@@ -10,6 +10,13 @@ import {
   AuditLogPage,
   DataMigrationPage,
 } from '../pages/control-center';
+import { ProjectsPage, ProjectDetailsPage, ProjectsProvider } from '../pages/projects';
+import {
+  ExpensesPage,
+  RecurringExpensesPage,
+  ExpenseDetailsPage,
+  ExpensesProvider,
+} from '../pages/expenses';
 import { Button } from '../components/common/Button';
 import { Link } from 'react-router-dom';
 import { AlertCircle } from 'lucide-react';
@@ -37,10 +44,12 @@ function NotFoundPage() {
 
 export function AppRoutes() {
   return (
-    <Routes>
-      <Route path="/" element={<AppLayout />}>
-        <Route index element={<Navigate to="/dashboard" replace />} />
-        <Route path="dashboard" element={<DashboardPage />} />
+    <ProjectsProvider>
+      <ExpensesProvider>
+        <Routes>
+          <Route path="/" element={<AppLayout />}>
+            <Route index element={<Navigate to="/dashboard" replace />} />
+            <Route path="dashboard" element={<DashboardPage />} />
 
         {/* WORKSPACE */}
         <Route path="customers" element={<PlaceholderPage />} />
@@ -67,8 +76,11 @@ export function AppRoutes() {
         <Route path="hosted-payment-pages" element={<PlaceholderPage />} />
 
         {/* OPERATIONS */}
-        <Route path="expenses" element={<PlaceholderPage />} />
-        <Route path="projects" element={<PlaceholderPage />} />
+        <Route path="expenses" element={<ExpensesPage />} />
+        <Route path="expenses/recurring" element={<RecurringExpensesPage />} />
+        <Route path="expenses/:expenseId" element={<ExpenseDetailsPage />} />
+        <Route path="projects" element={<ProjectsPage />} />
+        <Route path="projects/:projectId" element={<ProjectDetailsPage />} />
         <Route path="timesheets" element={<PlaceholderPage />} />
 
         {/* INSIGHTS */}
@@ -108,6 +120,7 @@ export function AppRoutes() {
         <Route path="subscriptions/proration" element={<Navigate to="/proration" replace />} />
         <Route path="subscriptions/dunning" element={<Navigate to="/dunning" replace />} />
         <Route path="operations/expenses" element={<Navigate to="/expenses" replace />} />
+        <Route path="operations/expenses/recurring" element={<Navigate to="/expenses/recurring" replace />} />
         <Route path="operations/projects" element={<Navigate to="/projects" replace />} />
         <Route path="operations/timesheets" element={<Navigate to="/timesheets" replace />} />
         <Route path="insights/revenue" element={<Navigate to="/revenue-intelligence" replace />} />
@@ -122,5 +135,7 @@ export function AppRoutes() {
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
+      </ExpensesProvider>
+    </ProjectsProvider>
   );
 }
