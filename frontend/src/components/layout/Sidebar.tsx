@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { cn } from '../../utils/cn';
-import { IsometricLogo } from '../common/IsometricLogo';
+import { RoomanLogo } from '../common/RoomanLogo';
 import {
   LayoutDashboard,
   Users,
@@ -122,16 +122,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       >
         {/* Brand Header */}
         <div className="h-16 px-5 flex items-center justify-between border-b border-slate-100 shrink-0">
-          <NavLink to="/dashboard" className="flex items-center gap-2.5 group">
-            <IsometricLogo className="w-7 h-7 shrink-0" />
-            <div className="flex flex-col leading-tight">
-              <span className="text-sm font-bold text-slate-900 tracking-tight">
-                Rooman
-              </span>
-              <span className="text-sm font-bold text-slate-900 tracking-tight">
-                Billing
-              </span>
-            </div>
+          <NavLink to="/dashboard" className="flex items-center group">
+            <RoomanLogo variant="combined" size="md" showTagline={false} />
           </NavLink>
 
           <button
@@ -182,8 +174,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         {/* Footer Tenant Info */}
         <div className="p-3 border-t border-slate-100 shrink-0">
           <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-xl bg-slate-50 border border-slate-200/60">
-            <div className="w-7 h-7 rounded-lg bg-brand-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs">
-              RB
+            <div className="w-7 h-7 rounded-lg bg-white p-0.5 border border-slate-200/80 flex items-center justify-center shrink-0 shadow-2xs overflow-hidden">
+              <RoomanLogo variant="shield" size="sm" />
             </div>
             <div className="min-w-0 flex-1 leading-tight">
               <p className="text-xs font-bold text-slate-900 truncate">

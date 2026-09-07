@@ -1,4 +1,4 @@
-import { Menu, Search, Bell, Plus, Settings, Calendar, ChevronDown } from 'lucide-react';
+import { Menu, Search, Bell, Plus, Settings, ChevronDown } from 'lucide-react';
 import { useToast } from '../common/Toast';
 
 export interface HeaderProps {
@@ -54,7 +54,7 @@ export function Header({
           onClick={() => showToast('info', 'Workspace', 'Active workspace: Rooman Technologies')}
           className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200/90 rounded-xl hover:bg-slate-50 transition-colors cursor-pointer"
         >
-          <Calendar className="w-3.5 h-3.5 text-slate-400" />
+          <img src="/logos/rooman-shield-logo.png" alt="Rooman" className="w-4 h-4 object-contain" />
           <span>Rooman Technologies</span>
           <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
         </button>
