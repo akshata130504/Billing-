@@ -11,3 +11,5 @@ export * from './LoadingState';
 export * from './EmptyState';
 export * from './ErrorState';
 export * from './RoomanLogo';
+export * from './ConfirmDialog';
+export * from './PageHeader';

@@ -1,0 +1,38 @@
+# Optional overlay: Caddy terminates TLS (automatic Let's Encrypt certificates) and
+# proxies to the frontend container, which in turn proxies /api/ to the backend.
+#
+#   Set in .env.production:   DOMAIN=billing.example.com
+#                             FRONTEND_BIND=127.0.0.1:8080   # keep :80/:443 free for caddy
+#   Run:
+#   docker compose --env-file .env.production -f docker-compose.prod.yml -f docker-compose.caddy.yml up -d --build
+#
+# Ports 80 and 443 must be reachable from the internet for the ACME challenge, and
+# DOMAIN must already resolve to this host.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env.production}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      frontend:
+        condition: service_started
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../../utils/cn';
 import { RoomanLogo } from '../common/RoomanLogo';
+import { useAuth } from '../../hooks/useAuth';
+import { ROLE_LABELS } from '../../utils/format';
 import {
   LayoutDashboard,
   Users,
@@ -88,7 +90,7 @@ export const sidebarSections: SidebarSection[] = [
   {
     title: 'SUBSCRIPTIONS',
     items: [
-      { title: 'Plans & Pricing', path: '/plans-pricing', icon: Layers },
+      { title: 'Plans & Pricing', path: '/catalog', icon: Layers },
       { title: 'Subscriptions', path: '/subscriptions', icon: Repeat },
       { title: 'Trials', path: '/trials', icon: Clock },
       { title: 'Usage / Metering', path: '/usage', icon: Gauge },
@@ -145,7 +147,7 @@ export const sidebarSections: SidebarSection[] = [
       { title: 'Automation', path: '/automation', icon: Zap },
       { title: 'Customization', path: '/customization', icon: Palette },
       { title: 'Integrations', path: '/integrations', icon: Boxes },
-      { title: 'Settings', path: '/system/settings', icon: Settings },
+      { title: 'Settings', path: '/settings', icon: Settings },
     ],
   },
 ];
@@ -230,6 +232,9 @@ export function Sidebar({
   onToggleCollapse,
 }: SidebarProps) {
   const location = useLocation();
+  const { organization, membership } = useAuth();
+  const orgName = organization?.name ?? '';
+  const roleLabel = membership ? ROLE_LABELS[membership.role] ?? membership.role : '';
 
   // Initialize expanded sections from sessionStorage (defaulting to WORKSPACE)
   const [expandedSections, setExpandedSections] = useState<string[]>(() => {
@@ -476,18 +481,18 @@ export function Sidebar({
               'flex items-center gap-2.5 px-2 py-1.5 rounded-xl bg-slate-50 border border-slate-200/60',
               collapsed && 'lg:justify-center lg:px-1'
             )}
-            title={collapsed ? 'Rooman Technologies · Enterprise Workspace' : undefined}
+            title={collapsed ? `${orgName}${roleLabel ? ` · ${roleLabel}` : ''}` : undefined}
           >
             <div className="w-7 h-7 rounded-lg bg-white p-0.5 border border-slate-200/80 flex items-center justify-center shrink-0 shadow-2xs overflow-hidden">
-              <RoomanLogo variant="shield" size="sm" />
+              {organization?.logo_url ? (
+                <img src={organization.logo_url} alt="" className="w-full h-full object-contain" />
+              ) : (
+                <RoomanLogo variant="shield" size="sm" />
+              )}
             </div>
             <div className={cn('min-w-0 flex-1 leading-tight', collapsed && 'lg:hidden')}>
-              <p className="text-xs font-bold text-slate-900 truncate">
-                Rooman Technologies
-              </p>
-              <p className="text-[10px] text-slate-400 font-medium truncate">
-                Enterprise Workspace
-              </p>
+              <p className="text-xs font-bold text-slate-900 truncate">{orgName}</p>
+              <p className="text-[10px] text-slate-400 font-medium truncate">{roleLabel}</p>
             </div>
           </div>
         </div>

@@ -1,0 +1,1059 @@
+/**
+ * API contract types — mirrors docs/api-contract.md (v1) exactly.
+ * Money values are strings with 2 decimals; dates are `YYYY-MM-DD`;
+ * timestamps are RFC 3339 UTC strings; IDs are UUID strings.
+ */
+
+// ---------------------------------------------------------------------------
+// String-literal unions (lower-case, exactly as backend/app/models/*.py)
+// ---------------------------------------------------------------------------
+
+export type MemberRole = 'owner' | 'admin' | 'finance' | 'viewer';
+export type MembershipStatus = 'invited' | 'active' | 'deactivated';
+export type CustomerStatus = 'active' | 'inactive';
+export type ProductType = 'service' | 'goods' | 'subscription';
+export type BillingInterval = 'one_time' | 'monthly' | 'quarterly' | 'semiannual' | 'yearly';
+export type PricingModel = 'flat' | 'per_unit';
+export type QuoteStatus =
+  | 'draft'
+  | 'pending_approval'
+  | 'sent'
+  | 'accepted'
+  | 'declined'
+  | 'expired'
+  | 'converted';
+export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'paused' | 'cancelled';
+export type InvoiceStatus = 'draft' | 'sent' | 'partially_paid' | 'paid' | 'overdue' | 'void';
+/**
+ * `razorpay` is only ever set by the gateway flow; manual recording accepts
+ * the remaining values (see `ManualPaymentMethod`).
+ */
+export type PaymentMethod = 'razorpay' | 'bank_transfer' | 'upi' | 'card' | 'cash' | 'cheque' | 'other';
+export type ManualPaymentMethod = Exclude<PaymentMethod, 'razorpay'>;
+export type PaymentGateway = 'manual' | 'razorpay';
+export type PaymentStatus = 'pending' | 'succeeded' | 'failed' | 'refunded' | 'partially_refunded';
+export type ReconciliationStatus = 'auto_matched' | 'matched' | 'unmatched' | 'exception';
+export type RefundStatus = 'pending' | 'processed' | 'failed';
+export type ApprovalType = 'quote_discount' | 'invoice_discount' | 'refund' | 'invoice_void';
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
+export type AuditStatus = 'success' | 'warning' | 'denied';
+export type ImportEntity = 'customers' | 'products' | 'plans';
+export type ImportStatus = 'completed' | 'completed_with_errors' | 'failed';
+export type DashboardRange = 'today' | '7_days' | '30_days' | '3_months' | '12_months';
+export type ActivityCategoryFilter = 'all' | 'billing' | 'customers' | 'payments' | 'system';
+export type SearchCategory =
+  | 'customers'
+  | 'invoices'
+  | 'quotes'
+  | 'products'
+  | 'subscriptions'
+  | 'payments';
+
+// ---------------------------------------------------------------------------
+// Envelope / shared
+// ---------------------------------------------------------------------------
+
+export interface Paginated<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+export interface PageParams {
+  page?: number;
+  page_size?: number;
+  sort?: string;
+}
+
+export interface ApiErrorDetails {
+  fields?: Record<string, string>;
+  [key: string]: unknown;
+}
+
+export interface ApiError {
+  code: string;
+  message: string;
+  details?: ApiErrorDetails;
+  /** HTTP status when the error came from a response. */
+  status?: number;
+}
+
+export interface CustomerRef {
+  id: string;
+  customer_number: string;
+  display_name: string;
+  email: string | null;
+}
+
+export interface UserRef {
+  id: string;
+  full_name: string;
+  email: string;
+}
+
+export interface LineItemIn {
+  product_id?: string | null;
+  plan_id?: string | null;
+  description: string;
+  quantity: string;
+  unit_price: string;
+  tax_rate_pct: string;
+}
+
+export interface LineItemOut extends LineItemIn {
+  id: string;
+  amount: string;
+  position: number;
+}
+
+// ---------------------------------------------------------------------------
+// §1 Health & meta
+// ---------------------------------------------------------------------------
+
+export interface HealthResponse {
+  status: 'healthy' | 'degraded';
+  project_name: string;
+  version: string;
+  timestamp: string;
+  environment: string;
+  database: { status: string; dialect: string };
+}
+
+export interface IntegrationsMeta {
+  razorpay: { enabled: boolean; key_id: string | null };
+  email: { enabled: boolean };
+}
+
+// ---------------------------------------------------------------------------
+// §2 Auth
+// ---------------------------------------------------------------------------
+
+export interface AuthTokens {
+  access_token: string;
+  refresh_token: string;
+  token_type: 'bearer';
+  expires_in: number;
+}
+
+export interface MeUser {
+  id: string;
+  email: string;
+  full_name: string;
+  last_login_at: string | null;
+  created_at: string;
+}
+
+export interface MeMembership {
+  id: string;
+  role: MemberRole;
+  status: 'active';
+  joined_at: string | null;
+}
+
+export interface MeOrganizationSummary {
+  id: string;
+  name: string;
+  slug: string;
+  role: string;
+}
+
+export interface MeResponse {
+  user: MeUser;
+  organization: OrganizationOut;
+  membership: MeMembership;
+  organizations: MeOrganizationSummary[];
+}
+
+export interface SignupRequest {
+  organization_name: string;
+  full_name: string;
+  email: string;
+  password: string;
+}
+
+export type SignupResponse = AuthTokens & { me: MeResponse };
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface ForgotPasswordResponse {
+  message: string;
+  reset_url?: string;
+}
+
+export interface InvitationDetails {
+  email: string;
+  organization_name: string;
+  role: MemberRole;
+  invited_by: string;
+  expires_at: string;
+  user_exists: boolean;
+}
+
+export interface AcceptInvitationRequest {
+  token: string;
+  full_name?: string;
+  password?: string;
+}
+
+// ---------------------------------------------------------------------------
+// §3 Organization & team
+// ---------------------------------------------------------------------------
+
+export interface OrganizationOut {
+  id: string;
+  name: string;
+  slug: string;
+  legal_name: string | null;
+  email: string | null;
+  phone: string | null;
+  website: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  city: string | null;
+  state: string | null;
+  postal_code: string | null;
+  country: string | null;
+  gstin: string | null;
+  pan: string | null;
+  default_currency: string;
+  timezone: string;
+  invoice_prefix: string;
+  invoice_next_number: number;
+  quote_prefix: string;
+  quote_next_number: number;
+  payment_prefix: string;
+  payment_next_number: number;
+  subscription_prefix: string;
+  subscription_next_number: number;
+  customer_prefix: string;
+  customer_next_number: number;
+  default_payment_terms_days: number;
+  default_tax_rate_pct: string;
+  discount_approval_threshold_pct: string;
+  invoice_notes: string | null;
+  invoice_terms: string | null;
+  logo_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type OrganizationUpdate = Partial<
+  Omit<OrganizationOut, 'id' | 'slug' | 'created_at' | 'updated_at'>
+>;
+
+export interface TeamMember {
+  id: string;
+  user: UserRef;
+  role: MemberRole;
+  status: MembershipStatus;
+  invited_by: UserRef | null;
+  invite_expires_at: string | null;
+  accepted_at: string | null;
+  created_at: string;
+}
+
+export interface InviteRequest {
+  email: string;
+  role: MemberRole;
+  full_name?: string;
+}
+
+export type InviteResponse = TeamMember & { invite_url?: string };
+
+// ---------------------------------------------------------------------------
+// §4 Customers
+// ---------------------------------------------------------------------------
+
+export interface ContactIn {
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  designation?: string | null;
+  is_primary?: boolean;
+}
+
+export interface ContactOut {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  designation: string | null;
+  is_primary: boolean;
+}
+
+export interface CustomerStats {
+  open_invoice_count: number;
+  outstanding_amount: string;
+  total_billed: string;
+  total_paid: string;
+  active_subscriptions: number;
+}
+
+export interface CustomerOut {
+  id: string;
+  customer_number: string;
+  display_name: string;
+  company_name: string | null;
+  email: string | null;
+  phone: string | null;
+  website: string | null;
+  gstin: string | null;
+  pan: string | null;
+  tax_exempt: boolean;
+  currency: string;
+  payment_terms_days: number;
+  status: CustomerStatus;
+  billing_address_line1: string | null;
+  billing_address_line2: string | null;
+  billing_city: string | null;
+  billing_state: string | null;
+  billing_postal_code: string | null;
+  billing_country: string | null;
+  notes: string | null;
+  portal_url: string | null;
+  contacts: ContactOut[];
+  /** Only present on GET /customers/{id}. */
+  stats?: CustomerStats;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomerIn {
+  display_name: string;
+  company_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  gstin?: string | null;
+  pan?: string | null;
+  tax_exempt?: boolean;
+  currency?: string;
+  payment_terms_days?: number;
+  status?: CustomerStatus;
+  billing_address_line1?: string | null;
+  billing_address_line2?: string | null;
+  billing_city?: string | null;
+  billing_state?: string | null;
+  billing_postal_code?: string | null;
+  billing_country?: string | null;
+  notes?: string | null;
+  contacts?: ContactIn[];
+}
+
+export interface CustomerListParams extends PageParams {
+  search?: string;
+  status?: CustomerStatus;
+}
+
+// ---------------------------------------------------------------------------
+// §5 Catalog
+// ---------------------------------------------------------------------------
+
+export interface PlanOut {
+  id: string;
+  product_id: string;
+  name: string;
+  code: string;
+  description: string | null;
+  billing_interval: BillingInterval;
+  interval_count: number;
+  pricing_model: PricingModel;
+  unit_amount: string;
+  currency: string;
+  setup_fee: string;
+  trial_days: number;
+  is_active: boolean;
+  active_subscriptions: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlanIn {
+  product_id: string;
+  name: string;
+  code: string;
+  description?: string | null;
+  billing_interval: BillingInterval;
+  interval_count?: number;
+  pricing_model: PricingModel;
+  unit_amount: string;
+  currency?: string;
+  setup_fee?: string;
+  trial_days?: number;
+  is_active?: boolean;
+}
+
+export interface ProductOut {
+  id: string;
+  name: string;
+  sku: string;
+  description: string | null;
+  type: ProductType;
+  unit: string | null;
+  hsn_sac_code: string | null;
+  tax_rate_pct: string;
+  is_active: boolean;
+  plans: PlanOut[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductIn {
+  name: string;
+  sku: string;
+  description?: string | null;
+  type?: ProductType;
+  unit?: string | null;
+  hsn_sac_code?: string | null;
+  tax_rate_pct?: string;
+  is_active?: boolean;
+}
+
+export interface ProductListParams extends PageParams {
+  search?: string;
+  is_active?: boolean;
+  type?: ProductType;
+}
+
+export interface PlanListParams extends PageParams {
+  product_id?: string;
+  is_active?: boolean;
+  billing_interval?: BillingInterval;
+}
+
+// ---------------------------------------------------------------------------
+// §6 Quotes
+// ---------------------------------------------------------------------------
+
+export interface QuoteOut {
+  id: string;
+  quote_number: string;
+  customer: CustomerRef;
+  status: QuoteStatus;
+  title: string | null;
+  issue_date: string;
+  expiry_date: string | null;
+  currency: string;
+  subtotal: string;
+  discount_pct: string;
+  discount_amount: string;
+  tax_amount: string;
+  total: string;
+  notes: string | null;
+  terms: string | null;
+  items: LineItemOut[];
+  public_url: string | null;
+  sent_at: string | null;
+  accepted_at: string | null;
+  declined_at: string | null;
+  converted_invoice_id: string | null;
+  approval_request_id: string | null;
+  created_by: UserRef | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QuoteIn {
+  customer_id: string;
+  title?: string | null;
+  issue_date?: string;
+  expiry_date?: string | null;
+  currency?: string;
+  discount_pct?: string;
+  notes?: string | null;
+  terms?: string | null;
+  items: LineItemIn[];
+}
+
+export type QuoteUpdate = Partial<QuoteIn>;
+
+export interface QuoteListParams extends PageParams {
+  search?: string;
+  status?: QuoteStatus;
+  customer_id?: string;
+  date_from?: string;
+  date_to?: string;
+}
+
+export interface QuoteConvertRequest {
+  issue_date?: string;
+  due_date?: string;
+}
+
+// ---------------------------------------------------------------------------
+// §7 Subscriptions
+// ---------------------------------------------------------------------------
+
+export interface SubscriptionPlanRef {
+  id: string;
+  name: string;
+  code: string;
+  billing_interval: BillingInterval;
+  interval_count: number;
+  unit_amount: string;
+  currency: string;
+  product_name: string;
+}
+
+export interface SubscriptionOut {
+  id: string;
+  subscription_number: string;
+  customer: CustomerRef;
+  plan: SubscriptionPlanRef;
+  quantity: number;
+  status: SubscriptionStatus;
+  start_date: string;
+  trial_end: string | null;
+  current_period_start: string;
+  current_period_end: string;
+  next_billing_date: string | null;
+  cancel_at_period_end: boolean;
+  cancelled_at: string | null;
+  paused_at: string | null;
+  ended_at: string | null;
+  notes: string | null;
+  /** Monthly-normalised recurring amount. */
+  mrr: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SubscriptionIn {
+  customer_id: string;
+  plan_id: string;
+  quantity?: number;
+  start_date?: string;
+  /** null = plan default */
+  trial_days?: number | null;
+  notes?: string | null;
+  /** default true when no trial */
+  generate_first_invoice?: boolean;
+}
+
+export interface SubscriptionUpdate {
+  quantity?: number;
+  notes?: string | null;
+  cancel_at_period_end?: boolean;
+}
+
+export interface SubscriptionCancelRequest {
+  at_period_end: boolean;
+  reason?: string;
+}
+
+export interface SubscriptionListParams extends PageParams {
+  search?: string;
+  status?: SubscriptionStatus;
+  customer_id?: string;
+  plan_id?: string;
+}
+
+// ---------------------------------------------------------------------------
+// §8 Invoices
+// ---------------------------------------------------------------------------
+
+export interface InvoicePaymentRef {
+  id: string;
+  payment_number: string;
+  /** Allocated amount. */
+  amount: string;
+  method: PaymentMethod;
+  paid_at: string | null;
+  status: PaymentStatus;
+}
+
+export interface InvoiceOut {
+  id: string;
+  invoice_number: string;
+  customer: CustomerRef;
+  subscription_id: string | null;
+  quote_id: string | null;
+  status: InvoiceStatus;
+  issue_date: string;
+  due_date: string;
+  currency: string;
+  subtotal: string;
+  discount_pct: string;
+  discount_amount: string;
+  tax_amount: string;
+  total: string;
+  amount_paid: string;
+  amount_due: string;
+  notes: string | null;
+  terms: string | null;
+  items: LineItemOut[];
+  public_url: string;
+  /** `${API}/public/invoices/{token}/pdf` */
+  pdf_url: string;
+  sent_at: string | null;
+  paid_at: string | null;
+  voided_at: string | null;
+  void_reason: string | null;
+  last_reminder_at: string | null;
+  reminder_count: number;
+  period_start: string | null;
+  period_end: string | null;
+  days_overdue: number;
+  /** Omitted on list rows. */
+  payments?: InvoicePaymentRef[];
+  created_by: UserRef | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InvoiceIn {
+  customer_id: string;
+  issue_date?: string;
+  /** default issue + payment terms */
+  due_date?: string;
+  currency?: string;
+  discount_pct?: string;
+  notes?: string | null;
+  terms?: string | null;
+  items: LineItemIn[];
+}
+
+export type InvoiceUpdate = Partial<InvoiceIn>;
+
+export interface InvoiceListParams extends PageParams {
+  search?: string;
+  status?: InvoiceStatus;
+  customer_id?: string;
+  date_from?: string;
+  date_to?: string;
+  overdue_only?: boolean;
+}
+
+export interface RecordPaymentRequest {
+  amount: string;
+  method: ManualPaymentMethod;
+  paid_at?: string;
+  reference?: string | null;
+  notes?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// §9 Payments
+// ---------------------------------------------------------------------------
+
+export interface PaymentAllocation {
+  id: string;
+  invoice_id: string;
+  invoice_number: string;
+  amount: string;
+}
+
+export interface PaymentAllocationIn {
+  invoice_id: string;
+  amount: string;
+}
+
+export interface RefundOut {
+  id: string;
+  amount: string;
+  status: RefundStatus;
+  gateway_refund_id: string | null;
+  reason: string | null;
+  created_at: string;
+}
+
+export interface PaymentOut {
+  id: string;
+  payment_number: string;
+  customer: CustomerRef | null;
+  amount: string;
+  currency: string;
+  method: PaymentMethod;
+  gateway: PaymentGateway;
+  status: PaymentStatus;
+  reconciliation_status: ReconciliationStatus;
+  gateway_order_id: string | null;
+  gateway_payment_id: string | null;
+  gateway_signature_verified: boolean;
+  reference: string | null;
+  paid_at: string | null;
+  failure_reason: string | null;
+  notes: string | null;
+  amount_refunded: string;
+  amount_allocated: string;
+  amount_unallocated: string;
+  allocations: PaymentAllocation[];
+  refunds: RefundOut[];
+  recorded_by: UserRef | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PaymentIn {
+  customer_id: string;
+  amount: string;
+  method: ManualPaymentMethod;
+  paid_at?: string;
+  reference?: string | null;
+  notes?: string | null;
+  allocations?: PaymentAllocationIn[];
+}
+
+export interface PaymentUpdate {
+  reference?: string | null;
+  notes?: string | null;
+}
+
+export interface PaymentListParams extends PageParams {
+  search?: string;
+  status?: PaymentStatus;
+  method?: PaymentMethod;
+  gateway?: PaymentGateway;
+  reconciliation_status?: ReconciliationStatus;
+  customer_id?: string;
+  date_from?: string;
+  date_to?: string;
+}
+
+export interface RefundRequest {
+  amount: string;
+  reason?: string;
+}
+
+export interface ReconciliationSummary {
+  auto_matched: number;
+  matched: number;
+  unmatched: number;
+  exception: number;
+  total: number;
+  unallocated_amount: string;
+}
+
+// ---------------------------------------------------------------------------
+// §8/§9 Public (hosted payment page & quote page)
+// ---------------------------------------------------------------------------
+
+export interface PublicOrganization {
+  name: string;
+  legal_name: string | null;
+  email: string | null;
+  phone: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  city: string | null;
+  state: string | null;
+  postal_code: string | null;
+  country: string | null;
+  gstin: string | null;
+  logo_url: string | null;
+}
+
+export interface PublicCustomer {
+  display_name: string;
+  company_name: string | null;
+  email: string | null;
+  billing_address_line1: string | null;
+  billing_address_line2: string | null;
+  billing_city: string | null;
+  billing_state: string | null;
+  billing_postal_code: string | null;
+  billing_country: string | null;
+}
+
+export interface PublicInvoice {
+  invoice_number: string;
+  status: InvoiceStatus;
+  issue_date: string;
+  due_date: string;
+  currency: string;
+  subtotal: string;
+  discount_amount: string;
+  tax_amount: string;
+  total: string;
+  amount_paid: string;
+  amount_due: string;
+  items: LineItemOut[];
+  notes: string | null;
+  terms: string | null;
+  organization: PublicOrganization;
+  customer: PublicCustomer;
+  payments: InvoicePaymentRef[];
+  razorpay: { enabled: boolean; key_id: string | null };
+}
+
+export interface PublicQuote {
+  quote_number: string;
+  status: QuoteStatus;
+  title: string | null;
+  issue_date: string;
+  expiry_date: string | null;
+  currency: string;
+  subtotal: string;
+  discount_pct: string;
+  discount_amount: string;
+  tax_amount: string;
+  total: string;
+  items: LineItemOut[];
+  notes: string | null;
+  terms: string | null;
+  organization: { name: string; logo_url: string | null };
+  customer: { display_name: string };
+  accepted_at: string | null;
+  declined_at: string | null;
+}
+
+export interface RazorpayOrderResponse {
+  order_id: string;
+  /** Paise, integer. */
+  amount: number;
+  currency: string;
+  key_id: string;
+  /** Our pending Payment id. */
+  payment_id: string;
+  prefill: { name: string | null; email: string | null; contact: string | null };
+}
+
+export interface RazorpayVerifyRequest {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+}
+
+export interface RazorpayVerifyResponse {
+  status: 'succeeded';
+  payment_number: string;
+  invoice_status: InvoiceStatus;
+  amount_due: string;
+}
+
+// ---------------------------------------------------------------------------
+// §10 Control Center
+// ---------------------------------------------------------------------------
+
+export interface DashboardMetrics {
+  total_revenue: string;
+  revenue_change_pct: string | null;
+  outstanding_amount: string;
+  outstanding_count: number;
+  overdue_count: number;
+  active_customers: number;
+  new_customers: number;
+  at_risk_amount: string;
+  at_risk_count: number;
+}
+
+export interface RevenueTrendPoint {
+  /** e.g. "Sep 2026" */
+  label: string;
+  period_start: string;
+  revenue: string;
+  invoiced: string;
+}
+
+export interface DashboardRevenue {
+  mrr: string;
+  arr: string;
+  mrr_change_pct: string | null;
+  /** Last 12 months. */
+  trend: RevenueTrendPoint[];
+}
+
+export interface PipelineBucket {
+  count: number;
+  amount: string;
+}
+
+export interface DashboardPipeline {
+  draft: PipelineBucket;
+  sent: PipelineBucket;
+  partially_paid: PipelineBucket;
+  overdue: PipelineBucket;
+  paid_this_period: PipelineBucket;
+}
+
+export interface DashboardCustomerHealth {
+  active: number;
+  trialing: number;
+  past_due: number;
+  paused: number;
+  cancelled_this_period: number;
+}
+
+export interface DashboardRecovery {
+  failed_payments: number;
+  failed_amount: string;
+  recovered_amount: string;
+  reminders_sent: number;
+}
+
+export interface DashboardSummary {
+  currency: string;
+  metrics: DashboardMetrics;
+  revenue: DashboardRevenue;
+  pipeline: DashboardPipeline;
+  customer_health: DashboardCustomerHealth;
+  recovery: DashboardRecovery;
+  /** 8 latest. */
+  recent_transactions: PaymentOut[];
+  /** 10 latest audit entries. */
+  activity: ActivityItem[];
+}
+
+export type ActionCategory =
+  | 'overdue'
+  | 'failed_payment'
+  | 'expiring_trial'
+  | 'pending_quote'
+  | 'pending_approval';
+
+export type ActionUrgency = 'critical' | 'high' | 'medium';
+
+export type SuggestedAction =
+  | 'send_reminder'
+  | 'retry_payment'
+  | 'convert_trial'
+  | 'review_quote'
+  | 'review_approval';
+
+export interface ActionItem {
+  id: string;
+  category: ActionCategory;
+  title: string;
+  description: string;
+  amount: string | null;
+  customer: CustomerRef | null;
+  entity_type: string;
+  entity_id: string;
+  due_info: string;
+  urgency: ActionUrgency;
+  suggested_action: SuggestedAction;
+}
+
+export interface ActionCenterResponse {
+  items: ActionItem[];
+  counts: Record<ActionCategory, number>;
+}
+
+export type CalendarEventType = 'invoice_due' | 'subscription_renewal' | 'trial_ending' | 'quote_expiry';
+
+export interface CalendarEvent {
+  id: string;
+  date: string;
+  type: CalendarEventType;
+  title: string;
+  customer: CustomerRef | null;
+  amount: string | null;
+  entity_type: string;
+  entity_id: string;
+  status: string;
+}
+
+export interface CalendarResponse {
+  events: CalendarEvent[];
+}
+
+export interface ApprovalOut {
+  id: string;
+  type: ApprovalType;
+  status: ApprovalStatus;
+  entity_type: string;
+  entity_id: string;
+  entity_label: string;
+  title: string;
+  justification: string | null;
+  payload: Record<string, unknown>;
+  requested_by: UserRef | null;
+  reviewed_by: UserRef | null;
+  reviewed_at: string | null;
+  decision_note: string | null;
+  created_at: string;
+}
+
+export interface ApprovalListParams extends PageParams {
+  status?: ApprovalStatus;
+  type?: ApprovalType;
+}
+
+export interface AuditLogOut {
+  id: string;
+  created_at: string;
+  actor: UserRef | null;
+  actor_label: string;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  entity_label: string | null;
+  status: AuditStatus;
+  before_state: Record<string, unknown> | null;
+  after_state: Record<string, unknown> | null;
+  ip_address: string | null;
+}
+
+export interface AuditLogParams extends PageParams {
+  search?: string;
+  action?: string;
+  entity_type?: string;
+  actor_user_id?: string;
+  date_from?: string;
+  date_to?: string;
+}
+
+export type AuditExportFormat = 'csv' | 'json';
+
+export type ActivitySeverity = 'normal' | 'warning' | 'danger' | 'success';
+
+export interface ActivityItem {
+  id: string;
+  title: string;
+  description: string;
+  timestamp: string;
+  category: 'billing' | 'customers' | 'payments' | 'system';
+  severity: ActivitySeverity;
+  entity_type: string | null;
+  entity_id: string | null;
+}
+
+export interface ActivityParams extends PageParams {
+  category?: ActivityCategoryFilter;
+}
+
+export interface SearchResult {
+  id: string;
+  category: SearchCategory;
+  title: string;
+  subtitle: string;
+  /** Frontend route, e.g. "/invoices/<id>". */
+  path: string;
+  badge: string | null;
+}
+
+export interface SearchResponse {
+  results: SearchResult[];
+}
+
+export interface ImportRowError {
+  row: number;
+  error: string;
+}
+
+export interface ImportResult {
+  id: string | null;
+  entity: ImportEntity;
+  file_name: string;
+  status: ImportStatus;
+  dry_run: boolean;
+  total_rows: number;
+  imported_rows: number;
+  failed_rows: number;
+  /** First 100. */
+  errors: ImportRowError[];
+  /** First 10 parsed rows. */
+  preview: Record<string, unknown>[];
+}
+
+export interface RunJobsResult {
+  renewals: number;
+  trials_converted: number;
+  marked_overdue: number;
+  reminders_sent: number;
+}

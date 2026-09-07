@@ -1,0 +1,115 @@
+# Rooman Billing - production stack.
+#
+#   cp .env.production.example .env.production   # fill in secrets
+#   docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+#
+# Services
+#   db         PostgreSQL 16 with a named volume (not published to the host)
+#   backend    FastAPI via gunicorn/uvicorn; runs migrations on start; SCHEDULER_ENABLED=false
+#   scheduler  same image, one instance, runs renewals / overdue marking / dunning
+#   frontend   nginx serving the SPA and proxying /api/ to backend:8000 (port 80)
+#
+# TLS: terminate HTTPS in front of `frontend` (see docker-compose.caddy.yml and
+# docs/deployment.md). Set FRONTEND_BIND=127.0.0.1:8080 in .env.production when a
+# reverse proxy on the host or the caddy overlay owns ports 80/443.
+
+name: rooman-billing
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    # POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB are read straight from the env file.
+    env_file: .env.production
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # Deliberately no `ports:` - only containers on the compose network reach the DB.
+    # For an admin session use: docker compose -f docker-compose.prod.yml exec db psql -U $POSTGRES_USER $POSTGRES_DB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    shm_size: 256m
+    logging: &default-logging
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: rooman-billing-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      # The API replicas never run background jobs; the `scheduler` service does.
+      SCHEDULER_ENABLED: "false"
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+      RUN_MIGRATIONS: "true"
+      POSTGRES_SERVER: db
+      POSTGRES_PORT: "5432"
+    depends_on:
+      db:
+        condition: service_healthy
+    # Not published: the frontend container proxies /api/. Uncomment for local debugging only.
+    # ports:
+    #   - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    logging: *default-logging
+
+  scheduler:
+    image: rooman-billing-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      SCHEDULER_ENABLED: "true"
+      RUN_MIGRATIONS: "false"      # backend already migrated; avoid two migrators racing
+      POSTGRES_SERVER: db
+      POSTGRES_PORT: "5432"
+    # Exactly ONE instance of this service may run. `run_forever` is provided by
+    # backend/app/services/scheduler.py and blocks while APScheduler runs the jobs.
+    command: ["python", "-c", "from backend.app.services.scheduler import run_forever; run_forever()"]
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    deploy:
+      replicas: 1
+    healthcheck:
+      disable: true
+    logging: *default-logging
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: rooman-billing-web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_BIND:-80}:80"
+    depends_on:
+      backend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    logging: *default-logging
+
+volumes:
+  postgres_data:
+    driver: local
