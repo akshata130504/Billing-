@@ -121,9 +121,9 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         )}
       >
         {/* Brand Header */}
-        <div className="h-16 px-5 flex items-center justify-between border-b border-slate-100 shrink-0">
-          <NavLink to="/dashboard" className="flex items-center group">
-            <RoomanLogo variant="combined" size="md" showTagline={false} />
+        <div className="h-16 px-3.5 sm:px-4 flex items-center justify-between border-b border-slate-100 shrink-0">
+          <NavLink to="/dashboard" className="flex items-center group py-1 min-w-0">
+            <RoomanLogo variant="brand" size="md" showBillingBadge={true} />
           </NavLink>
 
           <button

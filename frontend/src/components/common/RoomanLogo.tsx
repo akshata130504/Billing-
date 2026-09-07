@@ -1,31 +1,20 @@
 export interface RoomanLogoProps {
-  variant?: 'shield' | 'full' | 'combined';
+  variant?: 'shield' | 'full' | 'brand' | 'combined';
   className?: string;
   size?: 'sm' | 'md' | 'lg';
-  showTagline?: boolean;
+  showBillingBadge?: boolean;
 }
 
 export function RoomanLogo({
-  variant = 'combined',
+  variant = 'brand',
   className = '',
   size = 'md',
-  showTagline = false,
+  showBillingBadge = true,
 }: RoomanLogoProps) {
-  if (variant === 'full') {
-    const heightClass =
-      size === 'sm' ? 'h-6' : size === 'lg' ? 'h-10' : 'h-8';
-    return (
-      <img
-        src="/logos/rooman-full-logo.png"
-        alt="Rooman Technologies"
-        className={`${heightClass} object-contain ${className}`}
-      />
-    );
-  }
-
+  // Shield emblem icon only (for avatars, favicons, compact badges)
   if (variant === 'shield') {
     const dimensionClass =
-      size === 'sm' ? 'w-6 h-6' : size === 'lg' ? 'w-10 h-10' : 'w-8 h-8';
+      size === 'sm' ? 'w-6 h-6' : size === 'lg' ? 'w-10 h-10' : 'w-7 h-7';
     return (
       <img
         src="/logos/rooman-shield-logo.png"
@@ -35,36 +24,35 @@ export function RoomanLogo({
     );
   }
 
-  // Combined: Shield emblem + Rooman Typography + Billing Badge
-  const shieldDim =
-    size === 'sm' ? 'w-6 h-6' : size === 'lg' ? 'w-9 h-9' : 'w-7 h-7';
-  const titleText =
-    size === 'sm' ? 'text-xs' : size === 'lg' ? 'text-base' : 'text-sm';
+  // Full image without badge
+  if (variant === 'full') {
+    const heightClass =
+      size === 'sm' ? 'h-6' : size === 'lg' ? 'h-10' : 'h-8';
+    return (
+      <img
+        src="/logos/rooman-full-logo.png"
+        alt="Rooman Technologies"
+        className={`${heightClass} w-auto object-contain ${className}`}
+      />
+    );
+  }
+
+  // Brand / Combined: Official company logo graphic (Shield + Rooman + Tagline) + Billing badge
+  const heightClass =
+    size === 'sm' ? 'h-6' : size === 'lg' ? 'h-9' : 'h-7 sm:h-8';
 
   return (
-    <div className={`flex items-center gap-2.5 ${className}`}>
+    <div className={`flex items-center gap-2 ${className}`}>
       <img
-        src="/logos/rooman-shield-logo.png"
-        alt="Rooman Logo"
-        className={`${shieldDim} object-contain shrink-0 drop-shadow-2xs`}
+        src="/logos/rooman-full-logo.png"
+        alt="Rooman Technologies"
+        className={`${heightClass} w-auto object-contain shrink-0 drop-shadow-2xs`}
       />
-      <div className="flex flex-col leading-tight min-w-0">
-        <div className="flex items-center gap-1.5">
-          <span
-            className={`${titleText} font-extrabold text-[#1B365D] tracking-tight uppercase`}
-          >
-            Rooman
-          </span>
-          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-brand-700 border border-blue-200/80 leading-none">
-            Billing
-          </span>
-        </div>
-        {showTagline && (
-          <span className="text-[8.5px] font-semibold text-slate-400 tracking-wider uppercase mt-0.5">
-            Innovate • Integrate • Empower
-          </span>
-        )}
-      </div>
+      {showBillingBadge && (
+        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-blue-50 text-brand-700 border border-blue-200/80 leading-none shadow-3xs tracking-tight shrink-0 self-center">
+          Billing
+        </span>
+      )}
     </div>
   );
 }
