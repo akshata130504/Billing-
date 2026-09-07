@@ -1,0 +1,50 @@
+# Build context for backend/Dockerfile is the repo root. Keep it small and secret-free.
+.git
+.github
+.gitignore
+.pytest_cache
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.coverage
+**/htmlcov
+
+# Virtual envs
+backend/venv
+venv
+.venv
+env
+ENV
+
+# Secrets / local config - never bake env files into an image
+.env
+.env.*
+!.env.example
+!.env.production.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Local databases created by tests / the SQLite fallback
+**/*.sqlite3
+**/*.db
+postgres_data
+
+# Frontend is built by its own Dockerfile (context ./frontend)
+frontend/node_modules
+frontend/dist
+frontend/dist-ssr
+
+# Docs and tooling not needed at runtime
+docs
+deploy
+Makefile
+docker-compose*.yml
+*.md
+.vscode
+.idea
+.DS_Store
+Thumbs.db

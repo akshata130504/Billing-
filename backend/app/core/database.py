@@ -1,21 +1,33 @@
-from typing import Generator, Tuple, Dict, Any
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import declarative_base, sessionmaker, Session
+from typing import Any, Dict, Generator
+
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
+
 from backend.app.core.config import settings
 from backend.app.core.logging import logger
 
 database_url = settings.sync_database_url
 
 # Configure connection pooling appropriately
-engine_kwargs = {}
+engine_kwargs: Dict[str, Any] = {}
 if database_url.startswith("sqlite"):
     engine_kwargs["connect_args"] = {"check_same_thread": False}
 else:
     engine_kwargs["pool_pre_ping"] = True
-    engine_kwargs["pool_size"] = 10
-    engine_kwargs["max_overflow"] = 20
+    engine_kwargs["pool_size"] = settings.DB_POOL_SIZE
+    engine_kwargs["max_overflow"] = settings.DB_MAX_OVERFLOW
 
 engine = create_engine(database_url, **engine_kwargs)
+
+if database_url.startswith("sqlite"):
+    # SQLite ignores foreign keys unless asked; keep behaviour close to PostgreSQL in tests.
+    @event.listens_for(engine, "connect")
+    def _enable_sqlite_fks(dbapi_connection, _record):  # pragma: no cover - trivial
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

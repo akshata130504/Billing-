@@ -1,18 +1,77 @@
+import traceback
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
 from backend.app import __version__
-from backend.app.core.config import settings
-from backend.app.core.exceptions import AppException, app_exception_handler
-from backend.app.core.logging import logger
 from backend.app.api.v1.api_router import api_router
+from backend.app.core.config import settings
+from backend.app.core.exceptions import AppException, app_exception_handler, validation_exception_handler
+from backend.app.core.logging import logger
+from backend.app.core.rate_limit import RateLimitExceeded, limiter, rate_limit_exceeded_handler
+
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+}
+HSTS_HEADER = "max-age=31536000; includeSubDomains"
+
+
+def _load_scheduler():
+    """The scheduler module is optional during the build; import lazily and tolerate its absence."""
+    try:
+        from backend.app.services.scheduler import start_scheduler, stop_scheduler  # noqa: WPS433
+    except ImportError as exc:
+        logger.warning("Scheduler enabled but backend.app.services.scheduler is unavailable (%s); skipping", exc)
+        return None, None
+    return start_scheduler, stop_scheduler
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Application %s started in %s mode (v%s)", settings.PROJECT_NAME, settings.ENVIRONMENT, __version__)
+    stop_scheduler = None
+    if settings.SCHEDULER_ENABLED:
+        start_scheduler, stop_scheduler = _load_scheduler()
+        if start_scheduler is not None:
+            try:
+                start_scheduler()
+            except Exception:  # never let a background job stop the API from serving
+                logger.exception("Failed to start the background scheduler")
+                stop_scheduler = None
     yield
+    if stop_scheduler is not None:
+        try:
+            stop_scheduler()
+        except Exception:
+            logger.exception("Failed to stop the background scheduler cleanly")
     logger.info("Application %s shutting down", settings.PROJECT_NAME)
+
+
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Last line of defence: log the traceback, return the standard envelope, leak nothing."""
+    logger.error(
+        "Unhandled exception on %s %s: %s\n%s",
+        request.method,
+        request.url.path,
+        exc,
+        "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": {
+                "code": "INTERNAL_SERVER_ERROR",
+                "message": "An unexpected error occurred. Please try again later.",
+                "details": {},
+            }
+        },
+    )
 
 
 def create_application() -> FastAPI:
@@ -35,8 +94,23 @@ def create_application() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        for header, value in SECURITY_HEADERS.items():
+            response.headers.setdefault(header, value)
+        if settings.SECURE_COOKIES:
+            response.headers.setdefault("Strict-Transport-Security", HSTS_HEADER)
+        return response
+
+    # Rate limiting (per client IP) on credential endpoints
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+
     # Register Domain Exception Handlers
     app.add_exception_handler(AppException, app_exception_handler)
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(Exception, unhandled_exception_handler)
 
     # Mount API routers
     app.include_router(api_router, prefix=settings.API_V1_STR)
@@ -58,6 +132,7 @@ app = create_application()
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "backend.app.main:app",
         host=settings.BACKEND_HOST,

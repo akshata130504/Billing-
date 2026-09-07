@@ -1,7 +1,22 @@
-import { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Menu, Search, Bell, Plus, Settings, ChevronDown, Check, Building2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import {
+  Menu,
+  Search,
+  Plus,
+  Settings,
+  ChevronDown,
+  Check,
+  Building2,
+  KeyRound,
+  LogOut,
+  Loader2,
+} from 'lucide-react';
 import { useToast } from '../common/Toast';
+import { useAuth } from '../../hooks/useAuth';
+import { toApiError } from '../../services/apiClient';
+import { cn } from '../../utils/cn';
+import { initials, ROLE_LABELS } from '../../utils/format';
 
 export interface HeaderProps {
   onMenuClick: () => void;
@@ -9,45 +24,74 @@ export interface HeaderProps {
   onOpenSearch: () => void;
 }
 
-const WORKSPACES = [
-  { id: 'ws-1', name: 'Rooman Technologies', region: 'Enterprise · Primary', badge: 'Active' },
-  { id: 'ws-2', name: 'Rooman APAC', region: 'Singapore · Production', badge: 'Production' },
-  { id: 'ws-3', name: 'Rooman US Sandbox', region: 'Oregon · Staging', badge: 'Sandbox' },
-];
+/** Closes a dropdown on outside click / Escape. */
+function useDismiss(isOpen: boolean, onClose: () => void, ref: React.RefObject<HTMLElement>) {
+  useEffect(() => {
+    if (!isOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isOpen, onClose, ref]);
+}
 
-export function Header({
-  onMenuClick,
-  onQuickCreateClick,
-  onOpenSearch,
-}: HeaderProps) {
+export function Header({ onMenuClick, onQuickCreateClick, onOpenSearch }: HeaderProps) {
   const navigate = useNavigate();
   const { showToast } = useToast();
-  const [selectedWorkspace, setSelectedWorkspace] = useState('Rooman Technologies');
-  const [isWorkspaceMenuOpen, setIsWorkspaceMenuOpen] = useState(false);
-  const workspaceDropdownRef = useRef<HTMLDivElement>(null);
+  const { user, organization, membership, organizations, switchOrganization, logout } = useAuth();
 
-  // Close workspace dropdown when clicking outside or pressing Escape
-  useEffect(() => {
-    if (!isWorkspaceMenuOpen) return;
-    function handleClickOutside(e: MouseEvent) {
-      if (workspaceDropdownRef.current && !workspaceDropdownRef.current.contains(e.target as Node)) {
-        setIsWorkspaceMenuOpen(false);
-      }
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [switchingTo, setSwitchingTo] = useState<string | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
+
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  useDismiss(workspaceOpen, () => setWorkspaceOpen(false), workspaceRef);
+  useDismiss(userMenuOpen, () => setUserMenuOpen(false), userMenuRef);
+
+  const roleLabel = membership ? ROLE_LABELS[membership.role] ?? membership.role : '';
+
+  const handleSwitch = async (organizationId: string, name: string) => {
+    if (!organization || organizationId === organization.id) {
+      setWorkspaceOpen(false);
+      return;
     }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setIsWorkspaceMenuOpen(false);
+    setSwitchingTo(organizationId);
+    try {
+      await switchOrganization(organizationId);
+      setWorkspaceOpen(false);
+      showToast('success', 'Organization switched', `You are now working in ${name}.`);
+      navigate('/dashboard');
+    } catch (err) {
+      showToast('error', 'Could not switch organization', toApiError(err).message);
+    } finally {
+      setSwitchingTo(null);
     }
-    document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isWorkspaceMenuOpen]);
+  };
+
+  const handleSignOut = async () => {
+    setSigningOut(true);
+    try {
+      await logout();
+      navigate('/login', { replace: true });
+    } finally {
+      setSigningOut(false);
+      setUserMenuOpen(false);
+    }
+  };
 
   return (
     <header className="h-16 bg-white border-b border-slate-200/80 px-4 sm:px-6 flex items-center justify-between gap-4 sticky top-0 z-30">
-      {/* Left: Mobile Toggle & Global Search trigger */}
+      {/* Left: mobile toggle + search trigger */}
       <div className="flex items-center gap-3 flex-1 max-w-xl">
         <button
           onClick={onMenuClick}
@@ -57,11 +101,7 @@ export function Header({
           <Menu className="w-5 h-5" />
         </button>
 
-        {/* Global Search Input Button (Opens Search Modal) */}
-        <div
-          onClick={onOpenSearch}
-          className="relative w-full cursor-pointer group"
-        >
+        <div onClick={onOpenSearch} className="relative w-full cursor-pointer group">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-hover:text-slate-600 transition-colors pointer-events-none" />
           <input
             type="text"
@@ -79,132 +119,200 @@ export function Header({
           />
           <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-0.5 pointer-events-none">
             <span className="text-[10px] font-mono bg-white text-slate-400 px-1.5 py-0.5 rounded border border-slate-200 shadow-2xs">
-              ⌘K
+              Ctrl K
             </span>
           </div>
         </div>
       </div>
 
-      {/* Right Controls */}
+      {/* Right controls */}
       <div className="flex items-center gap-2.5 sm:gap-3">
-        {/* Workspace Selector Dropdown */}
-        <div className="relative hidden sm:block" ref={workspaceDropdownRef}>
+        {/* Organization selector */}
+        <div className="relative hidden sm:block" ref={workspaceRef}>
           <button
             type="button"
-            onClick={() => setIsWorkspaceMenuOpen((prev) => !prev)}
-            aria-expanded={isWorkspaceMenuOpen}
+            onClick={() => setWorkspaceOpen((prev) => !prev)}
+            aria-expanded={workspaceOpen}
             aria-haspopup="true"
-            className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200/90 rounded-xl hover:bg-slate-50 transition-colors cursor-pointer select-none"
+            className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200/90 rounded-xl hover:bg-slate-50 transition-colors cursor-pointer select-none max-w-[240px]"
           >
-            <img src="/logos/rooman-shield-logo.png" alt="Rooman" className="w-4 h-4 object-contain" />
-            <span>{selectedWorkspace}</span>
-            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isWorkspaceMenuOpen ? 'rotate-180 text-brand-600' : ''}`} />
+            {organization?.logo_url ? (
+              <img
+                src={organization.logo_url}
+                alt=""
+                className="w-4 h-4 object-contain rounded-sm"
+              />
+            ) : (
+              <Building2 className="w-4 h-4 text-slate-400" />
+            )}
+            <span className="truncate">{organization?.name ?? 'Organization'}</span>
+            <ChevronDown
+              className={cn(
+                'w-3.5 h-3.5 text-slate-400 transition-transform shrink-0',
+                workspaceOpen && 'rotate-180 text-brand-600'
+              )}
+            />
           </button>
 
-          {isWorkspaceMenuOpen && (
-            <div className="absolute right-0 mt-2 w-72 bg-white border border-slate-200 rounded-2xl shadow-xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+          {workspaceOpen && (
+            <div className="absolute right-0 mt-2 w-72 bg-white border border-slate-200 rounded-2xl shadow-xl p-1.5 z-50">
               <div className="px-3 py-2 border-b border-slate-100">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Switch Workspace
+                  Your organizations
                 </p>
               </div>
-              <div className="py-1 space-y-0.5">
-                {WORKSPACES.map((ws) => {
-                  const isCurrent = ws.name === selectedWorkspace;
+              <div className="py-1 space-y-0.5 max-h-72 overflow-y-auto">
+                {organizations.map((org) => {
+                  const isCurrent = org.id === organization?.id;
+                  const isSwitching = switchingTo === org.id;
                   return (
                     <button
-                      key={ws.id}
+                      key={org.id}
                       type="button"
-                      onClick={() => {
-                        setSelectedWorkspace(ws.name);
-                        setIsWorkspaceMenuOpen(false);
-                        showToast('success', 'Workspace Switched', `Active workspace is now: ${ws.name}`);
-                      }}
-                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors cursor-pointer text-left ${
+                      disabled={switchingTo !== null}
+                      onClick={() => void handleSwitch(org.id, org.name)}
+                      className={cn(
+                        'w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors cursor-pointer text-left disabled:cursor-wait',
                         isCurrent
                           ? 'bg-blue-50/80 text-brand-700 font-semibold'
                           : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'
-                      }`}
+                      )}
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <div className={`p-1.5 rounded-lg border shrink-0 ${
-                          isCurrent ? 'bg-white border-blue-200 text-brand-600' : 'bg-slate-50 border-slate-200 text-slate-400'
-                        }`}>
+                        <div
+                          className={cn(
+                            'p-1.5 rounded-lg border shrink-0',
+                            isCurrent
+                              ? 'bg-white border-blue-200 text-brand-600'
+                              : 'bg-slate-50 border-slate-200 text-slate-400'
+                          )}
+                        >
                           <Building2 className="w-3.5 h-3.5" />
                         </div>
                         <div className="min-w-0">
-                          <p className="truncate leading-snug">{ws.name}</p>
-                          <p className="text-[10px] text-slate-400 font-normal truncate">{ws.region}</p>
+                          <p className="truncate leading-snug">{org.name}</p>
+                          <p className="text-[10px] text-slate-400 font-normal truncate">
+                            {ROLE_LABELS[org.role] ?? org.role}
+                          </p>
                         </div>
                       </div>
-                      {isCurrent && <Check className="w-4 h-4 text-brand-600 shrink-0 ml-2" />}
+                      {isSwitching ? (
+                        <Loader2 className="w-4 h-4 text-brand-600 animate-spin shrink-0 ml-2" />
+                      ) : (
+                        isCurrent && <Check className="w-4 h-4 text-brand-600 shrink-0 ml-2" />
+                      )}
                     </button>
                   );
                 })}
+                {organizations.length === 0 && (
+                  <p className="px-3 py-2 text-xs text-slate-400">No organizations found.</p>
+                )}
               </div>
               <div className="border-t border-slate-100 mt-1 pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsWorkspaceMenuOpen(false);
-                    showToast('info', 'Workspace Settings', 'Opening workspace management modal...');
-                  }}
-                  className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs text-slate-500 hover:text-brand-600 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
+                <Link
+                  to="/settings?tab=organization"
+                  onClick={() => setWorkspaceOpen(false)}
+                  className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs text-slate-500 hover:text-brand-600 hover:bg-slate-50 rounded-lg transition-colors"
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Add or Manage Workspaces</span>
-                </button>
+                  <Settings className="w-3.5 h-3.5" />
+                  <span>Organization settings</span>
+                </Link>
               </div>
             </div>
           )}
         </div>
 
-        {/* Quick Create '+' Button */}
+        {/* Quick create */}
         <button
           type="button"
           onClick={onQuickCreateClick}
           className="w-8 h-8 rounded-xl bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white flex items-center justify-center shadow-xs transition-colors cursor-pointer"
-          aria-label="Quick Create"
-          title="Quick Create"
+          aria-label="Quick create"
+          title="Quick create"
         >
           <Plus className="w-4 h-4 stroke-[2.5]" />
         </button>
 
-        {/* Notifications */}
-        <button
-          type="button"
-          onClick={() => showToast('info', 'Notifications', 'No unread critical alerts.')}
-          className="relative p-2 rounded-xl text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
-          aria-label="Notifications"
-        >
-          <Bell className="w-4 h-4" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white" />
-        </button>
-
-        {/* Settings Cog */}
-        <button
-          type="button"
-          onClick={() => {
-            showToast('info', 'Settings', 'Navigating to system settings');
-            navigate('/system/settings');
-          }}
+        {/* Settings */}
+        <Link
+          to="/settings"
           className="p-2 rounded-xl text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
           aria-label="Settings"
+          title="Settings"
         >
           <Settings className="w-4 h-4" />
-        </button>
+        </Link>
 
-        {/* User Profile */}
-        <div className="flex items-center gap-2 pl-2 border-l border-slate-200/70">
-          <div className="w-8 h-8 rounded-full bg-slate-300 text-slate-700 font-semibold text-xs flex items-center justify-center">
-            AR
-          </div>
-          <div className="hidden md:block text-left leading-tight">
-            <p className="text-xs font-bold text-slate-900">
-              Akshata R.
-            </p>
-            <p className="text-[10px] text-slate-400 font-medium">Admin</p>
-          </div>
+        {/* User menu */}
+        <div className="relative pl-2 border-l border-slate-200/70" ref={userMenuRef}>
+          <button
+            type="button"
+            onClick={() => setUserMenuOpen((prev) => !prev)}
+            aria-expanded={userMenuOpen}
+            aria-haspopup="true"
+            className="flex items-center gap-2 rounded-xl px-1 py-0.5 hover:bg-slate-50 transition-colors"
+          >
+            <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-700 font-semibold text-xs flex items-center justify-center">
+              {initials(user?.full_name, user?.email?.[0]?.toUpperCase() ?? '?')}
+            </div>
+            <div className="hidden md:block text-left leading-tight max-w-[140px]">
+              <p className="text-xs font-bold text-slate-900 truncate">{user?.full_name ?? ''}</p>
+              <p className="text-[10px] text-slate-400 font-medium truncate">{roleLabel}</p>
+            </div>
+            <ChevronDown
+              className={cn(
+                'hidden md:block w-3.5 h-3.5 text-slate-400 transition-transform',
+                userMenuOpen && 'rotate-180'
+              )}
+            />
+          </button>
+
+          {userMenuOpen && (
+            <div className="absolute right-0 mt-2 w-64 bg-white border border-slate-200 rounded-2xl shadow-xl p-1.5 z-50">
+              <div className="px-3 py-2.5 border-b border-slate-100">
+                <p className="text-xs font-semibold text-slate-900 truncate">{user?.full_name}</p>
+                <p className="text-[11px] text-slate-500 truncate">{user?.email}</p>
+                {roleLabel && (
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    {roleLabel} · {organization?.name}
+                  </p>
+                )}
+              </div>
+              <div className="py-1 space-y-0.5">
+                <Link
+                  to="/settings"
+                  onClick={() => setUserMenuOpen(false)}
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-slate-700 hover:bg-slate-50"
+                >
+                  <Settings className="w-4 h-4 text-slate-400" />
+                  Settings
+                </Link>
+                <Link
+                  to="/settings?tab=security"
+                  onClick={() => setUserMenuOpen(false)}
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-slate-700 hover:bg-slate-50"
+                >
+                  <KeyRound className="w-4 h-4 text-slate-400" />
+                  Change password
+                </Link>
+              </div>
+              <div className="border-t border-slate-100 pt-1">
+                <button
+                  type="button"
+                  onClick={() => void handleSignOut()}
+                  disabled={signingOut}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-rose-600 hover:bg-rose-50 disabled:opacity-60"
+                >
+                  {signingOut ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <LogOut className="w-4 h-4" />
+                  )}
+                  Sign out
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </header>

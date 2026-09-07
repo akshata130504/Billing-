@@ -1,9 +1,168 @@
-import pytest
-from fastapi.testclient import TestClient
-from backend.app.main import app
+"""Shared pytest fixtures.
+
+Tests run against an isolated database. By default that is a throwaway SQLite
+file; set TEST_DATABASE_URL to a PostgreSQL URL (CI does) to run the exact same
+suite against Postgres. Settings are forced before the application is imported.
+"""
+import os
+import uuid
+from datetime import date
+from decimal import Decimal
+from pathlib import Path
+
+_TEST_DB_PATH = Path(__file__).resolve().parent / ".test_rooman_billing.sqlite3"
+os.environ.setdefault("ENVIRONMENT", "test")
+os.environ["DEBUG"] = "false"
+os.environ["SCHEDULER_ENABLED"] = "false"
+os.environ["SECRET_KEY"] = "unit-test-secret-key-0123456789abcdef0123456789abcdef"
+os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL", f"sqlite:///{_TEST_DB_PATH.as_posix()}")
+os.environ["RAZORPAY_KEY_ID"] = ""
+os.environ["RAZORPAY_KEY_SECRET"] = ""
+os.environ["SMTP_HOST"] = ""
+os.environ["AUTH_RATE_LIMIT"] = "1000/minute"
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy.orm import Session  # noqa: E402
+
+from backend.app.core.database import Base, SessionLocal, engine  # noqa: E402
+from backend.app.core.security import create_access_token, hash_password  # noqa: E402
+from backend.app.main import app  # noqa: E402
+from backend.app.models import Customer, Membership, MemberRole, MembershipStatus, Organization, Plan, Product, User  # noqa: E402
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _create_schema():
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    yield
+    Base.metadata.drop_all(bind=engine)
+    engine.dispose()
+    if _TEST_DB_PATH.exists():
+        try:
+            _TEST_DB_PATH.unlink()
+        except OSError:
+            pass
 
 
 @pytest.fixture(scope="session")
 def client():
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture()
+def db() -> Session:
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+class Tenant:
+    """A fresh organization with an owner user, plus helpers to mint tokens for other roles."""
+
+    def __init__(self, db: Session, suffix: str):
+        self.db = db
+        self.suffix = suffix
+        self.organization = Organization(name=f"Test Org {suffix}", slug=f"test-org-{suffix}")
+        db.add(self.organization)
+        db.flush()
+        self.owner = self.add_member("owner", MemberRole.OWNER)
+        db.commit()
+
+    def add_member(self, label: str, role: MemberRole) -> User:
+        user = User(
+            email=f"{label}-{self.suffix}@example.test",
+            full_name=f"{label.title()} {self.suffix}",
+            hashed_password=hash_password("Str0ngPassw0rd!"),
+        )
+        self.db.add(user)
+        self.db.flush()
+        self.db.add(
+            Membership(
+                organization_id=self.organization.id,
+                user_id=user.id,
+                role=role,
+                status=MembershipStatus.ACTIVE,
+            )
+        )
+        self.db.flush()
+        return user
+
+    def headers(self, user: User | None = None, role: MemberRole | None = None) -> dict:
+        user = user or self.owner
+        role = role or MemberRole.OWNER
+        token = create_access_token(user.id, self.organization.id, role.value)
+        return {"Authorization": f"Bearer {token}"}
+
+    def headers_for_role(self, role: MemberRole) -> dict:
+        user = self.add_member(f"{role.value}-{uuid.uuid4().hex[:6]}", role)
+        self.db.commit()
+        return self.headers(user, role)
+
+    def customer(self, **overrides) -> Customer:
+        n = int(self.organization.customer_next_number or 1)
+        self.organization.customer_next_number = n + 1
+        data = dict(
+            organization_id=self.organization.id,
+            customer_number=f"CUS-{n:06d}",
+            display_name=f"Customer {n} {self.suffix}",
+            email=f"customer{n}-{self.suffix}@example.test",
+            currency="INR",
+            payment_terms_days=30,
+        )
+        data.update(overrides)
+        customer = Customer(**data)
+        self.db.add(customer)
+        self.db.commit()
+        self.db.refresh(customer)
+        return customer
+
+    def product_with_plan(self, unit_amount="1000.00", interval="monthly", trial_days=0) -> tuple[Product, Plan]:
+        from backend.app.models import BillingInterval, PricingModel, ProductType
+
+        code = uuid.uuid4().hex[:8]
+        product = Product(
+            organization_id=self.organization.id,
+            name=f"Product {code}",
+            sku=f"SKU-{code}",
+            type=ProductType.SUBSCRIPTION,
+            tax_rate_pct=Decimal("18"),
+        )
+        self.db.add(product)
+        self.db.flush()
+        plan = Plan(
+            organization_id=self.organization.id,
+            product_id=product.id,
+            name=f"Plan {code}",
+            code=f"PLAN-{code}",
+            billing_interval=BillingInterval(interval),
+            interval_count=1,
+            pricing_model=PricingModel.PER_UNIT,
+            unit_amount=Decimal(unit_amount),
+            currency="INR",
+            trial_days=trial_days,
+        )
+        self.db.add(plan)
+        self.db.commit()
+        self.db.refresh(product)
+        self.db.refresh(plan)
+        return product, plan
+
+
+@pytest.fixture()
+def tenant(db: Session) -> Tenant:
+    return Tenant(db, uuid.uuid4().hex[:8])
+
+
+@pytest.fixture()
+def auth_headers(tenant: Tenant) -> dict:
+    """Owner credentials for a fresh organization."""
+    return tenant.headers()
+
+
+@pytest.fixture()
+def today() -> date:
+    return date.today()
