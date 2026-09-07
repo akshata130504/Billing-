@@ -1,7 +1,14 @@
 import json
-from typing import List, Union
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pathlib import Path
+from typing import Annotated, List, Union
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+# Resolve .env files relative to the repository layout instead of the current
+# working directory so the backend behaves the same regardless of where
+# uvicorn/pytest/alembic are launched from.
+_BACKEND_DIR = Path(__file__).resolve().parents[2]
+_REPO_ROOT = _BACKEND_DIR.parent
 
 
 class Settings(BaseSettings):
@@ -12,8 +19,10 @@ class Settings(BaseSettings):
     BACKEND_HOST: str = "0.0.0.0"
     BACKEND_PORT: int = 8000
     SECRET_KEY: str = "phase0-development-secret-key-replace-in-production-12345"
-    
-    ALLOWED_ORIGINS: List[str] = [
+
+    # NoDecode stops pydantic-settings from JSON-decoding the raw env value so the
+    # validator below can accept either a JSON array or a comma-separated list.
+    ALLOWED_ORIGINS: Annotated[List[str], NoDecode] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:3000",
@@ -22,10 +31,11 @@ class Settings(BaseSettings):
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
-        if isinstance(v, str) and not v.startswith("["):
-            return [i.strip() for i in v.split(",")]
-        elif isinstance(v, str) and v.startswith("["):
-            return json.loads(v)
+        if isinstance(v, str):
+            value = v.strip()
+            if value.startswith("["):
+                return json.loads(value)
+            return [origin.strip() for origin in value.split(",") if origin.strip()]
         return v
 
     # PostgreSQL Database
@@ -34,7 +44,7 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "rooman_billing"
-    
+
     DATABASE_URL: str | None = None
 
     @property
@@ -43,8 +53,9 @@ class Settings(BaseSettings):
             return self.DATABASE_URL
         return f"postgresql+psycopg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
 
+    # Later files take precedence: backend/.env overrides the repo-root .env.
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(_REPO_ROOT / ".env", _BACKEND_DIR / ".env"),
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",

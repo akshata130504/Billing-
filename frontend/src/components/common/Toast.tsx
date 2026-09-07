@@ -65,7 +65,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             key={toast.id}
             role="alert"
             className={cn(
-              'pointer-events-auto flex items-start p-3.5 rounded-xl border transition-all transform animate-in slide-in-from-bottom-2',
+              'pointer-events-auto flex items-start p-3.5 rounded-xl border transition-all transform animate-toast-in',
               borders[toast.type]
             )}
           >

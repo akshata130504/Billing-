@@ -7,13 +7,14 @@ import { GlobalSearchModal } from '../common/GlobalSearchModal';
 
 export function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
 
-  // Global Ctrl + K / Cmd + K listener
+  // Global Ctrl + K / Cmd + K listener (single owner of the toggle)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setSearchOpen((prev) => !prev);
       }
@@ -25,7 +26,12 @@ export function AppLayout() {
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
       {/* Sidebar Navigation */}
-      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <Sidebar
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
+      />
 
       {/* Main App Content Viewport */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">

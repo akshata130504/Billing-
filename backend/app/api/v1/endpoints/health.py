@@ -12,12 +12,13 @@ router = APIRouter()
     response_model=HealthResponse,
     status_code=status.HTTP_200_OK,
     summary="Application Health & Status Check",
-    description="Returns current service status, API version, environment details, and database connectivity state.",
+    description="Returns current service status (healthy, or degraded when the database is unreachable), API version, environment details, and database connectivity state.",
 )
 def health_check() -> HealthResponse:
     db_health = check_db_health()
+    overall_status = "healthy" if db_health.get("status") == "connected" else "degraded"
     return HealthResponse(
-        status="healthy",
+        status=overall_status,
         project_name=settings.PROJECT_NAME,
         version=__version__,
         environment=settings.ENVIRONMENT,

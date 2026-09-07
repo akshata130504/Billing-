@@ -37,6 +37,7 @@ export function RevenueIntelligenceWidget() {
   };
 
   const actualPath = createSpline(points.map((p) => ({ x: p.x, y: p.yActual })));
+  const forecastPath = createSpline(points.map((p) => ({ x: p.x, y: p.yForecast })));
   const areaPath = `${actualPath} L ${points[points.length - 1].x},${paddingTop + chartHeight} L ${points[0].x},${paddingTop + chartHeight} Z`;
 
   return (
@@ -166,6 +167,16 @@ export function RevenueIntelligenceWidget() {
           {/* Area under actual */}
           <path d={areaPath} fill="url(#actualGradient)" />
 
+          {/* Forecast line (dashed) */}
+          <path
+            d={forecastPath}
+            fill="none"
+            stroke="#38BDF8"
+            strokeWidth="2"
+            strokeDasharray="5 4"
+            strokeLinecap="round"
+          />
+
           {/* Actual line */}
           <path
             d={actualPath}
@@ -205,7 +216,7 @@ export function RevenueIntelligenceWidget() {
               left: `${(points[activeIdx].x / svgWidth) * 100}%`,
             }}
           >
-            Actual: ₹{points[activeIdx].actual}k
+            Actual: ₹{points[activeIdx].actual}k · Forecast: ₹{points[activeIdx].forecast}k
           </div>
         )}
       </div>

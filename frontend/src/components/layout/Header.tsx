@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { Menu, Search, Bell, Plus, Settings, ChevronDown } from 'lucide-react';
 import { useToast } from '../common/Toast';
 
@@ -13,6 +14,7 @@ export function Header({
   onOpenSearch,
 }: HeaderProps) {
   const { showToast } = useToast();
+  const navigate = useNavigate();
 
   return (
     <header className="h-16 bg-white border-b border-slate-200/80 px-4 sm:px-6 flex items-center justify-between gap-4 sticky top-0 z-30">
@@ -26,24 +28,23 @@ export function Header({
           <Menu className="w-5 h-5" />
         </button>
 
-        {/* Global Search Input Button (Opens Search Modal) */}
-        <div
+        {/* Global Search Trigger (Opens Search Modal) */}
+        <button
+          type="button"
           onClick={onOpenSearch}
-          className="relative w-full cursor-pointer group"
+          aria-label="Open global search (Ctrl + K)"
+          className="relative w-full text-left cursor-pointer group pl-10 pr-12 py-2 text-xs bg-slate-50 hover:bg-slate-100/70 border border-slate-200/90 rounded-xl text-slate-400 transition-colors"
         >
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-hover:text-slate-600 transition-colors pointer-events-none" />
-          <input
-            type="text"
-            readOnly
-            placeholder="Search customers, invoices, subscriptions, payments... (Ctrl + K)"
-            className="w-full pl-10 pr-12 py-2 text-xs bg-slate-50 group-hover:bg-slate-100/70 border border-slate-200/90 rounded-xl text-slate-900 placeholder:text-slate-400 cursor-pointer transition-colors outline-none"
-          />
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-0.5 pointer-events-none">
+          <span className="block truncate">
+            Search customers, invoices, subscriptions, payments...
+          </span>
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-0.5 pointer-events-none">
             <span className="text-[10px] font-mono bg-white text-slate-400 px-1.5 py-0.5 rounded border border-slate-200 shadow-2xs">
               ⌘K
             </span>
-          </div>
-        </div>
+          </span>
+        </button>
       </div>
 
       {/* Right Controls */}
@@ -84,7 +85,7 @@ export function Header({
         {/* Settings Cog */}
         <button
           type="button"
-          onClick={() => showToast('info', 'Settings', 'Navigating to system settings')}
+          onClick={() => navigate('/system/settings')}
           className="p-2 rounded-xl text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
           aria-label="Settings"
         >

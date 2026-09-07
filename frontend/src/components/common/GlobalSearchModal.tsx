@@ -24,18 +24,24 @@ export function GlobalSearchModal({ isOpen, onClose }: GlobalSearchModalProps) {
   const [activeCategory, setActiveCategory] = useState<SearchCategory | 'all'>('all');
   const navigate = useNavigate();
 
-  // Escape listener
+  // Escape closes the modal. Ctrl/Cmd + K toggling is owned by AppLayout so the
+  // two handlers never race each other on the same keydown.
   useEffect(() => {
+    if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) onClose();
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        onClose();
-      }
+      if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
+
+  // Start from a clean search each time the modal is reopened
+  useEffect(() => {
+    if (!isOpen) {
+      setQuery('');
+      setActiveCategory('all');
+    }
+  }, [isOpen]);
 
   const filteredResults = useMemo(() => {
     return mockSearchDirectory.filter((item) => {

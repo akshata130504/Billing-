@@ -13,11 +13,13 @@ This guide walks through setting up the local development environment for **Room
 ---
 
 ## 1. Clone & Branch Setup
-Ensure you are working on your assigned feature branch:
+Create a feature branch from `main` for every change:
 ```bash
-git checkout feature/phase0-foundation
+git checkout main
+git pull
+git checkout -b feature/<feature-name>
 ```
-*(Do not switch to `main` directly; work via feature branches and pull requests).*
+*(Do not commit to `main` directly; work via feature branches and pull requests).*
 
 ---
 
@@ -57,10 +59,11 @@ pip install -r backend/requirements.txt
 ```bash
 cp backend/.env.example backend/.env
 ```
+The backend loads `.env` from the repository root first and then `backend/.env` (which takes precedence), regardless of the directory you launch it from. `ALLOWED_ORIGINS` accepts either a JSON array or a comma-separated list.
 
-4. Run Automated Tests:
+4. Run Automated Tests (from the repository root; `pytest.ini` configures the import path):
 ```bash
-PYTHONPATH=. backend/venv/bin/pytest backend/tests/
+backend/venv/bin/pytest
 ```
 
 5. Start the FastAPI Dev Server:
@@ -69,7 +72,13 @@ backend/venv/bin/uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reloa
 ```
 API Documentation will be accessible at:
 - Swagger UI: `http://localhost:8000/api/v1/docs`
-- Health Endpoint: `http://localhost:8000/api/v1/health`
+- Health Endpoint: `http://localhost:8000/api/v1/health` (reports `healthy`, or `degraded` when the database is unreachable)
+
+6. Database Migrations (Alembic, run from the repository root):
+```bash
+backend/venv/bin/alembic -c backend/alembic.ini revision --autogenerate -m "describe change"
+backend/venv/bin/alembic -c backend/alembic.ini upgrade head
+```
 
 ---
 
@@ -108,4 +117,4 @@ All requests to `/api/*` are automatically proxied to the backend at `http://loc
 - Branch naming convention: `feature/<feature-name>`
 - Small, atomic commits
 - Never commit `.env` or sensitive credentials
-- Run `npm run build` and `pytest backend/tests/` before opening a Pull Request into `main`.
+- Run `npm run build` (in `frontend/`) and `pytest` (from the repository root) before opening a Pull Request into `main`.

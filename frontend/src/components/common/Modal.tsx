@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useId } from 'react';
 import { cn } from '../../utils/cn';
 import { X } from 'lucide-react';
 
@@ -21,15 +21,28 @@ export function Modal({
   footer,
   size = 'md',
 }: ModalProps) {
+  const titleId = useId();
+
   useEffect(() => {
+    if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
+      if (e.key === 'Escape') {
         onClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
+
+  // Prevent the page behind the dialog from scrolling while it is open
+  useEffect(() => {
+    if (!isOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -53,7 +66,7 @@ export function Modal({
       <div
         role="dialog"
         aria-modal="true"
-        aria-labelledby="modal-title"
+        aria-labelledby={titleId}
         className={cn(
           'relative w-full bg-white rounded-xl shadow-modal border border-slate-200 z-10 overflow-hidden transform transition-all',
           sizeClasses[size]
@@ -63,7 +76,7 @@ export function Modal({
         <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
           <div>
             <h3
-              id="modal-title"
+              id={titleId}
               className="text-base font-semibold text-slate-900 leading-6"
             >
               {title}

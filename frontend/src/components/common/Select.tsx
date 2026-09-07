@@ -34,6 +34,9 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
   ) => {
     const generatedId = useId();
     const id = customId || generatedId;
+    // When uncontrolled and no default is supplied, pre-select the placeholder option.
+    const isUncontrolled = props.value === undefined && props.defaultValue === undefined;
+    const placeholderDefault = placeholder && isUncontrolled ? { defaultValue: '' } : {};
 
     return (
       <div className="w-full">
@@ -60,10 +63,11 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
                 : 'border-slate-300 hover:border-slate-400',
               className
             )}
+            {...placeholderDefault}
             {...props}
           >
             {placeholder && (
-              <option value="" disabled selected>
+              <option value="" disabled>
                 {placeholder}
               </option>
             )}

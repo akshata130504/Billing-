@@ -38,8 +38,11 @@ docker compose up -d
 ```bash
 # From repository root:
 source backend/venv/bin/activate
+pip install -r backend/requirements.txt
+cp backend/.env.example backend/.env
 uvicorn backend.app.main:app --reload --port 8000
 ```
+- Run tests: `pytest` (from the repository root)
 - Health Check: `http://localhost:8000/api/v1/health`
 - Swagger Docs: `http://localhost:8000/api/v1/docs`
 
@@ -47,6 +50,7 @@ uvicorn backend.app.main:app --reload --port 8000
 ```bash
 # In another terminal:
 cd frontend
+npm install
 npm run dev
 ```
 - Web Application: `http://localhost:5173`

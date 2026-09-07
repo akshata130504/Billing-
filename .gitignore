@@ -17,8 +17,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
 parts/
 sdist/
 var/
@@ -28,6 +26,7 @@ wheels/
 *.egg
 backend/venv/
 venv/
+.venv/
 ENV/
 env/
 .pytest_cache/
