@@ -38,37 +38,9 @@ const moduleDirectory: Record<string, ModuleMetadata> = {
       '1-click conversion to finalized invoice',
     ],
   },
-  '/revenue/quotes': {
-    title: 'Quotes & Proposals',
-    category: 'REVENUE',
-    phase: 'Phase 2',
-    coreFeatureIndex: 1,
-    coreFeatureName: 'Quotes',
-    description: 'Draft customer pricing estimates, configure custom deal terms, track client approval states, and convert accepted quotes into invoices.',
-    plannedFeatures: [
-      'Interactive quote builder & customized term sheets',
-      'Client e-signature approval & expiration tracking',
-      'PDF quote rendering & email dispatch with tracking',
-      '1-click conversion to finalized invoice',
-    ],
-  },
 
   // 2. Billing / Invoices
   '/invoices': {
-    title: 'Billing & Invoices Lifecycle',
-    category: 'REVENUE',
-    phase: 'Phase 2',
-    coreFeatureIndex: 2,
-    coreFeatureName: 'Billing / Invoices',
-    description: 'Recurring and manual invoice issuance, line-item tax calculations, automated billing runs, credit notes, and invoice lifecycle states.',
-    plannedFeatures: [
-      'Draft, Sent, Paid, Void, and Overdue state machine',
-      'Automated recurring batch billing schedules',
-      'Multi-jurisdiction GST/VAT tax calculation rules',
-      'Credit notes, balance adjustments, and ledger sync',
-    ],
-  },
-  '/revenue/invoices': {
     title: 'Billing & Invoices Lifecycle',
     category: 'REVENUE',
     phase: 'Phase 2',
@@ -98,20 +70,6 @@ const moduleDirectory: Record<string, ModuleMetadata> = {
       'One-click rebilling onto client invoices',
     ],
   },
-  '/operations/expenses': {
-    title: 'Expense Management & Billing',
-    category: 'OPERATIONS',
-    phase: 'Phase 6',
-    coreFeatureIndex: 3,
-    coreFeatureName: 'Expenses',
-    description: 'Record operating and project expenses, capture receipts, categorize tax deductions, and pass billable costs onto client invoices.',
-    plannedFeatures: [
-      'Billable vs. non-billable expense categorization',
-      'Client and project cost-center allocation',
-      'Multi-currency receipt uploads & OCR parsing',
-      'One-click rebilling onto client invoices',
-    ],
-  },
 
   // 4. Projects
   '/projects': {
@@ -128,37 +86,9 @@ const moduleDirectory: Record<string, ModuleMetadata> = {
       'Role-based task assignments and delivery schedules',
     ],
   },
-  '/operations/projects': {
-    title: 'Projects & Engagements',
-    category: 'OPERATIONS',
-    phase: 'Phase 6',
-    coreFeatureIndex: 4,
-    coreFeatureName: 'Projects',
-    description: 'Manage client deliverables, milestone-based billing, engagement budgets, task assignments, and progress tracking.',
-    plannedFeatures: [
-      'Milestone-based and retainer project billing models',
-      'Fixed-price vs. Time & Materials (T&M) tracking',
-      'Budget vs. actual expenditure variance analytics',
-      'Role-based task assignments and delivery schedules',
-    ],
-  },
 
   // 5. Payments
   '/payments': {
-    title: 'Payments & Gateway Processing',
-    category: 'REVENUE',
-    phase: 'Phase 3',
-    coreFeatureIndex: 5,
-    coreFeatureName: 'Payments',
-    description: 'Process online gateway transactions, log offline wire/bank transfers, and allocate single payments across multiple open invoices.',
-    plannedFeatures: [
-      'Multi-invoice payment receipt allocation engine',
-      'Payment gateway integrations (Razorpay, Stripe, UPI)',
-      'Offline bank wire / check settlement recording',
-      'Refund management & transactional ledger audit trail',
-    ],
-  },
-  '/revenue/payments': {
     title: 'Payments & Gateway Processing',
     category: 'REVENUE',
     phase: 'Phase 3',
@@ -204,37 +134,9 @@ const moduleDirectory: Record<string, ModuleMetadata> = {
       'Dynamic proposal generation and approval routing',
     ],
   },
-  '/revenue/cpq': {
-    title: 'Configure, Price, Quote (CPQ)',
-    category: 'REVENUE',
-    phase: 'Phase 2',
-    coreFeatureIndex: 7,
-    coreFeatureName: 'CPQ',
-    description: 'Advanced CPQ engine for complex multi-tier pricing bundles, volume discount matrices, and contract rule enforcement.',
-    plannedFeatures: [
-      'Rule-based product bundling logic',
-      'Volume, tier, and ramp pricing calculators',
-      'Contract tenure & discount threshold guards',
-      'Dynamic proposal generation and approval routing',
-    ],
-  },
 
   // 8. Trial Management
   '/trials': {
-    title: 'Trial Management & Funnels',
-    category: 'SUBSCRIPTIONS',
-    phase: 'Phase 4',
-    coreFeatureIndex: 8,
-    coreFeatureName: 'Trial Management',
-    description: 'Track prospect trial expiration dates, monitor product usage during evaluation, and execute automated conversion campaigns.',
-    plannedFeatures: [
-      'Configurable free trial durations (with/without card)',
-      'Automated trial expiration warnings & alerts',
-      'One-click conversion checkout links',
-      'Trial extension approvals and funnel conversion analytics',
-    ],
-  },
-  '/subscriptions/trials': {
     title: 'Trial Management & Funnels',
     category: 'SUBSCRIPTIONS',
     phase: 'Phase 4',
@@ -312,20 +214,6 @@ const moduleDirectory: Record<string, ModuleMetadata> = {
       'Usage threshold alerts and automated cap protections',
     ],
   },
-  '/subscriptions/usage': {
-    title: 'Metered & Usage-Based Billing',
-    category: 'SUBSCRIPTIONS',
-    phase: 'Phase 4',
-    coreFeatureIndex: 12,
-    coreFeatureName: 'Metered Billing',
-    description: 'High-frequency usage telemetry ingestion, rating events according to tier thresholds, and appending to cycle billing runs.',
-    plannedFeatures: [
-      'High-throughput usage telemetry ingestion API',
-      'Sum, Max, Last, and Unique Count aggregation modes',
-      'Graduated and volume pricing brackets',
-      'Usage threshold alerts and automated cap protections',
-    ],
-  },
 
   // 13. Hosted Payment Pages
   '/hosted-payment-pages': {
@@ -361,20 +249,6 @@ const moduleDirectory: Record<string, ModuleMetadata> = {
 
   // 15. Pricing Models
   '/plans-pricing': {
-    title: 'Pricing Models & Rate Cards',
-    category: 'SUBSCRIPTIONS',
-    phase: 'Phase 1',
-    coreFeatureIndex: 15,
-    coreFeatureName: 'Pricing Models',
-    description: 'Configure flexible pricing structures: Flat-fee, Per-seat, Tiered, Volume, Stairstep, and hybrid recurring + usage models.',
-    plannedFeatures: [
-      'Multi-model pricing builders (Flat, Per Unit, Tiered, Volume)',
-      'Monthly, quarterly, semi-annual, and annual intervals',
-      'Multi-currency rate cards & foreign exchange conversions',
-      'Price versioning and grandfathering policies',
-    ],
-  },
-  '/subscriptions/plans': {
     title: 'Pricing Models & Rate Cards',
     category: 'SUBSCRIPTIONS',
     phase: 'Phase 1',
@@ -526,18 +400,6 @@ const moduleDirectory: Record<string, ModuleMetadata> = {
     ],
   },
   '/subscriptions': {
-    title: 'Active Subscriptions Management',
-    category: 'SUBSCRIPTIONS',
-    phase: 'Phase 4',
-    description: 'Manage active recurring customer subscriptions, mid-cycle plan upgrades, pause/resume, and renewal tracking.',
-    plannedFeatures: [
-      'Subscription state machine (Active, Trial, Paused, Canceled)',
-      'Mid-cycle upgrades/downgrades with automatic proration',
-      'Pause, resume, and cancellation workflows',
-      'Automated renewal billing triggers',
-    ],
-  },
-  '/subscriptions/all': {
     title: 'Active Subscriptions Management',
     category: 'SUBSCRIPTIONS',
     phase: 'Phase 4',

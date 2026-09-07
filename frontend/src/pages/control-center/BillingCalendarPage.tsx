@@ -3,7 +3,6 @@ import { Card, CardContent } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
-import { useToast } from '../../components/common/Toast';
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -19,7 +18,6 @@ export type CalendarEventType = 'invoice_generation' | 'subscription_renewal' | 
 export interface CalendarEvent {
   id: string;
   date: string; // YYYY-MM-DD
-  dayNumber: number;
   type: CalendarEventType;
   title: string;
   account: string;
@@ -32,7 +30,6 @@ const mockEvents: CalendarEvent[] = [
   {
     id: 'EVT-01',
     date: '2026-09-08',
-    dayNumber: 8,
     type: 'trial_ending',
     title: 'Trial Expiration: Vanguard Biometrics',
     account: 'Vanguard Biometrics',
@@ -43,7 +40,6 @@ const mockEvents: CalendarEvent[] = [
   {
     id: 'EVT-02',
     date: '2026-09-09',
-    dayNumber: 9,
     type: 'invoice_generation',
     title: 'Monthly Recurring Batch Run #09',
     account: '42 Active Subscriptions',
@@ -54,7 +50,6 @@ const mockEvents: CalendarEvent[] = [
   {
     id: 'EVT-03',
     date: '2026-09-11',
-    dayNumber: 11,
     type: 'subscription_renewal',
     title: 'Annual Plan Renewal: Acme Cloud Dynamics',
     account: 'Acme Cloud Dynamics',
@@ -65,7 +60,6 @@ const mockEvents: CalendarEvent[] = [
   {
     id: 'EVT-04',
     date: '2026-09-14',
-    dayNumber: 14,
     type: 'payment_collection',
     title: 'Dunning Automated Retry #3',
     account: 'Hyperion FinTech Ltd',
@@ -76,7 +70,6 @@ const mockEvents: CalendarEvent[] = [
   {
     id: 'EVT-05',
     date: '2026-09-18',
-    dayNumber: 18,
     type: 'subscription_renewal',
     title: 'Quarterly Renewal: Solaria Robotics',
     account: 'Solaria Robotics Corp',
@@ -87,7 +80,6 @@ const mockEvents: CalendarEvent[] = [
   {
     id: 'EVT-06',
     date: '2026-09-22',
-    dayNumber: 22,
     type: 'trial_ending',
     title: 'Trial Expiration: Matrix Logistics',
     account: 'Matrix Logistics Ltd',
@@ -98,7 +90,6 @@ const mockEvents: CalendarEvent[] = [
   {
     id: 'EVT-07',
     date: '2026-09-25',
-    dayNumber: 25,
     type: 'invoice_generation',
     title: 'Usage Metering Invoice Run',
     account: '18 Metered Accounts',
@@ -109,7 +100,6 @@ const mockEvents: CalendarEvent[] = [
   {
     id: 'EVT-08',
     date: '2026-09-28',
-    dayNumber: 28,
     type: 'payment_collection',
     title: 'ACH / Wire Transfer Settlement Audit',
     account: 'Rooman Treasury',
@@ -119,36 +109,83 @@ const mockEvents: CalendarEvent[] = [
   },
 ];
 
+/** Parse a YYYY-MM-DD string as a local date (avoids UTC shifting the day). */
+function parseIsoDate(iso: string): Date {
+  const [year, month, day] = iso.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function startOfMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function isSameDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+const monthLabelFormatter = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' });
+const agendaDateFormatter = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+});
+
+// Open the calendar on the month that holds the mock schedule so the demo has content.
+const DEFAULT_VIEW_MONTH = startOfMonth(parseIsoDate(mockEvents[0].date));
+
+type CalendarCell =
+  | { dayNumber: null; isCurrentMonth: false }
+  | { dayNumber: number; isCurrentMonth: true; events: CalendarEvent[]; isToday: boolean };
+
 export function BillingCalendarPage() {
-  const { showToast } = useToast();
-  const [selectedMonth, setSelectedMonth] = useState('September 2026');
+  const [viewMonth, setViewMonth] = useState<Date>(DEFAULT_VIEW_MONTH);
   const [selectedType, setSelectedType] = useState<'all' | CalendarEventType>('all');
   const [activeEvent, setActiveEvent] = useState<CalendarEvent | null>(null);
 
+  const selectedMonthLabel = monthLabelFormatter.format(viewMonth);
+
+  // Events for the visible month, honouring the type filter, in chronological order
   const filteredEvents = useMemo(() => {
-    if (selectedType === 'all') return mockEvents;
-    return mockEvents.filter((e) => e.type === selectedType);
-  }, [selectedType]);
+    return mockEvents
+      .filter((e) => selectedType === 'all' || e.type === selectedType)
+      .filter((e) => {
+        const d = parseIsoDate(e.date);
+        return d.getFullYear() === viewMonth.getFullYear() && d.getMonth() === viewMonth.getMonth();
+      })
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [selectedType, viewMonth]);
 
-  const daysInMonth = 30; // September has 30 days
-  const startDayOffset = 2; // Sept 1, 2026 is Tuesday (offset = 2)
+  const calendarDays = useMemo<CalendarCell[]>(() => {
+    const year = viewMonth.getFullYear();
+    const month = viewMonth.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const startDayOffset = new Date(year, month, 1).getDay(); // 0 = Sunday, matches header row
+    const today = new Date();
 
-  const calendarDays = useMemo(() => {
-    const days = [];
+    const days: CalendarCell[] = [];
     for (let i = 0; i < startDayOffset; i++) {
       days.push({ dayNumber: null, isCurrentMonth: false });
     }
     for (let i = 1; i <= daysInMonth; i++) {
-      const dayEvents = filteredEvents.filter((e) => e.dayNumber === i);
+      const cellDate = new Date(year, month, i);
       days.push({
         dayNumber: i,
         isCurrentMonth: true,
-        events: dayEvents,
-        isToday: i === 7, // Simulated "today"
+        events: filteredEvents.filter((e) => parseIsoDate(e.date).getDate() === i),
+        isToday: isSameDay(cellDate, today),
       });
     }
     return days;
-  }, [filteredEvents]);
+  }, [filteredEvents, viewMonth]);
+
+  const goToPreviousMonth = () =>
+    setViewMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+  const goToNextMonth = () =>
+    setViewMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
 
   const getEventBadge = (type: CalendarEventType) => {
     switch (type) {
@@ -210,24 +247,18 @@ export function BillingCalendarPage() {
         <div className="flex items-center gap-2 bg-white border border-slate-200/90 rounded-xl p-1 shadow-2xs">
           <button
             type="button"
-            onClick={() => {
-              setSelectedMonth('August 2026');
-              showToast('info', 'Calendar', 'Showing August 2026');
-            }}
+            onClick={goToPreviousMonth}
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
             aria-label="Previous month"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
           <span className="text-xs font-bold text-slate-900 px-2 min-w-[110px] text-center">
-            {selectedMonth}
+            {selectedMonthLabel}
           </span>
           <button
             type="button"
-            onClick={() => {
-              setSelectedMonth('October 2026');
-              showToast('info', 'Calendar', 'Showing October 2026');
-            }}
+            onClick={goToNextMonth}
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
             aria-label="Next month"
           >
@@ -354,6 +385,11 @@ export function BillingCalendarPage() {
               </div>
 
               <div className="space-y-3">
+                {filteredEvents.length === 0 && (
+                  <p className="text-xs text-slate-500 text-center py-6">
+                    No scheduled events in {selectedMonthLabel}.
+                  </p>
+                )}
                 {filteredEvents.map((ev) => (
                   <div
                     key={ev.id}
@@ -362,7 +398,7 @@ export function BillingCalendarPage() {
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-bold text-slate-500">
-                        Sept {ev.dayNumber}, 2026
+                        {agendaDateFormatter.format(parseIsoDate(ev.date))}
                       </span>
                       {getEventBadge(ev.type)}
                     </div>
@@ -399,7 +435,8 @@ export function BillingCalendarPage() {
               <div className="flex items-center justify-between">
                 <span className="text-slate-500 font-medium">Event Date</span>
                 <span className="font-bold text-slate-900">
-                  {activeEvent.date} ({activeEvent.time})
+                  {agendaDateFormatter.format(parseIsoDate(activeEvent.date))}
+                  {activeEvent.time ? ` (${activeEvent.time})` : ''}
                 </span>
               </div>
               <div className="flex items-center justify-between">

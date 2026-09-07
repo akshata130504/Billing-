@@ -152,6 +152,77 @@ export const sidebarSections: SidebarSection[] = [
 
 const STORAGE_KEY = 'rooman_sidebar_expanded';
 
+interface SectionVisualConfig {
+  icon: React.ComponentType<{ className?: string }>;
+  headerBg: string;
+  iconColor: string;
+  labelColor: string;
+}
+
+const DEFAULT_SECTION_VISUAL: SectionVisualConfig = {
+  icon: Layers,
+  headerBg: 'bg-slate-50 hover:bg-slate-100 border border-slate-200/60',
+  iconColor: 'text-slate-500',
+  labelColor: 'text-slate-800',
+};
+
+const SECTION_VISUALS: Record<string, SectionVisualConfig> = {
+  WORKSPACE: {
+    icon: Building2,
+    headerBg: 'bg-blue-50/70 hover:bg-blue-100/60 border border-blue-100/80',
+    iconColor: 'text-blue-600',
+    labelColor: 'text-blue-900',
+  },
+  REVENUE: {
+    icon: Receipt,
+    headerBg: 'bg-emerald-50/70 hover:bg-emerald-100/60 border border-emerald-100/80',
+    iconColor: 'text-emerald-600',
+    labelColor: 'text-emerald-900',
+  },
+  SUBSCRIPTIONS: {
+    icon: Repeat,
+    headerBg: 'bg-amber-50/70 hover:bg-amber-100/60 border border-amber-100/80',
+    iconColor: 'text-amber-600',
+    labelColor: 'text-amber-900',
+  },
+  'CUSTOMER EXPERIENCE': {
+    icon: UserCheck,
+    headerBg: 'bg-rose-50/70 hover:bg-rose-100/60 border border-rose-100/80',
+    iconColor: 'text-rose-600',
+    labelColor: 'text-rose-900',
+  },
+  OPERATIONS: {
+    icon: Briefcase,
+    headerBg: 'bg-sky-50/70 hover:bg-sky-100/60 border border-sky-100/80',
+    iconColor: 'text-sky-600',
+    labelColor: 'text-sky-900',
+  },
+  INSIGHTS: {
+    icon: Sparkles,
+    headerBg: 'bg-purple-50/70 hover:bg-purple-100/60 border border-purple-100/80',
+    iconColor: 'text-purple-600',
+    labelColor: 'text-purple-900',
+  },
+  PLATFORMS: {
+    icon: Monitor,
+    headerBg: 'bg-indigo-50/60 hover:bg-indigo-100/50 border border-indigo-100/70',
+    iconColor: 'text-indigo-600',
+    labelColor: 'text-indigo-900',
+  },
+  'CONTROL CENTER': {
+    icon: ShieldCheck,
+    headerBg: 'bg-indigo-50/80 hover:bg-indigo-100/70 border border-indigo-200/70',
+    iconColor: 'text-indigo-600',
+    labelColor: 'text-indigo-900',
+  },
+  SYSTEM: {
+    icon: Settings,
+    headerBg: 'bg-slate-100/80 hover:bg-slate-200/60 border border-slate-200/80',
+    iconColor: 'text-slate-600',
+    labelColor: 'text-slate-800',
+  },
+};
+
 export function Sidebar({
   isOpen,
   onClose,
@@ -237,70 +308,6 @@ export function Sidebar({
     });
   };
 
-interface SectionVisualConfig {
-  icon: React.ComponentType<{ className?: string }>;
-  headerBg: string;
-  iconColor: string;
-  labelColor: string;
-}
-
-const SECTION_VISUALS: Record<string, SectionVisualConfig> = {
-  WORKSPACE: {
-    icon: Building2,
-    headerBg: 'bg-blue-50/70 hover:bg-blue-100/60 border border-blue-100/80',
-    iconColor: 'text-blue-600',
-    labelColor: 'text-blue-900',
-  },
-  REVENUE: {
-    icon: Receipt,
-    headerBg: 'bg-emerald-50/70 hover:bg-emerald-100/60 border border-emerald-100/80',
-    iconColor: 'text-emerald-600',
-    labelColor: 'text-emerald-900',
-  },
-  SUBSCRIPTIONS: {
-    icon: Repeat,
-    headerBg: 'bg-amber-50/70 hover:bg-amber-100/60 border border-amber-100/80',
-    iconColor: 'text-amber-600',
-    labelColor: 'text-amber-900',
-  },
-  'CUSTOMER EXPERIENCE': {
-    icon: UserCheck,
-    headerBg: 'bg-rose-50/70 hover:bg-rose-100/60 border border-rose-100/80',
-    iconColor: 'text-rose-600',
-    labelColor: 'text-rose-900',
-  },
-  OPERATIONS: {
-    icon: Briefcase,
-    headerBg: 'bg-sky-50/70 hover:bg-sky-100/60 border border-sky-100/80',
-    iconColor: 'text-sky-600',
-    labelColor: 'text-sky-900',
-  },
-  INSIGHTS: {
-    icon: Sparkles,
-    headerBg: 'bg-purple-50/70 hover:bg-purple-100/60 border border-purple-100/80',
-    iconColor: 'text-purple-600',
-    labelColor: 'text-purple-900',
-  },
-  PLATFORMS: {
-    icon: Monitor,
-    headerBg: 'bg-indigo-50/60 hover:bg-indigo-100/50 border border-indigo-100/70',
-    iconColor: 'text-indigo-600',
-    labelColor: 'text-indigo-900',
-  },
-  'CONTROL CENTER': {
-    icon: ShieldCheck,
-    headerBg: 'bg-indigo-50/80 hover:bg-indigo-100/70 border border-indigo-200/70',
-    iconColor: 'text-indigo-600',
-    labelColor: 'text-indigo-900',
-  },
-  SYSTEM: {
-    icon: Settings,
-    headerBg: 'bg-slate-100/80 hover:bg-slate-200/60 border border-slate-200/80',
-    iconColor: 'text-slate-600',
-    labelColor: 'text-slate-800',
-  },
-};
-
   const navItemClass = (isActive: boolean) =>
     cn(
       'group flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 select-none',
@@ -373,12 +380,7 @@ const SECTION_VISUALS: Record<string, SectionVisualConfig> = {
         <div className={cn('flex-1 overflow-y-auto px-3 py-3.5 space-y-3', collapsed && 'lg:px-2')}>
           {sidebarSections.map((section) => {
             const isExpanded = expandedSections.includes(section.title);
-            const visual = SECTION_VISUALS[section.title] || {
-              icon: Layers,
-              headerBg: 'bg-slate-50 hover:bg-slate-100 border border-slate-200/60',
-              iconColor: 'text-slate-500',
-              labelColor: 'text-slate-800',
-            };
+            const visual = SECTION_VISUALS[section.title] ?? DEFAULT_SECTION_VISUAL;
             const SectionIcon = visual.icon;
 
             return (
@@ -411,12 +413,21 @@ const SECTION_VISUALS: Record<string, SectionVisualConfig> = {
                 </button>
 
                 {/* Collapsible Child Items */}
+                {/*
+                  Items follow the accordion state, except in the desktop icon rail
+                  (collapsed) where section headers are unlabeled and every item
+                  must stay reachable. The lg: overrides only apply on desktop so
+                  the mobile drawer keeps honouring the accordion.
+                */}
                 <div
                   className={cn(
                     'overflow-hidden transition-all duration-200 ease-in-out',
-                    isExpanded || (collapsed && 'lg:max-h-none lg:opacity-100')
+                    isExpanded
                       ? 'max-h-96 opacity-100 pt-1 pb-0.5'
-                      : 'max-h-0 opacity-0 pointer-events-none'
+                      : 'max-h-0 opacity-0 pointer-events-none',
+                    !isExpanded &&
+                      collapsed &&
+                      'lg:max-h-96 lg:opacity-100 lg:pointer-events-auto lg:pt-1 lg:pb-0.5'
                   )}
                 >
                   <div

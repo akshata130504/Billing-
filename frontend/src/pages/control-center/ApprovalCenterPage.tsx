@@ -257,7 +257,9 @@ export function ApprovalCenterPage() {
               <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mx-auto mb-3">
                 <CheckCircle2 className="w-6 h-6" />
               </div>
-              <h3 className="text-sm font-bold text-slate-900">No {statusFilter} approvals</h3>
+              <h3 className="text-sm font-bold text-slate-900">
+                {statusFilter === 'all' ? 'No approval requests' : `No ${statusFilter} approvals`}
+              </h3>
               <p className="text-xs text-slate-500 mt-1">
                 There are no approval requests matching this criteria.
               </p>

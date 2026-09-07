@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Card, CardContent } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
@@ -74,6 +74,23 @@ export function DataMigrationPage() {
   const [step, setStep] = useState<'upload' | 'validating' | 'preview' | 'importing' | 'completed'>('upload');
   const [progress, setProgress] = useState(0);
 
+  // Pending simulated async work, so a reset or unmount can cancel it cleanly
+  const validationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const importIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const clearPendingTimers = () => {
+    if (validationTimerRef.current !== null) {
+      clearTimeout(validationTimerRef.current);
+      validationTimerRef.current = null;
+    }
+    if (importIntervalRef.current !== null) {
+      clearInterval(importIntervalRef.current);
+      importIntervalRef.current = null;
+    }
+  };
+
+  useEffect(() => clearPendingTimers, []);
+
   const activeConfig = entityConfigs.find((c) => c.key === selectedEntity)!;
 
   const handleDownloadTemplate = () => {
@@ -89,35 +106,43 @@ export function DataMigrationPage() {
   };
 
   const handleFileSelect = (name: string, size: string) => {
+    clearPendingTimers();
     setSelectedFile({ name, size });
     setStep('validating');
-    setTimeout(() => {
+    validationTimerRef.current = setTimeout(() => {
+      validationTimerRef.current = null;
       setStep('preview');
       showToast('success', 'File Validated', 'All columns mapped successfully against schema.');
     }, 600);
   };
 
   const handleStartImport = () => {
+    clearPendingTimers();
     setStep('importing');
-    setProgress(15);
-    const interval = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setStep('completed');
-          showToast('success', 'Import Successful', `Migrated 142 records into ${activeConfig.title}.`);
-          return 100;
-        }
-        return prev + 25;
-      });
+    let current = 15;
+    setProgress(current);
+    importIntervalRef.current = setInterval(() => {
+      current = Math.min(current + 25, 100);
+      setProgress(current);
+      if (current >= 100) {
+        clearPendingTimers();
+        setStep('completed');
+        showToast('success', 'Import Successful', `Migrated 142 records into ${activeConfig.title}.`);
+      }
     }, 300);
   };
 
   const handleReset = () => {
+    clearPendingTimers();
     setSelectedFile(null);
     setStep('upload');
     setProgress(0);
   };
+
+  const formatFileSize = (bytes: number) =>
+    bytes >= 1024 * 1024
+      ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+      : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 
   return (
     <div className="space-y-6">
@@ -206,7 +231,13 @@ export function DataMigrationPage() {
                 onDrop={(e) => {
                   e.preventDefault();
                   setDragOver(false);
-                  handleFileSelect('legacy_export_data.csv', '248 KB');
+                  // Reflect the dropped file's real name/size; the parsing itself is still simulated
+                  const dropped = e.dataTransfer.files[0];
+                  if (dropped) {
+                    handleFileSelect(dropped.name, formatFileSize(dropped.size));
+                  } else {
+                    handleFileSelect('legacy_export_data.csv', '248 KB');
+                  }
                 }}
                 onClick={() => handleFileSelect(`${selectedEntity}_export_sample.csv`, '184 KB')}
                 className={`border-2 border-dashed rounded-2xl p-8 sm:p-12 text-center transition-colors cursor-pointer ${

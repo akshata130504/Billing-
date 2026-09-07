@@ -26,18 +26,22 @@ export function Header({
   const [isWorkspaceMenuOpen, setIsWorkspaceMenuOpen] = useState(false);
   const workspaceDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close workspace dropdown when clicking outside
+  // Close workspace dropdown when clicking outside or pressing Escape
   useEffect(() => {
+    if (!isWorkspaceMenuOpen) return;
     function handleClickOutside(e: MouseEvent) {
       if (workspaceDropdownRef.current && !workspaceDropdownRef.current.contains(e.target as Node)) {
         setIsWorkspaceMenuOpen(false);
       }
     }
-    if (isWorkspaceMenuOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setIsWorkspaceMenuOpen(false);
     }
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isWorkspaceMenuOpen]);
 
@@ -62,6 +66,14 @@ export function Header({
           <input
             type="text"
             readOnly
+            role="button"
+            aria-label="Open global search (Ctrl + K)"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onOpenSearch();
+              }
+            }}
             placeholder="Search customers, invoices, subscriptions, payments... (Ctrl + K)"
             className="w-full pl-10 pr-12 py-2 text-xs bg-slate-50 group-hover:bg-slate-100/70 border border-slate-200/90 rounded-xl text-slate-900 placeholder:text-slate-400 cursor-pointer transition-colors outline-none"
           />
