@@ -180,8 +180,8 @@ def list_subscriptions(
     if search:
         like = f"%{search.strip()}%"
         stmt = (
-            stmt.join(Customer, Customer.id == Subscription.customer_id)
-            .join(Plan, Plan.id == Subscription.plan_id)
+            stmt.outerjoin(Customer, Customer.id == Subscription.customer_id)
+            .outerjoin(Plan, Plan.id == Subscription.plan_id)
             .where(or_(Subscription.subscription_number.ilike(like), Customer.display_name.ilike(like), Plan.name.ilike(like)))
         )
     if status:
