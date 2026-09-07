@@ -45,9 +45,6 @@ import {
   ExpenseDetailsPage,
   ExpensesProvider,
 } from '../pages/expenses';
-import { Button } from '../components/common/Button';
-import { Link } from 'react-router-dom';
-import { AlertCircle } from 'lucide-react';
 import { SettingsPage } from '../pages/settings';
 
 // ---------------------------------------------------------------------------
@@ -150,206 +147,125 @@ export function AppRoutes() {
     <ProjectsProvider>
       <ExpensesProvider>
         <Routes>
-          <Route path="/" element={<AppLayout />}>
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="dashboard" element={<DashboardPage />} />
+          {/* Public: auth */}
+          <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
+          <Route path="/signup" element={<PublicOnly><SignupPage /></PublicOnly>} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
 
-        {/* WORKSPACE */}
-        <Route path="customers" element={<PlaceholderPage />} />
-        <Route path="catalog" element={<PlaceholderPage />} />
+          {/* Public: hosted pages */}
+          <Route path="/pay/:token" element={<PayInvoicePage />} />
+          <Route path="/quote/:token" element={<PublicQuotePage />} />
 
-        {/* REVENUE */}
-        <Route path="quotes" element={<PlaceholderPage />} />
-        <Route path="cpq" element={<PlaceholderPage />} />
-        <Route path="invoices" element={<PlaceholderPage />} />
-        <Route path="payments" element={<PlaceholderPage />} />
-        <Route path="collections" element={<PlaceholderPage />} />
+          {/* Private */}
+          <Route element={<ProtectedRoute />}>
+            <Route path="/" element={<AppLayout />}>
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="dashboard" element={<DashboardPage />} />
 
-        {/* SUBSCRIPTIONS */}
-        <Route path="plans-pricing" element={<PlaceholderPage />} />
-        <Route path="subscriptions" element={<PlaceholderPage />} />
-        <Route path="trials" element={<PlaceholderPage />} />
-        <Route path="usage" element={<PlaceholderPage />} />
-        <Route path="proration" element={<PlaceholderPage />} />
-        <Route path="dunning" element={<PlaceholderPage />} />
+              {/* Workspace */}
+              <Route path="customers" element={<CustomersListPage />} />
+              <Route path="customers/new" element={<CustomerFormPage />} />
+              <Route path="customers/:id" element={<CustomerDetailPage />} />
+              <Route path="customers/:id/edit" element={<CustomerFormPage />} />
+              <Route path="catalog" element={<CatalogPage />} />
 
-        {/* CUSTOMER EXPERIENCE */}
-        <Route path="customer-lifecycle" element={<PlaceholderPage />} />
-        <Route path="customer-portal" element={<PlaceholderPage />} />
-        <Route path="hosted-payment-pages" element={<PlaceholderPage />} />
+              {/* Revenue */}
+              <Route path="quotes" element={<QuotesListPage />} />
+              <Route path="quotes/new" element={<QuoteFormPage />} />
+              <Route path="quotes/:id" element={<QuoteDetailPage />} />
+              <Route path="quotes/:id/edit" element={<QuoteFormPage />} />
+              <Route path="invoices" element={<InvoicesListPage />} />
+              <Route path="invoices/new" element={<InvoiceFormPage />} />
+              <Route path="invoices/:id" element={<InvoiceDetailPage />} />
+              <Route path="invoices/:id/edit" element={<InvoiceFormPage />} />
+              <Route path="payments" element={<PaymentsListPage />} />
+              <Route path="payments/:id" element={<PaymentDetailPage />} />
+              <Route path="collections" element={<CollectionsPage />} />
 
-        {/* OPERATIONS */}
-        <Route path="expenses" element={<ExpensesPage />} />
-        <Route path="expenses/recurring" element={<RecurringExpensesPage />} />
-        <Route path="expenses/:expenseId" element={<ExpenseDetailsPage />} />
-        <Route path="projects" element={<ProjectsPage />} />
-        <Route path="projects/:projectId" element={<ProjectDetailsPage />} />
-        <Route path="timesheets" element={<PlaceholderPage />} />
+              {/* Subscriptions */}
+              <Route path="subscriptions" element={<SubscriptionsListPage />} />
+              <Route path="subscriptions/new" element={<SubscriptionFormPage />} />
+              <Route path="subscriptions/:id" element={<SubscriptionDetailPage />} />
+              <Route path="trials" element={<TrialsPage />} />
 
-        {/* INSIGHTS */}
-        <Route path="revenue-intelligence" element={<PlaceholderPage />} />
-        <Route path="reports" element={<PlaceholderPage />} />
-        <Route path="ai-billing" element={<PlaceholderPage />} />
-        <Route path="activity" element={<PlaceholderPage />} />
+              {/* Operations */}
+              <Route path="expenses" element={<ExpensesPage />} />
+              <Route path="expenses/recurring" element={<RecurringExpensesPage />} />
+              <Route path="expenses/:expenseId" element={<ExpenseDetailsPage />} />
+              <Route path="projects" element={<ProjectsPage />} />
+              <Route path="projects/:projectId" element={<ProjectDetailsPage />} />
+              <Route path="timesheets" element={<ComingSoonPage />} />
 
-        {/* PLATFORMS */}
-        <Route path="platforms/mobile" element={<PlaceholderPage />} />
-        <Route path="platforms/desktop" element={<PlaceholderPage />} />
+              {/* Insights */}
+              <Route path="activity" element={<ActivityPage />} />
 
-        {/* CONTROL CENTER (Dedicated Pages) */}
-        <Route path="control-center/action-center" element={<ActionCenterPage />} />
-        <Route path="control-center/approvals" element={<ApprovalCenterPage />} />
-        <Route path="control-center/calendar" element={<BillingCalendarPage />} />
-        <Route path="control-center/reconciliation" element={<ReconciliationPage />} />
-        <Route path="control-center/audit-log" element={<AuditLogPage />} />
-        <Route path="control-center/migration" element={<DataMigrationPage />} />
+              {/* Control center */}
+              <Route path="control-center/action-center" element={<ActionCenterPage />} />
+              <Route path="control-center/approvals" element={<ApprovalCenterPage />} />
+              <Route path="control-center/calendar" element={<BillingCalendarPage />} />
+              <Route path="control-center/reconciliation" element={<ReconciliationPage />} />
+              <Route
+                path="control-center/audit-log"
+                element={
+                  <RequireRole min="admin">
+                    <AuditLogPage />
+                  </RequireRole>
+                }
+              />
+              <Route path="control-center/migration" element={<DataMigrationPage />} />
 
-        {/* SYSTEM */}
-        <Route path="automation" element={<PlaceholderPage />} />
-        <Route path="customization" element={<PlaceholderPage />} />
-        <Route path="integrations" element={<PlaceholderPage />} />
-        <Route path="system/settings" element={<PlaceholderPage />} />
+              {/* Settings (tabs via ?tab=) */}
+              <Route path="settings" element={<SettingsPage />} />
 
-        {/* Legacy / Alternate Path Compatibility Redirects */}
-        <Route path="revenue/quotes" element={<Navigate to="/quotes" replace />} />
-        <Route path="revenue/cpq" element={<Navigate to="/cpq" replace />} />
-        <Route path="revenue/invoices" element={<Navigate to="/invoices" replace />} />
-        <Route path="revenue/payments" element={<Navigate to="/payments" replace />} />
-        <Route path="revenue/collections" element={<Navigate to="/collections" replace />} />
-        <Route path="subscriptions/plans" element={<Navigate to="/plans-pricing" replace />} />
-        <Route path="subscriptions/all" element={<Navigate to="/subscriptions" replace />} />
-        <Route path="subscriptions/trials" element={<Navigate to="/trials" replace />} />
-        <Route path="subscriptions/usage" element={<Navigate to="/usage" replace />} />
-        <Route path="subscriptions/proration" element={<Navigate to="/proration" replace />} />
-        <Route path="subscriptions/dunning" element={<Navigate to="/dunning" replace />} />
-        <Route path="operations/expenses" element={<Navigate to="/expenses" replace />} />
-        <Route path="operations/expenses/recurring" element={<Navigate to="/expenses/recurring" replace />} />
-        <Route path="operations/projects" element={<Navigate to="/projects" replace />} />
-        <Route path="operations/timesheets" element={<Navigate to="/timesheets" replace />} />
-        <Route path="insights/revenue" element={<Navigate to="/revenue-intelligence" replace />} />
-        <Route path="insights/reports" element={<Navigate to="/reports" replace />} />
-        <Route path="insights/activity" element={<Navigate to="/activity" replace />} />
-        <Route path="insights/ai" element={<Navigate to="/ai-billing" replace />} />
-        <Route path="system/automation" element={<Navigate to="/automation" replace />} />
-        <Route path="system/customization" element={<Navigate to="/customization" replace />} />
-        <Route path="system/integrations" element={<Navigate to="/integrations" replace />} />
+              {/* Navigation entries without an implementation in this release */}
+              <Route path="cpq" element={<ComingSoonPage />} />
+              <Route path="usage" element={<ComingSoonPage />} />
+              <Route path="proration" element={<ComingSoonPage />} />
+              <Route path="dunning" element={<ComingSoonPage />} />
+              <Route path="customer-lifecycle" element={<ComingSoonPage />} />
+              <Route path="customer-portal" element={<ComingSoonPage />} />
+              <Route path="hosted-payment-pages" element={<ComingSoonPage />} />
+              <Route path="revenue-intelligence" element={<ComingSoonPage />} />
+              <Route path="reports" element={<ComingSoonPage />} />
+              <Route path="ai-billing" element={<ComingSoonPage />} />
+              <Route path="automation" element={<ComingSoonPage />} />
+              <Route path="customization" element={<ComingSoonPage />} />
+              <Route path="integrations" element={<ComingSoonPage />} />
+              <Route path="platforms/mobile" element={<ComingSoonPage />} />
+              <Route path="platforms/desktop" element={<ComingSoonPage />} />
 
-        {/* Catch-all 404 */}
-        <Route path="*" element={<NotFoundPage />} />
-    <Routes>
-      {/* Public: auth */}
-      <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
-      <Route path="/signup" element={<PublicOnly><SignupPage /></PublicOnly>} />
-      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-      <Route path="/reset-password" element={<ResetPasswordPage />} />
-      <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
+              {/* Legacy / alternate path redirects */}
+              <Route path="plans-pricing" element={<Navigate to="/catalog" replace />} />
+              <Route path="system/settings" element={<Navigate to="/settings" replace />} />
+              <Route path="revenue/quotes" element={<Navigate to="/quotes" replace />} />
+              <Route path="revenue/cpq" element={<Navigate to="/cpq" replace />} />
+              <Route path="revenue/invoices" element={<Navigate to="/invoices" replace />} />
+              <Route path="revenue/payments" element={<Navigate to="/payments" replace />} />
+              <Route path="revenue/collections" element={<Navigate to="/collections" replace />} />
+              <Route path="subscriptions/plans" element={<Navigate to="/catalog" replace />} />
+              <Route path="subscriptions/all" element={<Navigate to="/subscriptions" replace />} />
+              <Route path="subscriptions/trials" element={<Navigate to="/trials" replace />} />
+              <Route path="subscriptions/usage" element={<Navigate to="/usage" replace />} />
+              <Route path="subscriptions/proration" element={<Navigate to="/proration" replace />} />
+              <Route path="subscriptions/dunning" element={<Navigate to="/dunning" replace />} />
+              <Route path="operations/expenses" element={<Navigate to="/expenses" replace />} />
+              <Route path="operations/expenses/recurring" element={<Navigate to="/expenses/recurring" replace />} />
+              <Route path="operations/projects" element={<Navigate to="/projects" replace />} />
+              <Route path="operations/timesheets" element={<Navigate to="/timesheets" replace />} />
+              <Route path="insights/revenue" element={<Navigate to="/revenue-intelligence" replace />} />
+              <Route path="insights/reports" element={<Navigate to="/reports" replace />} />
+              <Route path="insights/activity" element={<Navigate to="/activity" replace />} />
+              <Route path="insights/ai" element={<Navigate to="/ai-billing" replace />} />
+              <Route path="system/automation" element={<Navigate to="/automation" replace />} />
+              <Route path="system/customization" element={<Navigate to="/customization" replace />} />
+              <Route path="system/integrations" element={<Navigate to="/integrations" replace />} />
 
-      {/* Public: hosted pages */}
-      <Route path="/pay/:token" element={<PayInvoicePage />} />
-      <Route path="/quote/:token" element={<PublicQuotePage />} />
-
-      {/* Private */}
-      <Route element={<ProtectedRoute />}>
-        <Route path="/" element={<AppLayout />}>
-          <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="dashboard" element={<DashboardPage />} />
-
-          {/* Workspace */}
-          <Route path="customers" element={<CustomersListPage />} />
-          <Route path="customers/new" element={<CustomerFormPage />} />
-          <Route path="customers/:id" element={<CustomerDetailPage />} />
-          <Route path="customers/:id/edit" element={<CustomerFormPage />} />
-          <Route path="catalog" element={<CatalogPage />} />
-
-          {/* Revenue */}
-          <Route path="quotes" element={<QuotesListPage />} />
-          <Route path="quotes/new" element={<QuoteFormPage />} />
-          <Route path="quotes/:id" element={<QuoteDetailPage />} />
-          <Route path="quotes/:id/edit" element={<QuoteFormPage />} />
-          <Route path="invoices" element={<InvoicesListPage />} />
-          <Route path="invoices/new" element={<InvoiceFormPage />} />
-          <Route path="invoices/:id" element={<InvoiceDetailPage />} />
-          <Route path="invoices/:id/edit" element={<InvoiceFormPage />} />
-          <Route path="payments" element={<PaymentsListPage />} />
-          <Route path="payments/:id" element={<PaymentDetailPage />} />
-          <Route path="collections" element={<CollectionsPage />} />
-
-          {/* Subscriptions */}
-          <Route path="subscriptions" element={<SubscriptionsListPage />} />
-          <Route path="subscriptions/new" element={<SubscriptionFormPage />} />
-          <Route path="subscriptions/:id" element={<SubscriptionDetailPage />} />
-          <Route path="trials" element={<TrialsPage />} />
-
-          {/* Insights */}
-          <Route path="activity" element={<ActivityPage />} />
-
-          {/* Control center */}
-          <Route path="control-center/action-center" element={<ActionCenterPage />} />
-          <Route path="control-center/approvals" element={<ApprovalCenterPage />} />
-          <Route path="control-center/calendar" element={<BillingCalendarPage />} />
-          <Route path="control-center/reconciliation" element={<ReconciliationPage />} />
-          <Route
-            path="control-center/audit-log"
-            element={
-              <RequireRole min="admin">
-                <AuditLogPage />
-              </RequireRole>
-            }
-          />
-          <Route path="control-center/migration" element={<DataMigrationPage />} />
-
-          {/* Settings (tabs via ?tab=) */}
-          <Route path="settings" element={<SettingsPage />} />
-
-          {/* Navigation entries without an implementation in this release */}
-          <Route path="cpq" element={<ComingSoonPage />} />
-          <Route path="usage" element={<ComingSoonPage />} />
-          <Route path="proration" element={<ComingSoonPage />} />
-          <Route path="dunning" element={<ComingSoonPage />} />
-          <Route path="customer-lifecycle" element={<ComingSoonPage />} />
-          <Route path="customer-portal" element={<ComingSoonPage />} />
-          <Route path="hosted-payment-pages" element={<ComingSoonPage />} />
-          <Route path="expenses" element={<ComingSoonPage />} />
-          <Route path="projects" element={<ComingSoonPage />} />
-          <Route path="timesheets" element={<ComingSoonPage />} />
-          <Route path="revenue-intelligence" element={<ComingSoonPage />} />
-          <Route path="reports" element={<ComingSoonPage />} />
-          <Route path="ai-billing" element={<ComingSoonPage />} />
-          <Route path="automation" element={<ComingSoonPage />} />
-          <Route path="customization" element={<ComingSoonPage />} />
-          <Route path="integrations" element={<ComingSoonPage />} />
-          <Route path="platforms/mobile" element={<ComingSoonPage />} />
-          <Route path="platforms/desktop" element={<ComingSoonPage />} />
-
-          {/* Legacy / alternate path redirects */}
-          <Route path="plans-pricing" element={<Navigate to="/catalog" replace />} />
-          <Route path="system/settings" element={<Navigate to="/settings" replace />} />
-          <Route path="revenue/quotes" element={<Navigate to="/quotes" replace />} />
-          <Route path="revenue/cpq" element={<Navigate to="/cpq" replace />} />
-          <Route path="revenue/invoices" element={<Navigate to="/invoices" replace />} />
-          <Route path="revenue/payments" element={<Navigate to="/payments" replace />} />
-          <Route path="revenue/collections" element={<Navigate to="/collections" replace />} />
-          <Route path="subscriptions/plans" element={<Navigate to="/catalog" replace />} />
-          <Route path="subscriptions/all" element={<Navigate to="/subscriptions" replace />} />
-          <Route path="subscriptions/trials" element={<Navigate to="/trials" replace />} />
-          <Route path="subscriptions/usage" element={<Navigate to="/usage" replace />} />
-          <Route path="subscriptions/proration" element={<Navigate to="/proration" replace />} />
-          <Route path="subscriptions/dunning" element={<Navigate to="/dunning" replace />} />
-          <Route path="operations/expenses" element={<Navigate to="/expenses" replace />} />
-          <Route path="operations/projects" element={<Navigate to="/projects" replace />} />
-          <Route path="operations/timesheets" element={<Navigate to="/timesheets" replace />} />
-          <Route path="insights/revenue" element={<Navigate to="/revenue-intelligence" replace />} />
-          <Route path="insights/reports" element={<Navigate to="/reports" replace />} />
-          <Route path="insights/activity" element={<Navigate to="/activity" replace />} />
-          <Route path="insights/ai" element={<Navigate to="/ai-billing" replace />} />
-          <Route path="system/automation" element={<Navigate to="/automation" replace />} />
-          <Route path="system/customization" element={<Navigate to="/customization" replace />} />
-          <Route path="system/integrations" element={<Navigate to="/integrations" replace />} />
-
-          <Route path="*" element={<NotFoundPage />} />
-        </Route>
-      </Route>
-    </Routes>
+              <Route path="*" element={<NotFoundPage />} />
+            </Route>
+          </Route>
+        </Routes>
       </ExpensesProvider>
     </ProjectsProvider>
   );
