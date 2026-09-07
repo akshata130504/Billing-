@@ -18,7 +18,7 @@ export function QuickCreateModal({ isOpen, onClose }: QuickCreateModalProps) {
       description: 'Issue a one-off or recurring invoice to an account',
       icon: Receipt,
       color: 'bg-emerald-50 text-emerald-600 border-emerald-100',
-      path: '/revenue/invoices',
+      path: '/invoices',
       phase: 'Phase 2',
     },
     {
@@ -26,7 +26,7 @@ export function QuickCreateModal({ isOpen, onClose }: QuickCreateModalProps) {
       description: 'Draft pricing terms, discounts, and line-item estimates',
       icon: FileText,
       color: 'bg-blue-50 text-brand-600 border-blue-100',
-      path: '/revenue/quotes',
+      path: '/quotes',
       phase: 'Phase 2',
     },
     {
@@ -50,7 +50,7 @@ export function QuickCreateModal({ isOpen, onClose }: QuickCreateModalProps) {
       description: 'Log manual, bank wire, or offline payment reconciliation',
       icon: CreditCard,
       color: 'bg-teal-50 text-teal-600 border-teal-100',
-      path: '/revenue/payments',
+      path: '/payments',
       phase: 'Phase 3',
     },
     {
@@ -58,7 +58,7 @@ export function QuickCreateModal({ isOpen, onClose }: QuickCreateModalProps) {
       description: 'Enroll customer in recurring billing cycle with trial terms',
       icon: Repeat,
       color: 'bg-indigo-50 text-indigo-600 border-indigo-100',
-      path: '/subscriptions/all',
+      path: '/subscriptions',
       phase: 'Phase 4',
     },
   ];

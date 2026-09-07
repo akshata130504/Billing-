@@ -347,7 +347,7 @@ export const mockSearchDirectory: SearchResultItem[] = [
     category: 'invoices',
     title: 'INV-2026-0089',
     subtitle: 'Acme Cloud Dynamics • ₹34,000.00',
-    path: '/revenue/invoices',
+    path: '/invoices',
     badge: 'Paid',
   },
   {
@@ -355,7 +355,7 @@ export const mockSearchDirectory: SearchResultItem[] = [
     category: 'invoices',
     title: 'INV-2026-0087',
     subtitle: 'Hyperion FinTech Ltd • ₹42,000.00',
-    path: '/revenue/invoices',
+    path: '/invoices',
     badge: 'Overdue',
   },
   // Quotes
@@ -364,7 +364,7 @@ export const mockSearchDirectory: SearchResultItem[] = [
     category: 'quotes',
     title: 'QT-2026-0034',
     subtitle: 'Nexus Global Logistics • ₹84,000.00',
-    path: '/revenue/quotes',
+    path: '/quotes',
     badge: 'Accepted',
   },
   {
@@ -372,7 +372,7 @@ export const mockSearchDirectory: SearchResultItem[] = [
     category: 'quotes',
     title: 'QT-2026-0035',
     subtitle: 'Orion Systems Pvt Ltd • ₹56,000.00',
-    path: '/revenue/quotes',
+    path: '/quotes',
     badge: 'Sent',
   },
   // Products
@@ -398,7 +398,7 @@ export const mockSearchDirectory: SearchResultItem[] = [
     category: 'subscriptions',
     title: 'SUB-2026-0142',
     subtitle: 'Acme Cloud Dynamics • Enterprise Tier',
-    path: '/subscriptions/all',
+    path: '/subscriptions',
     badge: 'Active',
   },
   // Payments
@@ -407,7 +407,7 @@ export const mockSearchDirectory: SearchResultItem[] = [
     category: 'payments',
     title: 'TXN-984210',
     subtitle: '₹34,000.00 via Stripe • Settled',
-    path: '/revenue/payments',
+    path: '/payments',
     badge: 'Settled',
   },
 ];
