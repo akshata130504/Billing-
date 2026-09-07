@@ -17,6 +17,11 @@ import {
   ExpenseDetailsPage,
   ExpensesProvider,
 } from '../pages/expenses';
+import {
+  PaymentsPage,
+  PaymentDetailsPage,
+  PaymentsProvider,
+} from '../pages/payments';
 import { Button } from '../components/common/Button';
 import { Link } from 'react-router-dom';
 import { AlertCircle } from 'lucide-react';
@@ -46,21 +51,23 @@ export function AppRoutes() {
   return (
     <ProjectsProvider>
       <ExpensesProvider>
-        <Routes>
-          <Route path="/" element={<AppLayout />}>
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="dashboard" element={<DashboardPage />} />
+        <PaymentsProvider>
+          <Routes>
+            <Route path="/" element={<AppLayout />}>
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="dashboard" element={<DashboardPage />} />
 
-        {/* WORKSPACE */}
-        <Route path="customers" element={<PlaceholderPage />} />
-        <Route path="catalog" element={<PlaceholderPage />} />
+          {/* WORKSPACE */}
+          <Route path="customers" element={<PlaceholderPage />} />
+          <Route path="catalog" element={<PlaceholderPage />} />
 
-        {/* REVENUE */}
-        <Route path="quotes" element={<PlaceholderPage />} />
-        <Route path="cpq" element={<PlaceholderPage />} />
-        <Route path="invoices" element={<PlaceholderPage />} />
-        <Route path="payments" element={<PlaceholderPage />} />
-        <Route path="collections" element={<PlaceholderPage />} />
+          {/* REVENUE */}
+          <Route path="quotes" element={<PlaceholderPage />} />
+          <Route path="cpq" element={<PlaceholderPage />} />
+          <Route path="invoices" element={<PlaceholderPage />} />
+          <Route path="payments" element={<PaymentsPage />} />
+          <Route path="payments/:paymentId" element={<PaymentDetailsPage />} />
+          <Route path="collections" element={<PlaceholderPage />} />
 
         {/* SUBSCRIPTIONS */}
         <Route path="plans-pricing" element={<PlaceholderPage />} />
@@ -134,7 +141,8 @@ export function AppRoutes() {
         {/* Catch-all 404 */}
         <Route path="*" element={<NotFoundPage />} />
       </Route>
-    </Routes>
+          </Routes>
+        </PaymentsProvider>
       </ExpensesProvider>
     </ProjectsProvider>
   );
