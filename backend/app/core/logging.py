@@ -1,26 +1,53 @@
+import json
 import logging
 import sys
+from datetime import datetime, timezone
+
 from backend.app.core.config import settings
 
 
-def setup_logging():
+class JsonFormatter(logging.Formatter):
+    """One JSON object per line, friendly to log shippers (Loki, CloudWatch, Datadog)."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "time": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        for key in ("request_id", "path", "method", "status_code", "duration_ms"):
+            if hasattr(record, key):
+                payload[key] = getattr(record, key)
+        return json.dumps(payload, default=str)
+
+
+def setup_logging() -> logging.Logger:
     log_level = logging.DEBUG if settings.DEBUG else logging.INFO
-    
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout)
-        ]
-    )
-    
+
+    handler = logging.StreamHandler(sys.stdout)
+    if settings.LOG_JSON:
+        handler.setFormatter(JsonFormatter())
+    else:
+        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(handler)
+    root.setLevel(log_level)
+
     # Silence overly verbose external loggers
     logging.getLogger("uvicorn.access").setLevel(logging.INFO)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
-    
-    logger = logging.getLogger("rooman_billing")
-    logger.info("Structured logging initialized for %s in %s environment", settings.PROJECT_NAME, settings.ENVIRONMENT)
-    return logger
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
+
+    app_logger = logging.getLogger("rooman_billing")
+    app_logger.info(
+        "Structured logging initialized for %s in %s environment", settings.PROJECT_NAME, settings.ENVIRONMENT
+    )
+    return app_logger
 
 
 logger = setup_logging()

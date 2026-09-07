@@ -1,4 +1,9 @@
-import { ActivityItem, SearchResultItem } from '../../types';
+import type { ActivityItem, SearchResult } from '../../types';
+
+// Local shapes for the mock rows: the contract types carry entity references
+// that these placeholder rows do not have. The dashboard rewrite removes this file.
+type MockActivityItem = Omit<ActivityItem, 'entity_type' | 'entity_id'>;
+type MockSearchResult = Omit<SearchResult, 'badge'> & { badge?: string };
 
 export interface DashboardMetric {
   title: string;
@@ -263,7 +268,7 @@ export const mockRecentTransactions: TransactionItem[] = [
 ];
 
 // Activity Timeline with Categories
-export const mockActivityTimeline: ActivityItem[] = [
+export const mockActivityTimeline: MockActivityItem[] = [
   {
     id: 'act-1',
     title: 'Payment Reconciled (₹34,000.00)',
@@ -315,7 +320,7 @@ export const mockActivityTimeline: ActivityItem[] = [
 ];
 
 // Global Search Directory Mock
-export const mockSearchDirectory: SearchResultItem[] = [
+export const mockSearchDirectory: MockSearchResult[] = [
   // Customers
   {
     id: 's-c1',

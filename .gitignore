@@ -1,7 +1,12 @@
-# Environment & Secrets
+# Environment & Secrets (the *.example templates are the only env files tracked)
 .env
+.env.*
+!.env.example
+!.env.production.example
 .env.local
 .env.*.local
+backend/.env
+frontend/.env
 *.pem
 *.key
 
@@ -50,6 +55,7 @@ dist-ssr/
 *.sqlite3
 *.db
 postgres_data/
+backups/
 
 # IDE & OS
 .vscode/

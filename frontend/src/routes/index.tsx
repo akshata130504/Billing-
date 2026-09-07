@@ -1,7 +1,35 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import type { ReactNode } from 'react';
+import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
+import { AlertCircle, ShieldOff } from 'lucide-react';
 import { AppLayout } from '../components/layout/AppLayout';
+import { Button } from '../components/common/Button';
+import { LoadingState } from '../components/common/LoadingState';
+import { useAuth } from '../hooks/useAuth';
+import type { MemberRole } from '../types/api';
+import { ROLE_LABELS } from '../utils/format';
+
+import { ComingSoonPage } from '../pages/ComingSoonPage';
 import { DashboardPage } from '../pages/dashboard/DashboardPage';
-import { PlaceholderPage } from '../pages/PlaceholderPage';
+import {
+  LoginPage,
+  SignupPage,
+  ForgotPasswordPage,
+  ResetPasswordPage,
+  AcceptInvitationPage,
+} from '../pages/auth';
+import { CustomersListPage, CustomerFormPage, CustomerDetailPage } from '../pages/customers';
+import { CatalogPage } from '../pages/catalog';
+import { QuotesListPage, QuoteFormPage, QuoteDetailPage } from '../pages/quotes';
+import {
+  SubscriptionsListPage,
+  SubscriptionFormPage,
+  SubscriptionDetailPage,
+  TrialsPage,
+} from '../pages/subscriptions';
+import { InvoicesListPage, InvoiceFormPage, InvoiceDetailPage, CollectionsPage } from '../pages/invoices';
+import { PaymentsListPage, PaymentDetailPage } from '../pages/payments';
+import { PayInvoicePage, PublicQuotePage } from '../pages/public';
+import { ActivityPage } from '../pages/activity';
 import {
   ActionCenterPage,
   ApprovalCenterPage,
@@ -20,16 +48,54 @@ import {
 import { Button } from '../components/common/Button';
 import { Link } from 'react-router-dom';
 import { AlertCircle } from 'lucide-react';
+import { SettingsPage } from '../pages/settings';
 
-function NotFoundPage() {
+// ---------------------------------------------------------------------------
+// Guards
+// ---------------------------------------------------------------------------
+
+/** Redirects unauthenticated users to /login, remembering where they wanted to go. */
+export function ProtectedRoute({ children }: { children?: ReactNode }) {
+  const { isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <LoadingState message="Loading your workspace..." />
+      </div>
+    );
+  }
+  if (!isAuthenticated) {
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ from: { pathname: location.pathname, search: location.search } }}
+      />
+    );
+  }
+  return children ? <>{children}</> : <Outlet />;
+}
+
+/** Renders children only when the current member has at least `min` role. */
+export function RequireRole({ min, children }: { min: MemberRole; children?: ReactNode }) {
+  const { hasRole } = useAuth();
+  if (!hasRole(min)) return <AccessDeniedPage min={min} />;
+  return children ? <>{children}</> : <Outlet />;
+}
+
+function AccessDeniedPage({ min }: { min: MemberRole }) {
+  const { membership } = useAuth();
   return (
     <div className="py-16 flex flex-col items-center justify-center text-center">
-      <div className="p-3 bg-slate-100 rounded-full text-slate-500 mb-3">
-        <AlertCircle className="w-8 h-8" />
+      <div className="p-3 bg-amber-50 border border-amber-100 rounded-full text-amber-600 mb-3">
+        <ShieldOff className="w-8 h-8" />
       </div>
-      <h2 className="text-xl font-bold text-slate-900">Page Not Found</h2>
+      <h2 className="text-xl font-bold text-slate-900">You do not have access to this page</h2>
       <p className="text-xs text-slate-500 mt-1 max-w-sm">
-        The requested URL was not found in the Rooman Billing workspace.
+        This area requires the {ROLE_LABELS[min]} role or higher. Your role in this organization is{' '}
+        {membership ? ROLE_LABELS[membership.role] : 'unknown'}.
       </p>
       <div className="mt-4">
         <Link to="/dashboard">
@@ -41,6 +107,43 @@ function NotFoundPage() {
     </div>
   );
 }
+
+function NotFoundPage() {
+  return (
+    <div className="py-16 flex flex-col items-center justify-center text-center">
+      <div className="p-3 bg-slate-100 rounded-full text-slate-500 mb-3">
+        <AlertCircle className="w-8 h-8" />
+      </div>
+      <h2 className="text-xl font-bold text-slate-900">Page not found</h2>
+      <p className="text-xs text-slate-500 mt-1 max-w-sm">The requested URL does not exist.</p>
+      <div className="mt-4">
+        <Link to="/dashboard">
+          <Button variant="primary" size="sm">
+            Return to Overview
+          </Button>
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+/** Sends already-authenticated users away from the auth screens. */
+function PublicOnly({ children }: { children: ReactNode }) {
+  const { isAuthenticated, isLoading } = useAuth();
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <LoadingState message="Checking your session..." />
+      </div>
+    );
+  }
+  if (isAuthenticated) return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
+}
+
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 
 export function AppRoutes() {
   return (
@@ -133,6 +236,118 @@ export function AppRoutes() {
 
         {/* Catch-all 404 */}
         <Route path="*" element={<NotFoundPage />} />
+    <Routes>
+      {/* Public: auth */}
+      <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
+      <Route path="/signup" element={<PublicOnly><SignupPage /></PublicOnly>} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
+
+      {/* Public: hosted pages */}
+      <Route path="/pay/:token" element={<PayInvoicePage />} />
+      <Route path="/quote/:token" element={<PublicQuotePage />} />
+
+      {/* Private */}
+      <Route element={<ProtectedRoute />}>
+        <Route path="/" element={<AppLayout />}>
+          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route path="dashboard" element={<DashboardPage />} />
+
+          {/* Workspace */}
+          <Route path="customers" element={<CustomersListPage />} />
+          <Route path="customers/new" element={<CustomerFormPage />} />
+          <Route path="customers/:id" element={<CustomerDetailPage />} />
+          <Route path="customers/:id/edit" element={<CustomerFormPage />} />
+          <Route path="catalog" element={<CatalogPage />} />
+
+          {/* Revenue */}
+          <Route path="quotes" element={<QuotesListPage />} />
+          <Route path="quotes/new" element={<QuoteFormPage />} />
+          <Route path="quotes/:id" element={<QuoteDetailPage />} />
+          <Route path="quotes/:id/edit" element={<QuoteFormPage />} />
+          <Route path="invoices" element={<InvoicesListPage />} />
+          <Route path="invoices/new" element={<InvoiceFormPage />} />
+          <Route path="invoices/:id" element={<InvoiceDetailPage />} />
+          <Route path="invoices/:id/edit" element={<InvoiceFormPage />} />
+          <Route path="payments" element={<PaymentsListPage />} />
+          <Route path="payments/:id" element={<PaymentDetailPage />} />
+          <Route path="collections" element={<CollectionsPage />} />
+
+          {/* Subscriptions */}
+          <Route path="subscriptions" element={<SubscriptionsListPage />} />
+          <Route path="subscriptions/new" element={<SubscriptionFormPage />} />
+          <Route path="subscriptions/:id" element={<SubscriptionDetailPage />} />
+          <Route path="trials" element={<TrialsPage />} />
+
+          {/* Insights */}
+          <Route path="activity" element={<ActivityPage />} />
+
+          {/* Control center */}
+          <Route path="control-center/action-center" element={<ActionCenterPage />} />
+          <Route path="control-center/approvals" element={<ApprovalCenterPage />} />
+          <Route path="control-center/calendar" element={<BillingCalendarPage />} />
+          <Route path="control-center/reconciliation" element={<ReconciliationPage />} />
+          <Route
+            path="control-center/audit-log"
+            element={
+              <RequireRole min="admin">
+                <AuditLogPage />
+              </RequireRole>
+            }
+          />
+          <Route path="control-center/migration" element={<DataMigrationPage />} />
+
+          {/* Settings (tabs via ?tab=) */}
+          <Route path="settings" element={<SettingsPage />} />
+
+          {/* Navigation entries without an implementation in this release */}
+          <Route path="cpq" element={<ComingSoonPage />} />
+          <Route path="usage" element={<ComingSoonPage />} />
+          <Route path="proration" element={<ComingSoonPage />} />
+          <Route path="dunning" element={<ComingSoonPage />} />
+          <Route path="customer-lifecycle" element={<ComingSoonPage />} />
+          <Route path="customer-portal" element={<ComingSoonPage />} />
+          <Route path="hosted-payment-pages" element={<ComingSoonPage />} />
+          <Route path="expenses" element={<ComingSoonPage />} />
+          <Route path="projects" element={<ComingSoonPage />} />
+          <Route path="timesheets" element={<ComingSoonPage />} />
+          <Route path="revenue-intelligence" element={<ComingSoonPage />} />
+          <Route path="reports" element={<ComingSoonPage />} />
+          <Route path="ai-billing" element={<ComingSoonPage />} />
+          <Route path="automation" element={<ComingSoonPage />} />
+          <Route path="customization" element={<ComingSoonPage />} />
+          <Route path="integrations" element={<ComingSoonPage />} />
+          <Route path="platforms/mobile" element={<ComingSoonPage />} />
+          <Route path="platforms/desktop" element={<ComingSoonPage />} />
+
+          {/* Legacy / alternate path redirects */}
+          <Route path="plans-pricing" element={<Navigate to="/catalog" replace />} />
+          <Route path="system/settings" element={<Navigate to="/settings" replace />} />
+          <Route path="revenue/quotes" element={<Navigate to="/quotes" replace />} />
+          <Route path="revenue/cpq" element={<Navigate to="/cpq" replace />} />
+          <Route path="revenue/invoices" element={<Navigate to="/invoices" replace />} />
+          <Route path="revenue/payments" element={<Navigate to="/payments" replace />} />
+          <Route path="revenue/collections" element={<Navigate to="/collections" replace />} />
+          <Route path="subscriptions/plans" element={<Navigate to="/catalog" replace />} />
+          <Route path="subscriptions/all" element={<Navigate to="/subscriptions" replace />} />
+          <Route path="subscriptions/trials" element={<Navigate to="/trials" replace />} />
+          <Route path="subscriptions/usage" element={<Navigate to="/usage" replace />} />
+          <Route path="subscriptions/proration" element={<Navigate to="/proration" replace />} />
+          <Route path="subscriptions/dunning" element={<Navigate to="/dunning" replace />} />
+          <Route path="operations/expenses" element={<Navigate to="/expenses" replace />} />
+          <Route path="operations/projects" element={<Navigate to="/projects" replace />} />
+          <Route path="operations/timesheets" element={<Navigate to="/timesheets" replace />} />
+          <Route path="insights/revenue" element={<Navigate to="/revenue-intelligence" replace />} />
+          <Route path="insights/reports" element={<Navigate to="/reports" replace />} />
+          <Route path="insights/activity" element={<Navigate to="/activity" replace />} />
+          <Route path="insights/ai" element={<Navigate to="/ai-billing" replace />} />
+          <Route path="system/automation" element={<Navigate to="/automation" replace />} />
+          <Route path="system/customization" element={<Navigate to="/customization" replace />} />
+          <Route path="system/integrations" element={<Navigate to="/integrations" replace />} />
+
+          <Route path="*" element={<NotFoundPage />} />
+        </Route>
       </Route>
     </Routes>
       </ExpensesProvider>

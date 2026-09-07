@@ -1,3 +1,89 @@
-from backend.app.models.base import TimestampMixin, TenantMixin, UUIDPrimaryKeyMixin
+"""All SQLAlchemy models. Importing this package registers every table on Base.metadata."""
+from backend.app.models.base import TenantMixin, TimestampMixin, UUIDPrimaryKeyMixin, new_uuid, utcnow
+from backend.app.models.catalog import INTERVAL_MONTHS, BillingInterval, Plan, PricingModel, Product, ProductType
+from backend.app.models.customers import Customer, CustomerContact, CustomerStatus
+from backend.app.models.governance import (
+    ApprovalRequest,
+    ApprovalStatus,
+    ApprovalType,
+    AuditLog,
+    AuditStatus,
+    ImportEntity,
+    ImportJob,
+    ImportStatus,
+)
+from backend.app.models.identity import (
+    ROLE_RANK,
+    Membership,
+    MemberRole,
+    MembershipStatus,
+    Organization,
+    PasswordResetToken,
+    RefreshToken,
+    User,
+)
+from backend.app.models.invoices import OPEN_INVOICE_STATUSES, Invoice, InvoiceItem, InvoiceStatus
+from backend.app.models.payments import (
+    Payment,
+    PaymentAllocation,
+    PaymentGateway,
+    PaymentMethod,
+    PaymentStatus,
+    ReconciliationStatus,
+    Refund,
+    RefundStatus,
+    WebhookEvent,
+)
+from backend.app.models.quotes import Quote, QuoteItem, QuoteStatus
+from backend.app.models.subscriptions import Subscription, SubscriptionStatus
 
-__all__ = ["TimestampMixin", "TenantMixin", "UUIDPrimaryKeyMixin"]
+__all__ = [
+    "TenantMixin",
+    "TimestampMixin",
+    "UUIDPrimaryKeyMixin",
+    "new_uuid",
+    "utcnow",
+    "Organization",
+    "User",
+    "Membership",
+    "MemberRole",
+    "MembershipStatus",
+    "ROLE_RANK",
+    "RefreshToken",
+    "PasswordResetToken",
+    "Customer",
+    "CustomerContact",
+    "CustomerStatus",
+    "Product",
+    "ProductType",
+    "Plan",
+    "BillingInterval",
+    "INTERVAL_MONTHS",
+    "PricingModel",
+    "Quote",
+    "QuoteItem",
+    "QuoteStatus",
+    "Subscription",
+    "SubscriptionStatus",
+    "Invoice",
+    "InvoiceItem",
+    "InvoiceStatus",
+    "OPEN_INVOICE_STATUSES",
+    "Payment",
+    "PaymentAllocation",
+    "PaymentMethod",
+    "PaymentGateway",
+    "PaymentStatus",
+    "ReconciliationStatus",
+    "Refund",
+    "RefundStatus",
+    "WebhookEvent",
+    "ApprovalRequest",
+    "ApprovalType",
+    "ApprovalStatus",
+    "AuditLog",
+    "AuditStatus",
+    "ImportJob",
+    "ImportEntity",
+    "ImportStatus",
+]

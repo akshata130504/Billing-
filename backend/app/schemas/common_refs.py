@@ -1,0 +1,149 @@
+"""Shared sub-objects from the API contract (CustomerRef, UserRef, LineItemIn/Out)
+plus the small serialisation helpers every module uses to build them.
+
+Other endpoint modules import from here; keep the exported names stable:
+CustomerRef, UserRef, LineItemIn, LineItemOut, PaginatedResponse, paginated_of,
+money_str, qty_str, iso_dt, enum_value, customer_ref, user_ref, line_item_out.
+"""
+from datetime import datetime, timezone
+from decimal import Decimal
+from enum import Enum
+from typing import Any, Dict, List, Optional, Type
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from backend.app.schemas.common import PaginatedResponse
+from backend.app.services.money import D, to_str
+
+__all__ = [
+    "CustomerRef",
+    "UserRef",
+    "LineItemIn",
+    "LineItemOut",
+    "PaginatedResponse",
+    "paginated_of",
+    "money_str",
+    "qty_str",
+    "iso_dt",
+    "enum_value",
+    "customer_ref",
+    "user_ref",
+    "line_item_out",
+]
+
+
+class CustomerRef(BaseModel):
+    id: str
+    customer_number: str
+    display_name: str
+    email: Optional[str] = None
+
+
+class UserRef(BaseModel):
+    id: str
+    full_name: str
+    email: str
+
+
+class LineItemIn(BaseModel):
+    """A line item as posted by the client. Numbers arrive as strings (or numbers)."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    product_id: Optional[str] = None
+    plan_id: Optional[str] = None
+    description: str = Field(..., min_length=1, max_length=500)
+    quantity: Decimal = Field(default=Decimal("1"))
+    unit_price: Decimal = Field(default=Decimal("0"))
+    tax_rate_pct: Decimal = Field(default=Decimal("0"))
+
+    @field_validator("product_id", "plan_id", mode="before")
+    @classmethod
+    def _empty_to_none(cls, value):
+        if value == "":
+            return None
+        return value
+
+
+class LineItemOut(BaseModel):
+    id: str
+    product_id: Optional[str] = None
+    plan_id: Optional[str] = None
+    description: str
+    quantity: str
+    unit_price: str
+    tax_rate_pct: str
+    amount: str
+    position: int
+
+
+def paginated_of(item_model: Type[BaseModel]):
+    """Return the concrete `PaginatedResponse[item_model]` type for use as a response_model."""
+    return PaginatedResponse[item_model]  # type: ignore[valid-type]
+
+
+# --- serialisation helpers -------------------------------------------------------------
+
+
+def money_str(value) -> str:
+    """Decimal/str/None -> '1250.00'."""
+    return to_str(value)
+
+
+def qty_str(value) -> str:
+    """Quantity with up to 3 decimals, trailing zeros trimmed ('2', '1.5', '0.125')."""
+    q = D(value)
+    text = format(q.quantize(Decimal("0.001")), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def iso_dt(value: Optional[datetime]) -> Optional[datetime]:
+    """Normalise a DB datetime to UTC-aware so pydantic renders RFC 3339 with 'Z'."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def enum_value(value: Any) -> Any:
+    if isinstance(value, Enum):
+        return value.value
+    return value
+
+
+def customer_ref(customer) -> Optional[Dict[str, Any]]:
+    if customer is None:
+        return None
+    return {
+        "id": customer.id,
+        "customer_number": customer.customer_number,
+        "display_name": customer.display_name,
+        "email": customer.email,
+    }
+
+
+def user_ref(user) -> Optional[Dict[str, Any]]:
+    if user is None:
+        return None
+    return {"id": user.id, "full_name": user.full_name, "email": user.email}
+
+
+def line_item_out(item) -> Dict[str, Any]:
+    return {
+        "id": item.id,
+        "product_id": item.product_id,
+        "plan_id": item.plan_id,
+        "description": item.description,
+        "quantity": qty_str(item.quantity),
+        "unit_price": money_str(item.unit_price),
+        "tax_rate_pct": money_str(item.tax_rate_pct),
+        "amount": money_str(item.amount),
+        "position": int(item.position or 0),
+    }
+
+
+def line_items_out(items) -> List[Dict[str, Any]]:
+    return [line_item_out(i) for i in sorted(items, key=lambda x: (x.position or 0))]
