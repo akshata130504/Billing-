@@ -2,6 +2,14 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { AppLayout } from '../components/layout/AppLayout';
 import { DashboardPage } from '../pages/dashboard/DashboardPage';
 import { PlaceholderPage } from '../pages/PlaceholderPage';
+import {
+  ActionCenterPage,
+  ApprovalCenterPage,
+  BillingCalendarPage,
+  ReconciliationPage,
+  AuditLogPage,
+  DataMigrationPage,
+} from '../pages/control-center';
 import { Button } from '../components/common/Button';
 import { Link } from 'react-router-dom';
 import { AlertCircle } from 'lucide-react';
@@ -40,6 +48,7 @@ export function AppRoutes() {
 
         {/* REVENUE */}
         <Route path="revenue/quotes" element={<PlaceholderPage />} />
+        <Route path="revenue/cpq" element={<PlaceholderPage />} />
         <Route path="revenue/invoices" element={<PlaceholderPage />} />
         <Route path="revenue/payments" element={<PlaceholderPage />} />
         <Route path="revenue/collections" element={<PlaceholderPage />} />
@@ -47,8 +56,15 @@ export function AppRoutes() {
         {/* SUBSCRIPTIONS */}
         <Route path="subscriptions/plans" element={<PlaceholderPage />} />
         <Route path="subscriptions/all" element={<PlaceholderPage />} />
-        <Route path="subscriptions/usage" element={<PlaceholderPage />} />
         <Route path="subscriptions/trials" element={<PlaceholderPage />} />
+        <Route path="subscriptions/usage" element={<PlaceholderPage />} />
+        <Route path="subscriptions/proration" element={<PlaceholderPage />} />
+        <Route path="subscriptions/dunning" element={<PlaceholderPage />} />
+
+        {/* CUSTOMER EXPERIENCE */}
+        <Route path="customer-experience/lifecycle" element={<PlaceholderPage />} />
+        <Route path="customer-experience/portal" element={<PlaceholderPage />} />
+        <Route path="customer-experience/payment-pages" element={<PlaceholderPage />} />
 
         {/* OPERATIONS */}
         <Route path="operations/expenses" element={<PlaceholderPage />} />
@@ -58,10 +74,24 @@ export function AppRoutes() {
         {/* INSIGHTS */}
         <Route path="insights/revenue" element={<PlaceholderPage />} />
         <Route path="insights/reports" element={<PlaceholderPage />} />
+        <Route path="insights/ai" element={<PlaceholderPage />} />
         <Route path="insights/activity" element={<PlaceholderPage />} />
+
+        {/* PLATFORMS */}
+        <Route path="platforms/mobile" element={<PlaceholderPage />} />
+        <Route path="platforms/desktop" element={<PlaceholderPage />} />
+
+        {/* CONTROL CENTER */}
+        <Route path="control-center/action-center" element={<ActionCenterPage />} />
+        <Route path="control-center/approvals" element={<ApprovalCenterPage />} />
+        <Route path="control-center/calendar" element={<BillingCalendarPage />} />
+        <Route path="control-center/reconciliation" element={<ReconciliationPage />} />
+        <Route path="control-center/audit-log" element={<AuditLogPage />} />
+        <Route path="control-center/migration" element={<DataMigrationPage />} />
 
         {/* SYSTEM */}
         <Route path="system/automation" element={<PlaceholderPage />} />
+        <Route path="system/customization" element={<PlaceholderPage />} />
         <Route path="system/integrations" element={<PlaceholderPage />} />
         <Route path="system/settings" element={<PlaceholderPage />} />
 

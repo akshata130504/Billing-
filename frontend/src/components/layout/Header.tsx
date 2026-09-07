@@ -13,8 +13,8 @@ export function Header({
   onQuickCreateClick,
   onOpenSearch,
 }: HeaderProps) {
-  const { showToast } = useToast();
   const navigate = useNavigate();
+  const { showToast } = useToast();
 
   return (
     <header className="h-16 bg-white border-b border-slate-200/80 px-4 sm:px-6 flex items-center justify-between gap-4 sticky top-0 z-30">
@@ -85,7 +85,10 @@ export function Header({
         {/* Settings Cog */}
         <button
           type="button"
-          onClick={() => navigate('/system/settings')}
+          onClick={() => {
+            showToast('info', 'Settings', 'Navigating to system settings');
+            navigate('/system/settings');
+          }}
           className="p-2 rounded-xl text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
           aria-label="Settings"
         >
