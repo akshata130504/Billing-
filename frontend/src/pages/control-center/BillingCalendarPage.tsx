@@ -1,107 +1,191 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Card, CardContent } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
+import { Modal } from '../../components/common/Modal';
+import { useToast } from '../../components/common/Toast';
 import {
   Calendar as CalendarIcon,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Receipt,
+  Repeat,
+  CreditCard,
 } from 'lucide-react';
 
-interface CalendarEvent {
+export type CalendarEventType = 'invoice_generation' | 'subscription_renewal' | 'trial_ending' | 'payment_collection';
+
+export interface CalendarEvent {
   id: string;
-  type: 'invoice' | 'renewal' | 'trial' | 'payment' | 'retry';
+  date: string; // YYYY-MM-DD
+  dayNumber: number;
+  type: CalendarEventType;
   title: string;
-  client: string;
-  amount: string;
-  date: string;
-  day: number;
-  time: string;
-  status: 'scheduled' | 'imminent' | 'action_required';
+  account: string;
+  amount?: string;
+  details: string;
+  time?: string;
 }
 
 const mockEvents: CalendarEvent[] = [
   {
     id: 'EVT-01',
-    type: 'invoice',
-    day: 8,
-    date: 'Sep 08, 2026',
-    time: '09:00 AM',
-    title: 'Net 30 Invoice Due (#INV-2026-081)',
-    client: 'Starlight Media Group',
-    amount: '$18,400.00',
-    status: 'imminent',
+    date: '2026-09-08',
+    dayNumber: 8,
+    type: 'trial_ending',
+    title: 'Trial Expiration: Vanguard Biometrics',
+    account: 'Vanguard Biometrics',
+    amount: '₹65,000.00 / yr',
+    details: '14-day enterprise trial completes. Conversion checkout link scheduled.',
+    time: '11:00 AM IST',
   },
   {
     id: 'EVT-02',
-    type: 'renewal',
-    day: 10,
-    date: 'Sep 10, 2026',
-    time: '12:00 PM',
-    title: 'Annual Subscription Renewal (12 Seats)',
-    client: 'Apex Global Logistics',
-    amount: '$48,000.00 / yr',
-    status: 'scheduled',
+    date: '2026-09-09',
+    dayNumber: 9,
+    type: 'invoice_generation',
+    title: 'Monthly Recurring Batch Run #09',
+    account: '42 Active Subscriptions',
+    amount: '₹4,85,000.00',
+    details: 'Automated invoice generation for mid-month subscription cycle accounts.',
+    time: '02:00 AM IST',
   },
   {
     id: 'EVT-03',
-    type: 'trial',
-    day: 11,
-    date: 'Sep 11, 2026',
-    time: '05:00 PM',
-    title: '14-Day Free Trial Expiration',
-    client: 'CloudScale Systems',
-    amount: 'Pipeline $6,000',
-    status: 'action_required',
+    date: '2026-09-11',
+    dayNumber: 11,
+    type: 'subscription_renewal',
+    title: 'Annual Plan Renewal: Acme Cloud Dynamics',
+    account: 'Acme Cloud Dynamics',
+    amount: '₹1,20,000.00',
+    details: 'Tier-3 Pro Annual plan auto-renewal via saved credit mandate.',
+    time: '09:30 AM IST',
   },
   {
     id: 'EVT-04',
-    type: 'payment',
-    day: 15,
-    date: 'Sep 15, 2026',
-    time: '02:00 AM',
-    title: 'Mid-Month Batch Direct Debit Run',
-    client: '42 Active Accounts',
-    amount: '$126,800.00',
-    status: 'scheduled',
+    date: '2026-09-14',
+    dayNumber: 14,
+    type: 'payment_collection',
+    title: 'Dunning Automated Retry #3',
+    account: 'Hyperion FinTech Ltd',
+    amount: '₹42,000.00',
+    details: 'Third scheduled attempt for overdue invoice collection.',
+    time: '10:00 AM IST',
   },
   {
     id: 'EVT-05',
-    type: 'retry',
-    day: 16,
-    date: 'Sep 16, 2026',
-    time: '10:30 AM',
-    title: 'Smart Dunning Payment Retry #3',
-    client: 'Zenith Retail India',
-    amount: '$3,150.00',
-    status: 'imminent',
+    date: '2026-09-18',
+    dayNumber: 18,
+    type: 'subscription_renewal',
+    title: 'Quarterly Renewal: Solaria Robotics',
+    account: 'Solaria Robotics Corp',
+    amount: '₹37,500.00',
+    details: 'Quarterly platform license and 20 compute seats renewal.',
+    time: '12:00 PM IST',
   },
   {
     id: 'EVT-06',
-    type: 'renewal',
-    day: 22,
-    date: 'Sep 22, 2026',
-    time: '11:00 AM',
-    title: 'Quarterly Multi-Tenant Renewal',
-    client: 'HyperLink Networks',
-    amount: '$15,200.00',
-    status: 'scheduled',
+    date: '2026-09-22',
+    dayNumber: 22,
+    type: 'trial_ending',
+    title: 'Trial Expiration: Matrix Logistics',
+    account: 'Matrix Logistics Ltd',
+    amount: '₹24,000.00 / yr',
+    details: 'Trial day 14 completion. Automated conversion campaign triggers.',
+    time: '05:00 PM IST',
+  },
+  {
+    id: 'EVT-07',
+    date: '2026-09-25',
+    dayNumber: 25,
+    type: 'invoice_generation',
+    title: 'Usage Metering Invoice Run',
+    account: '18 Metered Accounts',
+    amount: '₹2,14,000.00',
+    details: 'Telemetry data ingestion aggregation cut-off and cycle billing run.',
+    time: '11:59 PM IST',
+  },
+  {
+    id: 'EVT-08',
+    date: '2026-09-28',
+    dayNumber: 28,
+    type: 'payment_collection',
+    title: 'ACH / Wire Transfer Settlement Audit',
+    account: 'Rooman Treasury',
+    amount: '₹6,40,000.00',
+    details: 'Quarter-end bank reconciliation cut-off and unallocated payment review.',
+    time: '04:00 PM IST',
   },
 ];
 
 export function BillingCalendarPage() {
-  const [filterType, setFilterType] = useState<string>('all');
-  const [selectedDay, setSelectedDay] = useState<number | null>(null);
+  const { showToast } = useToast();
+  const [selectedMonth, setSelectedMonth] = useState('September 2026');
+  const [selectedType, setSelectedType] = useState<'all' | CalendarEventType>('all');
+  const [activeEvent, setActiveEvent] = useState<CalendarEvent | null>(null);
 
-  const filteredEvents = mockEvents.filter((ev) => {
-    if (selectedDay !== null && ev.day !== selectedDay) return false;
-    if (filterType === 'all') return true;
-    return ev.type === filterType;
-  });
+  const filteredEvents = useMemo(() => {
+    if (selectedType === 'all') return mockEvents;
+    return mockEvents.filter((e) => e.type === selectedType);
+  }, [selectedType]);
 
-  const daysInMonth = Array.from({ length: 30 }, (_, i) => i + 1);
+  const daysInMonth = 30; // September has 30 days
+  const startDayOffset = 2; // Sept 1, 2026 is Tuesday (offset = 2)
+
+  const calendarDays = useMemo(() => {
+    const days = [];
+    for (let i = 0; i < startDayOffset; i++) {
+      days.push({ dayNumber: null, isCurrentMonth: false });
+    }
+    for (let i = 1; i <= daysInMonth; i++) {
+      const dayEvents = filteredEvents.filter((e) => e.dayNumber === i);
+      days.push({
+        dayNumber: i,
+        isCurrentMonth: true,
+        events: dayEvents,
+        isToday: i === 7, // Simulated "today"
+      });
+    }
+    return days;
+  }, [filteredEvents]);
+
+  const getEventBadge = (type: CalendarEventType) => {
+    switch (type) {
+      case 'invoice_generation':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
+            <Receipt className="w-2.5 h-2.5" />
+            Invoice Run
+          </span>
+        );
+      case 'subscription_renewal':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <Repeat className="w-2.5 h-2.5" />
+            Renewal
+          </span>
+        );
+      case 'trial_ending':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+            <Clock className="w-2.5 h-2.5" />
+            Trial End
+          </span>
+        );
+      case 'payment_collection':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
+            <CreditCard className="w-2.5 h-2.5" />
+            Payment Run
+          </span>
+        );
+    }
+  };
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
@@ -110,45 +194,65 @@ export function BillingCalendarPage() {
             </span>
             <span className="text-slate-300">•</span>
             <Badge variant="primary" size="sm">
-              Time-Based Planning
+              Schedule & Planning
             </Badge>
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            <CalendarIcon className="w-6 h-6 text-brand-600" />
             Billing Calendar
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-            Chronological horizon for scheduled recurring runs, invoice due dates, subscription renewals, trial expiries, and automated payment retries.
+            Visualize recurring billing schedules, scheduled batch invoice generation, subscription renewal cut-offs, and trial expiration dates.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            leadingIcon={<CalendarIcon className="w-3.5 h-3.5" />}
+        {/* Month Picker Controls */}
+        <div className="flex items-center gap-2 bg-white border border-slate-200/90 rounded-xl p-1 shadow-2xs">
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedMonth('August 2026');
+              showToast('info', 'Calendar', 'Showing August 2026');
+            }}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+            aria-label="Previous month"
           >
-            September 2026
-          </Button>
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="text-xs font-bold text-slate-900 px-2 min-w-[110px] text-center">
+            {selectedMonth}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedMonth('October 2026');
+              showToast('info', 'Calendar', 'Showing October 2026');
+            }}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+            aria-label="Next month"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
-      {/* Filter Chips */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+      {/* Filter Tabs */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-slate-200/90">
         {[
-          { id: 'all', label: 'All Events' },
-          { id: 'invoice', label: 'Invoices Due' },
-          { id: 'renewal', label: 'Renewals' },
-          { id: 'trial', label: 'Trials Expiring' },
-          { id: 'payment', label: 'Batch Payments' },
-          { id: 'retry', label: 'Payment Retries' },
+          { key: 'all', label: 'All Events' },
+          { key: 'invoice_generation', label: 'Invoice Generation' },
+          { key: 'subscription_renewal', label: 'Renewals' },
+          { key: 'trial_ending', label: 'Expiring Trials' },
+          { key: 'payment_collection', label: 'Collections' },
         ].map((tab) => (
           <button
-            key={tab.id}
-            onClick={() => setFilterType(tab.id)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${
-              filterType === tab.id
-                ? 'bg-brand-600 text-white shadow-xs'
-                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+            key={tab.key}
+            type="button"
+            onClick={() => setSelectedType(tab.key as typeof selectedType)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+              selectedType === tab.key
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             {tab.label}
@@ -156,132 +260,183 @@ export function BillingCalendarPage() {
         ))}
       </div>
 
+      {/* Main Layout: Calendar Grid + Agenda Sidebar */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Calendar Grid */}
-        <Card className="lg:col-span-2">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <CalendarIcon className="w-4 h-4 text-brand-600" />
-                <span>September 2026 Schedule</span>
-              </h3>
-              {selectedDay !== null && (
-                <button
-                  onClick={() => setSelectedDay(null)}
-                  className="text-xs text-brand-600 hover:underline font-medium"
-                >
-                  Clear day filter ({selectedDay}th)
-                </button>
+        {/* Calendar Grid (2 Cols) */}
+        <div className="lg:col-span-2 space-y-3">
+          <Card>
+            <CardContent className="p-4 sm:p-5">
+              {/* Day Headers */}
+              <div className="grid grid-cols-7 text-center text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                <div>Sun</div>
+                <div>Mon</div>
+                <div>Tue</div>
+                <div>Wed</div>
+                <div>Thu</div>
+                <div>Fri</div>
+                <div>Sat</div>
+              </div>
+
+              {/* Month Grid Cells */}
+              <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+                {calendarDays.map((cell, idx) => {
+                  if (!cell.isCurrentMonth) {
+                    return (
+                      <div
+                        key={idx}
+                        className="h-20 sm:h-24 bg-slate-50/50 rounded-xl border border-slate-100/80 p-1.5 opacity-40 pointer-events-none"
+                      />
+                    );
+                  }
+
+                  const hasEvents = cell.events && cell.events.length > 0;
+
+                  return (
+                    <div
+                      key={idx}
+                      className={`h-20 sm:h-24 rounded-xl border p-1.5 flex flex-col justify-between transition-all ${
+                        cell.isToday
+                          ? 'bg-blue-50/40 border-brand-300 ring-1 ring-brand-400'
+                          : hasEvents
+                          ? 'bg-white border-slate-200/90 hover:border-brand-300 shadow-2xs cursor-pointer'
+                          : 'bg-white border-slate-200/60'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span
+                          className={`text-xs font-bold ${
+                            cell.isToday
+                              ? 'w-5 h-5 rounded-full bg-brand-600 text-white flex items-center justify-center text-[10px]'
+                              : 'text-slate-700'
+                          }`}
+                        >
+                          {cell.dayNumber}
+                        </span>
+                        {cell.isToday && (
+                          <span className="text-[9px] font-bold text-brand-600 hidden sm:inline">
+                            Today
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Event Chips inside cell */}
+                      <div className="space-y-1 overflow-hidden">
+                        {cell.events?.map((ev) => (
+                          <div
+                            key={ev.id}
+                            onClick={() => setActiveEvent(ev)}
+                            className="text-[10px] p-1 rounded font-medium truncate bg-slate-100/90 text-slate-800 hover:bg-brand-50 hover:text-brand-700 transition-colors cursor-pointer border border-slate-200/70"
+                            title={`${ev.title} (${ev.account})`}
+                          >
+                            {ev.title}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Agenda / Upcoming Events Panel (1 Col) */}
+        <div className="space-y-4">
+          <Card>
+            <CardContent className="p-5 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 className="text-sm font-bold text-slate-900 tracking-tight">
+                  Upcoming Agenda ({filteredEvents.length})
+                </h3>
+                <span className="text-[10px] font-medium text-slate-400">
+                  Chronological
+                </span>
+              </div>
+
+              <div className="space-y-3">
+                {filteredEvents.map((ev) => (
+                  <div
+                    key={ev.id}
+                    onClick={() => setActiveEvent(ev)}
+                    className="p-3 rounded-xl bg-slate-50 hover:bg-slate-100/80 border border-slate-200/80 transition-colors cursor-pointer space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-500">
+                        Sept {ev.dayNumber}, 2026
+                      </span>
+                      {getEventBadge(ev.type)}
+                    </div>
+
+                    <h4 className="text-xs font-bold text-slate-900 leading-tight">
+                      {ev.title}
+                    </h4>
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 pt-0.5">
+                      <span className="truncate max-w-[150px]">{ev.account}</span>
+                      {ev.amount && (
+                        <span className="font-bold text-slate-900 tabular-nums">
+                          {ev.amount}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Event Details Modal */}
+      {activeEvent && (
+        <Modal
+          isOpen={true}
+          onClose={() => setActiveEvent(null)}
+          title={activeEvent.title}
+        >
+          <div className="space-y-4">
+            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 font-medium">Event Date</span>
+                <span className="font-bold text-slate-900">
+                  {activeEvent.date} ({activeEvent.time})
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 font-medium">Account / Group</span>
+                <span className="font-bold text-slate-900">{activeEvent.account}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 font-medium">Category</span>
+                <div>{getEventBadge(activeEvent.type)}</div>
+              </div>
+              {activeEvent.amount && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">Scheduled Value</span>
+                  <span className="font-bold text-slate-900 text-sm tabular-nums">
+                    {activeEvent.amount}
+                  </span>
+                </div>
               )}
             </div>
 
-            {/* Days of week */}
-            <div className="grid grid-cols-7 gap-1.5 text-center text-[11px] font-bold text-slate-400 uppercase mb-2">
-              <span>Mon</span>
-              <span>Tue</span>
-              <span>Wed</span>
-              <span>Thu</span>
-              <span>Fri</span>
-              <span>Sat</span>
-              <span>Sun</span>
+            <div>
+              <h5 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-1">
+                Execution Description
+              </h5>
+              <p className="text-xs text-slate-700 bg-white p-3 rounded-lg border border-slate-200 leading-relaxed">
+                {activeEvent.details}
+              </p>
             </div>
 
-            {/* Day Cells */}
-            <div className="grid grid-cols-7 gap-1.5 text-xs">
-              {daysInMonth.map((day) => {
-                const dayEvents = mockEvents.filter((e) => e.day === day);
-                const isSelected = selectedDay === day;
-                return (
-                  <div
-                    key={day}
-                    onClick={() => setSelectedDay(isSelected ? null : day)}
-                    className={`min-h-[64px] p-1.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
-                      isSelected
-                        ? 'border-brand-600 bg-brand-50/40 ring-1 ring-brand-600'
-                        : dayEvents.length > 0
-                        ? 'border-slate-300 bg-white hover:border-brand-400'
-                        : 'border-slate-100 bg-slate-50/50 hover:bg-slate-100/50 text-slate-400'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className={`text-xs font-semibold ${isSelected ? 'text-brand-700 font-bold' : 'text-slate-700'}`}>
-                        {day}
-                      </span>
-                      {dayEvents.length > 0 && (
-                        <span className="w-2 h-2 rounded-full bg-brand-600" />
-                      )}
-                    </div>
-
-                    <div className="space-y-1 mt-1">
-                      {dayEvents.slice(0, 1).map((ev) => (
-                        <div
-                          key={ev.id}
-                          className={`text-[9px] font-medium px-1 py-0.5 rounded truncate ${
-                            ev.type === 'invoice'
-                              ? 'bg-rose-100 text-rose-700'
-                              : ev.type === 'renewal'
-                              ? 'bg-teal-100 text-teal-700'
-                              : ev.type === 'trial'
-                              ? 'bg-amber-100 text-amber-700'
-                              : 'bg-blue-100 text-brand-700'
-                          }`}
-                        >
-                          {ev.client}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="primary" size="sm" onClick={() => setActiveEvent(null)}>
+                Close
+              </Button>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Upcoming Agenda */}
-        <Card className="lg:col-span-1">
-          <CardContent className="p-5">
-            <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center justify-between">
-              <span>Timeline Agenda</span>
-              <span className="text-xs font-normal text-slate-400">
-                {filteredEvents.length} events
-              </span>
-            </h3>
-
-            <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1 divide-y divide-slate-100">
-              {filteredEvents.map((ev) => (
-                <div key={ev.id} className="pt-3 first:pt-0 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-brand-600">
-                      {ev.date} • {ev.time}
-                    </span>
-                    <Badge
-                      variant={
-                        ev.status === 'action_required'
-                          ? 'danger'
-                          : ev.status === 'imminent'
-                          ? 'warning'
-                          : 'neutral'
-                      }
-                      size="sm"
-                    >
-                      {ev.type}
-                    </Badge>
-                  </div>
-                  <h4 className="text-xs font-bold text-slate-900 leading-snug">
-                    {ev.title}
-                  </h4>
-                  <p className="text-[11px] text-slate-500">
-                    Client: <span className="font-medium text-slate-700">{ev.client}</span>
-                  </p>
-                  <p className="text-[11px] font-bold text-slate-900">
-                    {ev.amount}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

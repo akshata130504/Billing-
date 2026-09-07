@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Card, CardContent } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
 import { useToast } from '../../components/common/Toast';
 import {
+  ArrowLeftRight,
   ArrowRight,
   RefreshCw,
   ShieldCheck,
@@ -14,100 +15,163 @@ import {
   UserCheck,
 } from 'lucide-react';
 
-interface ReconciliationItem {
+export type ReconStatus = 'auto-reconciled' | 'matched' | 'unmatched' | 'exception';
+
+export interface ReconciliationRecord {
   id: string;
   paymentRef: string;
   externalTxn: string;
   invoiceRef: string;
   customer: string;
   amount: string;
-  gateway: 'Stripe' | 'Razorpay' | 'HDFC Wire' | 'ICICI ACH';
-  status: 'matched' | 'unmatched' | 'exception' | 'auto-reconciled';
+  gateway: 'Razorpay' | 'Stripe' | 'HDFC Wire' | 'ICICI ACH';
+  status: ReconStatus;
   variance?: string;
   discrepancyNote?: string;
+  date: string;
 }
 
-const mockReconciliations: ReconciliationItem[] = [
+const initialReconciliations: ReconciliationRecord[] = [
   {
     id: 'REC-501',
-    paymentRef: 'PAY-8921',
-    externalTxn: 'ch_3N8zKq2eZvKYlo2C',
-    invoiceRef: 'INV-2026-0791',
-    customer: 'Apex Global Logistics',
-    amount: '$4,800.00',
-    gateway: 'Stripe',
+    paymentRef: 'PAY-2026-8921',
+    externalTxn: 'pay_N9m0Lq3x89vB',
+    invoiceRef: 'INV-2026-0089',
+    customer: 'Acme Cloud Dynamics',
+    amount: '₹34,000.00',
+    gateway: 'Razorpay',
     status: 'auto-reconciled',
+    date: 'Sep 7, 2026',
   },
   {
     id: 'REC-502',
-    paymentRef: 'PAY-8922',
-    externalTxn: 'pay_N9m0Lq3x89vB',
-    invoiceRef: 'INV-2026-0792',
-    customer: 'CloudScale Systems',
-    amount: '$12,400.00',
-    gateway: 'Razorpay',
+    paymentRef: 'PAY-2026-8922',
+    externalTxn: 'ch_3N8zKq2eZvKYlo2C',
+    invoiceRef: 'INV-2026-0088',
+    customer: 'Solaria Robotics Corp',
+    amount: '₹18,500.00',
+    gateway: 'Stripe',
     status: 'matched',
+    date: 'Sep 6, 2026',
   },
   {
     id: 'REC-503',
-    paymentRef: 'PAY-8923',
+    paymentRef: 'PAY-2026-8923',
     externalTxn: 'UTR_HDFC002938102',
-    invoiceRef: 'INV-2026-0785',
-    customer: 'Starlight Media Group',
-    amount: '$18,400.00',
+    invoiceRef: 'INV-2026-0087',
+    customer: 'Hyperion FinTech Ltd',
+    amount: '₹42,000.00',
     gateway: 'HDFC Wire',
     status: 'exception',
-    variance: '+$400.00',
-    discrepancyNote: 'Wire settlement amount exceeds invoice gross by bank fee charge differential.',
+    variance: '+₹500.00',
+    discrepancyNote: 'Customer added wire bank transfer fee allowance of ₹500 above invoice total.',
+    date: 'Sep 6, 2026',
   },
   {
     id: 'REC-504',
-    paymentRef: 'PAY-8924',
-    externalTxn: 'ACH_99182348',
-    invoiceRef: 'UNASSIGNED',
-    customer: 'Zenith Retail India',
-    amount: '$7,250.00',
-    gateway: 'ICICI ACH',
+    paymentRef: 'PAY-2026-8924',
+    externalTxn: 'pay_P1k8Jq4w12zC',
+    invoiceRef: 'Pending Match',
+    customer: 'Unidentified Depositor',
+    amount: '₹15,000.00',
+    gateway: 'Razorpay',
     status: 'unmatched',
-    discrepancyNote: 'Customer remittance slip missing matching invoice number.',
+    discrepancyNote: 'Gateway direct deposit received without customer metadata reference.',
+    date: 'Sep 5, 2026',
   },
   {
     id: 'REC-505',
-    paymentRef: 'PAY-8925',
-    externalTxn: 'ch_3N8zXv2eZvKYlo8J',
-    invoiceRef: 'INV-2026-0801',
-    customer: 'Vanguard Technologies',
-    amount: '$22,000.00',
-    gateway: 'Stripe',
+    paymentRef: 'PAY-2026-8925',
+    externalTxn: 'ACH_ICICI_889210',
+    invoiceRef: 'INV-2026-0084',
+    customer: 'Vanguard Biometrics',
+    amount: '₹84,000.00',
+    gateway: 'ICICI ACH',
     status: 'auto-reconciled',
+    date: 'Sep 4, 2026',
+  },
+  {
+    id: 'REC-506',
+    paymentRef: 'PAY-2026-8926',
+    externalTxn: 'UTR_HDFC002939881',
+    invoiceRef: 'INV-2026-0083',
+    customer: 'Nexus Global Logistics',
+    amount: '₹26,750.00',
+    gateway: 'HDFC Wire',
+    status: 'exception',
+    variance: '-₹1,200.00',
+    discrepancyNote: 'Client deducted TDS (Tax Deducted at Source) without attaching 16A TDS certificate.',
+    date: 'Sep 3, 2026',
   },
 ];
 
 export function ReconciliationPage() {
-  const [items, setItems] = useState<ReconciliationItem[]>(mockReconciliations);
-  const [selectedException, setSelectedException] = useState<ReconciliationItem | null>(null);
-  const [activeTab, setActiveTab] = useState<'all' | 'unmatched' | 'exception' | 'reconciled'>('all');
   const { showToast } = useToast();
+  const [records, setRecords] = useState<ReconciliationRecord[]>(initialReconciliations);
+  const [statusFilter, setStatusFilter] = useState<'all' | ReconStatus>('all');
+  const [isReconciling, setIsReconciling] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState<ReconciliationRecord | null>(null);
 
-  const handleMatch = (id: string) => {
-    setItems((prev) =>
-      prev.map((it) => (it.id === id ? { ...it, status: 'matched', invoiceRef: 'INV-2026-MANUAL' } : it))
-    );
-    showToast('success', 'Matched', `Transaction ${id} successfully reconciled with invoice.`);
+  const filteredRecords = useMemo(() => {
+    if (statusFilter === 'all') return records;
+    return records.filter((r) => r.status === statusFilter);
+  }, [records, statusFilter]);
+
+  const stats = useMemo(() => {
+    const auto = records.filter((r) => r.status === 'auto-reconciled').length;
+    const matched = records.filter((r) => r.status === 'matched').length;
+    const unmatched = records.filter((r) => r.status === 'unmatched').length;
+    const exceptions = records.filter((r) => r.status === 'exception').length;
+    return { auto, matched, unmatched, exceptions, total: records.length };
+  }, [records]);
+
+  const handleRunReconciliation = () => {
+    setIsReconciling(true);
+    setTimeout(() => {
+      setIsReconciling(false);
+      setRecords((prev) =>
+        prev.map((r) => (r.status === 'unmatched' ? { ...r, status: 'matched', customer: 'Resolved Customer (Matched)' } : r))
+      );
+      showToast('success', 'Reconciliation Completed', 'All settlement batches matched against ledger.');
+    }, 750);
   };
 
-  const filteredItems = items.filter((item) => {
-    if (activeTab === 'all') return true;
-    if (activeTab === 'unmatched') return item.status === 'unmatched';
-    if (activeTab === 'exception') return item.status === 'exception';
-    if (activeTab === 'reconciled') return item.status === 'matched' || item.status === 'auto-reconciled';
-    return true;
-  });
+  const handleManualMatch = (id: string) => {
+    setRecords((prev) =>
+      prev.map((r) =>
+        r.id === id
+          ? { ...r, status: 'matched', invoiceRef: 'INV-2026-0092', customer: 'Orbit Retail India' }
+          : r
+      )
+    );
+    setSelectedRecord(null);
+    showToast('success', 'Manual Match Saved', 'Transaction linked to Invoice #INV-2026-0092.');
+  };
 
-  const matchedCount = items.filter((i) => i.status === 'matched').length;
-  const autoCount = items.filter((i) => i.status === 'auto-reconciled').length;
-  const unmatchedCount = items.filter((i) => i.status === 'unmatched').length;
-  const exceptionCount = items.filter((i) => i.status === 'exception').length;
+  const handleResolveException = (id: string) => {
+    setRecords((prev) =>
+      prev.map((r) =>
+        r.id === id
+          ? { ...r, status: 'matched', discrepancyNote: 'Resolved via TDS adjustment ledger entry' }
+          : r
+      )
+    );
+    setSelectedRecord(null);
+    showToast('success', 'Exception Resolved', 'Adjustment entry posted to ledger.');
+  };
+
+  const getStatusBadge = (status: ReconStatus) => {
+    switch (status) {
+      case 'auto-reconciled':
+        return <Badge variant="success" size="sm">Auto-Reconciled</Badge>;
+      case 'matched':
+        return <Badge variant="primary" size="sm">Matched</Badge>;
+      case 'unmatched':
+        return <Badge variant="warning" size="sm">Unmatched</Badge>;
+      case 'exception':
+        return <Badge variant="danger" size="sm">Exception</Badge>;
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -120,111 +184,149 @@ export function ReconciliationPage() {
             </span>
             <span className="text-slate-300">•</span>
             <Badge variant="primary" size="sm">
-              Ledger Settlement
+              Financial Integrity
             </Badge>
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-            Reconciliation
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            <ArrowLeftRight className="w-6 h-6 text-brand-600" />
+            Reconciliation Workspace
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-            Automated multi-way matching linking payment receipts, external gateway settlement records, open invoices, and customer accounts.
+            Match bank transactions, gateway payouts, and external provider settlements against issued invoices and customer balances.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <Button
-            variant="outline"
+            variant="primary"
             size="sm"
+            isLoading={isReconciling}
             leadingIcon={<RefreshCw className="w-3.5 h-3.5" />}
-            onClick={() => showToast('info', 'Reconciled', 'Run automated settlement matching job.')}
+            onClick={handleRunReconciliation}
           >
-            Run Auto-Reconcile
+            Run Auto-Reconciliation
           </Button>
         </div>
       </div>
 
-      {/* Metrics Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-slate-500 font-medium">Auto-Reconciled</p>
-            <h3 className="text-xl font-bold text-emerald-600 mt-0.5">{autoCount}</h3>
-            <span className="text-[10px] text-slate-400">Zero touch matching</span>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-slate-500 font-medium">Manual Matched</p>
-            <h3 className="text-xl font-bold text-brand-600 mt-0.5">{matchedCount}</h3>
-            <span className="text-[10px] text-slate-400">Verified by finance</span>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-slate-500 font-medium">Unmatched</p>
-            <h3 className="text-xl font-bold text-amber-600 mt-0.5">{unmatchedCount}</h3>
-            <span className="text-[10px] text-slate-400">Missing invoice link</span>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-slate-500 font-medium">Exceptions</p>
-            <h3 className="text-xl font-bold text-rose-600 mt-0.5">{exceptionCount}</h3>
-            <span className="text-[10px] text-slate-400">Amount/currency variance</span>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Flow Diagram Card */}
-      <Card>
+      {/* Matching Flow Banner */}
+      <Card className="bg-gradient-to-r from-blue-50/70 via-slate-50 to-indigo-50/70 border-blue-200/70">
         <CardContent className="p-4 sm:p-5">
-          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3">
-            Multi-Way Matching Architecture Pipeline
-          </p>
-          <div className="flex items-center justify-between gap-2 overflow-x-auto text-xs py-1">
-            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 shrink-0">
-              <CreditCard className="w-4 h-4 text-brand-600" />
-              <span className="font-semibold text-slate-800">1. Payment Receipt</span>
+          <div className="flex items-center justify-between gap-2 overflow-x-auto pb-1 text-xs">
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="p-2 rounded-lg bg-white border border-blue-200 text-brand-600 shadow-2xs">
+                <CreditCard className="w-4 h-4" />
+              </span>
+              <div>
+                <p className="font-bold text-slate-900">1. Inward Payment</p>
+                <p className="text-[10px] text-slate-500">Gateway or Bank UTR</p>
+              </div>
             </div>
-            <ArrowRight className="w-4 h-4 text-slate-300 shrink-0" />
-            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 shrink-0">
-              <Building2 className="w-4 h-4 text-brand-600" />
-              <span className="font-semibold text-slate-800">2. External Settlement</span>
+
+            <ArrowRight className="w-4 h-4 text-slate-400 shrink-0" />
+
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="p-2 rounded-lg bg-white border border-blue-200 text-brand-600 shadow-2xs">
+                <Building2 className="w-4 h-4" />
+              </span>
+              <div>
+                <p className="font-bold text-slate-900">2. External Txn</p>
+                <p className="text-[10px] text-slate-500">Bank Statement / Settlement</p>
+              </div>
             </div>
-            <ArrowRight className="w-4 h-4 text-slate-300 shrink-0" />
-            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 shrink-0">
-              <FileText className="w-4 h-4 text-brand-600" />
-              <span className="font-semibold text-slate-800">3. Invoice Line Items</span>
+
+            <ArrowRight className="w-4 h-4 text-slate-400 shrink-0" />
+
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="p-2 rounded-lg bg-white border border-blue-200 text-brand-600 shadow-2xs">
+                <FileText className="w-4 h-4" />
+              </span>
+              <div>
+                <p className="font-bold text-slate-900">3. Invoice</p>
+                <p className="text-[10px] text-slate-500">Matched Open AR</p>
+              </div>
             </div>
-            <ArrowRight className="w-4 h-4 text-slate-300 shrink-0" />
-            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 shrink-0">
-              <UserCheck className="w-4 h-4 text-brand-600" />
-              <span className="font-semibold text-slate-800">4. Customer Ledger</span>
+
+            <ArrowRight className="w-4 h-4 text-slate-400 shrink-0" />
+
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="p-2 rounded-lg bg-white border border-blue-200 text-brand-600 shadow-2xs">
+                <UserCheck className="w-4 h-4" />
+              </span>
+              <div>
+                <p className="font-bold text-slate-900">4. Customer</p>
+                <p className="text-[10px] text-slate-500">Credit Ledger Offset</p>
+              </div>
             </div>
-            <ArrowRight className="w-4 h-4 text-slate-300 shrink-0" />
-            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0 font-bold">
-              <ShieldCheck className="w-4 h-4" />
-              <span>5. Reconciled</span>
+
+            <ArrowRight className="w-4 h-4 text-slate-400 shrink-0" />
+
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="p-2 rounded-lg bg-emerald-500 text-white shadow-2xs">
+                <ShieldCheck className="w-4 h-4" />
+              </span>
+              <div>
+                <p className="font-bold text-emerald-900">5. Reconciled</p>
+                <p className="text-[10px] text-emerald-700">Audit Proof Logged</p>
+              </div>
             </div>
           </div>
         </CardContent>
       </Card>
 
+      {/* Metric Counters */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+        <div
+          onClick={() => setStatusFilter('auto-reconciled')}
+          className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-emerald-300"
+        >
+          <span className="text-xs text-slate-500 font-medium">Auto-Reconciled</span>
+          <p className="text-xl font-bold text-emerald-600 mt-1">{stats.auto}</p>
+          <span className="text-[10px] text-slate-400">100% matched via webhook</span>
+        </div>
+        <div
+          onClick={() => setStatusFilter('matched')}
+          className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-blue-300"
+        >
+          <span className="text-xs text-slate-500 font-medium">Manual Matched</span>
+          <p className="text-xl font-bold text-brand-600 mt-1">{stats.matched}</p>
+          <span className="text-[10px] text-slate-400">Audited & approved</span>
+        </div>
+        <div
+          onClick={() => setStatusFilter('unmatched')}
+          className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-amber-300"
+        >
+          <span className="text-xs text-slate-500 font-medium">Unmatched Records</span>
+          <p className="text-xl font-bold text-amber-600 mt-1">{stats.unmatched}</p>
+          <span className="text-[10px] text-slate-400">Pending customer link</span>
+        </div>
+        <div
+          onClick={() => setStatusFilter('exception')}
+          className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-rose-300"
+        >
+          <span className="text-xs text-slate-500 font-medium">Discrepancy Exceptions</span>
+          <p className="text-xl font-bold text-rose-600 mt-1">{stats.exceptions}</p>
+          <span className="text-[10px] text-slate-400">Fee variance or TDS notes</span>
+        </div>
+      </div>
+
       {/* Filter Tabs */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-slate-200/90">
         {[
-          { id: 'all', label: 'All Records' },
-          { id: 'unmatched', label: 'Unmatched' },
-          { id: 'exception', label: 'Exceptions' },
-          { id: 'reconciled', label: 'Reconciled' },
+          { key: 'all', label: `All Transactions (${stats.total})` },
+          { key: 'auto-reconciled', label: `Auto-Reconciled (${stats.auto})` },
+          { key: 'matched', label: `Matched (${stats.matched})` },
+          { key: 'unmatched', label: `Unmatched (${stats.unmatched})` },
+          { key: 'exception', label: `Exceptions (${stats.exceptions})` },
         ].map((tab) => (
           <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id as typeof activeTab)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium capitalize transition-colors cursor-pointer ${
-              activeTab === tab.id
-                ? 'bg-brand-600 text-white shadow-xs'
-                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+            key={tab.key}
+            type="button"
+            onClick={() => setStatusFilter(tab.key as typeof statusFilter)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+              statusFilter === tab.key
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             {tab.label}
@@ -232,121 +334,139 @@ export function ReconciliationPage() {
         ))}
       </div>
 
-      {/* Table */}
+      {/* Records Table */}
       <Card>
-        <CardContent className="p-0 overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="border-b border-slate-200/80 bg-slate-50/75 text-slate-500 font-semibold uppercase tracking-wider text-[11px]">
-                <th className="py-3 px-4">Payment Ref</th>
-                <th className="py-3 px-4">External Txn</th>
-                <th className="py-3 px-4">Invoice Ref</th>
-                <th className="py-3 px-4">Customer</th>
-                <th className="py-3 px-4">Amount</th>
-                <th className="py-3 px-4">Gateway</th>
-                <th className="py-3 px-4">Status</th>
-                <th className="py-3 px-4 text-right">Action</th>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200/80">
+              <tr>
+                <th className="px-4 py-3">Internal Ref</th>
+                <th className="px-4 py-3">Gateway / Ext Txn</th>
+                <th className="px-4 py-3">Invoice & Customer</th>
+                <th className="px-4 py-3 text-right">Amount</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3 text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredItems.map((item) => (
-                <tr key={item.id} className="hover:bg-slate-50/60 transition-colors">
-                  <td className="py-3 px-4 font-bold text-slate-900">{item.paymentRef}</td>
-                  <td className="py-3 px-4 font-mono text-[11px] text-slate-600">{item.externalTxn}</td>
-                  <td className="py-3 px-4">
-                    {item.invoiceRef === 'UNASSIGNED' ? (
-                      <span className="text-amber-600 font-semibold italic">Unassigned</span>
-                    ) : (
-                      <span className="font-semibold text-slate-800">{item.invoiceRef}</span>
+              {filteredRecords.map((item) => (
+                <tr key={item.id} className="hover:bg-slate-50/70 transition-colors">
+                  <td className="px-4 py-3 font-mono font-bold text-slate-700">
+                    <div>{item.paymentRef}</div>
+                    <div className="text-[10px] text-slate-400 font-normal">{item.date}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="font-semibold text-slate-900 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-brand-500" />
+                      {item.gateway}
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-500 truncate max-w-[170px]">
+                      {item.externalTxn}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="font-bold text-slate-900">{item.customer}</div>
+                    <div className="text-[11px] text-slate-500">{item.invoiceRef}</div>
+                  </td>
+                  <td className="px-4 py-3 text-right font-bold text-slate-900 tabular-nums">
+                    {item.amount}
+                    {item.variance && (
+                      <span className="block text-[10px] text-rose-600 font-medium">
+                        Var: {item.variance}
+                      </span>
                     )}
                   </td>
-                  <td className="py-3 px-4 font-medium text-slate-700">{item.customer}</td>
-                  <td className="py-3 px-4 font-bold text-slate-900">{item.amount}</td>
-                  <td className="py-3 px-4 text-slate-600">{item.gateway}</td>
-                  <td className="py-3 px-4">
-                    <Badge
-                      variant={
-                        item.status === 'auto-reconciled' || item.status === 'matched'
-                          ? 'success'
-                          : item.status === 'exception'
-                          ? 'danger'
-                          : 'warning'
-                      }
+                  <td className="px-4 py-3">
+                    {getStatusBadge(item.status)}
+                    {item.discrepancyNote && (
+                      <span className="block text-[10px] text-slate-500 truncate max-w-[180px] mt-0.5" title={item.discrepancyNote}>
+                        {item.discrepancyNote}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <Button
+                      variant="outline"
                       size="sm"
+                      onClick={() => setSelectedRecord(item)}
                     >
-                      {item.status}
-                    </Badge>
-                  </td>
-                  <td className="py-3 px-4 text-right">
-                    {item.status === 'unmatched' && (
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        className="h-7 text-[11px] px-2.5"
-                        onClick={() => handleMatch(item.id)}
-                      >
-                        Match Transaction
-                      </Button>
-                    )}
-                    {item.status === 'exception' && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-[11px] px-2.5 text-rose-600 hover:bg-rose-50"
-                        onClick={() => setSelectedException(item)}
-                      >
-                        Review Exception
-                      </Button>
-                    )}
-                    {(item.status === 'matched' || item.status === 'auto-reconciled') && (
-                      <span className="text-[11px] text-emerald-600 font-medium">Reconciled ✓</span>
-                    )}
+                      Inspect
+                    </Button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </CardContent>
+        </div>
       </Card>
 
-      {/* Exception Modal */}
-      {selectedException && (
+      {/* Inspect Modal */}
+      {selectedRecord && (
         <Modal
           isOpen={true}
-          onClose={() => setSelectedException(null)}
-          title={`Reconciliation Exception: ${selectedException.paymentRef}`}
-          description={`Gateway: ${selectedException.gateway} • Amount: ${selectedException.amount}`}
-          size="md"
+          onClose={() => setSelectedRecord(null)}
+          title={`Reconciliation Record: ${selectedRecord.paymentRef}`}
+          size="lg"
         >
-          <div className="space-y-4 py-2 text-xs">
-            <div className="p-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-800 leading-relaxed">
-              <p className="font-bold">Discrepancy Detail:</p>
-              <p className="mt-1">{selectedException.discrepancyNote}</p>
-              {selectedException.variance && (
-                <p className="mt-2 font-semibold">
-                  Detected Variance: <span className="font-mono">{selectedException.variance}</span>
-                </p>
-              )}
+          <div className="space-y-4 text-xs">
+            <div className="grid grid-cols-2 gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+              <div>
+                <span className="text-slate-500 block font-medium">External Gateway</span>
+                <span className="font-bold text-slate-900">{selectedRecord.gateway}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block font-medium">Gateway Txn ID</span>
+                <span className="font-mono text-slate-800">{selectedRecord.externalTxn}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block font-medium">Customer Account</span>
+                <span className="font-bold text-slate-900">{selectedRecord.customer}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block font-medium">Matched Invoice</span>
+                <span className="font-bold text-slate-900">{selectedRecord.invoiceRef}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block font-medium">Transaction Amount</span>
+                <span className="font-bold text-slate-900 text-sm tabular-nums">
+                  {selectedRecord.amount}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-500 block font-medium">Reconciliation State</span>
+                <div>{getStatusBadge(selectedRecord.status)}</div>
+              </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setSelectedException(null)}
-              >
-                Dismiss
+            {selectedRecord.discrepancyNote && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900">
+                <span className="font-bold block mb-0.5">Discrepancy Analysis:</span>
+                {selectedRecord.discrepancyNote}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" size="sm" onClick={() => setSelectedRecord(null)}>
+                Close
               </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => {
-                  handleMatch(selectedException.id);
-                  setSelectedException(null);
-                }}
-              >
-                Accept Variance & Reconcile
-              </Button>
+              {selectedRecord.status === 'unmatched' && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => handleManualMatch(selectedRecord.id)}
+                >
+                  Link to Invoice
+                </Button>
+              )}
+              {selectedRecord.status === 'exception' && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => handleResolveException(selectedRecord.id)}
+                >
+                  Post Ledger Adjustment
+                </Button>
+              )}
             </div>
           </div>
         </Modal>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../../utils/cn';
 import { RoomanLogo } from '../common/RoomanLogo';
@@ -43,6 +43,7 @@ import {
   ChevronsRight,
   ChevronDown,
   ChevronRight,
+  Building2,
   X,
 } from 'lucide-react';
 
@@ -54,13 +55,15 @@ export interface SidebarProps {
   onToggleCollapse?: () => void;
 }
 
+interface SidebarItem {
+  title: string;
+  path: string;
+  icon: React.ComponentType<{ className?: string }>;
+}
+
 interface SidebarSection {
   title: string;
-  items: {
-    title: string;
-    path: string;
-    icon: React.ComponentType<{ className?: string }>;
-  }[];
+  items: SidebarItem[];
 }
 
 export const sidebarSections: SidebarSection[] = [
@@ -75,47 +78,47 @@ export const sidebarSections: SidebarSection[] = [
   {
     title: 'REVENUE',
     items: [
-      { title: 'Quotes', path: '/revenue/quotes', icon: FileText },
-      { title: 'CPQ', path: '/revenue/cpq', icon: Calculator },
-      { title: 'Invoices', path: '/revenue/invoices', icon: Receipt },
-      { title: 'Payments', path: '/revenue/payments', icon: CreditCard },
-      { title: 'Collections', path: '/revenue/collections', icon: ShieldCheck },
+      { title: 'Quotes', path: '/quotes', icon: FileText },
+      { title: 'CPQ', path: '/cpq', icon: Calculator },
+      { title: 'Invoices', path: '/invoices', icon: Receipt },
+      { title: 'Payments', path: '/payments', icon: CreditCard },
+      { title: 'Collections', path: '/collections', icon: ShieldCheck },
     ],
   },
   {
     title: 'SUBSCRIPTIONS',
     items: [
-      { title: 'Plans & Pricing', path: '/subscriptions/plans', icon: Layers },
-      { title: 'Subscriptions', path: '/subscriptions/all', icon: Repeat },
-      { title: 'Trials', path: '/subscriptions/trials', icon: Clock },
-      { title: 'Usage / Metering', path: '/subscriptions/usage', icon: Gauge },
-      { title: 'Proration', path: '/subscriptions/proration', icon: Percent },
-      { title: 'Dunning', path: '/subscriptions/dunning', icon: AlertTriangle },
+      { title: 'Plans & Pricing', path: '/plans-pricing', icon: Layers },
+      { title: 'Subscriptions', path: '/subscriptions', icon: Repeat },
+      { title: 'Trials', path: '/trials', icon: Clock },
+      { title: 'Usage / Metering', path: '/usage', icon: Gauge },
+      { title: 'Proration', path: '/proration', icon: Percent },
+      { title: 'Dunning', path: '/dunning', icon: AlertTriangle },
     ],
   },
   {
     title: 'CUSTOMER EXPERIENCE',
     items: [
-      { title: 'Customer Lifecycle', path: '/customer-experience/lifecycle', icon: UserCheck },
-      { title: 'Customer Portal', path: '/customer-experience/portal', icon: Globe },
-      { title: 'Hosted Payment Pages', path: '/customer-experience/payment-pages', icon: ExternalLink },
+      { title: 'Customer Lifecycle', path: '/customer-lifecycle', icon: UserCheck },
+      { title: 'Customer Portal', path: '/customer-portal', icon: Globe },
+      { title: 'Hosted Payment Pages', path: '/hosted-payment-pages', icon: ExternalLink },
     ],
   },
   {
     title: 'OPERATIONS',
     items: [
-      { title: 'Expenses', path: '/operations/expenses', icon: Coins },
-      { title: 'Projects', path: '/operations/projects', icon: Briefcase },
-      { title: 'Timesheets', path: '/operations/timesheets', icon: Timer },
+      { title: 'Expenses', path: '/expenses', icon: Coins },
+      { title: 'Projects', path: '/projects', icon: Briefcase },
+      { title: 'Timesheets', path: '/timesheets', icon: Timer },
     ],
   },
   {
     title: 'INSIGHTS',
     items: [
-      { title: 'Revenue Intelligence', path: '/insights/revenue', icon: LineChart },
-      { title: 'Reports & Analytics', path: '/insights/reports', icon: BarChart3 },
-      { title: 'AI in Billing', path: '/insights/ai', icon: Sparkles },
-      { title: 'Activity', path: '/insights/activity', icon: Activity },
+      { title: 'Revenue Intelligence', path: '/revenue-intelligence', icon: LineChart },
+      { title: 'Reports & Analytics', path: '/reports', icon: BarChart3 },
+      { title: 'AI in Billing', path: '/ai-billing', icon: Sparkles },
+      { title: 'Activity', path: '/activity', icon: Activity },
     ],
   },
   {
@@ -139,9 +142,9 @@ export const sidebarSections: SidebarSection[] = [
   {
     title: 'SYSTEM',
     items: [
-      { title: 'Automation', path: '/system/automation', icon: Zap },
-      { title: 'Customization', path: '/system/customization', icon: Palette },
-      { title: 'Integrations', path: '/system/integrations', icon: Boxes },
+      { title: 'Automation', path: '/automation', icon: Zap },
+      { title: 'Customization', path: '/customization', icon: Palette },
+      { title: 'Integrations', path: '/integrations', icon: Boxes },
       { title: 'Settings', path: '/system/settings', icon: Settings },
     ],
   },
@@ -157,7 +160,7 @@ export function Sidebar({
 }: SidebarProps) {
   const location = useLocation();
 
-  // Initialize expanded sections from sessionStorage or default to WORKSPACE
+  // Initialize expanded sections from sessionStorage (defaulting to WORKSPACE)
   const [expandedSections, setExpandedSections] = useState<string[]>(() => {
     try {
       const stored = sessionStorage.getItem(STORAGE_KEY);
@@ -171,15 +174,45 @@ export function Sidebar({
     return ['WORKSPACE'];
   });
 
-  // Auto-expand section when navigating to one of its child routes
-  useEffect(() => {
-    const activeSection = sidebarSections.find((sec) =>
-      sec.items.some((item) => location.pathname === item.path || (item.path !== '/dashboard' && location.pathname.startsWith(item.path)))
-    );
+  // Map of path to section title for fast lookup
+  const pathToSectionMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const section of sidebarSections) {
+      for (const item of section.items) {
+        map.set(item.path, section.title);
+      }
+    }
+    return map;
+  }, []);
 
-    if (activeSection && !expandedSections.includes(activeSection.title)) {
+  const prevPathRef = useRef<string | null>(null);
+
+  // Automatically expand the section containing the active route on route navigation
+  useEffect(() => {
+    if (prevPathRef.current === location.pathname) return;
+    prevPathRef.current = location.pathname;
+
+    // Check exact match or prefix match
+    let matchedSection = pathToSectionMap.get(location.pathname);
+    if (!matchedSection) {
+      for (const section of sidebarSections) {
+        if (
+          section.items.some(
+            (item) =>
+              location.pathname === item.path ||
+              (item.path !== '/dashboard' && location.pathname.startsWith(item.path))
+          )
+        ) {
+          matchedSection = section.title;
+          break;
+        }
+      }
+    }
+
+    if (matchedSection) {
       setExpandedSections((prev) => {
-        const next = [...prev, activeSection.title];
+        if (prev.includes(matchedSection!)) return prev;
+        const next = [...prev, matchedSection!];
         try {
           sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
         } catch {
@@ -188,7 +221,7 @@ export function Sidebar({
         return next;
       });
     }
-  }, [location.pathname]);
+  }, [location.pathname, pathToSectionMap]);
 
   const toggleSection = (sectionTitle: string) => {
     setExpandedSections((prev) => {
@@ -204,13 +237,77 @@ export function Sidebar({
     });
   };
 
+interface SectionVisualConfig {
+  icon: React.ComponentType<{ className?: string }>;
+  headerBg: string;
+  iconColor: string;
+  labelColor: string;
+}
+
+const SECTION_VISUALS: Record<string, SectionVisualConfig> = {
+  WORKSPACE: {
+    icon: Building2,
+    headerBg: 'bg-blue-50/70 hover:bg-blue-100/60 border border-blue-100/80',
+    iconColor: 'text-blue-600',
+    labelColor: 'text-blue-900',
+  },
+  REVENUE: {
+    icon: Receipt,
+    headerBg: 'bg-emerald-50/70 hover:bg-emerald-100/60 border border-emerald-100/80',
+    iconColor: 'text-emerald-600',
+    labelColor: 'text-emerald-900',
+  },
+  SUBSCRIPTIONS: {
+    icon: Repeat,
+    headerBg: 'bg-amber-50/70 hover:bg-amber-100/60 border border-amber-100/80',
+    iconColor: 'text-amber-600',
+    labelColor: 'text-amber-900',
+  },
+  'CUSTOMER EXPERIENCE': {
+    icon: UserCheck,
+    headerBg: 'bg-rose-50/70 hover:bg-rose-100/60 border border-rose-100/80',
+    iconColor: 'text-rose-600',
+    labelColor: 'text-rose-900',
+  },
+  OPERATIONS: {
+    icon: Briefcase,
+    headerBg: 'bg-sky-50/70 hover:bg-sky-100/60 border border-sky-100/80',
+    iconColor: 'text-sky-600',
+    labelColor: 'text-sky-900',
+  },
+  INSIGHTS: {
+    icon: Sparkles,
+    headerBg: 'bg-purple-50/70 hover:bg-purple-100/60 border border-purple-100/80',
+    iconColor: 'text-purple-600',
+    labelColor: 'text-purple-900',
+  },
+  PLATFORMS: {
+    icon: Monitor,
+    headerBg: 'bg-indigo-50/60 hover:bg-indigo-100/50 border border-indigo-100/70',
+    iconColor: 'text-indigo-600',
+    labelColor: 'text-indigo-900',
+  },
+  'CONTROL CENTER': {
+    icon: ShieldCheck,
+    headerBg: 'bg-indigo-50/80 hover:bg-indigo-100/70 border border-indigo-200/70',
+    iconColor: 'text-indigo-600',
+    labelColor: 'text-indigo-900',
+  },
+  SYSTEM: {
+    icon: Settings,
+    headerBg: 'bg-slate-100/80 hover:bg-slate-200/60 border border-slate-200/80',
+    iconColor: 'text-slate-600',
+    labelColor: 'text-slate-800',
+  },
+};
+
   const navItemClass = (isActive: boolean) =>
     cn(
-      'flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition-colors select-none',
+      'group flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 select-none',
       collapsed && 'lg:justify-center lg:px-2',
       isActive
-        ? 'bg-blue-50/90 text-brand-600 font-semibold shadow-subtle'
-        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+        ? 'bg-brand-50 text-brand-700 font-semibold shadow-2xs'
+        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50/90'
     );
 
   const CollapseIcon = collapsed ? ChevronsRight : ChevronsLeft;
@@ -250,16 +347,19 @@ export function Sidebar({
             </span>
           </NavLink>
 
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            className="hidden lg:flex p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            aria-expanded={!collapsed}
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            <CollapseIcon className="w-4 h-4" />
-          </button>
+          {onToggleCollapse && (
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              className="hidden lg:flex p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-expanded={!collapsed}
+              title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              <CollapseIcon className="w-4 h-4" />
+            </button>
+          )}
+
           <button
             onClick={onClose}
             className="lg:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
@@ -270,65 +370,88 @@ export function Sidebar({
         </div>
 
         {/* Collapsible Accordion Navigation Sections */}
-        <div className={cn('flex-1 overflow-y-auto px-3 py-3 space-y-2', collapsed && 'lg:px-2')}>
+        <div className={cn('flex-1 overflow-y-auto px-3 py-3.5 space-y-3', collapsed && 'lg:px-2')}>
           {sidebarSections.map((section) => {
             const isExpanded = expandedSections.includes(section.title);
-            const hasActiveItem = section.items.some(
-              (item) => location.pathname === item.path
-            );
+            const visual = SECTION_VISUALS[section.title] || {
+              icon: Layers,
+              headerBg: 'bg-slate-50 hover:bg-slate-100 border border-slate-200/60',
+              iconColor: 'text-slate-500',
+              labelColor: 'text-slate-800',
+            };
+            const SectionIcon = visual.icon;
 
             return (
               <div key={section.title} className="space-y-1">
-                {/* Clickable Collapsible Section Header */}
+                {/* Clickable Section Header */}
                 <button
                   type="button"
                   onClick={() => toggleSection(section.title)}
                   className={cn(
-                    'w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-colors cursor-pointer group select-none',
-                    collapsed && 'lg:justify-center lg:px-1',
-                    hasActiveItem
-                      ? 'text-brand-700 bg-brand-50/40'
-                      : 'text-slate-400 hover:text-slate-700 hover:bg-slate-50'
+                    'w-full flex items-center justify-between px-2.5 py-1.5 rounded-[9px] text-[10.5px] font-bold tracking-wider uppercase transition-all duration-150 cursor-pointer select-none group',
+                    visual.headerBg,
+                    collapsed && 'lg:justify-center lg:px-1.5'
                   )}
                   aria-expanded={isExpanded}
                   title={collapsed ? section.title : undefined}
                 >
-                  <span className={cn('truncate', collapsed && 'lg:hidden')}>{section.title}</span>
-                  <span className={cn(collapsed && 'lg:hidden')}>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <SectionIcon className={cn('w-3.5 h-3.5 shrink-0', visual.iconColor)} />
+                    <span className={cn('truncate', visual.labelColor, collapsed && 'lg:hidden')}>
+                      {section.title}
+                    </span>
+                  </div>
+                  <span className={cn('shrink-0 text-slate-400 group-hover:text-slate-600 transition-transform', collapsed && 'lg:hidden')}>
                     {isExpanded ? (
-                      <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-600 transition-transform" />
+                      <ChevronDown className="w-3.5 h-3.5" />
                     ) : (
-                      <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-600 transition-transform" />
+                      <ChevronRight className="w-3.5 h-3.5" />
                     )}
                   </span>
                 </button>
 
-                {/* Collapsible Accordion Child Items with smooth height animation */}
+                {/* Collapsible Child Items */}
                 <div
                   className={cn(
-                    'space-y-0.5 overflow-hidden transition-all duration-200 ease-in-out',
+                    'overflow-hidden transition-all duration-200 ease-in-out',
                     isExpanded || (collapsed && 'lg:max-h-none lg:opacity-100')
-                      ? 'max-h-96 opacity-100 pt-0.5'
+                      ? 'max-h-96 opacity-100 pt-1 pb-0.5'
                       : 'max-h-0 opacity-0 pointer-events-none'
                   )}
                 >
-                  {section.items.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <NavLink
-                        key={item.path}
-                        to={item.path}
-                        onClick={() => {
-                          if (window.innerWidth < 1024) onClose();
-                        }}
-                        className={({ isActive }) => navItemClass(isActive)}
-                        title={collapsed ? item.title : undefined}
-                      >
-                        <Icon className="w-4 h-4 shrink-0 opacity-75" />
-                        <span className={cn('truncate', collapsed && 'lg:sr-only')}>{item.title}</span>
-                      </NavLink>
-                    );
-                  })}
+                  <div
+                    className={cn(
+                      'ml-2.5 pl-2.5 border-l border-slate-200/60 space-y-0.5',
+                      collapsed && 'lg:ml-0 lg:pl-0 lg:border-l-0'
+                    )}
+                  >
+                    {section.items.map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <NavLink
+                          key={item.path}
+                          to={item.path}
+                          onClick={() => {
+                            if (window.innerWidth < 1024) onClose();
+                          }}
+                          className={({ isActive }) => navItemClass(isActive)}
+                          title={collapsed ? item.title : undefined}
+                        >
+                          {({ isActive }) => (
+                            <>
+                              <Icon
+                                className={cn(
+                                  'w-4 h-4 shrink-0 transition-colors',
+                                  isActive ? 'text-brand-600' : 'text-slate-400 group-hover:text-slate-600'
+                                )}
+                              />
+                              <span className={cn('truncate', collapsed && 'lg:sr-only')}>{item.title}</span>
+                            </>
+                          )}
+                        </NavLink>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             );

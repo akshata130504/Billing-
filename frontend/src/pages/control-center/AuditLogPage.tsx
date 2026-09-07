@@ -1,116 +1,171 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Card, CardContent } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
+import { Modal } from '../../components/common/Modal';
 import { useToast } from '../../components/common/Toast';
 import {
-  Download,
+  History,
   Search,
-  ArrowRight,
+  Download,
+  Eye,
+  Lock,
 } from 'lucide-react';
 
-interface AuditRecord {
+export interface AuditEntry {
   id: string;
-  user: string;
-  action: string;
-  module: 'Invoices' | 'Payments' | 'Subscriptions' | 'Quotes' | 'System';
-  entity: string;
-  previousValue: string;
-  newValue: string;
   timestamp: string;
-  source: string;
+  actor: string;
+  role: string;
+  action: string;
+  resource: string;
+  resourceType: 'Invoice' | 'Subscription' | 'Quote' | 'Payment' | 'Customer' | 'System';
+  ipAddress: string;
+  status: 'success' | 'warning' | 'denied';
+  beforeState?: Record<string, any>;
+  afterState?: Record<string, any>;
 }
 
-const mockAuditRecords: AuditRecord[] = [
+const mockAuditLogs: AuditEntry[] = [
   {
-    id: 'AUD-8801',
-    user: 'Akshata Rathod',
-    action: 'Modified Payment Terms',
-    module: 'Invoices',
-    entity: 'Invoice #INV-2026-0087',
-    previousValue: 'Due upon Receipt (0 Days)',
-    newValue: 'Net 30 Days',
-    timestamp: 'Today, 02:45 PM',
-    source: 'Web Workstation (192.168.1.42)',
+    id: 'AUD-901',
+    timestamp: '2026-09-07 14:32:10 IST',
+    actor: 'Akshata R.',
+    role: 'Billing Admin',
+    action: 'INVOICE_VOIDED',
+    resource: 'INV-2026-0082',
+    resourceType: 'Invoice',
+    ipAddress: '192.168.1.42',
+    status: 'warning',
+    beforeState: { status: 'issued', balance: '₹42,000.00', terms: 'Net 30' },
+    afterState: { status: 'void', balance: '₹0.00', voidReason: 'Re-issued with updated GSTIN' },
   },
   {
-    id: 'AUD-8802',
-    user: 'Finance Manager (Approval)',
-    action: 'Authorized Refund',
-    module: 'Payments',
-    entity: 'Refund #RF-1024',
-    previousValue: 'Status: Pending Review',
-    newValue: 'Status: Settled ($2,450.00)',
-    timestamp: 'Today, 01:15 PM',
-    source: 'Control Center Approvals',
+    id: 'AUD-902',
+    timestamp: '2026-09-07 13:15:22 IST',
+    actor: 'Rahul Sharma',
+    role: 'Account Exec',
+    action: 'QUOTE_DISCOUNT_APPLIED',
+    resource: 'QT-2026-0034',
+    resourceType: 'Quote',
+    ipAddress: '192.168.1.68',
+    status: 'success',
+    beforeState: { discountPct: 0, total: '₹1,20,000.00' },
+    afterState: { discountPct: 30, total: '₹84,000.00', approvedBy: 'Akshata R.' },
   },
   {
-    id: 'AUD-8803',
-    user: 'System Automation',
-    action: 'Executed Payment Retry',
-    module: 'Payments',
-    entity: 'Subscription #SUB-9021',
-    previousValue: 'Retry Count: 1',
-    newValue: 'Retry Count: 2 (Success)',
-    timestamp: 'Today, 11:30 AM',
-    source: 'Cron Dunning Scheduler',
+    id: 'AUD-903',
+    timestamp: '2026-09-07 11:04:19 IST',
+    actor: 'System Automation Engine',
+    role: 'Automated Worker',
+    action: 'SUBSCRIPTION_PRORATED_UPGRADE',
+    resource: 'SUB-2026-0418',
+    resourceType: 'Subscription',
+    ipAddress: '10.0.4.15',
+    status: 'success',
+    beforeState: { plan: 'Starter Monthly', seats: 5, unitPrice: '₹4,999.00' },
+    afterState: { plan: 'Enterprise Scale', seats: 25, unitPrice: '₹19,999.00', prorationCredit: '₹2,450.00' },
   },
   {
-    id: 'AUD-8804',
-    user: 'Sanjay Rao',
-    action: 'Overrode Price Tier',
-    module: 'Quotes',
-    entity: 'Quote #Q-7019',
-    previousValue: 'Tier Bracket Standard ($0.05/GB)',
-    newValue: 'Discounted Bracket ($0.035/GB)',
-    timestamp: 'Yesterday, 04:12 PM',
-    source: 'CPQ Pricing Engine',
+    id: 'AUD-904',
+    timestamp: '2026-09-07 09:40:02 IST',
+    actor: 'Pooja Nair',
+    role: 'Billing Specialist',
+    action: 'PAYMENT_REFUND_EXECUTED',
+    resource: 'PAY-2026-8920',
+    resourceType: 'Payment',
+    ipAddress: '192.168.1.77',
+    status: 'warning',
+    beforeState: { paymentStatus: 'settled', refunded: false },
+    afterState: { paymentStatus: 'refunded', refundAmount: '₹18,500.00', gatewayRefundId: 'rfnd_3N8zKq' },
   },
   {
-    id: 'AUD-8805',
-    user: 'Security Admin',
-    action: 'Rotated API Webhook Secret',
-    module: 'System',
-    entity: 'Stripe Webhook #whsec_live',
-    previousValue: 'Secret hash: ••••4920',
-    newValue: 'Secret hash: ••••8819',
-    timestamp: 'Sep 05, 2026',
-    source: 'System Integrations',
+    id: 'AUD-905',
+    timestamp: '2026-09-06 18:22:45 IST',
+    actor: 'External Webhook (Razorpay)',
+    role: 'Gateway Service',
+    action: 'GATEWAY_PAYMENT_CAPTURED',
+    resource: 'PAY-2026-8921',
+    resourceType: 'Payment',
+    ipAddress: '52.76.128.4',
+    status: 'success',
+    beforeState: { status: 'pending' },
+    afterState: { status: 'captured', amount: '₹34,000.00', authCode: 'AUTH_99182' },
   },
   {
-    id: 'AUD-8806',
-    user: 'Akshata Rathod',
-    action: 'Added Seat Allowance',
-    module: 'Subscriptions',
-    entity: 'Account: Acme Corp (#SUB-8012)',
-    previousValue: 'Allocated Seats: 25',
-    newValue: 'Allocated Seats: 35 (+10)',
-    timestamp: 'Sep 04, 2026',
-    source: 'Web Workstation',
+    id: 'AUD-906',
+    timestamp: '2026-09-06 16:11:30 IST',
+    actor: 'Unknown IP',
+    role: 'Unauthenticated Request',
+    action: 'ORG_SETTINGS_UPDATE_ATTEMPT',
+    resource: 'ORGANIZATION_ROOT',
+    resourceType: 'System',
+    ipAddress: '203.0.113.195',
+    status: 'denied',
+    beforeState: { restricted: true },
+    afterState: { blockedReason: 'Invalid CSRF token & 403 Forbidden' },
   },
 ];
 
 export function AuditLogPage() {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedModule, setSelectedModule] = useState<string>('all');
   const { showToast } = useToast();
+  const [logs] = useState<AuditEntry[]>(mockAuditLogs);
+  const [selectedResourceType, setSelectedResourceType] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedEntry, setSelectedEntry] = useState<AuditEntry | null>(null);
 
-  const handleExport = (format: 'CSV' | 'JSON') => {
-    showToast('info', 'Export Started', `Downloading audit trail export as ${format}.`);
+  const filteredLogs = useMemo(() => {
+    return logs.filter((entry) => {
+      const matchesType =
+        selectedResourceType === 'all' || entry.resourceType === selectedResourceType;
+      const matchesSearch =
+        !searchQuery.trim() ||
+        entry.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        entry.actor.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        entry.resource.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesType && matchesSearch;
+    });
+  }, [logs, selectedResourceType, searchQuery]);
+
+  const handleExportCSV = () => {
+    const headers = 'ID,Timestamp,Actor,Role,Action,Resource,ResourceType,Status,IPAddress\n';
+    const rows = filteredLogs
+      .map(
+        (l) =>
+          `"${l.id}","${l.timestamp}","${l.actor}","${l.role}","${l.action}","${l.resource}","${l.resourceType}","${l.status}","${l.ipAddress}"`
+      )
+      .join('\n');
+    const blob = new Blob([headers + rows], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `rooman_billing_audit_${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('success', 'Export Complete', 'Exported immutable audit trail to CSV.');
   };
 
-  const filteredRecords = mockAuditRecords.filter((rec) => {
-    const matchesModule = selectedModule === 'all' || rec.module === selectedModule;
-    const q = searchQuery.toLowerCase();
-    const matchesSearch =
-      !q ||
-      rec.user.toLowerCase().includes(q) ||
-      rec.action.toLowerCase().includes(q) ||
-      rec.entity.toLowerCase().includes(q) ||
-      rec.previousValue.toLowerCase().includes(q) ||
-      rec.newValue.toLowerCase().includes(q);
-    return matchesModule && matchesSearch;
-  });
+  const handleExportJSON = () => {
+    const blob = new Blob([JSON.stringify(filteredLogs, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `rooman_billing_audit_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('success', 'Export Complete', 'Exported audit log events to JSON.');
+  };
+
+  const getStatusBadge = (status: AuditEntry['status']) => {
+    switch (status) {
+      case 'success':
+        return <Badge variant="success" size="sm">Success</Badge>;
+      case 'warning':
+        return <Badge variant="warning" size="sm">Alert / Warning</Badge>;
+      case 'denied':
+        return <Badge variant="danger" size="sm">Access Denied</Badge>;
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -123,14 +178,15 @@ export function AuditLogPage() {
             </span>
             <span className="text-slate-300">•</span>
             <Badge variant="primary" size="sm">
-              Compliance & Security
+              SOC 2 / ISO Compliance
             </Badge>
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-            Audit Log
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            <History className="w-6 h-6 text-brand-600" />
+            Immutable Audit Trail
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-            Immutable chronological audit record of critical state transitions, price modifications, invoice adjustments, permission updates, and automated system actions.
+            Cryptographically sealed chronological log of all rate modifications, invoice voidings, discount approvals, and financial events.
           </p>
         </div>
 
@@ -139,7 +195,7 @@ export function AuditLogPage() {
             variant="outline"
             size="sm"
             leadingIcon={<Download className="w-3.5 h-3.5" />}
-            onClick={() => handleExport('CSV')}
+            onClick={handleExportCSV}
           >
             Export CSV
           </Button>
@@ -147,97 +203,192 @@ export function AuditLogPage() {
             variant="outline"
             size="sm"
             leadingIcon={<Download className="w-3.5 h-3.5" />}
-            onClick={() => handleExport('JSON')}
+            onClick={handleExportJSON}
           >
             Export JSON
           </Button>
         </div>
       </div>
 
+      {/* Security & Immutability Notice */}
+      <div className="p-3.5 rounded-xl bg-slate-900 text-white flex items-center justify-between gap-4 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-white/10 text-emerald-400">
+            <Lock className="w-4 h-4" />
+          </div>
+          <div>
+            <p className="text-xs font-bold text-slate-100">
+              Append-Only Financial Ledger Active
+            </p>
+            <p className="text-[11px] text-slate-400">
+              Audit log entries are write-once and cannot be edited or deleted by any administrative account.
+            </p>
+          </div>
+        </div>
+        <span className="hidden sm:inline-flex text-[11px] font-mono text-emerald-400 font-bold bg-emerald-950/60 border border-emerald-800 px-2.5 py-1 rounded-lg">
+          SHA-256 Validated
+        </span>
+      </div>
+
       {/* Filter and Search Bar */}
       <Card>
-        <CardContent className="p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="relative w-full sm:w-80">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search user, entity, action, or value..."
-              className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-brand-500 transition-colors"
-            />
-          </div>
+        <CardContent className="p-4">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            {/* Resource Type Filter */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 text-xs">
+              {[
+                { key: 'all', label: 'All Subsystems' },
+                { key: 'Invoice', label: 'Invoices' },
+                { key: 'Quote', label: 'Quotes' },
+                { key: 'Subscription', label: 'Subscriptions' },
+                { key: 'Payment', label: 'Payments' },
+                { key: 'System', label: 'System' },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setSelectedResourceType(tab.key)}
+                  className={`px-3 py-1.5 rounded-lg font-medium whitespace-nowrap transition-colors cursor-pointer ${
+                    selectedResourceType === tab.key
+                      ? 'bg-brand-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
 
-          <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto text-xs">
-            {['all', 'Invoices', 'Payments', 'Subscriptions', 'Quotes', 'System'].map((m) => (
-              <button
-                key={m}
-                onClick={() => setSelectedModule(m)}
-                className={`px-3 py-1.5 rounded-xl font-medium transition-colors cursor-pointer capitalize ${
-                  selectedModule === m
-                    ? 'bg-brand-600 text-white shadow-xs'
-                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                {m}
-              </button>
-            ))}
+            {/* Live Search */}
+            <div className="relative w-full sm:w-64">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search action, actor, resource..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 outline-none focus:bg-white transition-colors"
+              />
+            </div>
           </div>
         </CardContent>
       </Card>
 
       {/* Audit Log Table */}
       <Card>
-        <CardContent className="p-0 overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="border-b border-slate-200/80 bg-slate-50/75 text-slate-500 font-semibold uppercase tracking-wider text-[11px]">
-                <th className="py-3 px-4">User & Action</th>
-                <th className="py-3 px-4">Module</th>
-                <th className="py-3 px-4">Target Entity</th>
-                <th className="py-3 px-4">State Diff (Before → After)</th>
-                <th className="py-3 px-4">Source / Origin</th>
-                <th className="py-3 px-4 text-right">Timestamp</th>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200/80">
+              <tr>
+                <th className="px-4 py-3">Timestamp</th>
+                <th className="px-4 py-3">Actor</th>
+                <th className="px-4 py-3">Action</th>
+                <th className="px-4 py-3">Affected Resource</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">IP Address</th>
+                <th className="px-4 py-3 text-right">Details</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredRecords.map((rec) => (
-                <tr key={rec.id} className="hover:bg-slate-50/60 transition-colors">
-                  <td className="py-3.5 px-4">
-                    <p className="font-bold text-slate-900">{rec.user}</p>
-                    <p className="text-[11px] text-slate-500 mt-0.5">{rec.action}</p>
+              {filteredLogs.map((entry) => (
+                <tr key={entry.id} className="hover:bg-slate-50/70 transition-colors">
+                  <td className="px-4 py-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                    {entry.timestamp}
                   </td>
-                  <td className="py-3.5 px-4">
-                    <Badge variant="neutral" size="sm">
-                      {rec.module}
-                    </Badge>
+                  <td className="px-4 py-3">
+                    <div className="font-bold text-slate-900">{entry.actor}</div>
+                    <div className="text-[10px] text-slate-400">{entry.role}</div>
                   </td>
-                  <td className="py-3.5 px-4 font-semibold text-slate-800">
-                    {rec.entity}
+                  <td className="px-4 py-3">
+                    <span className="font-mono font-bold text-slate-800 text-[11px] bg-slate-100 px-1.5 py-0.5 rounded">
+                      {entry.action}
+                    </span>
                   </td>
-                  <td className="py-3.5 px-4">
-                    <div className="flex items-center gap-1.5 text-[11px]">
-                      <span className="text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded line-through">
-                        {rec.previousValue}
-                      </span>
-                      <ArrowRight className="w-3 h-3 text-slate-400 shrink-0" />
-                      <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-medium">
-                        {rec.newValue}
-                      </span>
-                    </div>
+                  <td className="px-4 py-3">
+                    <span className="font-semibold text-slate-900">{entry.resource}</span>
+                    <span className="text-[10px] text-slate-400 block">{entry.resourceType}</span>
                   </td>
-                  <td className="py-3.5 px-4 text-slate-500 font-mono text-[11px]">
-                    {rec.source}
+                  <td className="px-4 py-3">
+                    {getStatusBadge(entry.status)}
                   </td>
-                  <td className="py-3.5 px-4 text-right text-slate-500">
-                    {rec.timestamp}
+                  <td className="px-4 py-3 font-mono text-[11px] text-slate-500">
+                    {entry.ipAddress}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      leadingIcon={<Eye className="w-3.5 h-3.5" />}
+                      onClick={() => setSelectedEntry(entry)}
+                    >
+                      Diff
+                    </Button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </CardContent>
+        </div>
       </Card>
+
+      {/* Before / After State Diff Modal */}
+      {selectedEntry && (
+        <Modal
+          isOpen={true}
+          onClose={() => setSelectedEntry(null)}
+          title={`Audit State Diff: ${selectedEntry.action}`}
+          size="lg"
+        >
+          <div className="space-y-4 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 bg-slate-50 rounded-xl border border-slate-200">
+              <div>
+                <span className="text-slate-400 text-[10px] uppercase font-bold block">Log ID</span>
+                <span className="font-mono font-bold text-slate-800">{selectedEntry.id}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 text-[10px] uppercase font-bold block">Actor</span>
+                <span className="font-bold text-slate-800">{selectedEntry.actor}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 text-[10px] uppercase font-bold block">Resource</span>
+                <span className="font-bold text-slate-800">{selectedEntry.resource}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 text-[10px] uppercase font-bold block">IP Origin</span>
+                <span className="font-mono text-slate-800">{selectedEntry.ipAddress}</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* Before State */}
+              <div className="p-3 bg-rose-50/50 border border-rose-200 rounded-xl space-y-1.5">
+                <span className="text-[11px] font-bold text-rose-700 uppercase tracking-wider block">
+                  Prior State (Before Mutation)
+                </span>
+                <pre className="p-2.5 bg-white rounded-lg border border-rose-100 text-[11px] font-mono text-slate-800 overflow-x-auto">
+                  {JSON.stringify(selectedEntry.beforeState || { empty: true }, null, 2)}
+                </pre>
+              </div>
+
+              {/* After State */}
+              <div className="p-3 bg-emerald-50/50 border border-emerald-200 rounded-xl space-y-1.5">
+                <span className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider block">
+                  New State (Committed State)
+                </span>
+                <pre className="p-2.5 bg-white rounded-lg border border-emerald-100 text-[11px] font-mono text-slate-800 overflow-x-auto">
+                  {JSON.stringify(selectedEntry.afterState || { empty: true }, null, 2)}
+                </pre>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <Button variant="primary" size="sm" onClick={() => setSelectedEntry(null)}>
+                Close Inspector
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

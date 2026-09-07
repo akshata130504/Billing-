@@ -1,117 +1,203 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Card, CardContent } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
 import { useToast } from '../../components/common/Toast';
 import {
-  Eye,
   FileCheck,
+  CheckCircle2,
+  Clock,
+  User,
   Percent,
-  CreditCard,
-  Sliders,
-  Repeat,
+  Receipt,
+  Tag,
+  ShieldCheck,
+  Eye,
 } from 'lucide-react';
 
-interface ApprovalRequest {
+export type ApprovalType = 'quote_commitment' | 'high_discount' | 'refund_authorization' | 'price_override';
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
+
+export interface ApprovalRequest {
   id: string;
-  type: 'Quote Approval' | 'Large Discount' | 'Refund Request' | 'Price Override' | 'Subscription Change';
+  type: ApprovalType;
   title: string;
-  requestedBy: string;
+  requester: string;
+  role: string;
+  customer: string;
   amount: string;
-  date: string;
-  status: 'pending' | 'approved' | 'rejected';
-  reason: string;
-  impactDetails: string;
+  originalAmount?: string;
+  discountPercentage?: string;
+  justification: string;
+  requestedAt: string;
+  status: ApprovalStatus;
+  reviewedBy?: string;
+  reviewedAt?: string;
 }
 
 const initialApprovals: ApprovalRequest[] = [
   {
-    id: 'APR-1041',
-    type: 'Quote Approval',
-    title: 'Enterprise CPQ Contract (Vanguard Tech)',
-    requestedBy: 'Akash Verma (Sales Dir)',
-    amount: '$94,000.00 / yr',
-    date: 'Today, 11:20 AM',
+    id: 'APR-2026-0081',
+    type: 'high_discount',
+    title: '30% Annual Commitment Discount for Enterprise Plan',
+    requester: 'Rahul Sharma',
+    role: 'Account Executive',
+    customer: 'Acme Cloud Dynamics',
+    amount: '₹84,000.00 / yr',
+    originalAmount: '₹1,20,000.00 / yr',
+    discountPercentage: '30%',
+    justification: 'Customer is committing to a 3-year multi-tenant rollout with 50 seats. Standard VP discount limit is 20%.',
+    requestedAt: '2 hours ago',
     status: 'pending',
-    reason: 'Multi-year commitment with 20% ramp pricing waiver.',
-    impactDetails: 'Base ARR $117,500 discounted to $94,000 with 3-year upfront commitment.',
   },
   {
-    id: 'APR-1042',
-    type: 'Large Discount',
-    title: '25% Non-Profit Waiver (Global Care Trust)',
-    requestedBy: 'Meera Sen (Account Exec)',
-    amount: '$12,500.00',
-    date: 'Today, 09:45 AM',
+    id: 'APR-2026-0082',
+    type: 'refund_authorization',
+    title: 'Full Refund Authorization for Duplicate Mandate Debit',
+    requester: 'Pooja Nair',
+    role: 'Billing Specialist',
+    customer: 'Solaria Robotics Corp',
+    amount: '₹18,500.00',
+    justification: 'Gateway webhook timed out causing customer to re-attempt checkout. Customer charged twice in error.',
+    requestedAt: '4 hours ago',
     status: 'pending',
-    reason: 'Exceeds standard 15% sales rep discretionary discount threshold.',
-    impactDetails: 'Applies to 50 user seat licenses for 12 months.',
   },
   {
-    id: 'APR-1043',
-    type: 'Refund Request',
-    title: 'Partial Refund for Double Gateway Charge #RF-209',
-    requestedBy: 'Support Desk (Auto-Flag)',
-    amount: '$2,450.00',
-    date: 'Yesterday, 04:30 PM',
+    id: 'APR-2026-0083',
+    type: 'quote_commitment',
+    title: 'Custom Payment Terms: Net-60 Extension',
+    requester: 'Siddharth Roy',
+    role: 'Enterprise Director',
+    customer: 'Vanguard Biometrics',
+    amount: '₹2,40,000.00',
+    justification: 'Government vendor security clearance requires extended invoice settlement cycle from standard Net 30 to Net 60.',
+    requestedAt: 'Yesterday',
     status: 'pending',
-    reason: 'Customer charged twice via Stripe webhook race condition.',
-    impactDetails: 'Original transaction #txn_99014 verified duplicate in ledger.',
   },
   {
-    id: 'APR-1044',
-    type: 'Price Override',
-    title: 'Custom Per-Gigabyte Metering Rate ($0.035 vs $0.050)',
-    requestedBy: 'Sanjay Rao (Solutions Architect)',
-    amount: 'Estimated $8,400/mo',
-    date: 'Sep 05, 2026',
+    id: 'APR-2026-0084',
+    type: 'price_override',
+    title: 'Custom Per-Unit API Metering Price Override',
+    requester: 'Neha Gupta',
+    role: 'Sales Engineer',
+    customer: 'Hyperion FinTech Ltd',
+    amount: '₹0.08 / event',
+    originalAmount: '₹0.15 / event',
+    discountPercentage: '46%',
+    justification: 'Scale customer projecting >10M monthly meter telemetry events. Custom bracket approved by Product VP.',
+    requestedAt: '2 days ago',
     status: 'pending',
-    reason: 'High-volume tier commitment over 250 TB monthly egress.',
-    impactDetails: 'Custom billing rule overrides default catalog tiered bracket.',
   },
   {
-    id: 'APR-1045',
-    type: 'Subscription Change',
-    title: 'Mid-Cycle Plan Downgrade with Credit Freeze',
-    requestedBy: 'Pooja Nair (Billing Ops)',
-    amount: '$4,100.00 Credit',
-    date: 'Sep 04, 2026',
+    id: 'APR-2026-0079',
+    type: 'high_discount',
+    title: 'Early Bird 25% Discount for Scale Migration',
+    requester: 'Rahul Sharma',
+    role: 'Account Executive',
+    customer: 'Apex Global Logistics',
+    amount: '₹54,000.00',
+    originalAmount: '₹72,000.00',
+    discountPercentage: '25%',
+    justification: 'Competitor replacement opportunity. Migration completed.',
+    requestedAt: '3 days ago',
     status: 'approved',
-    reason: 'Downgrade from Enterprise to Growth per mutual contractual agreement.',
-    impactDetails: 'Approved by VP of Finance. Credit memo #CM-810 issued.',
+    reviewedBy: 'Akshata R. (Admin)',
+    reviewedAt: '2 days ago',
+  },
+  {
+    id: 'APR-2026-0078',
+    type: 'refund_authorization',
+    title: 'Goodwill Credit Note Exception',
+    requester: 'Pooja Nair',
+    role: 'Billing Specialist',
+    customer: 'Zeta Health Systems',
+    amount: '₹45,000.00',
+    justification: 'Service downtime compensation request exceeding Tier 1 support limits.',
+    requestedAt: '4 days ago',
+    status: 'rejected',
+    reviewedBy: 'Akshata R. (Admin)',
+    reviewedAt: '3 days ago',
   },
 ];
 
 export function ApprovalCenterPage() {
-  const [requests, setRequests] = useState<ApprovalRequest[]>(initialApprovals);
-  const [selectedRequest, setSelectedRequest] = useState<ApprovalRequest | null>(null);
-  const [activeFilter, setActiveFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const { showToast } = useToast();
+  const [approvals, setApprovals] = useState<ApprovalRequest[]>(initialApprovals);
+  const [statusFilter, setStatusFilter] = useState<'all' | ApprovalStatus>('pending');
+  const [selectedApproval, setSelectedApproval] = useState<ApprovalRequest | null>(null);
 
-  const handleStatusChange = (id: string, newStatus: 'approved' | 'rejected') => {
-    setRequests((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, status: newStatus } : r))
+  const filteredApprovals = useMemo(() => {
+    return approvals.filter((item) => {
+      if (statusFilter === 'all') return true;
+      return item.status === statusFilter;
+    });
+  }, [approvals, statusFilter]);
+
+  const pendingCount = useMemo(() => {
+    return approvals.filter((a) => a.status === 'pending').length;
+  }, [approvals]);
+
+  const handleApprove = (id: string, customer: string) => {
+    setApprovals((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? { ...item, status: 'approved', reviewedBy: 'Akshata R. (Admin)', reviewedAt: 'Just now' }
+          : item
+      )
     );
-    showToast(
-      newStatus === 'approved' ? 'success' : 'info',
-      `Request ${newStatus === 'approved' ? 'Approved' : 'Rejected'}`,
-      `Request ${id} marked as ${newStatus}.`
+    setSelectedApproval(null);
+    showToast('success', 'Request Approved', `Authorized billing request for ${customer}.`);
+  };
+
+  const handleReject = (id: string, customer: string) => {
+    setApprovals((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? { ...item, status: 'rejected', reviewedBy: 'Akshata R. (Admin)', reviewedAt: 'Just now' }
+          : item
+      )
     );
-    if (selectedRequest?.id === id) {
-      setSelectedRequest((prev) => (prev ? { ...prev, status: newStatus } : null));
+    setSelectedApproval(null);
+    showToast('info', 'Request Rejected', `Declined billing request for ${customer}.`);
+  };
+
+  const getTypeBadge = (type: ApprovalType) => {
+    switch (type) {
+      case 'high_discount':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+            <Percent className="w-3 h-3" />
+            High Discount
+          </span>
+        );
+      case 'refund_authorization':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+            <Receipt className="w-3 h-3" />
+            Refund Authorization
+          </span>
+        );
+      case 'quote_commitment':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+            <FileCheck className="w-3 h-3" />
+            Quote Commitment
+          </span>
+        );
+      case 'price_override':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+            <Tag className="w-3 h-3" />
+            Price Override
+          </span>
+        );
     }
   };
 
-  const filteredRequests = requests.filter(
-    (r) => activeFilter === 'all' || r.status === activeFilter
-  );
-
-  const pendingCount = requests.filter((r) => r.status === 'pending').length;
-
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
@@ -120,212 +206,243 @@ export function ApprovalCenterPage() {
             </span>
             <span className="text-slate-300">•</span>
             <Badge variant="primary" size="sm">
-              Authorization Inbox
+              Governance & Compliance
             </Badge>
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            <FileCheck className="w-6 h-6 text-brand-600" />
             Approval Center
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-            Single centralized authorization inbox for financial approvals: high discounts, quote commitments, refund authorizations, and custom pricing overrides.
+            Authorize high discounts, custom quote terms, refund payouts, and pricing overrides requiring manager sign-off.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          <Badge variant={pendingCount > 0 ? 'warning' : 'success'} size="md">
-            {pendingCount} Pending Authorization
-          </Badge>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-800 text-xs font-bold">
+            <Clock className="w-3.5 h-3.5 text-amber-600" />
+            {pendingCount} Pending Decisions
+          </span>
         </div>
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex items-center gap-2">
-        {(['all', 'pending', 'approved', 'rejected'] as const).map((filter) => (
+      <div className="flex items-center gap-1.5 border-b border-slate-200/90 pb-2">
+        {[
+          { key: 'pending', label: `Pending Review (${pendingCount})` },
+          { key: 'approved', label: 'Approved' },
+          { key: 'rejected', label: 'Rejected' },
+          { key: 'all', label: 'All Requests' },
+        ].map((tab) => (
           <button
-            key={filter}
-            onClick={() => setActiveFilter(filter)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium capitalize transition-colors cursor-pointer ${
-              activeFilter === filter
+            key={tab.key}
+            type="button"
+            onClick={() => setStatusFilter(tab.key as typeof statusFilter)}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+              statusFilter === tab.key
                 ? 'bg-brand-600 text-white shadow-xs'
-                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
-            {filter} ({filter === 'all' ? requests.length : requests.filter((r) => r.status === filter).length})
+            {tab.label}
           </button>
         ))}
       </div>
 
-      {/* Approvals Table Card */}
-      <Card>
-        <CardContent className="p-0 overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="border-b border-slate-200/80 bg-slate-50/75 text-slate-500 font-semibold uppercase tracking-wider text-[11px]">
-                <th className="py-3 px-4">Request & Type</th>
-                <th className="py-3 px-4">Requested By</th>
-                <th className="py-3 px-4">Amount / Impact</th>
-                <th className="py-3 px-4">Date</th>
-                <th className="py-3 px-4">Status</th>
-                <th className="py-3 px-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredRequests.map((req) => (
-                <tr key={req.id} className="hover:bg-slate-50/60 transition-colors">
-                  <td className="py-3.5 px-4">
-                    <div className="flex items-center gap-2.5">
-                      <div className="p-2 rounded-lg bg-slate-100 text-slate-600 shrink-0">
-                        {req.type === 'Quote Approval' && <FileCheck className="w-4 h-4 text-brand-600" />}
-                        {req.type === 'Large Discount' && <Percent className="w-4 h-4 text-amber-600" />}
-                        {req.type === 'Refund Request' && <CreditCard className="w-4 h-4 text-rose-600" />}
-                        {req.type === 'Price Override' && <Sliders className="w-4 h-4 text-purple-600" />}
-                        {req.type === 'Subscription Change' && <Repeat className="w-4 h-4 text-teal-600" />}
-                      </div>
-                      <div>
-                        <p className="font-bold text-slate-900">{req.title}</p>
-                        <p className="text-[11px] text-slate-500">{req.id} • {req.type}</p>
-                      </div>
+      {/* Approval Requests List */}
+      <div className="space-y-3">
+        {filteredApprovals.length === 0 ? (
+          <Card>
+            <CardContent className="py-12 text-center">
+              <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mx-auto mb-3">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-sm font-bold text-slate-900">No {statusFilter} approvals</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                There are no approval requests matching this criteria.
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          filteredApprovals.map((item) => (
+            <Card key={item.id} className="hover:border-slate-300 transition-colors">
+              <CardContent className="p-4 sm:p-5">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  {/* Left Info */}
+                  <div className="space-y-1.5 flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-mono font-bold text-slate-500">
+                        {item.id}
+                      </span>
+                      <span className="text-slate-300">•</span>
+                      {getTypeBadge(item.type)}
+                      <span className="text-slate-300">•</span>
+                      <span className="text-xs font-bold text-slate-900">{item.customer}</span>
+                      <span className="text-slate-300">•</span>
+                      <span className="text-[11px] text-slate-400 font-medium">
+                        Requested {item.requestedAt}
+                      </span>
                     </div>
-                  </td>
-                  <td className="py-3.5 px-4 font-medium text-slate-700">
-                    {req.requestedBy}
-                  </td>
-                  <td className="py-3.5 px-4 font-bold text-slate-900">
-                    {req.amount}
-                  </td>
-                  <td className="py-3.5 px-4 text-slate-500">
-                    {req.date}
-                  </td>
-                  <td className="py-3.5 px-4">
-                    <Badge
-                      variant={
-                        req.status === 'approved'
-                          ? 'success'
-                          : req.status === 'rejected'
-                          ? 'danger'
-                          : 'warning'
-                      }
-                      size="sm"
-                    >
-                      {req.status}
-                    </Badge>
-                  </td>
-                  <td className="py-3.5 px-4 text-right">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button
-                        onClick={() => setSelectedRequest(req)}
-                        className="p-1.5 rounded-lg text-slate-500 hover:text-brand-600 hover:bg-brand-50 transition-colors"
-                        title="View Details"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      {req.status === 'pending' && (
-                        <>
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            onClick={() => handleStatusChange(req.id, 'approved')}
-                            className="bg-emerald-600 hover:bg-emerald-700 h-7 text-[11px] px-2.5"
-                          >
-                            Approve
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleStatusChange(req.id, 'rejected')}
-                            className="text-rose-600 hover:bg-rose-50 h-7 text-[11px] px-2.5"
-                          >
-                            Reject
-                          </Button>
-                        </>
+
+                    <h4 className="text-sm font-semibold text-slate-900 leading-snug">
+                      {item.title}
+                    </h4>
+
+                    <p className="text-xs text-slate-600 line-clamp-2">
+                      <span className="font-semibold text-slate-700">Justification: </span>
+                      {item.justification}
+                    </p>
+
+                    <div className="flex items-center gap-2 pt-1 text-[11px] text-slate-500">
+                      <User className="w-3.5 h-3.5 text-slate-400" />
+                      <span>
+                        Requester: <strong>{item.requester}</strong> ({item.role})
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Right Value & Actions */}
+                  <div className="flex items-center justify-between lg:justify-end gap-4 border-t lg:border-t-0 pt-3 lg:pt-0 border-slate-100 shrink-0">
+                    <div className="text-left lg:text-right">
+                      <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
+                        Requested Value
+                      </span>
+                      <span className="text-base font-bold text-slate-900 tabular-nums block">
+                        {item.amount}
+                      </span>
+                      {item.originalAmount && (
+                        <span className="text-[10px] text-slate-400 line-through block">
+                          List: {item.originalAmount}
+                        </span>
                       )}
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </CardContent>
-      </Card>
 
-      {/* Details Modal */}
-      {selectedRequest && (
+                    {item.status === 'pending' ? (
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          leadingIcon={<Eye className="w-3.5 h-3.5" />}
+                          onClick={() => setSelectedApproval(item)}
+                        >
+                          Review
+                        </Button>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          leadingIcon={<CheckCircle2 className="w-3.5 h-3.5" />}
+                          onClick={() => handleApprove(item.id, item.customer)}
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                          onClick={() => handleReject(item.id, item.customer)}
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="text-right">
+                        {item.status === 'approved' ? (
+                          <Badge variant="success" size="md">
+                            Approved
+                          </Badge>
+                        ) : (
+                          <Badge variant="danger" size="md">
+                            Rejected
+                          </Badge>
+                        )}
+                        {item.reviewedBy && (
+                          <span className="text-[10px] text-slate-400 block mt-1">
+                            By {item.reviewedBy}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))
+        )}
+      </div>
+
+      {/* Review Modal */}
+      {selectedApproval && (
         <Modal
           isOpen={true}
-          onClose={() => setSelectedRequest(null)}
-          title={`Approval Details: ${selectedRequest.id}`}
-          description={selectedRequest.title}
-          size="md"
+          onClose={() => setSelectedApproval(null)}
+          title={`Review Approval Request: ${selectedApproval.id}`}
+          size="lg"
         >
-          <div className="space-y-4 py-2 text-xs">
-            <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200/80">
-              <div>
-                <p className="text-slate-400 font-medium">Request Type</p>
-                <p className="text-slate-900 font-bold mt-0.5">{selectedRequest.type}</p>
+          <div className="space-y-4">
+            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-500">Customer Account</span>
+                <span className="text-xs font-bold text-slate-900">{selectedApproval.customer}</span>
               </div>
-              <div>
-                <p className="text-slate-400 font-medium">Financial Impact</p>
-                <p className="text-slate-900 font-bold mt-0.5">{selectedRequest.amount}</p>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-500">Requester</span>
+                <span className="text-xs font-medium text-slate-700">
+                  {selectedApproval.requester} ({selectedApproval.role})
+                </span>
               </div>
-              <div>
-                <p className="text-slate-400 font-medium">Requested By</p>
-                <p className="text-slate-900 font-semibold mt-0.5">{selectedRequest.requestedBy}</p>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-500">Request Type</span>
+                <div>{getTypeBadge(selectedApproval.type)}</div>
               </div>
-              <div>
-                <p className="text-slate-400 font-medium">Status</p>
-                <Badge
-                  variant={
-                    selectedRequest.status === 'approved'
-                      ? 'success'
-                      : selectedRequest.status === 'rejected'
-                      ? 'danger'
-                      : 'warning'
-                  }
-                  size="sm"
-                >
-                  {selectedRequest.status}
-                </Badge>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-500">Financial Impact</span>
+                <span className="text-sm font-bold text-slate-900 tabular-nums">
+                  {selectedApproval.amount}
+                </span>
               </div>
             </div>
 
             <div>
-              <h4 className="font-bold text-slate-800 uppercase tracking-wider text-[11px] mb-1">
-                Justification & Reason
-              </h4>
-              <p className="text-slate-600 bg-slate-50 p-2.5 rounded-lg border border-slate-200/60">
-                {selectedRequest.reason}
+              <h5 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-1">
+                Business Justification
+              </h5>
+              <p className="text-xs text-slate-700 bg-white p-3 rounded-lg border border-slate-200 leading-relaxed">
+                {selectedApproval.justification}
               </p>
             </div>
 
-            <div>
-              <h4 className="font-bold text-slate-800 uppercase tracking-wider text-[11px] mb-1">
-                Policy & Contract Scope
-              </h4>
-              <p className="text-slate-600 bg-slate-50 p-2.5 rounded-lg border border-slate-200/60">
-                {selectedRequest.impactDetails}
-              </p>
+            <div className="p-3 rounded-xl bg-blue-50/70 border border-blue-100 flex items-start gap-2.5 text-xs text-brand-800">
+              <ShieldCheck className="w-4 h-4 text-brand-600 shrink-0 mt-0.5" />
+              <span>
+                Approval will generate an audit log record and notify the requester and billing lifecycle automation engine.
+              </span>
             </div>
 
-            {selectedRequest.status === 'pending' && (
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleStatusChange(selectedRequest.id, 'rejected')}
-                  className="text-rose-600 hover:bg-rose-50"
-                >
-                  Reject Request
-                </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => handleStatusChange(selectedRequest.id, 'approved')}
-                  className="bg-emerald-600 hover:bg-emerald-700"
-                >
-                  Authorize & Approve
-                </Button>
-              </div>
-            )}
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSelectedApproval(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                onClick={() => handleReject(selectedApproval.id, selectedApproval.customer)}
+              >
+                Reject Request
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                leadingIcon={<CheckCircle2 className="w-3.5 h-3.5" />}
+                onClick={() => handleApprove(selectedApproval.id, selectedApproval.customer)}
+              >
+                Approve Request
+              </Button>
+            </div>
           </div>
         </Modal>
       )}
