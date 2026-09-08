@@ -659,16 +659,13 @@ def recompute_invoice(
     invoice.amount_due = q2(max(Decimal("0"), total - paid))
     today = date.today()
 
-    if invoice.amount_due == 0 and total > 0:
+    if invoice.amount_due == 0:
         invoice.status = InvoiceStatus.PAID
         if invoice.paid_at is None:
             invoice.paid_at = utcnow()
     elif paid > 0:
         invoice.paid_at = None
-        if previous_status == InvoiceStatus.OVERDUE and invoice.due_date < today:
-            invoice.status = InvoiceStatus.OVERDUE
-        else:
-            invoice.status = InvoiceStatus.PARTIALLY_PAID
+        invoice.status = InvoiceStatus.PARTIALLY_PAID
     else:
         invoice.paid_at = None
         invoice.status = InvoiceStatus.OVERDUE if invoice.due_date < today else InvoiceStatus.SENT

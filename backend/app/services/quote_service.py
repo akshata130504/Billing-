@@ -126,7 +126,7 @@ def list_quotes(
     stmt = _quote_query().where(Quote.organization_id == ctx.organization_id)
     if search:
         like = f"%{search.strip()}%"
-        stmt = stmt.join(Customer, Customer.id == Quote.customer_id).where(
+        stmt = stmt.outerjoin(Customer, Customer.id == Quote.customer_id).where(
             or_(
                 Quote.quote_number.ilike(like),
                 Quote.title.ilike(like),
