@@ -14,6 +14,7 @@ class SubscriptionStatus(str, enum.Enum):
     PAST_DUE = "past_due"  # renewal invoice overdue
     PAUSED = "paused"
     CANCELLED = "cancelled"
+    TRIAL_EXPIRED = "trial_expired"
 
 
 class Subscription(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
@@ -45,3 +46,9 @@ class Subscription(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
 
     customer = relationship("Customer")
     plan = relationship("Plan")
+    subscription_items = relationship(
+        "SubscriptionItem", back_populates="subscription", cascade="all, delete-orphan"
+    )
+    trial_period = relationship(
+        "TrialPeriod", back_populates="subscription", uselist=False, cascade="all, delete-orphan"
+    )

@@ -23,6 +23,15 @@ from backend.app.models import (
     SubscriptionStatus,
     utcnow,
 )
+from backend.app.models.billing_cycles import (
+    BillingCycle,
+    BillingCycleStatus,
+    PriceSnapshot,
+    SubscriptionItem,
+    SubscriptionItemStatus,
+    SubscriptionItemType,
+)
+from backend.app.models.events import DomainEventType, OutboxEvent, OutboxStatus
 from backend.app.schemas.common_refs import customer_ref, iso_dt, money_str
 from backend.app.schemas.subscriptions import SubscriptionCreate, SubscriptionUpdate
 from backend.app.services import audit
@@ -145,6 +154,7 @@ def _base_query() -> Select:
     return select(Subscription).options(
         selectinload(Subscription.customer),
         selectinload(Subscription.plan).selectinload(Plan.product),
+        selectinload(Subscription.subscription_items).selectinload(SubscriptionItem.price_snapshot),
     )
 
 
@@ -230,20 +240,43 @@ def generate_period_invoice(
     plan = subscription.plan
     product = plan.product
     customer = subscription.customer
-    quantity = Decimal(int(subscription.quantity or 1)) if plan.pricing_model == PricingModel.PER_UNIT else Decimal("1")
-    tax_rate = D(product.tax_rate_pct if product is not None else 0)
-    if customer.tax_exempt:
-        tax_rate = Decimal("0")
-    lines = [
-        LineInput(
-            description=f"{plan.name} ({subscription.current_period_start.isoformat()} – {subscription.current_period_end.isoformat()})",
-            quantity=quantity,
-            unit_price=D(plan.unit_amount),
-            tax_rate_pct=tax_rate,
-            product_id=plan.product_id,
-            plan_id=plan.id,
-        )
-    ]
+
+    lines = []
+    # If subscription has active subscription_items, generate lines from them
+    active_items = [it for it in (subscription.subscription_items or []) if it.status == SubscriptionItemStatus.ACTIVE]
+    if active_items:
+        for item in active_items:
+            snap = item.price_snapshot
+            item_plan = item.plan or plan
+            item_prod = item_plan.product if item_plan else product
+            snap_pricing_model = snap.pricing_model if snap else (item_plan.pricing_model if item_plan else PricingModel.FLAT)
+            item_qty = Decimal(str(item.quantity)) if snap_pricing_model == PricingModel.PER_UNIT else Decimal("1")
+            item_unit_amount = D(snap.unit_amount if snap else (item.unit_price or item_plan.unit_amount))
+            item_tax = Decimal("0") if customer.tax_exempt else D(snap.tax_rate_pct if snap else (item_prod.tax_rate_pct if item_prod else 0))
+            desc = f"{item_plan.name if item_plan else 'Subscription Item'} ({subscription.current_period_start.isoformat()} – {subscription.current_period_end.isoformat()})"
+            lines.append(
+                LineInput(
+                    description=desc,
+                    quantity=item_qty,
+                    unit_price=item_unit_amount,
+                    tax_rate_pct=item_tax,
+                    product_id=item_plan.product_id if item_plan else None,
+                    plan_id=item_plan.id if item_plan else None,
+                )
+            )
+    else:
+        quantity = Decimal(int(subscription.quantity or 1)) if plan.pricing_model == PricingModel.PER_UNIT else Decimal("1")
+        tax_rate = Decimal("0") if customer.tax_exempt else D(product.tax_rate_pct if product is not None else 0)
+        lines = [
+            LineInput(
+                description=f"{plan.name} ({subscription.current_period_start.isoformat()} – {subscription.current_period_end.isoformat()})",
+                quantity=quantity,
+                unit_price=D(plan.unit_amount),
+                tax_rate_pct=tax_rate,
+                product_id=plan.product_id,
+                plan_id=plan.id,
+            )
+        ]
     if include_setup_fee and D(plan.setup_fee) > 0:
         lines.append(
             LineInput(
@@ -268,6 +301,36 @@ def generate_period_invoice(
         created_by_id=ctx.user.id if ctx else subscription.created_by_id,
         status=InvoiceStatus.SENT,
     )
+
+    # Link or record BillingCycle
+    bc = db.scalars(
+        select(BillingCycle).where(
+            BillingCycle.subscription_id == subscription.id,
+            BillingCycle.period_start == subscription.current_period_start,
+        )
+    ).first()
+    if bc is None:
+        max_cycle = db.scalar(
+            select(func.max(BillingCycle.cycle_number)).where(
+                BillingCycle.subscription_id == subscription.id
+            )
+        ) or 0
+        bc = BillingCycle(
+            organization_id=subscription.organization_id,
+            subscription_id=subscription.id,
+            cycle_number=max_cycle + 1,
+            period_start=subscription.current_period_start,
+            period_end=subscription.current_period_end,
+            status=BillingCycleStatus.INVOICED,
+            invoice_id=invoice.id,
+            finalized_at=utcnow(),
+        )
+        db.add(bc)
+    else:
+        bc.invoice_id = invoice.id
+        bc.status = BillingCycleStatus.INVOICED
+        bc.finalized_at = utcnow()
+    db.flush()
     audit.record(
         db,
         action="INVOICE_CREATED",
@@ -346,6 +409,80 @@ def create_subscription(db: Session, ctx: CurrentContext, data: SubscriptionCrea
     )
     db.add(subscription)
     db.flush()
+
+    # Create immutable PriceSnapshot for subscription terms
+    product = plan.product
+    tax_rate = D(product.tax_rate_pct if product is not None else 0)
+    snap = PriceSnapshot(
+        organization_id=ctx.organization_id,
+        plan_id=plan.id,
+        unit_amount=plan.unit_amount,
+        currency=plan.currency,
+        billing_interval=plan.billing_interval,
+        interval_count=int(plan.interval_count or 1),
+        pricing_model=plan.pricing_model,
+        tax_rate_pct=tax_rate,
+        setup_fee=D(plan.setup_fee or 0),
+        trial_days=trial_days,
+        snapshot_at=utcnow(),
+    )
+    db.add(snap)
+    db.flush()
+
+    # Create primary SubscriptionItem
+    sub_item = SubscriptionItem(
+        organization_id=ctx.organization_id,
+        subscription_id=subscription.id,
+        plan_id=plan.id,
+        price_snapshot_id=snap.id,
+        item_type=SubscriptionItemType.PLAN,
+        quantity=Decimal(int(subscription.quantity or 1)),
+        unit_price=plan.unit_amount,
+        status=SubscriptionItemStatus.ACTIVE,
+    )
+    db.add(sub_item)
+    db.flush()
+
+    # Create initial BillingCycle
+    bc = BillingCycle(
+        organization_id=ctx.organization_id,
+        subscription_id=subscription.id,
+        cycle_number=1,
+        period_start=subscription.current_period_start,
+        period_end=subscription.current_period_end,
+        status=BillingCycleStatus.OPEN,
+    )
+    db.add(bc)
+    db.flush()
+
+    # Register OutboxEvent for transactional decoupling
+    outbox = OutboxEvent(
+        organization_id=ctx.organization_id,
+        event_type=DomainEventType.SUBSCRIPTION_CREATED.value,
+        aggregate_type="subscription",
+        aggregate_id=subscription.id,
+        payload={"subscription_number": subscription.subscription_number, "status": subscription.status.value},
+        status=OutboxStatus.PENDING,
+    )
+    db.add(outbox)
+
+    if status == SubscriptionStatus.TRIALING:
+        from backend.app.models.trials import TrialPeriod, TrialPeriodStatus
+        tp = TrialPeriod(
+            organization_id=ctx.organization_id,
+            subscription_id=subscription.id,
+            trial_start_date=start,
+            trial_end_date=trial_end,
+            extension_count=0,
+            max_extensions_allowed=2,
+            allow_customer_extension=True,
+            allow_early_conversion=True,
+            auto_charge_enabled=True,
+            status=TrialPeriodStatus.ACTIVE,
+        )
+        db.add(tp)
+        db.flush()
+
     audit.record(
         db,
         action="SUBSCRIPTION_CREATED",
@@ -491,6 +628,11 @@ def convert_trial(db: Session, subscription: Subscription, *, actor_label: str =
     subscription.current_period_end = period_end_for(period_start, subscription.plan, period_start.day)
     subscription.next_billing_date = subscription.current_period_end
     subscription.updated_at = utcnow()
+    if subscription.trial_period:
+        from backend.app.models.trials import TrialPeriodStatus
+        subscription.trial_period.status = TrialPeriodStatus.CONVERTED
+        subscription.trial_period.converted_at = utcnow()
+        subscription.trial_period.updated_at = utcnow()
     db.flush()
     invoice = None
     if not period_invoice_exists(db, subscription):
@@ -537,10 +679,44 @@ def renew_subscription(db: Session, subscription: Subscription, *, actor_label: 
     subscription.current_period_end = period_end_for(new_start, subscription.plan, anchor_day(subscription))
     subscription.next_billing_date = subscription.current_period_end
     subscription.updated_at = utcnow()
+
+    # Create next BillingCycle if not already present
+    existing_bc = db.scalars(
+        select(BillingCycle).where(
+            BillingCycle.subscription_id == subscription.id,
+            BillingCycle.period_start == subscription.current_period_start,
+        )
+    ).first()
+    if existing_bc is None:
+        max_cycle = db.scalar(
+            select(func.max(BillingCycle.cycle_number)).where(
+                BillingCycle.subscription_id == subscription.id
+            )
+        ) or 0
+        bc = BillingCycle(
+            organization_id=subscription.organization_id,
+            subscription_id=subscription.id,
+            cycle_number=max_cycle + 1,
+            period_start=subscription.current_period_start,
+            period_end=subscription.current_period_end,
+            status=BillingCycleStatus.OPEN,
+        )
+        db.add(bc)
     db.flush()
+
     invoice = None
     if not period_invoice_exists(db, subscription):
         invoice = generate_period_invoice(db, subscription, actor_label=actor_label)
+
+    outbox = OutboxEvent(
+        organization_id=subscription.organization_id,
+        event_type=DomainEventType.SUBSCRIPTION_RENEWED.value,
+        aggregate_type="subscription",
+        aggregate_id=subscription.id,
+        payload={"subscription_number": subscription.subscription_number, "invoice_id": invoice.id if invoice else None},
+        status=OutboxStatus.PENDING,
+    )
+    db.add(outbox)
     audit.record(
         db,
         action="SUBSCRIPTION_RENEWED",

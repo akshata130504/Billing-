@@ -1,8 +1,24 @@
 import { HeartPulse } from 'lucide-react';
-import { mockCustomerHealth } from '../mockDashboardData';
+import type { DashboardCustomerHealth } from '../../../types';
+import { formatNumber } from '../../../utils/format';
 
-export function CustomerHealthWidget() {
-  const health = mockCustomerHealth;
+export interface CustomerHealthWidgetProps {
+  health: DashboardCustomerHealth;
+}
+
+type HealthKey = keyof DashboardCustomerHealth;
+
+const BUCKETS: { key: HealthKey; label: string; dot: string; bg: string; text: string; bar: string }[] = [
+  { key: 'active', label: 'Active', dot: 'bg-emerald-500', bg: 'bg-emerald-50/50 border-emerald-100/80', text: 'text-emerald-900', bar: 'bg-emerald-500' },
+  { key: 'trialing', label: 'Trialing', dot: 'bg-sky-500', bg: 'bg-sky-50/50 border-sky-100/80', text: 'text-sky-900', bar: 'bg-sky-500' },
+  { key: 'past_due', label: 'Past Due', dot: 'bg-rose-500', bg: 'bg-rose-50/50 border-rose-100/80', text: 'text-rose-900', bar: 'bg-rose-500' },
+  { key: 'paused', label: 'Paused', dot: 'bg-amber-400', bg: 'bg-amber-50/50 border-amber-100/80', text: 'text-amber-900', bar: 'bg-amber-400' },
+  { key: 'cancelled_this_period', label: 'Cancelled', dot: 'bg-slate-400', bg: 'bg-slate-50/70 border-slate-200/80', text: 'text-slate-700', bar: 'bg-slate-400' },
+];
+
+export function CustomerHealthWidget({ health }: CustomerHealthWidgetProps) {
+  const total = BUCKETS.reduce((sum, b) => sum + health[b.key], 0);
+  const pct = (count: number) => (total > 0 ? Math.round((count / total) * 100) : 0);
 
   return (
     <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-sm space-y-4">
@@ -15,111 +31,42 @@ export function CustomerHealthWidget() {
           </h3>
         </div>
         <span className="text-xs text-slate-400">
-          1,420 Active Client Accounts
+          {formatNumber(total)} Subscription{total === 1 ? '' : 's'}
         </span>
       </div>
 
       {/* Segmented Progress Bar */}
-      <div className="w-full h-3 rounded-full overflow-hidden flex bg-slate-100 p-0.5 gap-0.5">
-        <div
-          style={{ width: `${health.healthy.percentage}%` }}
-          className="bg-emerald-500 rounded-l-full h-full"
-          title={`Healthy: ${health.healthy.percentage}%`}
-        />
-        <div
-          style={{ width: `${health.needsAttention.percentage}%` }}
-          className="bg-amber-400 h-full"
-          title={`Needs Attention: ${health.needsAttention.percentage}%`}
-        />
-        <div
-          style={{ width: `${health.atRisk.percentage}%` }}
-          className="bg-orange-500 h-full"
-          title={`At Risk: ${health.atRisk.percentage}%`}
-        />
-        <div
-          style={{ width: `${health.churned.percentage}%` }}
-          className="bg-rose-500 rounded-r-full h-full"
-          title={`Churned: ${health.churned.percentage}%`}
-        />
-      </div>
+      {total > 0 && (
+        <div className="w-full h-3 rounded-full overflow-hidden flex bg-slate-100 p-0.5 gap-0.5">
+          {BUCKETS.map((b) => (
+            <div
+              key={b.key}
+              style={{ width: `${pct(health[b.key])}%` }}
+              className={`${b.bar} h-full first:rounded-l-full last:rounded-r-full`}
+              title={`${b.label}: ${pct(health[b.key])}%`}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Health Breakdown Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-        {/* Healthy */}
-        <div className="p-3 rounded-xl bg-emerald-50/50 border border-emerald-100/80">
-          <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            <span className="text-xs font-bold text-emerald-900">Healthy</span>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+        {BUCKETS.map((b) => (
+          <div key={b.key} className={`p-3 rounded-xl border ${b.bg}`}>
+            <div className="flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${b.dot}`} />
+              <span className={`text-xs font-bold ${b.text}`}>{b.label}</span>
+            </div>
+            <div className="mt-2">
+              <span className="text-lg font-bold text-slate-900 tabular-nums">
+                {formatNumber(health[b.key])}
+              </span>
+              <span className="text-[11px] text-slate-500 font-semibold ml-1">
+                ({pct(health[b.key])}%)
+              </span>
+            </div>
           </div>
-          <div className="mt-2">
-            <span className="text-lg font-bold text-slate-900 tabular-nums">
-              {health.healthy.count}
-            </span>
-            <span className="text-[11px] text-emerald-700 font-semibold ml-1">
-              ({health.healthy.percentage}%)
-            </span>
-          </div>
-          <span className="text-[10px] text-slate-500 mt-1 block">
-            MRR: {health.healthy.mrr}
-          </span>
-        </div>
-
-        {/* Needs Attention */}
-        <div className="p-3 rounded-xl bg-amber-50/50 border border-amber-100/80">
-          <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-amber-400" />
-            <span className="text-xs font-bold text-amber-900">Needs Attention</span>
-          </div>
-          <div className="mt-2">
-            <span className="text-lg font-bold text-slate-900 tabular-nums">
-              {health.needsAttention.count}
-            </span>
-            <span className="text-[11px] text-amber-700 font-semibold ml-1">
-              ({health.needsAttention.percentage}%)
-            </span>
-          </div>
-          <span className="text-[10px] text-slate-500 mt-1 block">
-            MRR: {health.needsAttention.mrr}
-          </span>
-        </div>
-
-        {/* At Risk */}
-        <div className="p-3 rounded-xl bg-orange-50/50 border border-orange-100/80">
-          <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-orange-500" />
-            <span className="text-xs font-bold text-orange-900">At Risk</span>
-          </div>
-          <div className="mt-2">
-            <span className="text-lg font-bold text-slate-900 tabular-nums">
-              {health.atRisk.count}
-            </span>
-            <span className="text-[11px] text-orange-700 font-semibold ml-1">
-              ({health.atRisk.percentage}%)
-            </span>
-          </div>
-          <span className="text-[10px] text-slate-500 mt-1 block">
-            MRR: {health.atRisk.mrr}
-          </span>
-        </div>
-
-        {/* Churned */}
-        <div className="p-3 rounded-xl bg-rose-50/50 border border-rose-100/80">
-          <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-rose-500" />
-            <span className="text-xs font-bold text-rose-900">Churned</span>
-          </div>
-          <div className="mt-2">
-            <span className="text-lg font-bold text-slate-900 tabular-nums">
-              {health.churned.count}
-            </span>
-            <span className="text-[11px] text-rose-700 font-semibold ml-1">
-              ({health.churned.percentage}%)
-            </span>
-          </div>
-          <span className="text-[10px] text-slate-500 mt-1 block">
-            Lost: {health.churned.mrr}
-          </span>
-        </div>
+        ))}
       </div>
     </div>
   );

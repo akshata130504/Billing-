@@ -6,7 +6,7 @@ suite against Postgres. Settings are forced before the application is imported.
 """
 import os
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session  # noqa: E402
 from backend.app.core.database import Base, SessionLocal, engine  # noqa: E402
 from backend.app.core.security import create_access_token, hash_password  # noqa: E402
 from backend.app.main import app  # noqa: E402
-from backend.app.models import Customer, Membership, MemberRole, MembershipStatus, Organization, Plan, Product, User  # noqa: E402
+from backend.app.models import Customer, Invoice, InvoiceStatus, Membership, MemberRole, MembershipStatus, Organization, Plan, Product, User  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -150,6 +150,28 @@ class Tenant:
         self.db.refresh(product)
         self.db.refresh(plan)
         return product, plan
+
+    def invoice(self, customer: Customer, amount="1000.00", status=InvoiceStatus.SENT) -> Invoice:
+        today = date.today()
+        code = uuid.uuid4().hex[:6].upper()
+        amt = Decimal(amount)
+        inv = Invoice(
+            organization_id=self.organization.id,
+            invoice_number=f"INV-{code}",
+            customer_id=customer.id,
+            status=status,
+            issue_date=today,
+            due_date=today + timedelta(days=30),
+            subtotal=amt,
+            total=amt,
+            amount_paid=Decimal("0.00"),
+            amount_due=amt,
+            public_token=uuid.uuid4().hex,
+        )
+        self.db.add(inv)
+        self.db.commit()
+        self.db.refresh(inv)
+        return inv
 
 
 @pytest.fixture()

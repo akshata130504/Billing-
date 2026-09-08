@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from backend.app.core.config import settings
 from backend.app.core.logging import logger
-from backend.app.models import Invoice, InvoiceStatus, Plan, Subscription, SubscriptionStatus
+from backend.app.models import Invoice, InvoiceStatus, Organization, Plan, Subscription, SubscriptionStatus
 from backend.app.services import audit
 from backend.app.services.invoice_service import mark_overdue, send_reminder
 from backend.app.services.subscription_service import convert_trial, renew_subscription
@@ -53,7 +53,29 @@ def run_billing_jobs(db: Session, *, today: Optional[date] = None) -> Dict[str, 
         try:
             sub = _load_subscription(db, sid)
             if sub is not None and sub.status == SubscriptionStatus.TRIALING:
-                convert_trial(db, sub, actor_label=audit.SYSTEM_ACTOR)
+                from backend.app.models.payments import CustomerPaymentMethod, CustomerPaymentMethodStatus
+                from backend.app.models.trials import TrialConversionAttemptType
+                from backend.app.services.trial_service import convert_trial_to_live
+
+                pm = db.scalars(
+                    select(CustomerPaymentMethod).where(
+                        CustomerPaymentMethod.customer_id == sub.customer_id,
+                        CustomerPaymentMethod.is_default.is_(True),
+                        CustomerPaymentMethod.status == CustomerPaymentMethodStatus.ACTIVE,
+                    )
+                ).first()
+
+                if pm is not None:
+                    convert_trial_to_live(
+                        db,
+                        sub,
+                        payment_method_id=pm.id,
+                        attempt_type=TrialConversionAttemptType.AUTOMATIC_TRIAL_END,
+                        actor_label=audit.SYSTEM_ACTOR,
+                    )
+                else:
+                    convert_trial(db, sub, actor_label=audit.SYSTEM_ACTOR)
+
                 counts["trials_converted"] += 1
             db.commit()
         except Exception:
@@ -127,12 +149,42 @@ def run_billing_jobs(db: Session, *, today: Optional[date] = None) -> Dict[str, 
             logger.exception("Scheduler: reminder failed for invoice %s", iid)
             db.rollback()
 
+    # (e) dunning recovery retries across organizations
+    org_ids = list(db.scalars(select(Organization.id)).all())
+    dunning_recovered = 0
+    for oid in org_ids:
+        try:
+            from backend.app.services.dunning_service import execute_dunning_retries
+            res = execute_dunning_retries(db, oid)
+            dunning_recovered += res.get("recovered_count", 0)
+            db.commit()
+        except Exception:
+            errors += 1
+            logger.exception("Scheduler: dunning retry execution failed for organization %s", oid)
+            db.rollback()
+    counts["dunning_recovered"] = dunning_recovered
+
+    # (f) scheduled subscription changes due today
+    scheduled_changes_applied = 0
+    try:
+        from backend.app.services.subscription_change_service import execute_due_scheduled_changes
+        applied = execute_due_scheduled_changes(db, today=today)
+        scheduled_changes_applied = len(applied)
+        db.commit()
+    except Exception:
+        errors += 1
+        logger.exception("Scheduler: applying scheduled subscription changes failed")
+        db.rollback()
+    counts["scheduled_changes_applied"] = scheduled_changes_applied
+
     logger.info(
-        "Billing jobs: renewals=%s trials_converted=%s marked_overdue=%s reminders_sent=%s ended=%s errors=%s",
+        "Billing jobs: renewals=%s trials_converted=%s marked_overdue=%s reminders_sent=%s dunning_recovered=%s scheduled_changes=%s ended=%s errors=%s",
         counts["renewals"],
         counts["trials_converted"],
         counts["marked_overdue"],
         counts["reminders_sent"],
+        counts.get("dunning_recovered", 0),
+        counts.get("scheduled_changes_applied", 0),
         ended,
         errors,
     )
@@ -193,4 +245,38 @@ def stop_scheduler() -> None:
         logger.info("Scheduler stopped")
 
 
-__all__ = ["run_billing_jobs", "start_scheduler", "stop_scheduler"]
+def run_forever() -> None:
+    """Run the billing scheduler as a dedicated blocking worker process."""
+    import signal
+    import time
+    from threading import Event
+
+    stop_event = Event()
+
+    def _handle_exit(signum, frame):
+        logger.info("Received termination signal (%s); shutting down scheduler...", signum)
+        stop_event.set()
+
+    try:
+        signal.signal(signal.SIGINT, _handle_exit)
+        signal.signal(signal.SIGTERM, _handle_exit)
+    except (ValueError, AttributeError):
+        pass
+
+    # Ensure scheduler is enabled when running as a dedicated worker
+    settings.SCHEDULER_ENABLED = True
+    start_scheduler()
+    logger.info("Dedicated billing scheduler is running. Press Ctrl+C to terminate.")
+
+    try:
+        while not stop_event.is_set():
+            stop_event.wait(timeout=1.0)
+    finally:
+        stop_scheduler()
+        logger.info("Dedicated billing scheduler exited cleanly.")
+
+
+__all__ = ["run_billing_jobs", "start_scheduler", "stop_scheduler", "run_forever"]
+
+if __name__ == "__main__":
+    run_forever()

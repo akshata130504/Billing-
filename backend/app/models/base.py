@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime, ForeignKey, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.core.database import Base  # noqa: F401  (re-exported for convenience)
 
@@ -39,4 +40,4 @@ class TenantMixin:
 class UUIDPrimaryKeyMixin:
     """Abstract mixin for UUID-based primary keys."""
 
-    id = Column(String(36), primary_key=True, default=new_uuid)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)

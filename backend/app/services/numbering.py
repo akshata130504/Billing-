@@ -18,9 +18,26 @@ PAD_WIDTH = 6
 def next_number(db: Session, organization_id: str, sequence: Sequence) -> str:
     """Reserve and return the next formatted number for `sequence`.
 
-    Must be called inside the transaction that persists the document, so a
-    rollback also releases the number. Locking is skipped on SQLite (tests).
+    If an active default TransactionNumberSeries exists for this sequence/module,
+    it is used (with date token resolution); otherwise falls back to the Organization's
+    configured prefix and counter.
     """
+    from backend.app.models.customization import TransactionNumberSeries
+    from backend.app.services.customization_service import reserve_next_number
+
+    series_stmt = select(TransactionNumberSeries).where(
+        TransactionNumberSeries.organization_id == organization_id,
+        TransactionNumberSeries.module == sequence,
+        TransactionNumberSeries.is_default.is_(True),
+        TransactionNumberSeries.is_active.is_(True),
+    )
+    if db.bind is not None and db.bind.dialect.name != "sqlite":
+        series_stmt = series_stmt.with_for_update()
+    custom_series = db.execute(series_stmt).scalars().first()
+
+    if custom_series is not None:
+        return reserve_next_number(db, custom_series)
+
     stmt = select(Organization).where(Organization.id == organization_id)
     if db.bind is not None and db.bind.dialect.name != "sqlite":
         stmt = stmt.with_for_update()

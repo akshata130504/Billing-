@@ -20,6 +20,7 @@ from backend.app.core.logging import logger
 from backend.app.core.security import generate_opaque_token
 from backend.app.models import (
     OPEN_INVOICE_STATUSES,
+    ApprovalRequest,
     Customer,
     Invoice,
     InvoiceItem,
@@ -566,18 +567,36 @@ def send_reminder(
     return invoice
 
 
-def void_invoice(db: Session, ctx: CurrentContext, invoice: Invoice, reason: str) -> Invoice:
+def void_invoice(
+    db: Session,
+    ctx: Optional[CurrentContext] = None,
+    invoice: Optional[Invoice] = None,
+    reason: Optional[str] = None,
+    *,
+    approval: Optional[ApprovalRequest] = None,
+) -> Invoice:
+    if approval is not None:
+        invoice = db.get(Invoice, approval.entity_id)
+        if invoice is None:
+            raise EntityNotFoundError("Invoice", approval.entity_id)
+        reason = approval.justification or (approval.decision_note if hasattr(approval, "decision_note") else None) or "Approved invoice void request"
+
+    if invoice is None:
+        raise InvalidStateError("Invoice is required to void.")
     if invoice.status == InvoiceStatus.VOID:
         raise InvalidStateError("This invoice is already void.")
     if D(invoice.amount_paid) > 0:
         raise InvalidStateError("An invoice with recorded payments cannot be voided. Refund the payments first.")
+
     before = snapshot(invoice)
     invoice.status = InvoiceStatus.VOID
     invoice.voided_at = utcnow()
-    invoice.void_reason = reason.strip()
+    invoice.void_reason = (reason or "Voided").strip()
     invoice.amount_due = Decimal("0.00")
     invoice.updated_at = utcnow()
     db.flush()
+
+    actor_label = ctx.user.full_name if ctx and ctx.user else audit.SYSTEM_ACTOR
     audit.record(
         db,
         action="INVOICE_VOIDED",
@@ -585,11 +604,13 @@ def void_invoice(db: Session, ctx: CurrentContext, invoice: Invoice, reason: str
         entity_id=invoice.id,
         entity_label=invoice.invoice_number,
         ctx=ctx,
+        actor_label=actor_label,
         before=before,
         after=snapshot(invoice),
     )
     db.commit()
-    return get_invoice(db, ctx.organization_id, invoice.id)
+    org_id = ctx.organization_id if ctx else invoice.organization_id
+    return get_invoice(db, org_id, invoice.id)
 
 
 def mark_overdue(db: Session, invoice: Invoice, *, actor_label: str = audit.SYSTEM_ACTOR) -> bool:
