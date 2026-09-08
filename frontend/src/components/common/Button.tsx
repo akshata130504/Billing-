@@ -52,17 +52,17 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         disabled={disabled || isLoading}
         aria-busy={isLoading}
-        className={cn(baseStyles, variants[variant], sizes[size], className)}
+        className={cn(baseStyles, variants[variant], sizes[size], 'flex flex-row items-center whitespace-nowrap', className)}
         {...props}
       >
         {isLoading ? (
-          <Loader2 className="w-4 h-4 animate-spin text-current" />
+          <Loader2 className="w-4 h-4 animate-spin text-current shrink-0" />
         ) : (
-          leadingIcon && <span className="inline-flex shrink-0">{leadingIcon}</span>
+          leadingIcon && <span className="inline-flex shrink-0 items-center justify-center">{leadingIcon}</span>
         )}
-        <span>{children}</span>
+        <span className="truncate">{children}</span>
         {!isLoading && trailingIcon && (
-          <span className="inline-flex shrink-0">{trailingIcon}</span>
+          <span className="inline-flex shrink-0 items-center justify-center">{trailingIcon}</span>
         )}
       </button>
     );

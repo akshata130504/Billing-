@@ -15,6 +15,7 @@ export { authService } from './authService';
 export { organizationService } from './organizationService';
 export { customerService } from './customerService';
 export { catalogService } from './catalogService';
+export { catalogCpqService } from './catalogCpqService';
 export { quoteService } from './quoteService';
 export { subscriptionService } from './subscriptionService';
 export { invoiceService } from './invoiceService';

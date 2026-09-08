@@ -19,6 +19,8 @@ ROUTERS = [
     ("customers", "/customers", ["Customers"]),
     ("products", "/products", ["Catalog"]),
     ("plans", "/plans", ["Catalog"]),
+    ("catalog", "/catalog", ["Catalog"]),
+    ("cpq", "/cpq", ["CPQ"]),
     ("quotes", "/quotes", ["Quotes"]),
     ("subscriptions", "/subscriptions", ["Subscriptions"]),
     ("invoices", "/invoices", ["Invoices"]),

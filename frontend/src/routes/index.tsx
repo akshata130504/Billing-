@@ -19,6 +19,7 @@ import {
 } from '../pages/auth';
 import { CustomersListPage, CustomerFormPage, CustomerDetailPage } from '../pages/customers';
 import { CatalogPage } from '../pages/catalog';
+import { CPQPage } from '../pages/cpq';
 import { QuotesListPage, QuoteFormPage, QuoteDetailPage } from '../pages/quotes';
 import {
   SubscriptionsListPage,
@@ -219,8 +220,7 @@ export function AppRoutes() {
               {/* Settings (tabs via ?tab=) */}
               <Route path="settings" element={<SettingsPage />} />
 
-              {/* Navigation entries without an implementation in this release */}
-              <Route path="cpq" element={<ComingSoonPage />} />
+              <Route path="cpq" element={<CPQPage />} />
               <Route path="usage" element={<ComingSoonPage />} />
               <Route path="proration" element={<ComingSoonPage />} />
               <Route path="dunning" element={<ComingSoonPage />} />
