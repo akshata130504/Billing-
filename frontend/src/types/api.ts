@@ -720,6 +720,15 @@ export interface RefundRequest {
   reason?: string;
 }
 
+/** Money totals across every payment matching the current filters (GET /payments/summary). */
+export interface PaymentsSummary {
+  count: number;
+  total_collected: string;
+  pending_amount: string;
+  total_refunded: string;
+  unallocated_amount: string;
+}
+
 export interface ReconciliationSummary {
   auto_matched: number;
   matched: number;

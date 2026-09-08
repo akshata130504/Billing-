@@ -5,6 +5,7 @@ import type {
   PaymentIn,
   PaymentListParams,
   PaymentOut,
+  PaymentsSummary,
   PaymentUpdate,
   ReconciliationSummary,
   RefundRequest,
@@ -42,6 +43,14 @@ export const paymentService = {
 
   refund: async (id: string, body: RefundRequest): Promise<PaymentOut> => {
     const { data } = await apiClient.post<PaymentOut>(`/payments/${id}/refund`, body);
+    return data;
+  },
+
+  /** Org-wide money totals for the same rows list() returns. */
+  summary: async (params?: PaymentListParams): Promise<PaymentsSummary> => {
+    const { data } = await apiClient.get<PaymentsSummary>('/payments/summary', {
+      params: cleanParams(params),
+    });
     return data;
   },
 

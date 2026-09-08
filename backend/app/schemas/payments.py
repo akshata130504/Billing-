@@ -92,6 +92,16 @@ class PaymentOut(BaseModel):
     updated_at: datetime
 
 
+class PaymentsSummary(BaseModel):
+    """Money totals across every payment matching the current filters."""
+
+    count: int
+    total_collected: str
+    pending_amount: str
+    total_refunded: str
+    unallocated_amount: str
+
+
 class ReconciliationSummary(BaseModel):
     auto_matched: int
     matched: int

@@ -177,10 +177,9 @@ def _day_bounds(date_from: Optional[date], date_to: Optional[date]):
     return start, end
 
 
-def list_payments(
-    db: Session,
+def _apply_filters(
+    stmt: Select,
     organization_id: str,
-    params: PageParams,
     *,
     search: Optional[str] = None,
     status: Optional[str] = None,
@@ -190,8 +189,9 @@ def list_payments(
     customer_id: Optional[str] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
-):
-    stmt = _base_query().where(Payment.organization_id == organization_id)
+) -> Select:
+    """Shared WHERE clauses so the list and the summary always describe the same rows."""
+    stmt = stmt.where(Payment.organization_id == organization_id)
     if search:
         like = f"%{search.strip()}%"
         stmt = stmt.outerjoin(Customer, Customer.id == Payment.customer_id).where(
@@ -233,8 +233,53 @@ def list_payments(
         stmt = stmt.where(func.coalesce(Payment.paid_at, Payment.created_at) >= start)
     if end:
         stmt = stmt.where(func.coalesce(Payment.paid_at, Payment.created_at) < end)
+    return stmt
+
+
+def list_payments(
+    db: Session,
+    organization_id: str,
+    params: PageParams,
+    **filters,
+):
+    stmt = _apply_filters(_base_query(), organization_id, **filters)
     stmt = apply_sort(stmt, Payment, params.sort, PAYMENT_SORT_FIELDS, "-created_at")
     return paginate(db, stmt, params)
+
+
+def payments_summary(db: Session, organization_id: str, **filters) -> Dict[str, Any]:
+    """Organization-wide money totals for the same rows the list endpoint returns.
+
+    Computed in SQL so the figures cover every matching payment, not just the
+    page the client happens to be showing.
+    """
+    ids_stmt = _apply_filters(select(Payment.id), organization_id, **filters).subquery()
+    matching = select(ids_stmt.c.id)
+
+    def _sum(column, *conditions):
+        stmt = select(func.coalesce(func.sum(column), 0)).where(Payment.id.in_(matching))
+        for condition in conditions:
+            stmt = stmt.where(condition)
+        return D(db.scalar(stmt))
+
+    collected = _sum(Payment.amount - Payment.amount_refunded, Payment.status.in_(SETTLED_PAYMENT_STATUSES))
+    pending = _sum(Payment.amount, Payment.status == PaymentStatus.PENDING)
+    refunded = _sum(Payment.amount_refunded)
+    allocated = D(
+        db.scalar(
+            select(func.coalesce(func.sum(PaymentAllocation.amount), 0))
+            .join(Payment, Payment.id == PaymentAllocation.payment_id)
+            .where(Payment.id.in_(matching), Payment.status.in_(SETTLED_PAYMENT_STATUSES))
+        )
+    )
+    count = db.scalar(select(func.count()).select_from(ids_stmt)) or 0
+    return {
+        "count": int(count),
+        "total_collected": money_str(collected),
+        "pending_amount": money_str(pending),
+        "total_refunded": money_str(refunded),
+        "unallocated_amount": money_str(max(Decimal("0"), collected - allocated)),
+    }
 
 
 # --- reconciliation -----------------------------------------------------------------------------------------
