@@ -50,14 +50,16 @@ class LineItemIn(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
+    offering_id: Optional[str] = None
     product_id: Optional[str] = None
     plan_id: Optional[str] = None
     description: str = Field(..., min_length=1, max_length=500)
     quantity: Decimal = Field(default=Decimal("1"))
     unit_price: Decimal = Field(default=Decimal("0"))
     tax_rate_pct: Decimal = Field(default=Decimal("0"))
+    pricing_explanation: Optional[str] = None
 
-    @field_validator("product_id", "plan_id", mode="before")
+    @field_validator("offering_id", "product_id", "plan_id", mode="before")
     @classmethod
     def _empty_to_none(cls, value):
         if value == "":
@@ -67,6 +69,7 @@ class LineItemIn(BaseModel):
 
 class LineItemOut(BaseModel):
     id: str
+    offering_id: Optional[str] = None
     product_id: Optional[str] = None
     plan_id: Optional[str] = None
     description: str
@@ -75,6 +78,7 @@ class LineItemOut(BaseModel):
     tax_rate_pct: str
     amount: str
     position: int
+    pricing_explanation: Optional[str] = None
 
 
 def paginated_of(item_model: Type[BaseModel]):
@@ -134,6 +138,7 @@ def user_ref(user) -> Optional[Dict[str, Any]]:
 def line_item_out(item) -> Dict[str, Any]:
     return {
         "id": item.id,
+        "offering_id": getattr(item, "offering_id", None),
         "product_id": item.product_id,
         "plan_id": item.plan_id,
         "description": item.description,
@@ -142,6 +147,7 @@ def line_item_out(item) -> Dict[str, Any]:
         "tax_rate_pct": money_str(item.tax_rate_pct),
         "amount": money_str(item.amount),
         "position": int(item.position or 0),
+        "pricing_explanation": getattr(item, "pricing_explanation", None),
     }
 
 

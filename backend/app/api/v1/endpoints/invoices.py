@@ -1,12 +1,14 @@
 """/invoices (contract §8)."""
 from datetime import date
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from fastapi.responses import Response as RawResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import CurrentContext, get_db, require_finance, require_viewer
+from backend.app.models import Payment, PaymentAllocation
 from backend.app.schemas.common import PaginatedResponse
 from backend.app.schemas.invoices import InvoiceCreate, InvoiceOut, InvoiceUpdate, InvoiceVoidIn, RecordPaymentIn
 from backend.app.schemas.payments import PaymentOut
@@ -130,6 +132,35 @@ def record_payment(
     invoice = invoice_service.get_invoice(db, ctx.organization_id, invoice_id)
     payment = payment_service.record_invoice_payment(db, ctx, invoice, body)
     return payment_service.serialize_payment(payment)
+
+
+@router.get(
+    "/{invoice_id}/payments",
+    response_model=List[PaymentOut],
+    summary="List payments allocated to this invoice",
+)
+def list_invoice_payments(
+    invoice_id: str,
+    ctx: CurrentContext = Depends(require_viewer),
+    db: Session = Depends(get_db),
+):
+    invoice = invoice_service.get_invoice(db, ctx.organization_id, invoice_id)
+    allocations = db.scalars(
+        select(PaymentAllocation).where(
+            PaymentAllocation.organization_id == ctx.organization_id,
+            PaymentAllocation.invoice_id == invoice.id,
+        )
+    ).all()
+    payment_ids = [a.payment_id for a in allocations]
+    if not payment_ids:
+        return []
+    payments = db.scalars(
+        select(Payment).where(
+            Payment.organization_id == ctx.organization_id,
+            Payment.id.in_(payment_ids),
+        )
+    ).all()
+    return [payment_service.serialize_payment(p) for p in payments]
 
 
 @router.get("/{invoice_id}/pdf", response_class=RawResponse, summary="Download the invoice PDF", responses={200: {"content": {"application/pdf": {}}}})

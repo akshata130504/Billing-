@@ -17,6 +17,7 @@ export { customerService } from './customerService';
 export { catalogService } from './catalogService';
 export { catalogCpqService } from './catalogCpqService';
 export { quoteService } from './quoteService';
+export { planPricingService } from './planPricingService';
 export { subscriptionService } from './subscriptionService';
 export { invoiceService } from './invoiceService';
 export { paymentService } from './paymentService';

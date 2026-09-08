@@ -1,3 +1,3 @@
-export { QuotesListPage } from './QuotesListPage';
-export { QuoteFormPage } from './QuoteFormPage';
-export { QuoteDetailPage } from './QuoteDetailPage';
+export * from './QuotesListPage';
+export * from './QuoteFormPage';
+export * from './QuoteDetailPage';

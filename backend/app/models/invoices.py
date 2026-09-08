@@ -70,6 +70,7 @@ class InvoiceItem(UUIDPrimaryKeyMixin, TenantMixin, Base):
     __tablename__ = "invoice_items"
 
     invoice_id = Column(String(36), ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False, index=True)
+    offering_id = Column(String(36), ForeignKey("offerings.id", ondelete="SET NULL"), nullable=True)
     product_id = Column(String(36), ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
     plan_id = Column(String(36), ForeignKey("plans.id", ondelete="SET NULL"), nullable=True)
     description = Column(String(500), nullable=False)
@@ -78,5 +79,6 @@ class InvoiceItem(UUIDPrimaryKeyMixin, TenantMixin, Base):
     tax_rate_pct = Column(Numeric(5, 2), nullable=False, default=0)
     amount = Column(Numeric(14, 2), nullable=False, default=0)  # quantity * unit_price (pre-tax)
     position = Column(Integer, nullable=False, default=0)
+    pricing_explanation = Column(Text, nullable=True)
 
     invoice = relationship("Invoice", back_populates="items")

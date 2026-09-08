@@ -19,6 +19,7 @@ import {
 } from '../pages/auth';
 import { CustomersListPage, CustomerFormPage, CustomerDetailPage } from '../pages/customers';
 import { CatalogPage } from '../pages/catalog';
+import { PlansPricingPage, PricingSimulatorPage } from '../pages/plans-pricing';
 import { CPQPage } from '../pages/cpq';
 import { QuotesListPage, QuoteFormPage, QuoteDetailPage } from '../pages/quotes';
 import {
@@ -185,7 +186,9 @@ export function AppRoutes() {
               <Route path="payments/:id" element={<PaymentDetailPage />} />
               <Route path="collections" element={<CollectionsPage />} />
 
-              {/* Subscriptions */}
+              {/* Subscriptions & Plans */}
+              <Route path="plans-pricing" element={<PlansPricingPage />} />
+              <Route path="plans-pricing/simulator" element={<PricingSimulatorPage />} />
               <Route path="subscriptions" element={<SubscriptionsListPage />} />
               <Route path="subscriptions/new" element={<SubscriptionFormPage />} />
               <Route path="subscriptions/:id" element={<SubscriptionDetailPage />} />
@@ -237,7 +240,6 @@ export function AppRoutes() {
               <Route path="platforms/desktop" element={<ComingSoonPage />} />
 
               {/* Legacy / alternate path redirects */}
-              <Route path="plans-pricing" element={<Navigate to="/catalog" replace />} />
               <Route path="system/settings" element={<Navigate to="/settings" replace />} />
               <Route path="revenue/quotes" element={<Navigate to="/quotes" replace />} />
               <Route path="revenue/cpq" element={<Navigate to="/cpq" replace />} />

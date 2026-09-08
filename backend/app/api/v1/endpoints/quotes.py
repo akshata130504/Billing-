@@ -90,6 +90,7 @@ def delete_quote(
 
 
 @router.post("/{quote_id}/send", response_model=QuoteOut, summary="Send the quote (or request discount approval)")
+@router.post("/{quote_id}/submit", response_model=QuoteOut, summary="Submit quote for approval or sending")
 def send_quote(
     quote_id: str,
     ctx: CurrentContext = Depends(require_finance),
@@ -99,7 +100,39 @@ def send_quote(
     return svc.serialize_quote_full(db, quote)
 
 
+@router.post("/{quote_id}/approve", response_model=QuoteOut, summary="Approve a pending quote")
+def approve_quote(
+    quote_id: str,
+    ctx: CurrentContext = Depends(require_finance),
+    db: Session = Depends(get_db),
+):
+    quote = svc.approve_quote(db, ctx, quote_id)
+    return svc.serialize_quote_full(db, quote)
+
+
+@router.post("/{quote_id}/reject", response_model=QuoteOut, summary="Reject a pending quote")
+def reject_quote(
+    quote_id: str,
+    body: QuoteDeclineIn = Body(default=QuoteDeclineIn()),
+    ctx: CurrentContext = Depends(require_finance),
+    db: Session = Depends(get_db),
+):
+    quote = svc.reject_quote(db, ctx, quote_id, body.reason)
+    return svc.serialize_quote_full(db, quote)
+
+
+@router.post("/{quote_id}/mark-viewed", response_model=QuoteOut, summary="Mark quote as viewed")
+def mark_viewed(
+    quote_id: str,
+    ctx: CurrentContext = Depends(require_finance),
+    db: Session = Depends(get_db),
+):
+    quote = svc.mark_viewed(db, ctx, quote_id)
+    return svc.serialize_quote_full(db, quote)
+
+
 @router.post("/{quote_id}/mark-accepted", response_model=QuoteOut, summary="Mark a sent quote as accepted")
+@router.post("/{quote_id}/accept", response_model=QuoteOut, summary="Accept a quote")
 def mark_accepted(
     quote_id: str,
     _body: dict = Body(default={}),
@@ -111,6 +144,7 @@ def mark_accepted(
 
 
 @router.post("/{quote_id}/mark-declined", response_model=QuoteOut, summary="Mark a sent quote as declined")
+@router.post("/{quote_id}/decline", response_model=QuoteOut, summary="Decline a quote")
 def mark_declined(
     quote_id: str,
     body: QuoteDeclineIn = Body(default=QuoteDeclineIn()),
@@ -123,6 +157,12 @@ def mark_declined(
 
 @router.post(
     "/{quote_id}/convert",
+    response_model=InvoiceFromQuoteOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Convert an accepted quote into a draft invoice",
+)
+@router.post(
+    "/{quote_id}/convert-to-invoice",
     response_model=InvoiceFromQuoteOut,
     status_code=status.HTTP_201_CREATED,
     summary="Convert an accepted quote into a draft invoice",

@@ -11,10 +11,14 @@ from backend.app.models.base import TenantMixin, TimestampMixin, UUIDPrimaryKeyM
 class QuoteStatus(str, enum.Enum):
     DRAFT = "draft"
     PENDING_APPROVAL = "pending_approval"  # discount above org threshold, awaiting admin
+    APPROVED = "approved"
     SENT = "sent"
+    VIEWED = "viewed"
     ACCEPTED = "accepted"
     DECLINED = "declined"
     EXPIRED = "expired"
+    PARTIALLY_INVOICED = "partially_invoiced"
+    INVOICED = "invoiced"
     CONVERTED = "converted"  # an invoice was generated from it
 
 
@@ -56,6 +60,7 @@ class QuoteItem(UUIDPrimaryKeyMixin, TenantMixin, Base):
     __tablename__ = "quote_items"
 
     quote_id = Column(String(36), ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False, index=True)
+    offering_id = Column(String(36), ForeignKey("offerings.id", ondelete="SET NULL"), nullable=True)
     product_id = Column(String(36), ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
     plan_id = Column(String(36), ForeignKey("plans.id", ondelete="SET NULL"), nullable=True)
     description = Column(String(500), nullable=False)
@@ -64,5 +69,6 @@ class QuoteItem(UUIDPrimaryKeyMixin, TenantMixin, Base):
     tax_rate_pct = Column(Numeric(5, 2), nullable=False, default=0)
     amount = Column(Numeric(14, 2), nullable=False, default=0)  # quantity * unit_price (pre-tax)
     position = Column(Integer, nullable=False, default=0)
+    pricing_explanation = Column(Text, nullable=True)
 
     quote = relationship("Quote", back_populates="items")

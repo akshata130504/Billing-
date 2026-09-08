@@ -64,7 +64,7 @@ QUOTE_SNAPSHOT_FIELDS = (
     "converted_invoice_id",
 )
 
-EDITABLE_STATUSES = (QuoteStatus.DRAFT, QuoteStatus.PENDING_APPROVAL)
+EDITABLE_STATUSES = (QuoteStatus.DRAFT, QuoteStatus.PENDING_APPROVAL, QuoteStatus.APPROVED)
 
 
 def _quote_query() -> Select:
@@ -149,22 +149,36 @@ def list_quotes(
 # --- line items ------------------------------------------------------------------------------------
 
 
+from backend.app.models.catalog_cpq import Offering
+
+
 def _validate_refs(db: Session, organization_id: str, items: Sequence[LineItemIn]) -> None:
+    offering_ids = {i.offering_id for i in items if i.offering_id}
     product_ids = {i.product_id for i in items if i.product_id}
     plan_ids = {i.plan_id for i in items if i.plan_id}
     fields: Dict[str, str] = {}
+    if offering_ids:
+        found_off = set(
+            db.scalars(select(Offering.id).where(Offering.organization_id == organization_id, Offering.id.in_(offering_ids)))
+        )
+        for oid in offering_ids - found_off:
+            fields[f"items.offering_id.{oid}"] = "unknown offering"
     if product_ids:
-        found = set(
+        found_prod = set(
             db.scalars(select(Product.id).where(Product.organization_id == organization_id, Product.id.in_(product_ids)))
         )
-        for pid in product_ids - found:
+        found_off_prod = set(
+            db.scalars(select(Offering.id).where(Offering.organization_id == organization_id, Offering.id.in_(product_ids)))
+        )
+        for pid in product_ids - (found_prod | found_off_prod):
             fields[f"items.product_id.{pid}"] = "unknown product"
     if plan_ids:
-        found = set(db.scalars(select(Plan.id).where(Plan.organization_id == organization_id, Plan.id.in_(plan_ids))))
-        for pid in plan_ids - found:
+        found_plan = set(db.scalars(select(Plan.id).where(Plan.organization_id == organization_id, Plan.id.in_(plan_ids))))
+        found_off_plan = set(db.scalars(select(Offering.id).where(Offering.organization_id == organization_id, Offering.id.in_(plan_ids))))
+        for pid in plan_ids - (found_plan | found_off_plan):
             fields[f"items.plan_id.{pid}"] = "unknown plan"
     if fields:
-        raise ValidationAppError("One or more line items reference an unknown product or plan.", {"fields": fields})
+        raise ValidationAppError("One or more line items reference an unknown product, offering or plan.", {"fields": fields})
 
 
 def compute_quote_totals(items: Iterable[LineItemIn], discount_pct) -> Totals:
@@ -174,8 +188,10 @@ def compute_quote_totals(items: Iterable[LineItemIn], discount_pct) -> Totals:
             quantity=D(i.quantity),
             unit_price=D(i.unit_price),
             tax_rate_pct=D(i.tax_rate_pct),
+            offering_id=getattr(i, "offering_id", None),
             product_id=i.product_id,
             plan_id=i.plan_id,
+            pricing_explanation=getattr(i, "pricing_explanation", None),
         )
         for i in items
     ]
@@ -196,6 +212,7 @@ def _apply_totals(quote: Quote, totals: Totals) -> None:
         quote.items.append(
             QuoteItem(
                 organization_id=quote.organization_id,
+                offering_id=line.offering_id,
                 product_id=line.product_id,
                 plan_id=line.plan_id,
                 description=line.description,
@@ -204,6 +221,7 @@ def _apply_totals(quote: Quote, totals: Totals) -> None:
                 tax_rate_pct=line.tax_rate_pct,
                 amount=line.amount,
                 position=line.position,
+                pricing_explanation=line.pricing_explanation,
             )
         )
 
@@ -431,8 +449,8 @@ def send_quote(db: Session, ctx: CurrentContext, quote_id: str) -> Quote:
 
 def mark_accepted(db: Session, ctx: CurrentContext, quote_id: str) -> Quote:
     quote = get_quote(db, ctx, quote_id)
-    if quote.status != QuoteStatus.SENT:
-        raise InvalidStateError(f"Only sent quotes can be accepted (current status '{enum_value(quote.status)}').")
+    if quote.status not in (QuoteStatus.SENT, QuoteStatus.VIEWED):
+        raise InvalidStateError(f"Only sent or viewed quotes can be accepted (current status '{enum_value(quote.status)}').")
     before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
     quote.status = QuoteStatus.ACCEPTED
     quote.accepted_at = utcnow()
@@ -453,8 +471,8 @@ def mark_accepted(db: Session, ctx: CurrentContext, quote_id: str) -> Quote:
 
 def mark_declined(db: Session, ctx: CurrentContext, quote_id: str, reason: Optional[str] = None) -> Quote:
     quote = get_quote(db, ctx, quote_id)
-    if quote.status != QuoteStatus.SENT:
-        raise InvalidStateError(f"Only sent quotes can be declined (current status '{enum_value(quote.status)}').")
+    if quote.status not in (QuoteStatus.SENT, QuoteStatus.VIEWED):
+        raise InvalidStateError(f"Only sent or viewed quotes can be declined (current status '{enum_value(quote.status)}').")
     before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
     quote.status = QuoteStatus.DECLINED
     quote.declined_at = utcnow()
@@ -510,6 +528,7 @@ def _create_invoice_from_quote(db: Session, ctx: CurrentContext, quote: Quote, d
         invoice.items.append(
             InvoiceItem(
                 organization_id=ctx.organization_id,
+                offering_id=getattr(item, "offering_id", None),
                 product_id=item.product_id,
                 plan_id=item.plan_id,
                 description=item.description,
@@ -518,10 +537,96 @@ def _create_invoice_from_quote(db: Session, ctx: CurrentContext, quote: Quote, d
                 tax_rate_pct=item.tax_rate_pct,
                 amount=item.amount,
                 position=item.position,
+                pricing_explanation=getattr(item, "pricing_explanation", None),
             )
         )
     db.flush()
     return invoice
+
+
+def approve_quote(db: Session, ctx: CurrentContext, quote_id: str) -> Quote:
+    quote = get_quote(db, ctx, quote_id)
+    if quote.status != QuoteStatus.PENDING_APPROVAL:
+        raise InvalidStateError(f"Quote in status '{enum_value(quote.status)}' is not awaiting approval.")
+    before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
+    quote.status = QuoteStatus.APPROVED
+    db.flush()
+    req = db.scalars(
+        select(ApprovalRequest).where(
+            ApprovalRequest.organization_id == ctx.organization_id,
+            ApprovalRequest.entity_id == quote.id,
+            ApprovalRequest.status == ApprovalStatus.PENDING,
+        )
+    ).first()
+    if req:
+        req.status = ApprovalStatus.APPROVED
+        req.decided_by_id = ctx.user.id
+        req.decided_at = utcnow()
+    audit.record(
+        db,
+        ctx=ctx,
+        action="QUOTE_APPROVED",
+        entity_type="quote",
+        entity_id=quote.id,
+        entity_label=quote.quote_number,
+        before=before,
+        after=audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS),
+    )
+    db.commit()
+    return get_quote_or_404(db, ctx.organization_id, quote.id)
+
+
+def reject_quote(db: Session, ctx: CurrentContext, quote_id: str, reason: Optional[str] = None) -> Quote:
+    quote = get_quote(db, ctx, quote_id)
+    if quote.status != QuoteStatus.PENDING_APPROVAL:
+        raise InvalidStateError(f"Quote in status '{enum_value(quote.status)}' is not awaiting approval.")
+    before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
+    quote.status = QuoteStatus.DRAFT
+    db.flush()
+    req = db.scalars(
+        select(ApprovalRequest).where(
+            ApprovalRequest.organization_id == ctx.organization_id,
+            ApprovalRequest.entity_id == quote.id,
+            ApprovalRequest.status == ApprovalStatus.PENDING,
+        )
+    ).first()
+    if req:
+        req.status = ApprovalStatus.REJECTED
+        req.decided_by_id = ctx.user.id
+        req.decided_at = utcnow()
+        req.decision_notes = reason
+    audit.record(
+        db,
+        ctx=ctx,
+        action="QUOTE_REJECTED",
+        entity_type="quote",
+        entity_id=quote.id,
+        entity_label=quote.quote_number,
+        before=before,
+        after={**audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS), "reason": reason},
+    )
+    db.commit()
+    return get_quote_or_404(db, ctx.organization_id, quote.id)
+
+
+def mark_viewed(db: Session, ctx: CurrentContext, quote_id: str) -> Quote:
+    quote = get_quote(db, ctx, quote_id)
+    if quote.status == QuoteStatus.SENT:
+        before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
+        quote.status = QuoteStatus.VIEWED
+        db.flush()
+        audit.record(
+            db,
+            ctx=ctx,
+            action="QUOTE_VIEWED",
+            entity_type="quote",
+            entity_id=quote.id,
+            entity_label=quote.quote_number,
+            before=before,
+            after=audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS),
+        )
+        db.commit()
+    return get_quote_or_404(db, ctx.organization_id, quote.id)
 
 
 def convert_quote(db: Session, ctx: CurrentContext, quote_id: str, data: QuoteConvertIn) -> Invoice:
@@ -567,6 +672,9 @@ def convert_quote(db: Session, ctx: CurrentContext, quote_id: str, data: QuoteCo
         .options(selectinload(Invoice.items), selectinload(Invoice.customer))
     )
     return db.scalars(stmt).one()
+
+
+convert_to_invoice = convert_quote
 
 
 # --- public hosted page -----------------------------------------------------------------------------------

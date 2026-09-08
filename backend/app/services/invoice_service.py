@@ -100,8 +100,10 @@ def line_inputs(items: Iterable) -> List[LineInput]:
             quantity=D(i.quantity),
             unit_price=D(i.unit_price),
             tax_rate_pct=D(i.tax_rate_pct),
-            product_id=i.product_id,
-            plan_id=i.plan_id,
+            offering_id=getattr(i, "offering_id", None),
+            product_id=getattr(i, "product_id", None),
+            plan_id=getattr(i, "plan_id", None),
+            pricing_explanation=getattr(i, "pricing_explanation", None),
         )
         for i in items
     ]
@@ -315,6 +317,7 @@ def create_invoice_record(
         invoice.items.append(
             InvoiceItem(
                 organization_id=organization_id,
+                offering_id=line.offering_id,
                 product_id=line.product_id,
                 plan_id=line.plan_id,
                 description=line.description,
@@ -323,6 +326,7 @@ def create_invoice_record(
                 tax_rate_pct=line.tax_rate_pct,
                 amount=line.amount,
                 position=line.position,
+                pricing_explanation=line.pricing_explanation,
             )
         )
     db.add(invoice)
