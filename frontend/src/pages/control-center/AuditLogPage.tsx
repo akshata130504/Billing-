@@ -1,169 +1,125 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
+import { LoadingState } from '../../components/common/LoadingState';
+import { ErrorState } from '../../components/common/ErrorState';
 import { useToast } from '../../components/common/Toast';
+import { controlCenterService, downloadAuthenticated, toApiError } from '../../services';
+import { queryKeys } from '../../hooks/queries';
+import { formatDateTime } from '../../utils/format';
+import type { AuditExportFormat, AuditLogOut, AuditLogParams, AuditStatus } from '../../types/api';
 import {
   History,
   Search,
   Download,
   Eye,
   Lock,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 
-export interface AuditEntry {
-  id: string;
-  timestamp: string;
-  actor: string;
-  role: string;
-  action: string;
-  resource: string;
-  resourceType: 'Invoice' | 'Subscription' | 'Quote' | 'Payment' | 'Customer' | 'System';
-  ipAddress: string;
-  status: 'success' | 'warning' | 'denied';
-  beforeState?: Record<string, any>;
-  afterState?: Record<string, any>;
+const PAGE_SIZE = 20;
+
+/**
+ * Real `entity_type` strings used across the backend services when they call
+ * `audit.record(...)` — see backend/app/services/{invoice,quote,payment,
+ * customer,catalog,subscription,approval_service,organization_service,
+ * auth_service,import_service}.py.
+ */
+const ENTITY_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'invoice', label: 'Invoices' },
+  { value: 'quote', label: 'Quotes' },
+  { value: 'subscription', label: 'Subscriptions' },
+  { value: 'payment', label: 'Payments' },
+  { value: 'customer', label: 'Customers' },
+  { value: 'product', label: 'Products' },
+  { value: 'plan', label: 'Plans' },
+  { value: 'approval', label: 'Approvals' },
+  { value: 'membership', label: 'Team Membership' },
+  { value: 'organization', label: 'Organization' },
+  { value: 'user', label: 'User Accounts' },
+  { value: 'import', label: 'Data Imports' },
+];
+
+function useDebouncedValue<T>(value: T, delayMs = 400): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
 }
 
-const mockAuditLogs: AuditEntry[] = [
-  {
-    id: 'AUD-901',
-    timestamp: '2026-09-07 14:32:10 IST',
-    actor: 'Akshata R.',
-    role: 'Billing Admin',
-    action: 'INVOICE_VOIDED',
-    resource: 'INV-2026-0082',
-    resourceType: 'Invoice',
-    ipAddress: '192.168.1.42',
-    status: 'warning',
-    beforeState: { status: 'issued', balance: '₹42,000.00', terms: 'Net 30' },
-    afterState: { status: 'void', balance: '₹0.00', voidReason: 'Re-issued with updated GSTIN' },
-  },
-  {
-    id: 'AUD-902',
-    timestamp: '2026-09-07 13:15:22 IST',
-    actor: 'Rahul Sharma',
-    role: 'Account Exec',
-    action: 'QUOTE_DISCOUNT_APPLIED',
-    resource: 'QT-2026-0034',
-    resourceType: 'Quote',
-    ipAddress: '192.168.1.68',
-    status: 'success',
-    beforeState: { discountPct: 0, total: '₹1,20,000.00' },
-    afterState: { discountPct: 30, total: '₹84,000.00', approvedBy: 'Akshata R.' },
-  },
-  {
-    id: 'AUD-903',
-    timestamp: '2026-09-07 11:04:19 IST',
-    actor: 'System Automation Engine',
-    role: 'Automated Worker',
-    action: 'SUBSCRIPTION_PRORATED_UPGRADE',
-    resource: 'SUB-2026-0418',
-    resourceType: 'Subscription',
-    ipAddress: '10.0.4.15',
-    status: 'success',
-    beforeState: { plan: 'Starter Monthly', seats: 5, unitPrice: '₹4,999.00' },
-    afterState: { plan: 'Enterprise Scale', seats: 25, unitPrice: '₹19,999.00', prorationCredit: '₹2,450.00' },
-  },
-  {
-    id: 'AUD-904',
-    timestamp: '2026-09-07 09:40:02 IST',
-    actor: 'Pooja Nair',
-    role: 'Billing Specialist',
-    action: 'PAYMENT_REFUND_EXECUTED',
-    resource: 'PAY-2026-8920',
-    resourceType: 'Payment',
-    ipAddress: '192.168.1.77',
-    status: 'warning',
-    beforeState: { paymentStatus: 'settled', refunded: false },
-    afterState: { paymentStatus: 'refunded', refundAmount: '₹18,500.00', gatewayRefundId: 'rfnd_3N8zKq' },
-  },
-  {
-    id: 'AUD-905',
-    timestamp: '2026-09-06 18:22:45 IST',
-    actor: 'External Webhook (Razorpay)',
-    role: 'Gateway Service',
-    action: 'GATEWAY_PAYMENT_CAPTURED',
-    resource: 'PAY-2026-8921',
-    resourceType: 'Payment',
-    ipAddress: '52.76.128.4',
-    status: 'success',
-    beforeState: { status: 'pending' },
-    afterState: { status: 'captured', amount: '₹34,000.00', authCode: 'AUTH_99182' },
-  },
-  {
-    id: 'AUD-906',
-    timestamp: '2026-09-06 16:11:30 IST',
-    actor: 'Unknown IP',
-    role: 'Unauthenticated Request',
-    action: 'ORG_SETTINGS_UPDATE_ATTEMPT',
-    resource: 'ORGANIZATION_ROOT',
-    resourceType: 'System',
-    ipAddress: '203.0.113.195',
-    status: 'denied',
-    beforeState: { restricted: true },
-    afterState: { blockedReason: 'Invalid CSRF token & 403 Forbidden' },
-  },
-];
+function getStatusBadge(status: AuditStatus) {
+  switch (status) {
+    case 'success':
+      return <Badge variant="success" size="sm">Success</Badge>;
+    case 'warning':
+      return <Badge variant="warning" size="sm">Alert / Warning</Badge>;
+    case 'denied':
+      return <Badge variant="danger" size="sm">Access Denied</Badge>;
+    default:
+      return <Badge variant="neutral" size="sm">{status}</Badge>;
+  }
+}
 
 export function AuditLogPage() {
   const { showToast } = useToast();
-  const [logs] = useState<AuditEntry[]>(mockAuditLogs);
-  const [selectedResourceType, setSelectedResourceType] = useState<string>('all');
+
+  const [page, setPage] = useState(1);
+  const [entityType, setEntityType] = useState<string>('all');
+  const [actionQuery, setActionQuery] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedEntry, setSelectedEntry] = useState<AuditEntry | null>(null);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [selectedEntry, setSelectedEntry] = useState<AuditLogOut | null>(null);
+  const [exportingFormat, setExportingFormat] = useState<AuditExportFormat | null>(null);
 
-  const filteredLogs = useMemo(() => {
-    return logs.filter((entry) => {
-      const matchesType =
-        selectedResourceType === 'all' || entry.resourceType === selectedResourceType;
-      const matchesSearch =
-        !searchQuery.trim() ||
-        entry.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        entry.actor.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        entry.resource.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesType && matchesSearch;
-    });
-  }, [logs, selectedResourceType, searchQuery]);
+  const debouncedSearch = useDebouncedValue(searchQuery);
+  const debouncedAction = useDebouncedValue(actionQuery);
 
-  const handleExportCSV = () => {
-    const headers = 'ID,Timestamp,Actor,Role,Action,Resource,ResourceType,Status,IPAddress\n';
-    const rows = filteredLogs
-      .map(
-        (l) =>
-          `"${l.id}","${l.timestamp}","${l.actor}","${l.role}","${l.action}","${l.resource}","${l.resourceType}","${l.status}","${l.ipAddress}"`
-      )
-      .join('\n');
-    const blob = new Blob([headers + rows], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `rooman_billing_audit_${Date.now()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast('success', 'Export Complete', 'Exported immutable audit trail to CSV.');
+  // Jump back to page 1 whenever a filter changes so results aren't stranded
+  // on a now out-of-range page.
+  useEffect(() => {
+    setPage(1);
+  }, [entityType, debouncedSearch, debouncedAction, dateFrom, dateTo]);
+
+  const filters: AuditLogParams = {
+    search: debouncedSearch.trim() || undefined,
+    action: debouncedAction.trim() || undefined,
+    entity_type: entityType === 'all' ? undefined : entityType,
+    date_from: dateFrom || undefined,
+    date_to: dateTo || undefined,
   };
 
-  const handleExportJSON = () => {
-    const blob = new Blob([JSON.stringify(filteredLogs, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `rooman_billing_audit_${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast('success', 'Export Complete', 'Exported audit log events to JSON.');
-  };
+  const params: AuditLogParams = { ...filters, page, page_size: PAGE_SIZE };
 
-  const getStatusBadge = (status: AuditEntry['status']) => {
-    switch (status) {
-      case 'success':
-        return <Badge variant="success" size="sm">Success</Badge>;
-      case 'warning':
-        return <Badge variant="warning" size="sm">Alert / Warning</Badge>;
-      case 'denied':
-        return <Badge variant="danger" size="sm">Access Denied</Badge>;
+  const auditQuery = useQuery({
+    queryKey: queryKeys.controlCenter.auditLogs(params),
+    queryFn: () => controlCenterService.auditLogs(params),
+  });
+
+  const logs = auditQuery.data?.items ?? [];
+  const total = auditQuery.data?.total ?? 0;
+  const totalPages = auditQuery.data?.total_pages ?? 1;
+
+  const runExport = async (format: AuditExportFormat) => {
+    setExportingFormat(format);
+    try {
+      const filename = `rooman_billing_audit_${Date.now()}.${format}`;
+      await downloadAuthenticated(controlCenterService.auditExportUrl(format, filters), filename);
+      showToast(
+        'success',
+        'Export complete',
+        `Exported the audit trail to ${format.toUpperCase()}.`
+      );
+    } catch (err) {
+      showToast('error', 'Export failed', toApiError(err).message);
+    } finally {
+      setExportingFormat(null);
     }
   };
 
@@ -186,7 +142,8 @@ export function AuditLogPage() {
             Immutable Audit Trail
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-            Cryptographically sealed chronological log of all rate modifications, invoice voidings, discount approvals, and financial events.
+            Chronological log of rate modifications, invoice voidings, discount approvals, and other
+            financial events recorded across the organization.
           </p>
         </div>
 
@@ -195,7 +152,9 @@ export function AuditLogPage() {
             variant="outline"
             size="sm"
             leadingIcon={<Download className="w-3.5 h-3.5" />}
-            onClick={handleExportCSV}
+            isLoading={exportingFormat === 'csv'}
+            disabled={exportingFormat !== null}
+            onClick={() => void runExport('csv')}
           >
             Export CSV
           </Button>
@@ -203,7 +162,9 @@ export function AuditLogPage() {
             variant="outline"
             size="sm"
             leadingIcon={<Download className="w-3.5 h-3.5" />}
-            onClick={handleExportJSON}
+            isLoading={exportingFormat === 'json'}
+            disabled={exportingFormat !== null}
+            onClick={() => void runExport('json')}
           >
             Export JSON
           </Button>
@@ -225,31 +186,21 @@ export function AuditLogPage() {
             </p>
           </div>
         </div>
-        <span className="hidden sm:inline-flex text-[11px] font-mono text-emerald-400 font-bold bg-emerald-950/60 border border-emerald-800 px-2.5 py-1 rounded-lg">
-          SHA-256 Validated
-        </span>
       </div>
 
       {/* Filter and Search Bar */}
       <Card>
-        <CardContent className="p-4">
+        <CardContent className="p-4 space-y-3">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-            {/* Resource Type Filter */}
+            {/* Entity Type Filter */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 text-xs">
-              {[
-                { key: 'all', label: 'All Subsystems' },
-                { key: 'Invoice', label: 'Invoices' },
-                { key: 'Quote', label: 'Quotes' },
-                { key: 'Subscription', label: 'Subscriptions' },
-                { key: 'Payment', label: 'Payments' },
-                { key: 'System', label: 'System' },
-              ].map((tab) => (
+              {[{ value: 'all', label: 'All Subsystems' }, ...ENTITY_TYPE_OPTIONS].map((tab) => (
                 <button
-                  key={tab.key}
+                  key={tab.value}
                   type="button"
-                  onClick={() => setSelectedResourceType(tab.key)}
+                  onClick={() => setEntityType(tab.value)}
                   className={`px-3 py-1.5 rounded-lg font-medium whitespace-nowrap transition-colors cursor-pointer ${
-                    selectedResourceType === tab.key
+                    entityType === tab.value
                       ? 'bg-brand-600 text-white shadow-xs'
                       : 'text-slate-600 hover:bg-slate-100'
                   }`}
@@ -260,76 +211,174 @@ export function AuditLogPage() {
             </div>
 
             {/* Live Search */}
-            <div className="relative w-full sm:w-64">
+            <div className="relative w-full sm:w-64 shrink-0">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search action, actor, resource..."
+                placeholder="Search actor, entity, IP..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 outline-none focus:bg-white transition-colors"
               />
             </div>
           </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-3 border-t border-slate-100">
+            <div className="w-full sm:w-56">
+              <input
+                type="text"
+                placeholder="Filter by action (e.g. INVOICE_VOIDED)"
+                value={actionQuery}
+                onChange={(e) => setActionQuery(e.target.value)}
+                className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 outline-none focus:bg-white transition-colors font-mono"
+              />
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <label className="text-slate-500 font-medium" htmlFor="audit-date-from">
+                From
+              </label>
+              <input
+                id="audit-date-from"
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-900 outline-none focus:bg-white transition-colors"
+              />
+              <label className="text-slate-500 font-medium" htmlFor="audit-date-to">
+                To
+              </label>
+              <input
+                id="audit-date-to"
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-900 outline-none focus:bg-white transition-colors"
+              />
+              {(dateFrom || dateTo || actionQuery) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDateFrom('');
+                    setDateTo('');
+                    setActionQuery('');
+                  }}
+                  className="text-brand-600 font-medium hover:underline"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
         </CardContent>
       </Card>
 
       {/* Audit Log Table */}
-      <Card>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs text-left">
-            <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200/80">
-              <tr>
-                <th className="px-4 py-3">Timestamp</th>
-                <th className="px-4 py-3">Actor</th>
-                <th className="px-4 py-3">Action</th>
-                <th className="px-4 py-3">Affected Resource</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">IP Address</th>
-                <th className="px-4 py-3 text-right">Details</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredLogs.map((entry) => (
-                <tr key={entry.id} className="hover:bg-slate-50/70 transition-colors">
-                  <td className="px-4 py-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">
-                    {entry.timestamp}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="font-bold text-slate-900">{entry.actor}</div>
-                    <div className="text-[10px] text-slate-400">{entry.role}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="font-mono font-bold text-slate-800 text-[11px] bg-slate-100 px-1.5 py-0.5 rounded">
-                      {entry.action}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="font-semibold text-slate-900">{entry.resource}</span>
-                    <span className="text-[10px] text-slate-400 block">{entry.resourceType}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    {getStatusBadge(entry.status)}
-                  </td>
-                  <td className="px-4 py-3 font-mono text-[11px] text-slate-500">
-                    {entry.ipAddress}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      leadingIcon={<Eye className="w-3.5 h-3.5" />}
-                      onClick={() => setSelectedEntry(entry)}
-                    >
-                      Diff
-                    </Button>
-                  </td>
+      {auditQuery.isPending ? (
+        <LoadingState message="Loading audit trail..." className="py-16" />
+      ) : auditQuery.isError ? (
+        <ErrorState message={toApiError(auditQuery.error).message} onRetry={() => void auditQuery.refetch()} />
+      ) : (
+        <Card>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200/80">
+                <tr>
+                  <th className="px-4 py-3">Timestamp</th>
+                  <th className="px-4 py-3">Actor</th>
+                  <th className="px-4 py-3">Action</th>
+                  <th className="px-4 py-3">Affected Entity</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">IP Address</th>
+                  <th className="px-4 py-3 text-right">Details</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {logs.map((entry) => (
+                  <tr key={entry.id} className="hover:bg-slate-50/70 transition-colors">
+                    <td className="px-4 py-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                      {formatDateTime(entry.created_at)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="font-bold text-slate-900">{entry.actor_label}</div>
+                      {entry.actor?.email && (
+                        <div className="text-[10px] text-slate-400">{entry.actor.email}</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="font-mono font-bold text-slate-800 text-[11px] bg-slate-100 px-1.5 py-0.5 rounded">
+                        {entry.action}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="font-semibold text-slate-900">
+                        {entry.entity_label || entry.entity_id || '—'}
+                      </span>
+                      <span className="text-[10px] text-slate-400 block">{entry.entity_type}</span>
+                    </td>
+                    <td className="px-4 py-3">{getStatusBadge(entry.status)}</td>
+                    <td className="px-4 py-3 font-mono text-[11px] text-slate-500">
+                      {entry.ip_address || '—'}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        leadingIcon={<Eye className="w-3.5 h-3.5" />}
+                        onClick={() => setSelectedEntry(entry)}
+                      >
+                        Diff
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+                {logs.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-10 text-center text-slate-400">
+                      No audit log entries match the current filters.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {total > 0 && (
+            <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/50">
+              <div>
+                Showing{' '}
+                <span className="font-semibold text-slate-700">{(page - 1) * PAGE_SIZE + 1}</span> to{' '}
+                <span className="font-semibold text-slate-700">
+                  {Math.min(page * PAGE_SIZE, total)}
+                </span>{' '}
+                of <span className="font-semibold text-slate-700">{total}</span> entries
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  leadingIcon={<ChevronLeft className="w-3.5 h-3.5" />}
+                >
+                  Previous
+                </Button>
+                <span className="px-2 font-medium text-slate-600">
+                  Page {page} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  trailingIcon={<ChevronRight className="w-3.5 h-3.5" />}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Before / After State Diff Modal */}
       {selectedEntry && (
@@ -347,15 +396,18 @@ export function AuditLogPage() {
               </div>
               <div>
                 <span className="text-slate-400 text-[10px] uppercase font-bold block">Actor</span>
-                <span className="font-bold text-slate-800">{selectedEntry.actor}</span>
+                <span className="font-bold text-slate-800">{selectedEntry.actor_label}</span>
               </div>
               <div>
-                <span className="text-slate-400 text-[10px] uppercase font-bold block">Resource</span>
-                <span className="font-bold text-slate-800">{selectedEntry.resource}</span>
+                <span className="text-slate-400 text-[10px] uppercase font-bold block">Entity</span>
+                <span className="font-bold text-slate-800">
+                  {selectedEntry.entity_label || selectedEntry.entity_id || '—'}
+                </span>
+                <span className="text-[10px] text-slate-400 block">{selectedEntry.entity_type}</span>
               </div>
               <div>
                 <span className="text-slate-400 text-[10px] uppercase font-bold block">IP Origin</span>
-                <span className="font-mono text-slate-800">{selectedEntry.ipAddress}</span>
+                <span className="font-mono text-slate-800">{selectedEntry.ip_address || '—'}</span>
               </div>
             </div>
 
@@ -366,7 +418,9 @@ export function AuditLogPage() {
                   Prior State (Before Mutation)
                 </span>
                 <pre className="p-2.5 bg-white rounded-lg border border-rose-100 text-[11px] font-mono text-slate-800 overflow-x-auto">
-                  {JSON.stringify(selectedEntry.beforeState || { empty: true }, null, 2)}
+                  {selectedEntry.before_state
+                    ? JSON.stringify(selectedEntry.before_state, null, 2)
+                    : 'N/A — no prior state recorded for this event.'}
                 </pre>
               </div>
 
@@ -376,7 +430,9 @@ export function AuditLogPage() {
                   New State (Committed State)
                 </span>
                 <pre className="p-2.5 bg-white rounded-lg border border-emerald-100 text-[11px] font-mono text-slate-800 overflow-x-auto">
-                  {JSON.stringify(selectedEntry.afterState || { empty: true }, null, 2)}
+                  {selectedEntry.after_state
+                    ? JSON.stringify(selectedEntry.after_state, null, 2)
+                    : 'N/A — no new state recorded for this event.'}
                 </pre>
               </div>
             </div>

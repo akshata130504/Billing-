@@ -31,8 +31,10 @@ class LineInput:
     quantity: Decimal
     unit_price: Decimal
     tax_rate_pct: Decimal
+    offering_id: Optional[str] = None
     product_id: Optional[str] = None
     plan_id: Optional[str] = None
+    pricing_explanation: Optional[str] = None
 
 
 @dataclass
@@ -43,8 +45,10 @@ class LineComputed:
     tax_rate_pct: Decimal
     amount: Decimal
     position: int
+    offering_id: Optional[str] = None
     product_id: Optional[str] = None
     plan_id: Optional[str] = None
+    pricing_explanation: Optional[str] = None
 
 
 @dataclass
@@ -94,8 +98,10 @@ def compute_totals(lines: Iterable[LineInput], discount_pct=0) -> Totals:
                 tax_rate_pct=q2(rate),
                 amount=amount,
                 position=idx,
+                offering_id=line.offering_id,
                 product_id=line.product_id,
                 plan_id=line.plan_id,
+                pricing_explanation=line.pricing_explanation,
             )
         )
     if not computed:

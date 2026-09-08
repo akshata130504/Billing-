@@ -1,64 +1,100 @@
-import { absoluteUrl, apiClient, cleanParams } from './apiClient';
+import { apiClient } from './apiClient';
 import type {
-  InvoiceIn,
-  InvoiceListParams,
-  InvoiceOut,
-  InvoiceUpdate,
-  Paginated,
-  PaymentOut,
-  RecordPaymentRequest,
-} from '../types/api';
+  Invoice,
+  PaymentRecordIn,
+} from '../types/invoices';
 
 export const invoiceService = {
-  list: async (params?: InvoiceListParams): Promise<Paginated<InvoiceOut>> => {
-    const { data } = await apiClient.get<Paginated<InvoiceOut>>('/invoices', {
-      params: cleanParams(params),
-    });
-    return data;
+  async listInvoices(params?: {
+    search?: string;
+    status?: string;
+    customer_id?: string;
+    date_from?: string;
+    date_to?: string;
+    overdue_only?: boolean;
+    page?: number;
+    page_size?: number;
+  }): Promise<{ items: Invoice[]; total: number; kpis?: any }> {
+    const q = new URLSearchParams();
+    if (params?.search) q.set('search', params.search);
+    if (params?.status && params.status !== 'all') q.set('status', params.status);
+    if (params?.customer_id) q.set('customer_id', params.customer_id);
+    if (params?.date_from) q.set('date_from', params.date_from);
+    if (params?.date_to) q.set('date_to', params.date_to);
+    if (params?.overdue_only) q.set('overdue_only', 'true');
+    if (params?.page) q.set('page', String(params.page));
+    if (params?.page_size) q.set('page_size', String(params.page_size));
+
+    const res = await apiClient.get<{ items: Invoice[]; total: number; kpis?: any }>(`/invoices?${q.toString()}`);
+    return res.data;
   },
 
-  get: async (id: string): Promise<InvoiceOut> => {
-    const { data } = await apiClient.get<InvoiceOut>(`/invoices/${id}`);
-    return data;
+  async getInvoices(params?: any) {
+    return this.listInvoices(params);
   },
 
-  create: async (body: InvoiceIn): Promise<InvoiceOut> => {
-    const { data } = await apiClient.post<InvoiceOut>('/invoices', body);
-    return data;
+  async getInvoicePayments(id: string) {
+    return this.listPayments(id);
   },
 
-  update: async (id: string, body: InvoiceUpdate): Promise<InvoiceOut> => {
-    const { data } = await apiClient.patch<InvoiceOut>(`/invoices/${id}`, body);
-    return data;
+  async getInvoice(id: string): Promise<Invoice> {
+    const res = await apiClient.get<Invoice>(`/invoices/${id}`);
+    return res.data;
   },
 
-  remove: async (id: string): Promise<void> => {
+  async createInvoice(data: any): Promise<Invoice> {
+    const res = await apiClient.post<Invoice>('/invoices', data);
+    return res.data;
+  },
+
+  async updateInvoice(id: string, data: any): Promise<Invoice> {
+    const res = await apiClient.patch<Invoice>(`/invoices/${id}`, data);
+    return res.data;
+  },
+
+  async deleteInvoice(id: string): Promise<void> {
     await apiClient.delete(`/invoices/${id}`);
   },
 
-  send: async (id: string): Promise<InvoiceOut> => {
-    const { data } = await apiClient.post<InvoiceOut>(`/invoices/${id}/send`);
-    return data;
+  async sendInvoice(id: string): Promise<Invoice> {
+    const res = await apiClient.post<Invoice>(`/invoices/${id}/send`);
+    return res.data;
   },
 
-  sendReminder: async (id: string): Promise<InvoiceOut> => {
-    const { data } = await apiClient.post<InvoiceOut>(`/invoices/${id}/send-reminder`);
-    return data;
+  async sendReminder(id: string): Promise<Invoice> {
+    const res = await apiClient.post<Invoice>(`/invoices/${id}/send-reminder`);
+    return res.data;
   },
 
-  voidInvoice: async (id: string, reason: string): Promise<InvoiceOut> => {
-    const { data } = await apiClient.post<InvoiceOut>(`/invoices/${id}/void`, { reason });
-    return data;
+  async voidInvoice(id: string, reason?: string): Promise<Invoice> {
+    const res = await apiClient.post<Invoice>(`/invoices/${id}/void`, {
+      reason: reason && reason.trim() ? reason.trim() : 'Voided by user',
+    });
+    return res.data;
   },
 
-  recordPayment: async (id: string, body: RecordPaymentRequest): Promise<PaymentOut> => {
-    const { data } = await apiClient.post<PaymentOut>(`/invoices/${id}/record-payment`, body);
-    return data;
+  async recordPayment(id: string, data: PaymentRecordIn): Promise<any> {
+    const methodStr = (data.payment_method || 'bank_transfer').toLowerCase();
+    const res = await apiClient.post<any>(`/invoices/${id}/record-payment`, {
+      amount: data.amount,
+      paid_at: data.payment_date ? `${data.payment_date}T00:00:00Z` : undefined,
+      method: methodStr,
+      reference: data.reference_number || undefined,
+      notes: data.notes || undefined,
+    });
+    return res.data;
   },
 
-  /**
-   * Absolute URL of the authenticated PDF endpoint. Requires the bearer token —
-   * use `downloadAuthenticated(invoiceService.pdfUrl(id), 'INV-….pdf')`.
-   */
-  pdfUrl: (id: string): string => absoluteUrl(`/invoices/${id}/pdf`),
+  async listPayments(id: string): Promise<any[]> {
+    try {
+      const res = await apiClient.get<any[]>(`/invoices/${id}/payments`);
+      return res.data || [];
+    } catch {
+      return [];
+    }
+  },
+
+  getDownloadPdfUrl(id: string): string {
+    return `${apiClient.defaults.baseURL || '/api/v1'}/invoices/${id}/pdf`;
+  },
 };

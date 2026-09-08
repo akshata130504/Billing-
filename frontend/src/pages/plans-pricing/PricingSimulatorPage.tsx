@@ -1,0 +1,388 @@
+import { useState, useEffect } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import {
+  Calculator,
+  ArrowLeft,
+  Sparkles,
+  FileText,
+} from 'lucide-react';
+import { Button } from '../../components/common/Button';
+import { planPricingService } from '../../services/planPricingService';
+import { customerService } from '../../services/customerService';
+import { catalogCpqService } from '../../services/catalogCpqService';
+import type { PlanPricingItem, PricingSimulationResponse } from '../../types/plans_pricing';
+import type { CustomerOut } from '../../types/api';
+import type { PriceBookOut } from '../../types/catalog_cpq';
+
+import { LoadingState } from '../../components/common/LoadingState';
+
+export function PricingSimulatorPage() {
+  const navigate = useNavigate();
+  const [plans, setPlans] = useState<PlanPricingItem[]>([]);
+  const [customers, setCustomers] = useState<CustomerOut[]>([]);
+  const [priceBooks, setPriceBooks] = useState<PriceBookOut[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Simulation parameters
+  const [selectedPlanId, setSelectedPlanId] = useState<string>('');
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
+  const [selectedPriceBookId, setSelectedPriceBookId] = useState<string>('');
+  const [quantity, setQuantity] = useState<number>(10);
+  const [discountPct, setDiscountPct] = useState<number>(0);
+
+  const [isCalculating, setIsCalculating] = useState(false);
+  const [result, setResult] = useState<PricingSimulationResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadData() {
+      setIsLoading(true);
+      try {
+        const [plansRes, custRes, pbRes] = await Promise.all([
+          planPricingService.listPlans(),
+          customerService.list({ page_size: 100 }),
+          catalogCpqService.listPriceBooks(),
+        ]);
+        setPlans(plansRes.items);
+        setCustomers(custRes.items);
+        setPriceBooks(pbRes.items);
+        if (plansRes.items.length > 0) {
+          setSelectedPlanId(plansRes.items[0].id);
+        }
+      } catch (err) {
+        console.error('Failed to load simulator data', err);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadData();
+  }, []);
+
+  const handleCalculate = async () => {
+    if (!selectedPlanId) return;
+    setIsCalculating(true);
+    setError(null);
+    try {
+      const res = await planPricingService.simulatePricing({
+        offering_id: selectedPlanId,
+        customer_id: selectedCustomerId || undefined,
+        price_book_id: selectedPriceBookId || undefined,
+        quantity: Math.max(1, Number(quantity)),
+        discount_pct: Number(discountPct) || 0,
+      });
+      setResult(res);
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || err?.message || 'Calculation failed');
+    } finally {
+      setIsCalculating(false);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedPlanId) {
+      handleCalculate();
+    }
+  }, [selectedPlanId, selectedPriceBookId, quantity, discountPct]);
+
+  const handleReset = () => {
+    if (plans.length > 0) setSelectedPlanId(plans[0].id);
+    setSelectedCustomerId('');
+    setSelectedPriceBookId('');
+    setQuantity(10);
+    setDiscountPct(0);
+    setError(null);
+  };
+
+  const handleUseInQuote = () => {
+    const selectedPlan = plans.find((p) => p.id === selectedPlanId);
+    navigate('/quotes/new', {
+      state: {
+        prefilledCustomer: selectedCustomerId,
+        prefilledPriceBook: selectedPriceBookId,
+        prefilledItem: selectedPlan
+          ? {
+              offering_id: selectedPlan.id,
+              name: selectedPlan.name,
+              sku: selectedPlan.code || selectedPlan.sku,
+              quantity: quantity,
+              unit_price: result ? Number(result.effective_unit_price) : Number(selectedPlan.base_price),
+              tax_rate_pct: Number(selectedPlan.tax_rate_pct || 18),
+              discount_pct: discountPct,
+              pricing_explanation: result?.explanation ? JSON.stringify(result.explanation) : undefined,
+            }
+          : undefined,
+      },
+    });
+  };
+
+  const selectedPlanObj = plans.find((p) => p.id === selectedPlanId);
+
+  if (isLoading) {
+    return (
+      <div className="py-24">
+        <LoadingState message="Loading pricing simulator models and customers..." />
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-150">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Link to="/plans-pricing">
+            <Button variant="outline" size="sm" leadingIcon={<ArrowLeft className="w-3.5 h-3.5" />}>
+              Back
+            </Button>
+          </Link>
+          <div>
+            <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+              Pricing Simulator & Calculator
+              <Sparkles className="w-4 h-4 text-amber-500" />
+            </h1>
+            <p className="text-xs text-slate-500">
+              Simulate tiered volume brackets, price book overrides, and transparent &quot;Why This Price?&quot; breakdowns.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleReset}>
+            Reset
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleUseInQuote}
+            disabled={!result}
+            leadingIcon={<FileText className="w-4 h-4" />}
+          >
+            Use in Quote
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left Form: Inputs */}
+        <div className="lg:col-span-5 space-y-5 bg-white p-5 rounded-xl border border-slate-200/80 shadow-2xs">
+          <h2 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Simulation Parameters</h2>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Select Plan / Offering <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={selectedPlanId}
+                onChange={(e) => setSelectedPlanId(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white font-medium text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-slate-900/10"
+              >
+                {plans.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.pricing_model.toUpperCase()}) - ₹{Number(p.base_price).toLocaleString('en-IN')}/{p.unit}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Customer (Optional Segment Matching)
+              </label>
+              <select
+                value={selectedCustomerId}
+                onChange={(e) => setSelectedCustomerId(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white font-medium text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-slate-900/10"
+              >
+                <option value="">No Customer Selected (Standard Account)</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.display_name} ({c.customer_number})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Price Book (Segment Negotiated Rates)
+              </label>
+              <select
+                value={selectedPriceBookId}
+                onChange={(e) => setSelectedPriceBookId(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white font-medium text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-slate-900/10"
+              >
+                <option value="">Standard Catalog Rate (No Price Book)</option>
+                {priceBooks.map((pb) => (
+                  <option key={pb.id} value={pb.id}>
+                    {pb.name} ({pb.customer_segment || 'General'})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Quantity</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={quantity}
+                  onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))}
+                  className="w-full px-3 py-2 text-xs font-bold rounded-lg border border-slate-200 text-slate-900"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Deal Discount (%)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  value={discountPct}
+                  onChange={(e) => setDiscountPct(Math.max(0, Math.min(100, Number(e.target.value))))}
+                  className="w-full px-3 py-2 text-xs font-bold rounded-lg border border-slate-200 text-slate-900"
+                />
+              </div>
+            </div>
+
+            {selectedPlanObj?.pricing_tiers && selectedPlanObj.pricing_tiers.length > 0 && (
+              <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80 space-y-1.5 text-xs">
+                <p className="font-semibold text-slate-700">Configured Tiers / Packages:</p>
+                <div className="space-y-1 text-[11px] text-slate-600">
+                  {selectedPlanObj.pricing_tiers.map((t, i) => (
+                    <div key={i} className="flex justify-between font-mono">
+                      {selectedPlanObj.pricing_model === 'package' ? (
+                        <>
+                          <span>Block of {t.package_qty} units:</span>
+                          <span className="font-semibold text-slate-900">₹{Number(t.package_price).toLocaleString('en-IN')}</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Tier [{t.min_qty} - {t.max_qty || '∞'}]:</span>
+                          <span className="font-semibold text-slate-900">₹{Number(t.unit_price).toLocaleString('en-IN')}/unit</span>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleCalculate}
+              isLoading={isCalculating}
+              className="w-full"
+              leadingIcon={<Calculator className="w-4 h-4" />}
+            >
+              Recalculate Price
+            </Button>
+          </div>
+        </div>
+
+        {/* Right Output: Breakdown & "Why This Price?" */}
+        <div className="lg:col-span-7 space-y-5">
+          {error && (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600">
+              {error}
+            </div>
+          )}
+
+          {result && (
+            <div className="space-y-5">
+              {/* Summary Card */}
+              <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-2xs space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">{result.offering_name}</h3>
+                    <p className="text-xs text-slate-500 font-mono">{result.offering_sku}</p>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full text-xs font-semibold capitalize bg-purple-50 text-purple-700 border border-purple-200">
+                    {result.pricing_model.replace('_', ' ')} Model
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div>
+                    <p className="text-slate-400 text-[11px]">Effective Rate</p>
+                    <p className="text-base font-bold text-slate-900">₹{Number(result.effective_unit_price).toLocaleString('en-IN')}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-400 text-[11px]">Subtotal</p>
+                    <p className="text-base font-bold text-slate-900">₹{Number(result.subtotal).toLocaleString('en-IN')}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-400 text-[11px]">Discount ({result.discount_pct}%)</p>
+                    <p className="text-base font-bold text-amber-600">-₹{Number(result.discount_amount).toLocaleString('en-IN')}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-400 text-[11px]">Final Total (incl. Tax)</p>
+                    <p className="text-lg font-bold text-emerald-600">₹{Number(result.total_amount).toLocaleString('en-IN')}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* "Why This Price?" Mathematical Breakdown Tree */}
+              <div className="bg-slate-900 text-slate-100 p-5 rounded-xl shadow-md space-y-4">
+                <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                    Why This Price? — Detailed Calculation Audit
+                  </h3>
+                </div>
+
+                <div className="space-y-3 font-mono text-xs">
+                  <div className="flex items-center justify-between py-1 border-b border-slate-800/80">
+                    <span className="text-slate-400">1. Catalog Base Rate</span>
+                    <span className="text-slate-200">₹{result.explanation.catalog_base_price}</span>
+                  </div>
+
+                  {result.explanation.price_book_adjustment && (
+                    <div className="flex items-center justify-between py-1 border-b border-slate-800/80 text-indigo-300">
+                      <span>2. Price Book Adjustment</span>
+                      <span>{result.explanation.price_book_adjustment}</span>
+                    </div>
+                  )}
+
+                  {result.explanation.tier_explanation && (
+                    <div className="flex items-center justify-between py-1 border-b border-slate-800/80 text-purple-300">
+                      <span>3. Applied Tier / Bracket</span>
+                      <span>{result.explanation.tier_explanation}</span>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between py-1 border-b border-slate-800/80">
+                    <span className="text-slate-400">4. Pre-discount Subtotal ({result.quantity} units)</span>
+                    <span className="text-slate-200">₹{result.explanation.subtotal_pre_discount}</span>
+                  </div>
+
+                  {Number(result.discount_amount) > 0 && (
+                    <div className="flex items-center justify-between py-1 border-b border-slate-800/80 text-amber-400">
+                      <span>5. Applied Discount ({result.discount_pct}%)</span>
+                      <span>-₹{result.discount_amount}</span>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between py-1 border-b border-slate-800/80">
+                    <span className="text-slate-400">6. Applicable GST ({result.tax_rate_pct}%)</span>
+                    <span className="text-slate-200">+₹{result.tax_amount}</span>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 text-sm font-bold text-emerald-400">
+                    <span>FINAL TOTAL AMOUNT</span>
+                    <span>₹{result.total_amount}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default PricingSimulatorPage;

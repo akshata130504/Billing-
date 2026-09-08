@@ -90,7 +90,7 @@ export const sidebarSections: SidebarSection[] = [
   {
     title: 'SUBSCRIPTIONS',
     items: [
-      { title: 'Plans & Pricing', path: '/catalog', icon: Layers },
+      { title: 'Plans & Pricing', path: '/plans-pricing', icon: Layers },
       { title: 'Subscriptions', path: '/subscriptions', icon: Repeat },
       { title: 'Trials', path: '/trials', icon: Clock },
       { title: 'Usage / Metering', path: '/usage', icon: Gauge },

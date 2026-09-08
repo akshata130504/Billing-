@@ -23,6 +23,7 @@ from backend.app.models import (
     OPEN_INVOICE_STATUSES,
     Customer,
     Invoice,
+    InvoiceStatus,
     Payment,
     PaymentAllocation,
     PaymentGateway,
@@ -381,7 +382,11 @@ def create_payment(db: Session, ctx: CurrentContext, data: PaymentCreate) -> Pay
 
 def record_invoice_payment(db: Session, ctx: CurrentContext, invoice: Invoice, data: RecordPaymentIn) -> Payment:
     """POST /invoices/{id}/record-payment: manual payment fully allocated to one invoice."""
-    if invoice.status not in OPEN_INVOICE_STATUSES:
+    if invoice.status == InvoiceStatus.DRAFT:
+        invoice.status = InvoiceStatus.SENT
+        invoice.sent_at = utcnow()
+        db.flush()
+    elif invoice.status not in OPEN_INVOICE_STATUSES:
         raise InvalidStateError(f"Payments can only be recorded against open invoices; this invoice is {invoice.status.value}.")
     amount = q2(data.amount)
     if amount > q2(invoice.amount_due):

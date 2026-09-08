@@ -1,4 +1,4 @@
-export { InvoicesListPage } from './InvoicesListPage';
-export { InvoiceFormPage } from './InvoiceFormPage';
-export { InvoiceDetailPage } from './InvoiceDetailPage';
-export { CollectionsPage } from './CollectionsPage';
+export * from './InvoicesListPage';
+export * from './InvoiceFormPage';
+export * from './InvoiceDetailPage';
+export * from './CollectionsPage';

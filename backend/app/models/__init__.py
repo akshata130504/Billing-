@@ -36,6 +36,20 @@ from backend.app.models.payments import (
 )
 from backend.app.models.quotes import Quote, QuoteItem, QuoteStatus
 from backend.app.models.subscriptions import Subscription, SubscriptionStatus
+from backend.app.models.catalog_cpq import (
+    BundleItem,
+    CPQDeal,
+    CPQDealItem,
+    CPQDealStatus,
+    CPQRule,
+    Offering,
+    OfferingPricingModel,
+    OfferingType,
+    PriceBook,
+    PriceBookEntry,
+    PriceBookStatus,
+    RuleType,
+)
 
 __all__ = [
     "TenantMixin",
@@ -86,4 +100,16 @@ __all__ = [
     "ImportJob",
     "ImportEntity",
     "ImportStatus",
+    "Offering",
+    "OfferingType",
+    "OfferingPricingModel",
+    "PriceBook",
+    "PriceBookStatus",
+    "PriceBookEntry",
+    "BundleItem",
+    "CPQRule",
+    "RuleType",
+    "CPQDeal",
+    "CPQDealItem",
+    "CPQDealStatus",
 ]
