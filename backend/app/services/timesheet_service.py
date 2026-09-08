@@ -530,11 +530,24 @@ def generate_invoice_from_timesheets(
     if not entries:
         raise ValidationAppError("No valid time entries found for invoice generation")
 
+    # Every requested entry must exist, belong to this organization and to this
+    # customer. Silently invoicing only the subset that matched would under-bill
+    # without telling anyone.
+    found_ids = {e.id for e in entries}
+    missing = [eid for eid in payload.time_entry_ids if eid not in found_ids]
+    if missing:
+        raise ValidationAppError(
+            "Some time entries do not exist or do not belong to this customer.",
+            {"fields": {"time_entry_ids": missing}},
+        )
+
     for e in entries:
         if not e.billable:
             raise ValidationAppError(f"Time entry {e.id} is marked non-billable and cannot be invoiced")
         if e.status == TimeEntryStatus.BILLED:
             raise InvalidStateError(f"Time entry {e.id} is already billed on invoice {e.invoice_id}")
+        if e.status == TimeEntryStatus.REJECTED:
+            raise InvalidStateError(f"Time entry {e.id} was rejected by a reviewer and cannot be invoiced")
 
     # Build line items for the invoice
     items: List[LineItemIn] = []

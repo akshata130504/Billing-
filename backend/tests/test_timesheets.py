@@ -305,3 +305,98 @@ def test_timesheet_tenant_isolation(client: TestClient, tenant, auth_headers, db
     # Tenant 2 cannot delete it
     d_res = client.delete(f"/api/v1/timesheets/{t1_entry['id']}", headers=other_auth_headers)
     assert d_res.status_code == 404
+
+
+def test_rejected_entry_cannot_be_invoiced(client: TestClient, tenant, auth_headers):
+    """A reviewer's rejection must be final: rejected time can never reach an invoice."""
+    customer = tenant.customer(display_name="Rejection Corp")
+
+    entry = client.post(
+        "/api/v1/timesheets",
+        headers=auth_headers,
+        json={
+            "customer_id": customer.id,
+            "project_name": "Disputed Work",
+            "date": date.today().isoformat(),
+            "duration_hours": 8.0,
+            "description": "Hours the reviewer refused",
+            "billable": True,
+            "billing_rate": 150.0,
+        },
+    ).json()
+
+    client.post(f"/api/v1/timesheets/{entry['id']}/submit", headers=auth_headers)
+    rej = client.post(
+        f"/api/v1/timesheets/{entry['id']}/reject",
+        headers=auth_headers,
+        json={"reason": "Hours not authorised"},
+    )
+    assert rej.status_code == 200, rej.text
+    assert rej.json()["status"] == "rejected"
+
+    inv_res = client.post(
+        "/api/v1/timesheets/generate-invoice",
+        headers=auth_headers,
+        json={"customer_id": customer.id, "time_entry_ids": [entry["id"]]},
+    )
+    assert inv_res.status_code == 409, inv_res.text
+
+    # The entry must be untouched - still rejected, still unbilled.
+    after = client.get(f"/api/v1/timesheets/{entry['id']}", headers=auth_headers).json()
+    assert after["status"] == "rejected"
+    assert after["invoice_id"] is None
+
+
+def test_generate_invoice_rejects_unknown_or_foreign_entry_ids(client: TestClient, tenant, auth_headers):
+    """Unmatched ids must fail loudly rather than silently under-billing the customer."""
+    customer = tenant.customer(display_name="Partial Corp")
+    other_customer = tenant.customer(display_name="Someone Else Ltd")
+
+    mine = client.post(
+        "/api/v1/timesheets",
+        headers=auth_headers,
+        json={
+            "customer_id": customer.id,
+            "project_name": "Real Work",
+            "date": date.today().isoformat(),
+            "duration_hours": 4.0,
+            "description": "Billable hours",
+            "billable": True,
+            "billing_rate": 100.0,
+        },
+    ).json()
+
+    theirs = client.post(
+        "/api/v1/timesheets",
+        headers=auth_headers,
+        json={
+            "customer_id": other_customer.id,
+            "project_name": "Other Work",
+            "date": date.today().isoformat(),
+            "duration_hours": 4.0,
+            "description": "Another customer's hours",
+            "billable": True,
+            "billing_rate": 100.0,
+        },
+    ).json()
+
+    # An entry belonging to a different customer must not be quietly dropped.
+    res = client.post(
+        "/api/v1/timesheets/generate-invoice",
+        headers=auth_headers,
+        json={"customer_id": customer.id, "time_entry_ids": [mine["id"], theirs["id"]]},
+    )
+    assert res.status_code == 422, res.text
+
+    # A completely unknown id must be rejected too.
+    res = client.post(
+        "/api/v1/timesheets/generate-invoice",
+        headers=auth_headers,
+        json={"customer_id": customer.id, "time_entry_ids": [mine["id"], "does-not-exist"]},
+    )
+    assert res.status_code == 422, res.text
+
+    # Nothing was billed by either failed attempt.
+    after = client.get(f"/api/v1/timesheets/{mine['id']}", headers=auth_headers).json()
+    assert after["status"] == "draft"
+    assert after["invoice_id"] is None

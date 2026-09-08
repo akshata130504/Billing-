@@ -64,7 +64,9 @@ export function GenerateInvoiceModal({
       customer_id: selectedCustomerId,
       billable: true,
     }).then((entries) => {
-      const unbilled = entries.filter((e) => e.status !== 'billed');
+      // Rejected entries were explicitly refused by a reviewer, and already
+      // billed entries cannot be invoiced twice - neither is offerable here.
+      const unbilled = entries.filter((e) => e.status !== 'billed' && e.status !== 'rejected');
       setUnbilledEntries(unbilled);
       setSelectedEntryIds(unbilled.map((e) => e.id));
     }).catch((err) => {
