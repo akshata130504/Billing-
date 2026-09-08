@@ -29,6 +29,20 @@ export const invoiceService = {
     return res.data;
   },
 
+  async list(params?: {
+    search?: string;
+    status?: string;
+    customer_id?: string;
+    date_from?: string;
+    date_to?: string;
+    overdue_only?: boolean;
+    page?: number;
+    page_size?: number;
+    sort?: string;
+  }): Promise<{ items: Invoice[]; total: number; kpis?: any }> {
+    return this.listInvoices(params);
+  },
+
   async getInvoices(params?: any) {
     return this.listInvoices(params);
   },

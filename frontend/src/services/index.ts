@@ -23,3 +23,7 @@ export { invoiceService } from './invoiceService';
 export { paymentService } from './paymentService';
 export { controlCenterService } from './controlCenterService';
 export { publicService } from './publicService';
+export { reportsService } from './reportsService';
+export { lifecycleService } from './lifecycleService';
+export { timesheetService } from './timesheetService';
+export { collectionsService } from './collectionsService';

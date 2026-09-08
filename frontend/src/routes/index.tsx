@@ -28,9 +28,14 @@ import {
   SubscriptionDetailPage,
   TrialsPage,
 } from '../pages/subscriptions';
-import { InvoicesListPage, InvoiceFormPage, InvoiceDetailPage, CollectionsPage } from '../pages/invoices';
+import { InvoicesListPage, InvoiceFormPage, InvoiceDetailPage } from '../pages/invoices';
+import {
+  CollectionsDashboardPage,
+  CollectionsInvoiceListPage,
+  CollectionsInvoiceDetailPage,
+} from '../pages/collections';
 import { PaymentsListPage, PaymentDetailPage, PaymentsProvider } from '../pages/payments';
-import { PayInvoicePage, PublicQuotePage } from '../pages/public';
+import { PayInvoicePage, PublicQuotePage, LandingPage } from '../pages/public';
 import { ActivityPage } from '../pages/activity';
 import {
   ActionCenterPage,
@@ -47,6 +52,9 @@ import {
   ExpenseDetailsPage,
   ExpensesProvider,
 } from '../pages/expenses';
+import { CustomerLifecycleListPage, CustomerLifecycleDetailPage } from '../pages/customer-lifecycle';
+import { TimesheetsPage } from '../pages/timesheets';
+import { ReportsPage } from '../pages/reports';
 import { SettingsPage } from '../pages/settings';
 
 // ---------------------------------------------------------------------------
@@ -156,14 +164,15 @@ export function AppRoutes() {
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
 
-          {/* Public: hosted pages */}
+          {/* Public: landing & hosted pages */}
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/landing" element={<LandingPage />} />
           <Route path="/pay/:token" element={<PayInvoicePage />} />
           <Route path="/quote/:token" element={<PublicQuotePage />} />
 
           {/* Private */}
           <Route element={<ProtectedRoute />}>
-            <Route path="/" element={<AppLayout />}>
-              <Route index element={<Navigate to="/dashboard" replace />} />
+            <Route element={<AppLayout />}>
               <Route path="dashboard" element={<DashboardPage />} />
 
               {/* Workspace */}
@@ -191,7 +200,11 @@ export function AppRoutes() {
                 <Route index element={<PaymentsListPage />} />
                 <Route path=":id" element={<PaymentDetailPage />} />
               </Route>
-              <Route path="collections" element={<CollectionsPage />} />
+              <Route path="collections">
+                <Route index element={<CollectionsDashboardPage />} />
+                <Route path="invoices" element={<CollectionsInvoiceListPage />} />
+                <Route path="invoices/:id" element={<CollectionsInvoiceDetailPage />} />
+              </Route>
 
               {/* Subscriptions & Plans */}
               <Route path="plans-pricing" element={<PlansPricingPage />} />
@@ -207,7 +220,7 @@ export function AppRoutes() {
               <Route path="expenses/:expenseId" element={<ExpenseDetailsPage />} />
               <Route path="projects" element={<ProjectsPage />} />
               <Route path="projects/:projectId" element={<ProjectDetailsPage />} />
-              <Route path="timesheets" element={<ComingSoonPage />} />
+              <Route path="timesheets" element={<TimesheetsPage />} />
 
               {/* Insights */}
               <Route path="activity" element={<ActivityPage />} />
@@ -234,15 +247,16 @@ export function AppRoutes() {
               <Route path="usage" element={<ComingSoonPage />} />
               <Route path="proration" element={<ComingSoonPage />} />
               <Route path="dunning" element={<ComingSoonPage />} />
-              <Route path="customer-lifecycle" element={<ComingSoonPage />} />
+              <Route path="customer-lifecycle" element={<CustomerLifecycleListPage />} />
+              <Route path="customer-lifecycle/:customerId" element={<CustomerLifecycleDetailPage />} />
               <Route path="customer-portal" element={<ComingSoonPage />} />
               <Route path="hosted-payment-pages" element={<ComingSoonPage />} />
               <Route path="revenue-intelligence" element={<ComingSoonPage />} />
-              <Route path="reports" element={<ComingSoonPage />} />
+              <Route path="reports" element={<ReportsPage />} />
               <Route path="ai-billing" element={<ComingSoonPage />} />
               <Route path="automation" element={<ComingSoonPage />} />
               <Route path="customization" element={<ComingSoonPage />} />
-              <Route path="integrations" element={<ComingSoonPage />} />
+              <Route path="integrations" element={<Navigate to="/settings?tab=integrations" replace />} />
               <Route path="platforms/mobile" element={<ComingSoonPage />} />
               <Route path="platforms/desktop" element={<ComingSoonPage />} />
 

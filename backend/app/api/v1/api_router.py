@@ -34,6 +34,10 @@ ROUTERS = [
     ("admin", "/admin", ["Admin"]),
     ("public_invoices", "/public/invoices", ["Public"]),
     ("public_quotes", "/public/quotes", ["Public"]),
+    ("reports", "/reports", ["Reports"]),
+    ("lifecycle", "/lifecycle", ["Customer Lifecycle"]),
+    ("timesheets", "/timesheets", ["Timesheets"]),
+    ("collections", "/collections", ["Collections"]),
     ("webhooks", "/webhooks", ["Webhooks"]),
 ]
 

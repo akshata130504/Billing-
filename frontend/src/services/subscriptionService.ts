@@ -7,10 +7,16 @@ import type {
   SubscriptionIn,
   SubscriptionListParams,
   SubscriptionOut,
+  SubscriptionSummaryOut,
   SubscriptionUpdate,
 } from '../types/api';
 
 export const subscriptionService = {
+  summary: async (): Promise<SubscriptionSummaryOut> => {
+    const { data } = await apiClient.get<SubscriptionSummaryOut>('/subscriptions/summary');
+    return data;
+  },
+
   list: async (params?: SubscriptionListParams): Promise<Paginated<SubscriptionOut>> => {
     const { data } = await apiClient.get<Paginated<SubscriptionOut>>('/subscriptions', {
       params: cleanParams(params),
@@ -33,6 +39,11 @@ export const subscriptionService = {
     return data;
   },
 
+  activate: async (id: string): Promise<SubscriptionOut> => {
+    const { data } = await apiClient.post<SubscriptionOut>(`/subscriptions/${id}/activate`);
+    return data;
+  },
+
   pause: async (id: string): Promise<SubscriptionOut> => {
     const { data } = await apiClient.post<SubscriptionOut>(`/subscriptions/${id}/pause`);
     return data;
@@ -40,6 +51,11 @@ export const subscriptionService = {
 
   resume: async (id: string): Promise<SubscriptionOut> => {
     const { data } = await apiClient.post<SubscriptionOut>(`/subscriptions/${id}/resume`);
+    return data;
+  },
+
+  renew: async (id: string): Promise<SubscriptionOut> => {
+    const { data } = await apiClient.post<SubscriptionOut>(`/subscriptions/${id}/renew`);
     return data;
   },
 
