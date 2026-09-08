@@ -27,6 +27,8 @@ ROUTERS = [
     ("invoices", "/invoices", ["Invoices"]),
     ("payments", "/payments", ["Payments"]),
     ("collections", "/collections", ["Collections"]),
+    ("reports", "/reports", ["Reports & Analytics"]),
+    ("automation", "/automation", ["System"]),
     ("approvals", "/approvals", ["Control Center"]),
     ("dashboard", "", ["Control Center"]),
     ("audit_logs", "/audit-logs", ["Control Center"]),

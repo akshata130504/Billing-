@@ -75,6 +75,13 @@ class OrganizationOut(BaseModel):
     invoice_notes: Optional[str] = None
     invoice_terms: Optional[str] = None
     logo_url: Optional[str] = None
+    brand_color: Optional[str] = None
+    quote_notes: Optional[str] = None
+    quote_terms: Optional[str] = None
+    date_format: str
+    decimal_display_precision: int
+    default_dashboard_range: str
+    table_density: str
     created_at: UTCDateTime
     updated_at: UTCDateTime
 
@@ -120,6 +127,13 @@ class OrganizationUpdate(BaseModel):
     invoice_notes: Optional[str] = Field(default=None, max_length=5000)
     invoice_terms: Optional[str] = Field(default=None, max_length=5000)
     logo_url: Optional[str] = Field(default=None, max_length=500)
+    brand_color: Optional[str] = Field(default=None, max_length=7)
+    quote_notes: Optional[str] = Field(default=None, max_length=5000)
+    quote_terms: Optional[str] = Field(default=None, max_length=5000)
+    date_format: Optional[str] = Field(default=None, max_length=20)
+    decimal_display_precision: Optional[int] = None
+    default_dashboard_range: Optional[str] = Field(default=None, max_length=20)
+    table_density: Optional[str] = Field(default=None, max_length=12)
 
 
 # --- Team --------------------------------------------------------------------------

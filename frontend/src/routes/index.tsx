@@ -35,7 +35,7 @@ import {
   CollectionsInvoiceListPage,
   CollectionsInvoiceDetailPage,
 } from '../pages/collections';
-import { PayInvoicePage, PublicQuotePage } from '../pages/public';
+import { PayInvoicePage, PublicQuotePage, LandingPage } from '../pages/public';
 import { ActivityPage } from '../pages/activity';
 import {
   ActionCenterPage,
@@ -53,6 +53,7 @@ import {
   ExpensesProvider,
 } from '../pages/expenses';
 import { SettingsPage } from '../pages/settings';
+import { ReportsPage } from '../pages/reports';
 
 // ---------------------------------------------------------------------------
 // Guards
@@ -161,14 +162,15 @@ export function AppRoutes() {
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
 
-          {/* Public: hosted pages */}
+          {/* Public: landing & hosted pages */}
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/landing" element={<LandingPage />} />
           <Route path="/pay/:token" element={<PayInvoicePage />} />
           <Route path="/quote/:token" element={<PublicQuotePage />} />
 
           {/* Private */}
           <Route element={<ProtectedRoute />}>
-            <Route path="/" element={<AppLayout />}>
-              <Route index element={<Navigate to="/dashboard" replace />} />
+            <Route element={<AppLayout />}>
               <Route path="dashboard" element={<DashboardPage />} />
 
               {/* Workspace */}
@@ -247,11 +249,11 @@ export function AppRoutes() {
               <Route path="customer-portal" element={<ComingSoonPage />} />
               <Route path="hosted-payment-pages" element={<ComingSoonPage />} />
               <Route path="revenue-intelligence" element={<ComingSoonPage />} />
-              <Route path="reports" element={<ComingSoonPage />} />
+              <Route path="reports" element={<ReportsPage />} />
               <Route path="ai-billing" element={<ComingSoonPage />} />
-              <Route path="automation" element={<ComingSoonPage />} />
-              <Route path="customization" element={<ComingSoonPage />} />
-              <Route path="integrations" element={<ComingSoonPage />} />
+              <Route path="automation" element={<Navigate to="/settings?tab=automation" replace />} />
+              <Route path="customization" element={<Navigate to="/settings?tab=customization" replace />} />
+              <Route path="integrations" element={<Navigate to="/settings?tab=integrations" replace />} />
               <Route path="platforms/mobile" element={<ComingSoonPage />} />
               <Route path="platforms/desktop" element={<ComingSoonPage />} />
 

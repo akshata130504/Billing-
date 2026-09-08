@@ -1,5 +1,11 @@
 """All SQLAlchemy models. Importing this package registers every table on Base.metadata."""
 from backend.app.models.base import TenantMixin, TimestampMixin, UUIDPrimaryKeyMixin, new_uuid, utcnow
+from backend.app.models.automation import (
+    AutomationExecution,
+    AutomationExecutionStatus,
+    AutomationRule,
+    AutomationTrigger,
+)
 from backend.app.models.catalog import INTERVAL_MONTHS, BillingInterval, Plan, PricingModel, Product, ProductType
 from backend.app.models.collections import (
     MANUAL_COLLECTION_STATUSES,
@@ -128,4 +134,8 @@ __all__ = [
     "MANUAL_COLLECTION_STATUSES",
     "PromiseToPay",
     "PromiseToPayStatus",
+    "AutomationRule",
+    "AutomationExecution",
+    "AutomationTrigger",
+    "AutomationExecutionStatus",
 ]

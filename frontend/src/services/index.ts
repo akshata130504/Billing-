@@ -23,4 +23,6 @@ export { invoiceService } from './invoiceService';
 export { paymentService } from './paymentService';
 export { collectionsService } from './collectionsService';
 export { controlCenterService } from './controlCenterService';
+export { reportsService } from './reportsService';
 export { publicService } from './publicService';
+export { automationService } from './automationService';

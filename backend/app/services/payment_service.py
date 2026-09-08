@@ -21,6 +21,7 @@ from backend.app.core.exceptions import (
 )
 from backend.app.models import (
     OPEN_INVOICE_STATUSES,
+    AutomationTrigger,
     Customer,
     Invoice,
     InvoiceStatus,
@@ -421,6 +422,9 @@ def create_payment(db: Session, ctx: CurrentContext, data: PaymentCreate) -> Pay
             ctx=ctx,
             after={"allocations": [{"invoice_id": i.id, "invoice_number": i.invoice_number, "amount": a} for i, a in pairs]},
         )
+    from backend.app.services import automation_service
+
+    automation_service.dispatch(db, AutomationTrigger.PAYMENT_RECEIVED, ctx.organization_id, {"payment": payment, "customer": customer})
     db.commit()
     return _reload(db, payment)
 
@@ -468,6 +472,11 @@ def record_invoice_payment(db: Session, ctx: CurrentContext, invoice: Invoice, d
         entity_label=payment.payment_number,
         ctx=ctx,
         after={**snapshot(payment), "invoice_id": invoice.id, "invoice_number": invoice.invoice_number},
+    )
+    from backend.app.services import automation_service
+
+    automation_service.dispatch(
+        db, AutomationTrigger.PAYMENT_RECEIVED, ctx.organization_id, {"payment": payment, "invoice": invoice, "customer": invoice.customer}
     )
     db.commit()
     return _reload(db, payment)

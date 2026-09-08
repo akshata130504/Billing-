@@ -465,6 +465,10 @@ def mark_accepted(db: Session, ctx: CurrentContext, quote_id: str) -> Quote:
         before=before,
         after=audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS),
     )
+    from backend.app.models import AutomationTrigger
+    from backend.app.services import automation_service
+
+    automation_service.dispatch(db, AutomationTrigger.QUOTE_ACCEPTED, ctx.organization_id, {"quote": quote, "customer": quote.customer})
     db.commit()
     return get_quote_or_404(db, ctx.organization_id, quote.id)
 
@@ -710,6 +714,10 @@ def public_accept(db: Session, token: str, accepted_by_name: str) -> Quote:
         before=before,
         after={"accepted_by_name": accepted_by_name, "status": "accepted"},
     )
+    from backend.app.models import AutomationTrigger
+    from backend.app.services import automation_service
+
+    automation_service.dispatch(db, AutomationTrigger.QUOTE_ACCEPTED, quote.organization_id, {"quote": quote, "customer": quote.customer})
     db.commit()
     return get_public_quote_or_404(db, token)
 

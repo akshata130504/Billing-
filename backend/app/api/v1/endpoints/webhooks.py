@@ -11,9 +11,9 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_db
 from backend.app.core.logging import logger
-from backend.app.models import AuditStatus, Invoice, PaymentStatus, Refund, RefundStatus, WebhookEvent, utcnow
+from backend.app.models import AuditStatus, AutomationTrigger, Invoice, PaymentStatus, Refund, RefundStatus, WebhookEvent, utcnow
 from backend.app.schemas.public import WebhookAck
-from backend.app.services import audit, invoice_service, payment_service, razorpay_gateway
+from backend.app.services import audit, automation_service, invoice_service, payment_service, razorpay_gateway
 
 router = APIRouter()
 
@@ -65,6 +65,9 @@ def _handle_payment_captured(db: Session, event: WebhookEvent, payload: Dict[str
         signature_verified=True,
         actor_label=audit.WEBHOOK_ACTOR,
     )
+    automation_service.dispatch(
+        db, AutomationTrigger.PAYMENT_RECEIVED, payment.organization_id, {"payment": payment, "invoice": invoice, "customer": payment.customer}
+    )
 
 
 def _handle_payment_failed(db: Session, event: WebhookEvent, payload: Dict[str, Any]) -> None:
@@ -81,6 +84,9 @@ def _handle_payment_failed(db: Session, event: WebhookEvent, payload: Dict[str, 
         reason=reason,
         payload={"source": "webhook", "event_id": event.event_id, "entity": entity},
         actor_label=audit.WEBHOOK_ACTOR,
+    )
+    automation_service.dispatch(
+        db, AutomationTrigger.PAYMENT_FAILED, payment.organization_id, {"payment": payment, "customer": payment.customer}
     )
 
 

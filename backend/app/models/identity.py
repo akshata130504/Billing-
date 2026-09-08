@@ -84,6 +84,17 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     invoice_terms = Column(Text, nullable=True)
     logo_url = Column(String(500), nullable=True)
 
+    # Customization (Part 4.2): branding + document/UI display preferences.
+    # decimal_display_precision is display-only — it never changes the fixed
+    # Numeric(14,2) storage/rounding money.py uses everywhere else.
+    brand_color = Column(String(7), nullable=True)  # '#RRGGBB'
+    quote_notes = Column(Text, nullable=True)
+    quote_terms = Column(Text, nullable=True)
+    date_format = Column(String(20), nullable=False, default="DD/MM/YYYY")
+    decimal_display_precision = Column(Integer, nullable=False, default=2)
+    default_dashboard_range = Column(String(20), nullable=False, default="30_days")
+    table_density = Column(String(12), nullable=False, default="comfortable")
+
     memberships = relationship("Membership", back_populates="organization", cascade="all, delete-orphan")
 
 

@@ -22,7 +22,7 @@ export type QuoteStatus =
   | 'declined'
   | 'expired'
   | 'converted';
-export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'paused' | 'cancelled';
+export type SubscriptionStatus = 'draft' | 'pending_activation' | 'active' | 'trialing' | 'past_due' | 'paused' | 'cancelled' | 'expired';
 export type InvoiceStatus = 'draft' | 'sent' | 'partially_paid' | 'paid' | 'overdue' | 'void';
 /**
  * `razorpay` is only ever set by the gateway flow; manual recording accepts
@@ -238,6 +238,13 @@ export interface OrganizationOut {
   invoice_notes: string | null;
   invoice_terms: string | null;
   logo_url: string | null;
+  brand_color: string | null;
+  quote_notes: string | null;
+  quote_terms: string | null;
+  date_format: string;
+  decimal_display_precision: number;
+  default_dashboard_range: string;
+  table_density: string;
   created_at: string;
   updated_at: string;
 }
@@ -507,7 +514,18 @@ export interface SubscriptionOut {
   plan: SubscriptionPlanRef;
   quantity: number;
   status: SubscriptionStatus;
+  billing_frequency?: string;
+  currency?: string;
+  pricing_model?: string;
+  unit_price?: string;
+  subtotal?: string;
+  discount_amount?: string;
+  tax_amount?: string;
+  total_amount?: string;
+  auto_renewal?: boolean;
+  cancellation_reason?: string | null;
   start_date: string;
+  trial_start?: string | null;
   trial_end: string | null;
   current_period_start: string;
   current_period_end: string;
@@ -527,10 +545,14 @@ export interface SubscriptionIn {
   customer_id: string;
   plan_id: string;
   quantity?: number;
+  status?: SubscriptionStatus;
+  billing_frequency?: string;
+  auto_renewal?: boolean;
   start_date?: string;
   /** null = plan default */
   trial_days?: number | null;
   notes?: string | null;
+  discount_amount?: number;
   /** default true when no trial */
   generate_first_invoice?: boolean;
 }
@@ -538,7 +560,9 @@ export interface SubscriptionIn {
 export interface SubscriptionUpdate {
   quantity?: number;
   notes?: string | null;
+  auto_renewal?: boolean;
   cancel_at_period_end?: boolean;
+  billing_frequency?: string;
 }
 
 export interface SubscriptionCancelRequest {
@@ -551,6 +575,22 @@ export interface SubscriptionListParams extends PageParams {
   status?: SubscriptionStatus;
   customer_id?: string;
   plan_id?: string;
+  billing_frequency?: string;
+}
+
+export interface SubscriptionSummaryOut {
+  total_subscriptions: number;
+  active_count: number;
+  trialing_count: number;
+  paused_count: number;
+  past_due_count: number;
+  cancelled_count: number;
+  draft_count: number;
+  total_mrr: string;
+  total_arr: string;
+  expiring_soon_count: number;
+  trial_expiring_soon_count: number;
+  auto_renew_enabled_count: number;
 }
 
 // ---------------------------------------------------------------------------

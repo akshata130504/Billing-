@@ -15,10 +15,13 @@ from sqlalchemy.orm import Session, selectinload
 
 from backend.app.core.config import settings
 from backend.app.core.logging import logger
-from backend.app.models import Invoice, InvoiceStatus, Plan, Subscription, SubscriptionStatus
-from backend.app.services import audit
+from backend.app.models import AutomationTrigger, Invoice, InvoiceStatus, Plan, Quote, QuoteStatus, Subscription, SubscriptionStatus
+from backend.app.services import audit, automation_service
 from backend.app.services.invoice_service import mark_overdue, send_reminder
 from backend.app.services.subscription_service import convert_trial, renew_subscription
+
+DUE_SOON_WINDOW_DAYS = 3
+QUOTE_EXPIRING_WINDOW_DAYS = 3
 
 _scheduler = None
 
@@ -98,10 +101,63 @@ def run_billing_jobs(db: Session, *, today: Optional[date] = None) -> Dict[str, 
             inv = _load_invoice(db, iid)
             if inv is not None and mark_overdue(db, inv, actor_label=audit.SYSTEM_ACTOR):
                 counts["marked_overdue"] += 1
+                automation_service.dispatch(
+                    db, AutomationTrigger.INVOICE_OVERDUE, inv.organization_id,
+                    {"invoice": inv, "customer": inv.customer},
+                )
             db.commit()
         except Exception:
             errors += 1
             logger.exception("Scheduler: overdue marking failed for invoice %s", iid)
+            db.rollback()
+
+    # (c2) open invoices due soon -> invoice_due_soon automations (no status change)
+    due_soon_ids = list(
+        db.scalars(
+            select(Invoice.id).where(
+                Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIALLY_PAID]),
+                Invoice.due_date >= today,
+                Invoice.due_date <= today + timedelta(days=DUE_SOON_WINDOW_DAYS),
+            )
+        ).all()
+    )
+    for iid in due_soon_ids:
+        try:
+            inv = _load_invoice(db, iid)
+            if inv is not None:
+                automation_service.dispatch(
+                    db, AutomationTrigger.INVOICE_DUE_SOON, inv.organization_id,
+                    {"invoice": inv, "customer": inv.customer},
+                )
+            db.commit()
+        except Exception:
+            errors += 1
+            logger.exception("Scheduler: invoice_due_soon automation failed for invoice %s", iid)
+            db.rollback()
+
+    # (c3) sent quotes expiring soon -> quote_expiring automations
+    expiring_quote_ids = list(
+        db.scalars(
+            select(Quote.id).where(
+                Quote.status.in_([QuoteStatus.SENT, QuoteStatus.VIEWED]),
+                Quote.expiry_date.is_not(None),
+                Quote.expiry_date >= today,
+                Quote.expiry_date <= today + timedelta(days=QUOTE_EXPIRING_WINDOW_DAYS),
+            )
+        ).all()
+    )
+    for qid in expiring_quote_ids:
+        try:
+            quote = db.scalars(select(Quote).options(selectinload(Quote.customer)).where(Quote.id == qid)).first()
+            if quote is not None:
+                automation_service.dispatch(
+                    db, AutomationTrigger.QUOTE_EXPIRING, quote.organization_id,
+                    {"quote": quote, "customer": quote.customer},
+                )
+            db.commit()
+        except Exception:
+            errors += 1
+            logger.exception("Scheduler: quote_expiring automation failed for quote %s", qid)
             db.rollback()
 
     # (d) dunning reminders for overdue invoices

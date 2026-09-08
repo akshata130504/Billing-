@@ -31,18 +31,25 @@ from backend.app.services.email import frontend_url, send_email
 NULLABLE_TEXT_FIELDS = {
     "legal_name", "email", "phone", "website", "address_line1", "address_line2", "city", "state",
     "postal_code", "gstin", "pan", "invoice_notes", "invoice_terms", "logo_url",
+    "brand_color", "quote_notes", "quote_terms",
 }
 REQUIRED_TEXT_FIELDS = {
     "name", "country", "default_currency", "timezone",
     "invoice_prefix", "quote_prefix", "payment_prefix", "subscription_prefix", "customer_prefix",
+    "date_format", "default_dashboard_range", "table_density",
 }
 SEQUENCE_FIELDS = {
     "invoice_next_number", "quote_next_number", "payment_next_number",
     "subscription_next_number", "customer_next_number",
 }
 PERCENT_FIELDS = {"default_tax_rate_pct", "discount_approval_threshold_pct"}
-INT_FIELDS = SEQUENCE_FIELDS | {"default_payment_terms_days"}
+INT_FIELDS = SEQUENCE_FIELDS | {"default_payment_terms_days", "decimal_display_precision"}
 EDITABLE_FIELDS = NULLABLE_TEXT_FIELDS | REQUIRED_TEXT_FIELDS | INT_FIELDS | PERCENT_FIELDS
+
+_BRAND_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+_DATE_FORMATS = {"DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"}
+_DASHBOARD_RANGES = {"today", "7_days", "30_days", "3_months", "12_months"}
+_TABLE_DENSITIES = {"comfortable", "compact"}
 
 _GSTIN_RE = re.compile(r"^[0-9]{2}[A-Z0-9]{13}$")
 _PAN_RE = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
@@ -94,6 +101,10 @@ def _validate_organization_changes(organization: Organization, changes: Dict[str
             if field == "email" and value is not None and not _EMAIL_RE.match(value):
                 errors[field] = "is not a valid email address"
                 continue
+            if field == "brand_color" and value is not None:
+                if not _BRAND_COLOR_RE.match(value):
+                    errors[field] = "must be a hex color like #4F46E5"
+                    continue
             cleaned[field] = value
             continue
 
@@ -122,7 +133,19 @@ def _validate_organization_changes(organization: Organization, changes: Dict[str
                 if not value:
                     errors[field] = "cannot be empty"
                     continue
-            else:  # prefixes
+            elif field == "date_format":
+                if value not in _DATE_FORMATS:
+                    errors[field] = f"must be one of {sorted(_DATE_FORMATS)}"
+                    continue
+            elif field == "default_dashboard_range":
+                if value not in _DASHBOARD_RANGES:
+                    errors[field] = f"must be one of {sorted(_DASHBOARD_RANGES)}"
+                    continue
+            elif field == "table_density":
+                if value not in _TABLE_DENSITIES:
+                    errors[field] = f"must be one of {sorted(_TABLE_DENSITIES)}"
+                    continue
+            elif field in ("invoice_prefix", "quote_prefix", "payment_prefix", "subscription_prefix", "customer_prefix"):
                 if not value or len(value) > 12:
                     errors[field] = "must be 1 to 12 characters"
                     continue
@@ -140,6 +163,13 @@ def _validate_organization_changes(organization: Organization, changes: Dict[str
         if field == "default_payment_terms_days":
             if int(value) < 0 or int(value) > 365:
                 errors[field] = "must be between 0 and 365"
+                continue
+            cleaned[field] = int(value)
+            continue
+
+        if field == "decimal_display_precision":
+            if int(value) < 0 or int(value) > 6:
+                errors[field] = "must be between 0 and 6"
                 continue
             cleaned[field] = int(value)
             continue

@@ -158,6 +158,149 @@ def test_next_numbers_cannot_decrease(client, auth_headers):
     assert client.get(f"{API}/organization", headers=auth_headers).json()["customer_next_number"] == 7
 
 
+# --- customization fields (Part 4.2: branding + document/UI display preferences) --------------
+
+
+def test_customization_fields_round_trip(client, auth_headers):
+    body = {
+        "brand_color": "#4F46E5",
+        "quote_notes": "Thanks for your business!",
+        "quote_terms": "Valid for 30 days from issue.",
+        "date_format": "MM/DD/YYYY",
+        "decimal_display_precision": 4,
+        "default_dashboard_range": "7_days",
+        "table_density": "compact",
+    }
+    r = client.patch(f"{API}/organization", json=body, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    for field, value in body.items():
+        assert data[field] == value, field
+
+    # re-fetch to confirm it actually persisted, not just echoed back
+    refetched = client.get(f"{API}/organization", headers=auth_headers).json()
+    for field, value in body.items():
+        assert refetched[field] == value, field
+
+
+@pytest.mark.parametrize(
+    "body,field",
+    [
+        ({"brand_color": "blue"}, "brand_color"),
+        ({"brand_color": "#12345"}, "brand_color"),  # too short
+        ({"brand_color": "12A4F0"}, "brand_color"),  # missing '#'
+        ({"brand_color": "#GGGGGG"}, "brand_color"),  # not hex digits
+        ({"date_format": "YYYY/MM/DD"}, "date_format"),
+        ({"date_format": ""}, "date_format"),
+        ({"default_dashboard_range": "6_months"}, "default_dashboard_range"),
+        ({"table_density": "cozy"}, "table_density"),
+        ({"decimal_display_precision": -1}, "decimal_display_precision"),
+        ({"decimal_display_precision": 7}, "decimal_display_precision"),
+    ],
+)
+def test_customization_field_validation(client, auth_headers, body, field):
+    r = client.patch(f"{API}/organization", json=body, headers=auth_headers)
+    assert r.status_code == 422, r.text
+    err = r.json()["error"]
+    assert err["code"] == "VALIDATION_ERROR"
+    assert field in err["details"]["fields"]
+
+
+def test_brand_color_accepts_valid_hex_and_clears_with_null_or_empty(client, auth_headers):
+    ok = client.patch(f"{API}/organization", json={"brand_color": "#4F46E5"}, headers=auth_headers)
+    assert ok.status_code == 200 and ok.json()["brand_color"] == "#4F46E5"
+
+    cleared_by_empty = client.patch(f"{API}/organization", json={"brand_color": ""}, headers=auth_headers)
+    assert cleared_by_empty.status_code == 200 and cleared_by_empty.json()["brand_color"] is None
+
+    ok_again = client.patch(f"{API}/organization", json={"brand_color": "#000000"}, headers=auth_headers)
+    assert ok_again.status_code == 200 and ok_again.json()["brand_color"] == "#000000"
+
+    cleared_by_null = client.patch(f"{API}/organization", json={"brand_color": None}, headers=auth_headers)
+    assert cleared_by_null.status_code == 200 and cleared_by_null.json()["brand_color"] is None
+
+
+@pytest.mark.parametrize("value", ["DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"])
+def test_date_format_accepts_each_valid_value(client, auth_headers, value):
+    r = client.patch(f"{API}/organization", json={"date_format": value}, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["date_format"] == value
+
+
+@pytest.mark.parametrize("value", ["today", "7_days", "30_days", "3_months", "12_months"])
+def test_default_dashboard_range_accepts_each_valid_value(client, auth_headers, value):
+    r = client.patch(f"{API}/organization", json={"default_dashboard_range": value}, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["default_dashboard_range"] == value
+
+
+@pytest.mark.parametrize("value", ["comfortable", "compact"])
+def test_table_density_accepts_each_valid_value(client, auth_headers, value):
+    r = client.patch(f"{API}/organization", json={"table_density": value}, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["table_density"] == value
+
+
+@pytest.mark.parametrize("value", [0, 6])
+def test_decimal_display_precision_accepts_boundary_values(client, auth_headers, value):
+    r = client.patch(f"{API}/organization", json={"decimal_display_precision": value}, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["decimal_display_precision"] == value
+
+
+def test_customization_fields_require_admin(client, tenant):
+    for role in (MemberRole.VIEWER, MemberRole.FINANCE):
+        r = client.patch(f"{API}/organization", json={"table_density": "compact"}, headers=tenant.headers_for_role(role))
+        assert r.status_code == 403, role
+
+
+def test_customization_tenant_isolation(client, db, tenant, auth_headers):
+    from backend.tests.conftest import Tenant
+
+    other = Tenant(db, uuid.uuid4().hex[:8])
+    other_headers = other.headers()
+
+    other_before = client.get(f"{API}/organization", headers=other_headers).json()
+
+    body = {
+        "brand_color": "#123456",
+        "quote_notes": "Org A only notes",
+        "quote_terms": "Org A only terms",
+        "date_format": "YYYY-MM-DD",
+        "decimal_display_precision": 3,
+        "default_dashboard_range": "3_months",
+        "table_density": "compact",
+    }
+    r = client.patch(f"{API}/organization", json=body, headers=auth_headers)
+    assert r.status_code == 200, r.text
+
+    # org A got the change...
+    org_a = client.get(f"{API}/organization", headers=auth_headers).json()
+    for field, value in body.items():
+        assert org_a[field] == value
+
+    # ...but org B's row is completely untouched
+    other_after = client.get(f"{API}/organization", headers=other_headers).json()
+    assert other_after == other_before
+    for field in body:
+        assert other_after[field] != org_a[field]
+
+
+def test_customization_audit_row_written_only_when_fields_actually_change(client, db, tenant, auth_headers):
+    r = client.patch(f"{API}/organization", json={"table_density": "compact", "decimal_display_precision": 5}, headers=auth_headers)
+    assert r.status_code == 200, r.text
+
+    rows = audit_rows(db, "ORGANIZATION_UPDATED", tenant.organization.id)
+    assert len(rows) == 1
+    assert rows[0].after_state == {"table_density": "compact", "decimal_display_precision": 5}
+    assert rows[0].before_state == {"table_density": "comfortable", "decimal_display_precision": 2}
+
+    # re-sending the exact same values is a no-op: no new audit row
+    same = client.patch(f"{API}/organization", json={"table_density": "compact", "decimal_display_precision": 5}, headers=auth_headers)
+    assert same.status_code == 200
+    assert len(audit_rows(db, "ORGANIZATION_UPDATED", tenant.organization.id)) == 1
+
+
 # --- team listing -----------------------------------------------------------------------------
 
 

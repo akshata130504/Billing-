@@ -75,9 +75,25 @@ export const queryKeys = {
     search: (q: string) => ['control-center', 'search', q] as const,
     imports: (params?: object) => ['control-center', 'imports', params ?? {}] as const,
   },
+  reports: {
+    all: ['reports'] as const,
+    dashboard: (params?: object) => ['reports', 'dashboard', params ?? {}] as const,
+    revenue: (params?: object) => ['reports', 'revenue', params ?? {}] as const,
+    receivables: (params?: object) => ['reports', 'receivables', params ?? {}] as const,
+    invoices: (params?: object) => ['reports', 'invoices', params ?? {}] as const,
+    payments: (params?: object) => ['reports', 'payments', params ?? {}] as const,
+    customers: (params?: object) => ['reports', 'customers', params ?? {}] as const,
+    products: (params?: object) => ['reports', 'products', params ?? {}] as const,
+  },
   public: {
     invoice: (token: string) => ['public', 'invoice', token] as const,
     quote: (token: string) => ['public', 'quote', token] as const,
+  },
+  automation: {
+    all: ['automation'] as const,
+    dashboard: () => ['automation', 'dashboard'] as const,
+    rules: (params?: object) => ['automation', 'rules', params ?? {}] as const,
+    executions: (params?: object) => ['automation', 'executions', params ?? {}] as const,
   },
 } as const;
 

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { Building2, Receipt, Users, Boxes, ShieldCheck } from 'lucide-react';
+import { Building2, Receipt, Users, Boxes, ShieldCheck, Zap, Palette } from 'lucide-react';
 import { PageHeader } from '../../components/common/PageHeader';
 import { LoadingState } from '../../components/common/LoadingState';
 import { ErrorState } from '../../components/common/ErrorState';
@@ -14,13 +14,24 @@ import { BillingTab } from './BillingTab';
 import { TeamTab } from './TeamTab';
 import { IntegrationsTab } from './IntegrationsTab';
 import { SecurityTab } from './SecurityTab';
+import { AutomationTab } from './AutomationTab';
+import { CustomizationTab } from './CustomizationTab';
 
-export type SettingsTab = 'organization' | 'billing' | 'team' | 'integrations' | 'security';
+export type SettingsTab =
+  | 'organization'
+  | 'billing'
+  | 'team'
+  | 'automation'
+  | 'customization'
+  | 'integrations'
+  | 'security';
 
 const TABS: { key: SettingsTab; label: string; icon: typeof Building2 }[] = [
   { key: 'organization', label: 'Organization', icon: Building2 },
   { key: 'billing', label: 'Billing & numbering', icon: Receipt },
   { key: 'team', label: 'Team', icon: Users },
+  { key: 'automation', label: 'Automation', icon: Zap },
+  { key: 'customization', label: 'Customization', icon: Palette },
   { key: 'integrations', label: 'Integrations', icon: Boxes },
   { key: 'security', label: 'Security', icon: ShieldCheck },
 ];
@@ -97,6 +108,8 @@ export function SettingsPage() {
           {tab === 'organization' && renderOrgTab((org) => <OrganizationTab organization={org} canEdit={canEdit} />)}
           {tab === 'billing' && renderOrgTab((org) => <BillingTab organization={org} canEdit={canEdit} />)}
           {tab === 'team' && <TeamTab canEdit={canEdit} />}
+          {tab === 'automation' && <AutomationTab />}
+          {tab === 'customization' && renderOrgTab((org) => <CustomizationTab organization={org} canEdit={canEdit} />)}
           {tab === 'integrations' && <IntegrationsTab />}
           {tab === 'security' && <SecurityTab />}
         </div>

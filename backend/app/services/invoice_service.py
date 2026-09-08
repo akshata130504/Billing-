@@ -358,6 +358,10 @@ def create_invoice(db: Session, ctx: CurrentContext, data: InvoiceCreate) -> Inv
         ctx=ctx,
         after=snapshot(invoice),
     )
+    from backend.app.models import AutomationTrigger
+    from backend.app.services import automation_service
+
+    automation_service.dispatch(db, AutomationTrigger.INVOICE_CREATED, ctx.organization_id, {"invoice": invoice, "customer": invoice.customer})
     db.commit()
     return get_invoice(db, ctx.organization_id, invoice.id)
 

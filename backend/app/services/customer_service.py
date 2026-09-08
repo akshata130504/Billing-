@@ -156,6 +156,10 @@ def create_customer(db: Session, ctx: CurrentContext, data: CustomerCreate) -> C
         entity_label=customer.display_name,
         after=audit.snapshot(customer, CUSTOMER_SNAPSHOT_FIELDS),
     )
+    from backend.app.models import AutomationTrigger
+    from backend.app.services import automation_service
+
+    automation_service.dispatch(db, AutomationTrigger.CUSTOMER_CREATED, ctx.organization_id, {"customer": customer})
     db.commit()
     return get_customer_or_404(db, ctx.organization_id, customer.id)
 
