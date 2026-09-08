@@ -8,7 +8,6 @@ import { useAuth } from '../hooks/useAuth';
 import type { MemberRole } from '../types/api';
 import { ROLE_LABELS } from '../utils/format';
 
-import { ComingSoonPage } from '../pages/ComingSoonPage';
 import { DashboardPage } from '../pages/dashboard/DashboardPage';
 import {
   LoginPage,
@@ -35,7 +34,7 @@ import {
   CollectionsInvoiceListPage,
   CollectionsInvoiceDetailPage,
 } from '../pages/collections';
-import { PayInvoicePage, PublicQuotePage, LandingPage } from '../pages/public';
+import { PayInvoicePage, PublicQuotePage, LandingPage, PublicCheckoutPage } from '../pages/public';
 import { ActivityPage } from '../pages/activity';
 import {
   ActionCenterPage,
@@ -56,6 +55,16 @@ import { CustomerLifecycleListPage, CustomerLifecycleDetailPage } from '../pages
 import { TimesheetsPage } from '../pages/timesheets';
 import { ReportsPage } from '../pages/reports';
 import { SettingsPage } from '../pages/settings';
+import { MobilePlatformPage, DesktopPlatformPage } from '../pages/platforms';
+import { AIBillingPage } from '../pages/ai-billing';
+import { UsageMeteringPage } from '../pages/usage';
+import { ProrationPage } from '../pages/proration';
+import { DunningPage } from '../pages/dunning';
+import { CustomerPortalPage } from '../pages/customer-portal';
+import { HostedPaymentPagesPage } from '../pages/hosted-payment-pages';
+import { RevenueIntelligencePage } from '../pages/revenue-intelligence';
+import { AutomationPage } from '../pages/automation';
+import { CustomizationPage } from '../pages/customization';
 
 // ---------------------------------------------------------------------------
 // Guards
@@ -169,6 +178,7 @@ export function AppRoutes() {
           <Route path="/landing" element={<LandingPage />} />
           <Route path="/pay/:token" element={<PayInvoicePage />} />
           <Route path="/quote/:token" element={<PublicQuotePage />} />
+          <Route path="/checkout/:token" element={<PublicCheckoutPage />} />
 
           {/* Private */}
           <Route element={<ProtectedRoute />}>
@@ -244,21 +254,21 @@ export function AppRoutes() {
               <Route path="settings" element={<SettingsPage />} />
 
               <Route path="cpq" element={<CPQPage />} />
-              <Route path="usage" element={<ComingSoonPage />} />
-              <Route path="proration" element={<ComingSoonPage />} />
-              <Route path="dunning" element={<ComingSoonPage />} />
+              <Route path="usage" element={<UsageMeteringPage />} />
+              <Route path="proration" element={<ProrationPage />} />
+              <Route path="dunning" element={<DunningPage />} />
               <Route path="customer-lifecycle" element={<CustomerLifecycleListPage />} />
               <Route path="customer-lifecycle/:customerId" element={<CustomerLifecycleDetailPage />} />
-              <Route path="customer-portal" element={<ComingSoonPage />} />
-              <Route path="hosted-payment-pages" element={<ComingSoonPage />} />
-              <Route path="revenue-intelligence" element={<ComingSoonPage />} />
+              <Route path="customer-portal" element={<CustomerPortalPage />} />
+              <Route path="hosted-payment-pages" element={<HostedPaymentPagesPage />} />
+              <Route path="revenue-intelligence" element={<RevenueIntelligencePage />} />
               <Route path="reports" element={<ReportsPage />} />
-              <Route path="ai-billing" element={<ComingSoonPage />} />
-              <Route path="automation" element={<ComingSoonPage />} />
-              <Route path="customization" element={<ComingSoonPage />} />
+              <Route path="ai-billing" element={<AIBillingPage />} />
+              <Route path="automation" element={<AutomationPage />} />
+              <Route path="customization" element={<CustomizationPage />} />
               <Route path="integrations" element={<Navigate to="/settings?tab=integrations" replace />} />
-              <Route path="platforms/mobile" element={<ComingSoonPage />} />
-              <Route path="platforms/desktop" element={<ComingSoonPage />} />
+              <Route path="platforms/mobile" element={<MobilePlatformPage />} />
+              <Route path="platforms/desktop" element={<DesktopPlatformPage />} />
 
               {/* Legacy / alternate path redirects */}
               <Route path="system/settings" element={<Navigate to="/settings" replace />} />
