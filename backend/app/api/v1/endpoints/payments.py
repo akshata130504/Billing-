@@ -11,6 +11,7 @@ from backend.app.schemas.payments import (
     AllocationsPut,
     PaymentCreate,
     PaymentOut,
+    PaymentsSummary,
     PaymentUpdate,
     ReconciliationSummary,
     RefundIn,
@@ -58,6 +59,34 @@ def create_payment(
     db: Session = Depends(get_db),
 ):
     return payment_service.serialize_payment(payment_service.create_payment(db, ctx, body))
+
+
+# Declared BEFORE /{payment_id} so "summary" is never treated as an id.
+@router.get("/summary", response_model=PaymentsSummary, summary="Money totals for the filtered payments")
+def payments_summary(
+    search: Optional[str] = Query(None),
+    status_: Optional[str] = Query(None, alias="status"),
+    method: Optional[str] = Query(None),
+    gateway: Optional[str] = Query(None),
+    reconciliation_status: Optional[str] = Query(None),
+    customer_id: Optional[str] = Query(None),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+    ctx: CurrentContext = Depends(require_viewer),
+    db: Session = Depends(get_db),
+):
+    return payment_service.payments_summary(
+        db,
+        ctx.organization_id,
+        search=search,
+        status=status_,
+        method=method,
+        gateway=gateway,
+        reconciliation_status=reconciliation_status,
+        customer_id=customer_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
 
 # Declared BEFORE /{payment_id} so "reconciliation" is never treated as an id.

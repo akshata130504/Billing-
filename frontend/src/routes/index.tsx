@@ -146,8 +146,7 @@ export function AppRoutes() {
   return (
     <ProjectsProvider>
       <ExpensesProvider>
-        <PaymentsProvider>
-          <Routes>
+        <Routes>
           {/* Public: auth */}
           <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
           <Route path="/signup" element={<PublicOnly><SignupPage /></PublicOnly>} />
@@ -181,9 +180,15 @@ export function AppRoutes() {
               <Route path="invoices/new" element={<InvoiceFormPage />} />
               <Route path="invoices/:id" element={<InvoiceDetailPage />} />
               <Route path="invoices/:id/edit" element={<InvoiceFormPage />} />
-              <Route path="payments" element={<PaymentsListPage />} />
-              <Route path="payments/:id" element={<PaymentDetailPage />} />
-              <Route path="payments/:paymentId" element={<PaymentDetailPage />} />
+              {/*
+                PaymentsProvider loads payments, customers and totals on mount, so it
+                is scoped to these routes only. Mounted app-wide it would issue
+                authenticated requests from the login and hosted payment pages.
+              */}
+              <Route path="payments" element={<PaymentsProvider><Outlet /></PaymentsProvider>}>
+                <Route index element={<PaymentsListPage />} />
+                <Route path=":id" element={<PaymentDetailPage />} />
+              </Route>
               <Route path="collections" element={<CollectionsPage />} />
 
               {/* Subscriptions */}
@@ -268,7 +273,6 @@ export function AppRoutes() {
             </Route>
           </Route>
         </Routes>
-        </PaymentsProvider>
       </ExpensesProvider>
     </ProjectsProvider>
   );

@@ -1,23 +1,33 @@
-import { createContext, useContext, useState, useEffect, useMemo, useCallback, ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  ReactNode,
+} from 'react';
 import {
   Payment,
   PaymentCustomer,
   PaymentsSummary,
+  PaymentFilterState,
   InvoiceAllocation,
   PaymentType,
   PaymentMethod,
 } from './types';
-import { initialPayments, mockCustomersWithInvoices } from './mockPayments';
 import { paymentService } from '../../services/paymentService';
 import { customerService } from '../../services/customerService';
 import { invoiceService } from '../../services/invoiceService';
 import { toApiError } from '../../services/apiClient';
 import { useToast } from '../../components/common/Toast';
-import { paymentOutToUi, uiToPaymentIn, customerToUi } from './paymentMapper';
-import type { ReconciliationSummary } from '../../types/api';
+import { paymentOutToUi, uiToPaymentIn, customerToUi, toBackendPaymentMethod } from './paymentMapper';
+import type { ApiError, PaymentListParams, PaymentStatus as BackendPaymentStatus } from '../../types/api';
 
-const STORAGE_PAYMENTS_KEY = 'rooman_payments_list_v1';
-const STORAGE_CUSTOMERS_KEY = 'rooman_payments_customers_v1';
+export const PAYMENTS_PAGE_SIZE = 25;
+
+/** Invoice statuses a payment can still be applied to. */
+const OPEN_INVOICE_STATUSES = ['sent', 'partially_paid', 'overdue'] as const;
 
 export interface RecordPaymentInput {
   paymentType: PaymentType;
@@ -28,7 +38,6 @@ export interface RecordPaymentInput {
   paymentMethod: PaymentMethod;
   referenceNumber: string;
   notes?: string;
-  bankAccount?: string;
   allocations: InvoiceAllocation[];
 }
 
@@ -41,238 +50,295 @@ export interface RefundPaymentInput {
   notes?: string;
 }
 
+const EMPTY_SUMMARY: PaymentsSummary = {
+  totalCollected: 0,
+  pendingProcessing: 0,
+  totalRefunded: 0,
+  unappliedCredit: 0,
+};
+
 export interface PaymentsContextType {
+  /** The current page of payments, exactly as the server returned them. */
   payments: Payment[];
+  /** Customers available for the record-payment form (first page, refined by search). */
   customers: PaymentCustomer[];
+  /** Money totals for every payment matching the active filters, computed server-side. */
   summary: PaymentsSummary;
   isLoading: boolean;
-  reconciliationSummary: ReconciliationSummary | null;
+  /** Set when the payment list could not be loaded. The UI must not show figures in this state. */
+  error: ApiError | null;
+  filters: PaymentFilterState;
+  setFilters: (next: PaymentFilterState) => void;
+  page: number;
+  setPage: (page: number) => void;
+  total: number;
+  totalPages: number;
   recordPayment: (input: RecordPaymentInput) => Promise<Payment>;
   refundPayment: (input: RefundPaymentInput) => Promise<void>;
-  updatePayment: (id: string, updates: Partial<Payment>) => Promise<void>;
-  deletePayment: (id: string) => void;
+  updatePayment: (id: string, updates: { referenceNumber?: string; notes?: string }) => Promise<void>;
   getPaymentById: (id: string) => Payment | undefined;
   fetchPaymentById: (id: string) => Promise<Payment | undefined>;
+  searchCustomers: (query: string) => Promise<PaymentCustomer[]>;
   getCustomerById: (id: string) => PaymentCustomer | undefined;
-  getCustomerPayments: (customerId: string) => Promise<Payment[]>;
-  createCustomer: (data: { displayName: string; companyName?: string; email?: string; phone?: string }) => Promise<PaymentCustomer>;
+  loadCustomerInvoices: (customerId: string) => Promise<PaymentCustomer | undefined>;
+  createCustomer: (data: {
+    displayName: string;
+    companyName?: string;
+    email?: string;
+    phone?: string;
+  }) => Promise<PaymentCustomer>;
   refreshPayments: () => Promise<void>;
 }
 
 const PaymentsContext = createContext<PaymentsContextType | undefined>(undefined);
 
+export const INITIAL_PAYMENT_FILTERS: PaymentFilterState = {
+  searchQuery: '',
+  statusTab: 'all',
+  customer: 'all',
+  paymentMethod: 'all',
+  status: 'all',
+  sortBy: 'newest',
+};
+
+/** Translate the UI filter state into the query parameters the API understands. */
+function toListParams(filters: PaymentFilterState, page: number): PaymentListParams {
+  const sortMap: Record<PaymentFilterState['sortBy'], string> = {
+    newest: '-created_at',
+    oldest: 'created_at',
+    amount_high: '-amount',
+    amount_low: 'amount',
+  };
+
+  // The status tab and the status dropdown both narrow status; the dropdown wins
+  // when it names a single status, otherwise the tab decides.
+  let status: BackendPaymentStatus | undefined;
+  if (filters.status !== 'all') {
+    status = (filters.status === 'completed' ? 'succeeded' : filters.status) as BackendPaymentStatus;
+  } else if (filters.statusTab === 'completed') {
+    status = 'succeeded';
+  } else if (filters.statusTab === 'pending') {
+    status = 'pending';
+  } else if (filters.statusTab === 'failed') {
+    status = 'failed';
+  }
+
+  return {
+    page,
+    page_size: PAYMENTS_PAGE_SIZE,
+    search: filters.searchQuery.trim() || undefined,
+    status,
+    method: filters.paymentMethod !== 'all' ? toBackendPaymentMethod(filters.paymentMethod as PaymentMethod) : undefined,
+    customer_id: filters.customer !== 'all' ? filters.customer : undefined,
+    sort: sortMap[filters.sortBy],
+  };
+}
+
 export function PaymentsProvider({ children }: { children: ReactNode }) {
   const { showToast } = useToast();
 
-  const [payments, setPayments] = useState<Payment[]>(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_PAYMENTS_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {
-      console.error('Failed to load payments from localStorage:', e);
-    }
-    return initialPayments;
-  });
-
-  const [customers, setCustomers] = useState<PaymentCustomer[]>(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_CUSTOMERS_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {
-      console.error('Failed to load payment customers from localStorage:', e);
-    }
-    return mockCustomersWithInvoices;
-  });
-
-  const [reconciliation, setReconciliation] = useState<ReconciliationSummary | null>(null);
+  // Financial records are never seeded from fixtures and never cached in the
+  // browser: an empty list means the organization genuinely has no payments,
+  // and a failed load surfaces `error` rather than stale or invented figures.
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [customers, setCustomers] = useState<PaymentCustomer[]>([]);
+  const [summary, setSummary] = useState<PaymentsSummary>(EMPTY_SUMMARY);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [filters, setFiltersState] = useState<PaymentFilterState>(INITIAL_PAYMENT_FILTERS);
+  const [page, setPage] = useState(1);
 
-  // Sync state with localStorage for offline resilience
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_PAYMENTS_KEY, JSON.stringify(payments));
-    } catch (e) {
-      console.error('Failed to save payments to localStorage:', e);
-    }
-  }, [payments]);
+  const listParams = useMemo(() => toListParams(filters, page), [filters, page]);
+  // Totals ignore pagination but honour every other filter.
+  const summaryParams = useMemo(() => {
+    const { page: _page, page_size: _size, sort: _sort, ...rest } = listParams;
+    return rest;
+  }, [listParams]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_CUSTOMERS_KEY, JSON.stringify(customers));
-    } catch (e) {
-      console.error('Failed to save customers to localStorage:', e);
-    }
-  }, [customers]);
+  const setFilters = useCallback((next: PaymentFilterState) => {
+    setFiltersState(next);
+    setPage(1); // a changed filter invalidates the current page number
+  }, []);
 
-  // Load live data from the backend API
-  const refreshPayments = useCallback(async () => {
+  const loadPayments = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [paymentsRes, reconRes, customersRes, invoicesRes] = await Promise.allSettled([
-        paymentService.list({ page_size: 100 }),
-        paymentService.reconciliationSummary(),
-        customerService.list({ page_size: 100 }),
-        invoiceService.list({ page_size: 100 }),
-      ]);
-
-      if (paymentsRes.status === 'fulfilled') {
-        const livePayments = paymentsRes.value.items.map(paymentOutToUi);
-        setPayments(livePayments);
-      }
-
-      if (reconRes.status === 'fulfilled') {
-        setReconciliation(reconRes.value);
-      }
-
-      if (customersRes.status === 'fulfilled') {
-        const liveCusts = customersRes.value.items;
-        const liveInvoices = invoicesRes.status === 'fulfilled' ? invoicesRes.value.items : [];
-        const mappedCusts = liveCusts.map((c) => customerToUi(c, liveInvoices));
-        setCustomers(mappedCusts);
-      }
+      const listed = await paymentService.list(listParams);
+      setPayments(listed.items.map(paymentOutToUi));
+      setTotal(listed.total);
+      setTotalPages(listed.total_pages);
+      setError(null);
     } catch (err) {
-      console.warn('API hydration encountered an issue, keeping existing cache:', err);
+      const apiErr = toApiError(err);
+      setPayments([]);
+      setTotal(0);
+      setTotalPages(0);
+      setSummary(EMPTY_SUMMARY);
+      setError(apiErr);
+      return;
     } finally {
       setIsLoading(false);
     }
-  }, []);
+
+    // Totals are a separate query; a failure there must not blank the list.
+    try {
+      const totals = await paymentService.summary(summaryParams);
+      setSummary({
+        totalCollected: Number(totals.total_collected),
+        pendingProcessing: Number(totals.pending_amount),
+        totalRefunded: Number(totals.total_refunded),
+        unappliedCredit: Number(totals.unallocated_amount),
+      });
+    } catch {
+      setSummary(EMPTY_SUMMARY);
+    }
+  }, [listParams, summaryParams]);
 
   useEffect(() => {
-    refreshPayments();
-  }, [refreshPayments]);
+    void loadPayments();
+  }, [loadPayments]);
 
-  // Compute 4 dynamic summary metrics
-  const summary: PaymentsSummary = useMemo(() => {
-    let totalCollected = 0;
-    let pendingProcessing = 0;
-    let totalRefunded = 0;
-    let unappliedCredit = 0;
-
-    for (const p of payments) {
-      totalRefunded += p.refundedAmount || 0;
-
-      if (p.status === 'completed' || p.status === 'partially_refunded') {
-        totalCollected += p.amount - (p.refundedAmount || 0);
-        unappliedCredit += p.unappliedAmount || 0;
-      } else if (p.status === 'pending' || p.status === 'processing') {
-        pendingProcessing += p.amount;
-      }
-    }
-
-    // Override unapplied credit with backend reconciliation summary if available
-    if (reconciliation && reconciliation.unallocated_amount) {
-      const backendUnapplied = parseFloat(reconciliation.unallocated_amount);
-      if (!isNaN(backendUnapplied) && backendUnapplied > 0) {
-        unappliedCredit = backendUnapplied;
-      }
-    }
-
-    return {
-      totalCollected,
-      pendingProcessing,
-      totalRefunded,
-      unappliedCredit,
+  // Customers for the record-payment picker. Only the first page is preloaded;
+  // searchCustomers() queries the server for anything beyond it.
+  useEffect(() => {
+    let cancelled = false;
+    customerService
+      .list({ page_size: 50, status: 'active' })
+      .then((res) => {
+        if (!cancelled) setCustomers(res.items.map((c) => customerToUi(c)));
+      })
+      .catch(() => {
+        if (!cancelled) setCustomers([]);
+      });
+    return () => {
+      cancelled = true;
     };
-  }, [payments, reconciliation]);
+  }, []);
 
-  // Record a new payment with live API integration and offline fallback
-  const recordPayment = useCallback(
-    async (input: RecordPaymentInput): Promise<Payment> => {
+  const searchCustomers = useCallback(async (query: string): Promise<PaymentCustomer[]> => {
+    try {
+      const res = await customerService.list({
+        search: query.trim() || undefined,
+        status: 'active',
+        page_size: 20,
+      });
+      const mapped = res.items.map((c) => customerToUi(c));
+      setCustomers((prev) => {
+        const merged = [...mapped];
+        for (const existing of prev) {
+          if (!merged.some((c) => c.id === existing.id)) merged.push(existing);
+        }
+        return merged;
+      });
+      return mapped;
+    } catch {
+      return [];
+    }
+  }, []);
+
+  /** Fetch the customer's open invoices so the allocation editor has real balances. */
+  const loadCustomerInvoices = useCallback(
+    async (customerId: string): Promise<PaymentCustomer | undefined> => {
       try {
-        const payload = uiToPaymentIn(input);
-        const createdOut = await paymentService.create(payload);
-        const createdUi = paymentOutToUi(createdOut);
-
-        setPayments((prev) => [createdUi, ...prev]);
-
-        showToast(
-          'success',
-          'Payment Recorded',
-          `Payment #${createdUi.id} of ₹${input.amount.toLocaleString('en-IN')} has been recorded successfully.`
-        );
-
-        paymentService.reconciliationSummary().then(setReconciliation).catch(() => {});
-        return createdUi;
+        // Queried per status: /customers/{id}/invoices has no status filter, so
+        // a customer with many settled invoices could otherwise page the open
+        // ones out of reach.
+        const [detail, pages] = await Promise.all([
+          customerService.get(customerId),
+          Promise.all(
+            OPEN_INVOICE_STATUSES.map((status) =>
+              invoiceService.list({
+                customer_id: customerId,
+                status,
+                page_size: 100,
+                sort: 'due_date',
+              })
+            )
+          ),
+        ]);
+        const openInvoices = pages.flatMap((p) => p.items);
+        const mapped = customerToUi(detail, openInvoices);
+        setCustomers((prev) => {
+          const next = prev.filter((c) => c.id !== mapped.id);
+          return [mapped, ...next];
+        });
+        return mapped;
       } catch (err) {
-        const apiErr = toApiError(err);
-        console.error('Backend payment create failed:', apiErr.message);
-        showToast('error', 'Payment Failed', apiErr.message || 'Failed to record payment on the server.');
-        throw err;
+        showToast('error', 'Could not load invoices', toApiError(err).message);
+        return undefined;
       }
     },
     [showToast]
   );
 
-  // Issue a refund (full or partial) with live API integration and RBAC awareness
+  const recordPayment = useCallback(
+    async (input: RecordPaymentInput): Promise<Payment> => {
+      try {
+        const createdOut = await paymentService.create(uiToPaymentIn(input));
+        const createdUi = paymentOutToUi(createdOut);
+        showToast(
+          'success',
+          'Payment recorded',
+          `${createdUi.id} for ${createdUi.customerName} was saved.`
+        );
+        // Re-read from the server so totals, allocations and invoice states are authoritative.
+        await loadPayments();
+        return createdUi;
+      } catch (err) {
+        const apiErr = toApiError(err);
+        showToast('error', 'Payment failed', apiErr.message);
+        throw err;
+      }
+    },
+    [loadPayments, showToast]
+  );
+
   const refundPayment = useCallback(
     async (input: RefundPaymentInput): Promise<void> => {
       const target = payments.find((p) => p.id === input.paymentId || p.backendId === input.paymentId);
-      const backendId = target?.backendId || input.paymentId;
-
+      const backendId = target?.backendId ?? input.paymentId;
       try {
         const updatedOut = await paymentService.refund(backendId, {
           amount: input.amount.toFixed(2),
           reason: input.reason,
         });
-        const updatedUi = paymentOutToUi(updatedOut);
-
-        setPayments((prev) =>
-          prev.map((p) => (p.id === input.paymentId || p.backendId === backendId ? updatedUi : p))
-        );
-
         showToast(
           'success',
-          'Refund Processed',
-          `Refund of ₹${input.amount.toLocaleString('en-IN')} processed successfully for ${updatedUi.id}.`
+          'Refund processed',
+          `Refund recorded against ${updatedOut.payment_number}.`
         );
+        await loadPayments();
       } catch (err) {
         const apiErr = toApiError(err);
-        console.error('Backend refund failed:', apiErr.message);
-        showToast('error', 'Refund Failed', apiErr.message || 'Failed to process refund on the server.');
+        showToast('error', 'Refund failed', apiErr.message);
+        throw err;
+      }
+    },
+    [payments, loadPayments, showToast]
+  );
+
+  const updatePayment = useCallback(
+    async (id: string, updates: { referenceNumber?: string; notes?: string }): Promise<void> => {
+      const target = payments.find((p) => p.id === id || p.backendId === id);
+      const backendId = target?.backendId ?? id;
+      try {
+        const updated = await paymentService.update(backendId, {
+          reference: updates.referenceNumber,
+          notes: updates.notes,
+        });
+        const mapped = paymentOutToUi(updated);
+        setPayments((prev) => prev.map((p) => (p.backendId === mapped.backendId ? mapped : p)));
+        showToast('success', 'Payment updated', 'Reference and notes were saved.');
+      } catch (err) {
+        // The server rejected the change, so the UI must not pretend it stuck.
+        const apiErr = toApiError(err);
+        showToast('error', 'Update failed', apiErr.message);
         throw err;
       }
     },
     [payments, showToast]
-  );
-
-  const updatePayment = useCallback(
-    async (id: string, updates: Partial<Payment>): Promise<void> => {
-      const target = payments.find((p) => p.id === id || p.backendId === id);
-      const backendId = target?.backendId || id;
-
-      try {
-        await paymentService.update(backendId, {
-          reference: updates.referenceNumber,
-          notes: updates.notes,
-        });
-      } catch (err) {
-        console.warn('Backend update failed:', err);
-      }
-
-      setPayments((prev) =>
-        prev.map((p) =>
-          p.id === id || p.backendId === backendId
-            ? { ...p, ...updates, updatedAt: new Date().toISOString() }
-            : p
-        )
-      );
-      showToast('success', 'Payment Updated', 'Payment record changes saved.');
-    },
-    [payments, showToast]
-  );
-
-  const deletePayment = useCallback(
-    (id: string) => {
-      setPayments((prev) => prev.filter((p) => p.id !== id && p.backendId !== id));
-      showToast('info', 'Payment Deleted', `Payment record ${id} was removed.`);
-    },
-    [showToast]
   );
 
   const getPaymentById = useCallback(
@@ -285,13 +351,7 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
       const local = payments.find((p) => p.id === id || p.backendId === id);
       if (local) return local;
       try {
-        const res = await paymentService.get(id);
-        const mapped = paymentOutToUi(res);
-        setPayments((prev) => {
-          if (prev.some((p) => p.id === mapped.id || p.backendId === mapped.backendId)) return prev;
-          return [mapped, ...prev];
-        });
-        return mapped;
+        return paymentOutToUi(await paymentService.get(id));
       } catch {
         return undefined;
       }
@@ -304,20 +364,13 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
     [customers]
   );
 
-  const getCustomerPayments = useCallback(
-    async (customerId: string): Promise<Payment[]> => {
-      try {
-        const res = await customerService.payments(customerId);
-        return res.items.map(paymentOutToUi);
-      } catch {
-        return payments.filter((p) => p.customerId === customerId);
-      }
-    },
-    [payments]
-  );
-
   const createCustomer = useCallback(
-    async (data: { displayName: string; companyName?: string; email?: string; phone?: string }): Promise<PaymentCustomer> => {
+    async (data: {
+      displayName: string;
+      companyName?: string;
+      email?: string;
+      phone?: string;
+    }): Promise<PaymentCustomer> => {
       try {
         const created = await customerService.create({
           display_name: data.displayName,
@@ -326,42 +379,68 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
           phone: data.phone || undefined,
           currency: 'INR',
         });
-        const uiCust = customerToUi(created, []);
+        const uiCust = customerToUi(created);
         setCustomers((prev) => [uiCust, ...prev.filter((c) => c.id !== uiCust.id)]);
-        showToast('success', 'Customer Created', `Customer "${uiCust.name}" has been registered.`);
+        showToast('success', 'Customer created', `"${uiCust.name}" was registered.`);
         return uiCust;
       } catch (err) {
         const apiErr = toApiError(err);
-        showToast('error', 'Creation Failed', apiErr.message || 'Failed to create customer on the server.');
+        showToast('error', 'Creation failed', apiErr.message);
         throw err;
       }
     },
     [showToast]
   );
 
-  return (
-    <PaymentsContext.Provider
-      value={{
-        payments,
-        customers,
-        summary,
-        isLoading,
-        reconciliationSummary: reconciliation,
-        recordPayment,
-        refundPayment,
-        updatePayment,
-        deletePayment,
-        getPaymentById,
-        fetchPaymentById,
-        getCustomerById,
-        getCustomerPayments,
-        createCustomer,
-        refreshPayments,
-      }}
-    >
-      {children}
-    </PaymentsContext.Provider>
+  const value = useMemo(
+    () => ({
+      payments,
+      customers,
+      summary,
+      isLoading,
+      error,
+      filters,
+      setFilters,
+      page,
+      setPage,
+      total,
+      totalPages,
+      recordPayment,
+      refundPayment,
+      updatePayment,
+      getPaymentById,
+      fetchPaymentById,
+      searchCustomers,
+      getCustomerById,
+      loadCustomerInvoices,
+      createCustomer,
+      refreshPayments: loadPayments,
+    }),
+    [
+      payments,
+      customers,
+      summary,
+      isLoading,
+      error,
+      filters,
+      setFilters,
+      page,
+      total,
+      totalPages,
+      recordPayment,
+      refundPayment,
+      updatePayment,
+      getPaymentById,
+      fetchPaymentById,
+      searchCustomers,
+      getCustomerById,
+      loadCustomerInvoices,
+      createCustomer,
+      loadPayments,
+    ]
   );
+
+  return <PaymentsContext.Provider value={value}>{children}</PaymentsContext.Provider>;
 }
 
 export function usePayments() {

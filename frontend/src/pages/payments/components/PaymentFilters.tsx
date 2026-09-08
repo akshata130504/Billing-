@@ -5,7 +5,7 @@ interface PaymentFiltersProps {
   filters: PaymentFilterState;
   onChange: (filters: PaymentFilterState) => void;
   onReset: () => void;
-  customers: string[];
+  customers: { id: string; name: string }[];
 }
 
 const PAYMENT_METHODS = [
@@ -23,7 +23,6 @@ const STATUS_OPTIONS = [
   { value: 'all', label: 'All Statuses' },
   { value: 'completed', label: 'Completed' },
   { value: 'pending', label: 'Pending' },
-  { value: 'processing', label: 'Processing' },
   { value: 'failed', label: 'Failed' },
   { value: 'partially_refunded', label: 'Partially Refunded' },
   { value: 'refunded', label: 'Refunded' },
@@ -43,7 +42,10 @@ export function PaymentFilters({
     filters.status !== 'all' ||
     filters.sortBy !== 'newest';
 
-  const handleChange = (key: keyof PaymentFilterState, value: any) => {
+  const handleChange = <K extends keyof PaymentFilterState>(
+    key: K,
+    value: PaymentFilterState[K]
+  ) => {
     onChange({
       ...filters,
       [key]: value,
@@ -110,8 +112,8 @@ export function PaymentFilters({
           >
             <option value="all">All Customers</option>
             {customers.map((c) => (
-              <option key={c} value={c}>
-                {c}
+              <option key={c.id} value={c.id}>
+                {c.name}
               </option>
             ))}
           </select>
@@ -152,7 +154,9 @@ export function PaymentFilters({
         <div>
           <select
             value={filters.sortBy}
-            onChange={(e) => handleChange('sortBy', e.target.value)}
+            onChange={(e) =>
+              handleChange('sortBy', e.target.value as PaymentFilterState['sortBy'])
+            }
             className="w-full py-1 px-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-500"
           >
             <option value="newest">Sort: Newest</option>

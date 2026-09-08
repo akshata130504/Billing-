@@ -2,8 +2,8 @@ import { useState, useEffect, FormEvent } from 'react';
 import { Payment } from '../types';
 import { usePayments, RefundPaymentInput } from '../PaymentsContext';
 import { useAuth } from '../../../hooks/useAuth';
-import { formatINR } from '../mockPayments';
 import { X, RotateCcw, AlertTriangle } from 'lucide-react';
+import { formatMoney } from '../../../utils/format';
 
 interface RefundModalProps {
   isOpen: boolean;
@@ -34,11 +34,13 @@ export function RefundModal({ isOpen, onClose, payment }: RefundModalProps) {
   const [submitting, setSubmitting] = useState(false);
 
   const alreadyRefunded = payment?.refundedAmount || 0;
-  const maxRefundable = payment ? Math.max(0, payment.amount - alreadyRefunded) : 0;
+  const maxRefundable = payment
+    ? Math.round(Math.max(0, payment.amount - alreadyRefunded) * 100) / 100
+    : 0;
 
   useEffect(() => {
     if (payment && isOpen) {
-      setRefundAmount(String(maxRefundable));
+      setRefundAmount(maxRefundable.toFixed(2));
       setReason(REFUND_REASONS[0]);
       setRefundMode(`Original Payment Method (${payment.paymentMethod})`);
       setReferenceNumber('');
@@ -50,7 +52,7 @@ export function RefundModal({ isOpen, onClose, payment }: RefundModalProps) {
   if (!isOpen || !payment) return null;
 
   const handleFullRefundClick = () => {
-    setRefundAmount(String(maxRefundable));
+    setRefundAmount(maxRefundable.toFixed(2));
     setError('');
   };
 
@@ -68,8 +70,8 @@ export function RefundModal({ isOpen, onClose, payment }: RefundModalProps) {
       return;
     }
 
-    if (numRefund > maxRefundable) {
-      setError(`Refund amount cannot exceed remaining refundable balance of ${formatINR(maxRefundable)}`);
+    if (numRefund - maxRefundable > 0.005) {
+      setError(`Refund amount cannot exceed remaining refundable balance of ${formatMoney(maxRefundable)}`);
       return;
     }
 
@@ -128,18 +130,18 @@ export function RefundModal({ isOpen, onClose, payment }: RefundModalProps) {
             </div>
             <div className="flex justify-between items-center text-slate-600">
               <span>Original Payment Amount:</span>
-              <span className="font-mono font-bold text-slate-900">{formatINR(payment.amount)}</span>
+              <span className="font-mono font-bold text-slate-900">{formatMoney(payment.amount)}</span>
             </div>
             {alreadyRefunded > 0 && (
               <div className="flex justify-between items-center text-rose-600">
                 <span>Previously Refunded:</span>
-                <span className="font-mono font-semibold">{formatINR(alreadyRefunded)}</span>
+                <span className="font-mono font-semibold">{formatMoney(alreadyRefunded)}</span>
               </div>
             )}
             <div className="pt-2 border-t border-slate-200/60 flex justify-between items-center text-emerald-800 font-medium">
               <span>Remaining Refundable:</span>
               <span className="font-mono font-bold text-emerald-700 text-sm">
-                {formatINR(maxRefundable)}
+                {formatMoney(maxRefundable)}
               </span>
             </div>
           </div>
@@ -155,7 +157,7 @@ export function RefundModal({ isOpen, onClose, payment }: RefundModalProps) {
                 onClick={handleFullRefundClick}
                 className="text-[11px] font-semibold text-brand-600 hover:text-brand-700 hover:underline"
               >
-                Refund Full Balance ({formatINR(maxRefundable)})
+                Refund Full Balance ({formatMoney(maxRefundable)})
               </button>
             </div>
             <div className="relative">

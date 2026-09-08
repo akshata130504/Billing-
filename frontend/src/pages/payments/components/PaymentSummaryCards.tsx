@@ -1,6 +1,6 @@
 import { usePayments } from '../PaymentsContext';
-import { formatINR } from '../mockPayments';
 import { CheckCircle2, Clock, RotateCcw, CreditCard } from 'lucide-react';
+import { formatMoney } from '../../../utils/format';
 
 export function PaymentSummaryCards() {
   const { summary } = usePayments();
@@ -18,7 +18,7 @@ export function PaymentSummaryCards() {
               Total Collected
             </span>
             <span className="text-base font-bold text-slate-900 tracking-tight">
-              {formatINR(summary.totalCollected)}
+              {formatMoney(summary.totalCollected)}
             </span>
           </div>
         </div>
@@ -33,7 +33,7 @@ export function PaymentSummaryCards() {
               Pending / Processing
             </span>
             <span className="text-base font-bold text-amber-900 tracking-tight">
-              {formatINR(summary.pendingProcessing)}
+              {formatMoney(summary.pendingProcessing)}
             </span>
           </div>
         </div>
@@ -48,7 +48,7 @@ export function PaymentSummaryCards() {
               Total Refunded
             </span>
             <span className="text-base font-bold text-slate-800 tracking-tight">
-              {formatINR(summary.totalRefunded)}
+              {formatMoney(summary.totalRefunded)}
             </span>
           </div>
         </div>
@@ -63,7 +63,7 @@ export function PaymentSummaryCards() {
               Unapplied / Credit
             </span>
             <span className="text-base font-bold text-blue-900 tracking-tight">
-              {formatINR(summary.unappliedCredit)}
+              {formatMoney(summary.unappliedCredit)}
             </span>
           </div>
         </div>

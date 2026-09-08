@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Payment } from '../types';
-import { formatINR } from '../mockPayments';
 import { useAuth } from '../../../hooks/useAuth';
 import {
   CreditCard,
@@ -15,9 +14,12 @@ import {
   Copy,
   CheckCircle2,
 } from 'lucide-react';
+import { formatMoney } from '../../../utils/format';
+import { LoadingState } from '../../../components/common/LoadingState';
 
 interface PaymentTableProps {
   payments: Payment[];
+  isLoading?: boolean;
   onRefund: (payment: Payment) => void;
   onViewReceipt: (payment: Payment) => void;
   onRecordNew: () => void;
@@ -25,6 +27,7 @@ interface PaymentTableProps {
 
 export function PaymentTable({
   payments,
+  isLoading = false,
   onRefund,
   onViewReceipt,
   onRecordNew,
@@ -54,12 +57,6 @@ export function PaymentTable({
         return (
           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-amber-50 text-amber-700 border border-amber-200/80">
             Pending
-          </span>
-        );
-      case 'processing':
-        return (
-          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-blue-50 text-blue-700 border border-blue-200/80">
-            Processing
           </span>
         );
       case 'failed':
@@ -105,6 +102,14 @@ export function PaymentTable({
       return dateStr;
     }
   };
+
+  if (payments.length === 0 && isLoading) {
+    return (
+      <div className="bg-white border border-slate-200/80 rounded-xl p-12 shadow-2xs">
+        <LoadingState message="Loading payments..." />
+      </div>
+    );
+  }
 
   if (payments.length === 0) {
     return (
@@ -164,7 +169,7 @@ export function PaymentTable({
                   className="hover:bg-slate-50/70 transition-colors group cursor-pointer"
                   onClick={(e) => {
                     if ((e.target as HTMLElement).closest('.action-menu-area')) return;
-                    navigate(`/payments/${payment.id}`);
+                    navigate(`/payments/${payment.backendId ?? payment.id}`);
                   }}
                 >
                   {/* Payment # */}
@@ -238,19 +243,19 @@ export function PaymentTable({
 
                   {/* Amount */}
                   <td className="py-2.5 px-3 text-right whitespace-nowrap font-bold text-slate-900 font-mono">
-                    {formatINR(payment.amount)}
+                    {formatMoney(payment.amount)}
                   </td>
 
                   {/* Applied Amount */}
                   <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono text-emerald-700 font-medium">
-                    {formatINR(payment.appliedAmount)}
+                    {formatMoney(payment.appliedAmount)}
                   </td>
 
                   {/* Unapplied Amount */}
                   <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono">
                     {payment.unappliedAmount > 0 ? (
                       <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-semibold bg-blue-50 text-blue-700 border border-blue-100">
-                        {formatINR(payment.unappliedAmount)} (Credit)
+                        {formatMoney(payment.unappliedAmount)} (Credit)
                       </span>
                     ) : (
                       <span className="text-slate-400">₹0</span>
@@ -266,7 +271,7 @@ export function PaymentTable({
                   <td className="py-2.5 px-3 text-right whitespace-nowrap action-menu-area relative">
                     <div className="flex items-center justify-end gap-1">
                       <Link
-                        to={`/payments/${payment.id}`}
+                        to={`/payments/${payment.backendId ?? payment.id}`}
                         className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-slate-100 rounded-lg transition-colors"
                         title="View Payment Details"
                       >
@@ -311,7 +316,7 @@ export function PaymentTable({
                             />
                             <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1 text-xs">
                               <Link
-                                to={`/payments/${payment.id}`}
+                                to={`/payments/${payment.backendId ?? payment.id}`}
                                 className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
                               >
                                 <Eye className="w-3.5 h-3.5 text-slate-400" />

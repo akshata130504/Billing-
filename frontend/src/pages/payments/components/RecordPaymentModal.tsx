@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useMemo, FormEvent } from 'react';
 import { usePayments, RecordPaymentInput } from '../PaymentsContext';
 import { PaymentType, PaymentMethod, InvoiceAllocation } from '../types';
-import { formatINR } from '../mockPayments';
 import {
   X,
   CheckCircle,
@@ -12,6 +11,7 @@ import {
   UserPlus,
   AlertCircle,
 } from 'lucide-react';
+import { formatMoney } from '../../../utils/format';
 
 interface RecordPaymentModalProps {
   isOpen: boolean;
@@ -19,6 +19,11 @@ interface RecordPaymentModalProps {
   preselectedCustomerId?: string;
   preselectedInvoiceId?: string;
 }
+
+/** Half-up rounding to 2 decimals; money never travels as a raw float sum. */
+const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
+/** Half a paise: anything smaller is float noise, not a real overage. */
+const CENT_TOLERANCE = 0.005;
 
 const PAYMENT_METHODS: PaymentMethod[] = [
   'UPI',
@@ -31,20 +36,13 @@ const PAYMENT_METHODS: PaymentMethod[] = [
   'Other',
 ];
 
-const BANK_ACCOUNTS = [
-  'HDFC Bank - A/C **4920 (Operating Collections)',
-  'ICICI Bank - A/C **8301 (Corporate Settlement)',
-  'Kotak Mahindra Bank - A/C **1190 (Enterprise Escrow)',
-  'Axis Bank - A/C **6621 (Merchant Gateway)',
-  'State Bank of India - A/C **3320 (General Ledger)',
-];
-
 export function RecordPaymentModal({
   isOpen,
   onClose,
   preselectedCustomerId,
 }: RecordPaymentModalProps) {
-  const { customers, recordPayment, createCustomer } = usePayments();
+  const { customers, recordPayment, createCustomer, loadCustomerInvoices, searchCustomers } =
+    usePayments();
 
   const [paymentType, setPaymentType] = useState<PaymentType>('invoice_payment');
   const [customerId, setCustomerId] = useState<string>(preselectedCustomerId || (customers[0]?.id ?? ''));
@@ -52,7 +50,6 @@ export function RecordPaymentModal({
   const [paymentDate, setPaymentDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('UPI');
   const [referenceNumber, setReferenceNumber] = useState<string>('');
-  const [bankAccount, setBankAccount] = useState<string>(BANK_ACCOUNTS[0]);
   const [notes, setNotes] = useState<string>('');
 
   // Customer combobox & create state
@@ -91,6 +88,18 @@ export function RecordPaymentModal({
 
   const selectedCustomer = customers.find((c) => c.id === customerId);
   const outstandingInvoices = selectedCustomer?.outstandingInvoices || [];
+
+  // Typing in the combobox queries the server, so customers beyond the first
+  // preloaded page are findable too.
+  useEffect(() => {
+    if (!isCustomerDropdownOpen) return;
+    const q = customerSearchQuery.trim();
+    if (q.length < 2) return;
+    const timer = setTimeout(() => {
+      void searchCustomers(q);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [customerSearchQuery, isCustomerDropdownOpen, searchCustomers]);
 
   // Filtered customers for combobox
   const filteredCustomers = useMemo(() => {
@@ -144,12 +153,12 @@ export function RecordPaymentModal({
     if (isOpen) {
       const initialCustId = preselectedCustomerId || customers[0]?.id || '';
       setCustomerId(initialCustId);
+      if (initialCustId) void loadCustomerInvoices(initialCustId);
       setPaymentType('invoice_payment');
       setAmountReceived('');
       setPaymentDate(new Date().toISOString().split('T')[0]);
       setPaymentMethod('UPI');
       setReferenceNumber('');
-      setBankAccount(BANK_ACCOUNTS[0]);
       setNotes('');
       setSelectedInvoices({});
       setAllocatedAmounts({});
@@ -159,31 +168,32 @@ export function RecordPaymentModal({
       setIsCreateCustomerModalOpen(false);
       setNewCustomerError('');
 
-      // If customer has invoices, pre-select first invoice
-      const cust = customers.find((c) => c.id === initialCustId);
-      if (cust && cust.outstandingInvoices.length > 0) {
-        const firstInv = cust.outstandingInvoices[0];
-        setSelectedInvoices({ [firstInv.id]: true });
-        setAllocatedAmounts({ [firstInv.id]: String(firstInv.balanceDue) });
-        setAmountReceived(String(firstInv.balanceDue));
-      }
     }
-  }, [isOpen, preselectedCustomerId, customers]);
+    // `customers` is deliberately not a dependency: it changes as invoices load,
+    // which would otherwise reset the form the user is filling in.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, preselectedCustomerId]);
 
-  // When customer changes, update available invoices
+  // Pre-select the oldest open invoice once the customer's invoices arrive.
+  useEffect(() => {
+    if (!isOpen || !customerId) return;
+    const cust = customers.find((c) => c.id === customerId);
+    const first = cust?.outstandingInvoices[0];
+    if (!first) return;
+    setSelectedInvoices((prev) => (Object.keys(prev).length > 0 ? prev : { [first.id]: true }));
+    setAllocatedAmounts((prev) =>
+      Object.keys(prev).length > 0 ? prev : { [first.id]: first.balanceDue.toFixed(2) }
+    );
+    setAmountReceived((prev) => prev || first.balanceDue.toFixed(2));
+  }, [isOpen, customerId, customers]);
+
+  // When customer changes, load that customer's open invoices
   const handleCustomerChange = (newCustId: string) => {
     setCustomerId(newCustId);
     setSelectedInvoices({});
     setAllocatedAmounts({});
-    const cust = customers.find((c) => c.id === newCustId);
-    if (cust && cust.outstandingInvoices.length > 0) {
-      const firstInv = cust.outstandingInvoices[0];
-      setSelectedInvoices({ [firstInv.id]: true });
-      setAllocatedAmounts({ [firstInv.id]: String(firstInv.balanceDue) });
-      setAmountReceived(String(firstInv.balanceDue));
-    } else {
-      setAmountReceived('');
-    }
+    setAmountReceived('');
+    if (newCustId) void loadCustomerInvoices(newCustId);
   };
 
   // Toggle invoice checkbox
@@ -194,7 +204,7 @@ export function RecordPaymentModal({
     if (isNowSelected) {
       setAllocatedAmounts((prev) => ({
         ...prev,
-        [invId]: prev[invId] || String(balanceDue),
+        [invId]: prev[invId] || balanceDue.toFixed(2),
       }));
     } else {
       setAllocatedAmounts((prev) => {
@@ -215,7 +225,7 @@ export function RecordPaymentModal({
 
   // Auto-distribute received amount across selected invoices
   const handleAutoDistribute = () => {
-    const totalRec = parseFloat(amountReceived) || 0;
+    const totalRec = round2(parseFloat(amountReceived) || 0);
     if (totalRec <= 0) return;
 
     let remainingToApply = totalRec;
@@ -223,29 +233,32 @@ export function RecordPaymentModal({
     const newSelected: Record<string, boolean> = {};
 
     for (const inv of outstandingInvoices) {
-      if (remainingToApply <= 0) break;
-      const applyThis = Math.min(remainingToApply, inv.balanceDue);
-      newAllocated[inv.id] = String(applyThis);
+      if (remainingToApply <= 0.004) break;
+      const applyThis = round2(Math.min(remainingToApply, inv.balanceDue));
+      if (applyThis <= 0) continue;
+      newAllocated[inv.id] = applyThis.toFixed(2);
       newSelected[inv.id] = true;
-      remainingToApply -= applyThis;
+      remainingToApply = round2(remainingToApply - applyThis);
     }
 
     setSelectedInvoices(newSelected);
     setAllocatedAmounts(newAllocated);
   };
 
-  // Calculate totals
-  const numReceived = parseFloat(amountReceived) || 0;
+  // Calculate totals (rounded to paise so float drift never reaches a comparison)
+  const numReceived = round2(parseFloat(amountReceived) || 0);
   const totalApplied = paymentType === 'invoice_payment'
-    ? Object.entries(allocatedAmounts).reduce((sum, [invId, amountStr]) => {
-        if (selectedInvoices[invId]) {
-          return sum + (parseFloat(amountStr) || 0);
-        }
-        return sum;
-      }, 0)
+    ? round2(
+        Object.entries(allocatedAmounts).reduce((sum, [invId, amountStr]) => {
+          if (selectedInvoices[invId]) {
+            return sum + (parseFloat(amountStr) || 0);
+          }
+          return sum;
+        }, 0)
+      )
     : 0;
 
-  const unappliedBalance = Math.max(0, numReceived - totalApplied);
+  const unappliedBalance = round2(Math.max(0, numReceived - totalApplied));
 
   const validate = () => {
     const errs: Record<string, string> = {};
@@ -259,7 +272,7 @@ export function RecordPaymentModal({
     if (!paymentMethod) errs.paymentMethod = 'Payment method is required';
 
     if (paymentType === 'invoice_payment') {
-      if (totalApplied > numReceived) {
+      if (totalApplied - numReceived > CENT_TOLERANCE) {
         errs.allocation = `Total applied (₹${totalApplied.toLocaleString('en-IN')}) cannot exceed amount received (₹${numReceived.toLocaleString('en-IN')})`;
       }
 
@@ -268,7 +281,7 @@ export function RecordPaymentModal({
         if (selectedInvoices[invId]) {
           const val = parseFloat(amtStr) || 0;
           const inv = outstandingInvoices.find((i) => i.id === invId);
-          if (inv && val > inv.balanceDue) {
+          if (inv && val - inv.balanceDue > CENT_TOLERANCE) {
             errs[`inv_${invId}`] = `Cannot exceed balance due of ₹${inv.balanceDue.toLocaleString('en-IN')}`;
           }
         }
@@ -294,10 +307,7 @@ export function RecordPaymentModal({
             allocations.push({
               invoiceId: inv.id,
               invoiceNumber: inv.invoiceNumber,
-              invoiceDate: inv.date,
-              invoiceTotal: inv.totalAmount,
               appliedAmount: appliedVal,
-              remainingAmount: Math.max(0, inv.balanceDue - appliedVal),
             });
           }
         }
@@ -313,7 +323,6 @@ export function RecordPaymentModal({
       paymentMethod,
       referenceNumber: referenceNumber.trim(),
       notes: notes.trim() || undefined,
-      bankAccount,
       allocations,
     };
 
@@ -422,11 +431,6 @@ export function RecordPaymentModal({
                     />
                   </div>
                   <div className="flex items-center gap-1 shrink-0 text-slate-400">
-                    {selectedCustomer && !isCustomerDropdownOpen && selectedCustomer.creditBalance > 0 && (
-                      <span className="text-[10px] font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded mr-1">
-                        Credit: ₹{selectedCustomer.creditBalance.toLocaleString('en-IN')}
-                      </span>
-                    )}
                     <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isCustomerDropdownOpen ? 'rotate-180 text-brand-600' : ''}`} />
                   </div>
                 </div>
@@ -495,11 +499,6 @@ export function RecordPaymentModal({
                                   <div className="text-[11px] text-slate-400">No open invoices</div>
                                 )}
                               </div>
-                              {c.creditBalance > 0 && (
-                                <span className="text-[11px] font-semibold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">
-                                  ₹{c.creditBalance.toLocaleString('en-IN')} Credit
-                                </span>
-                              )}
                             </button>
                           );
                         })
@@ -611,22 +610,6 @@ export function RecordPaymentModal({
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Deposit To (Account)
-              </label>
-              <select
-                value={bankAccount}
-                onChange={(e) => setBankAccount(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand-500 truncate"
-              >
-                {BANK_ACCOUNTS.map((acc) => (
-                  <option key={acc} value={acc}>
-                    {acc}
-                  </option>
-                ))}
-              </select>
-            </div>
           </div>
 
           {/* INVOICE SETTLEMENT SECTION */}
@@ -702,10 +685,10 @@ export function RecordPaymentModal({
                             </td>
                             <td className="py-2.5 px-3 text-slate-500">{inv.dueDate}</td>
                             <td className="py-2.5 px-3 text-right font-mono text-slate-600">
-                              {formatINR(inv.totalAmount)}
+                              {formatMoney(inv.totalAmount)}
                             </td>
                             <td className="py-2.5 px-3 text-right font-mono font-semibold text-slate-900">
-                              {formatINR(inv.balanceDue)}
+                              {formatMoney(inv.balanceDue)}
                             </td>
                             <td className="py-2.5 px-3 text-right">
                               <div className="relative inline-block w-32">
@@ -746,19 +729,19 @@ export function RecordPaymentModal({
                   <div>
                     <span className="text-[11px] text-slate-500 block">Amount Received</span>
                     <span className="font-bold text-slate-900 font-mono text-sm">
-                      {formatINR(numReceived)}
+                      {formatMoney(numReceived)}
                     </span>
                   </div>
                   <div>
                     <span className="text-[11px] text-slate-500 block">Amount Applied</span>
                     <span className="font-bold text-emerald-700 font-mono text-sm">
-                      {formatINR(totalApplied)}
+                      {formatMoney(totalApplied)}
                     </span>
                   </div>
                   <div>
                     <span className="text-[11px] text-slate-500 block">Unapplied Balance</span>
                     <span className="font-bold text-blue-700 font-mono text-sm">
-                      {formatINR(unappliedBalance)}
+                      {formatMoney(unappliedBalance)}
                     </span>
                   </div>
                 </div>
@@ -767,7 +750,7 @@ export function RecordPaymentModal({
                   <div className="flex items-center gap-1.5 text-[11px] text-blue-700 bg-blue-50/70 p-2 rounded-lg border border-blue-100">
                     <Info className="w-3.5 h-3.5 shrink-0" />
                     <span>
-                      The unapplied balance of <strong className="font-mono">{formatINR(unappliedBalance)}</strong> will be credited to {selectedCustomer?.name} as an available advance credit for future invoices.
+                      The unapplied balance of <strong className="font-mono">{formatMoney(unappliedBalance)}</strong> will be credited to {selectedCustomer?.name} as an available advance credit for future invoices.
                     </span>
                   </div>
                 )}
@@ -780,7 +763,7 @@ export function RecordPaymentModal({
                 <span>Customer Advance Deposit</span>
               </div>
               <p className="text-slate-600 leading-relaxed text-[11px]">
-                The full payment of <strong className="font-mono font-bold text-slate-900">{formatINR(numReceived)}</strong> will be recorded as unapplied customer credit. It can be applied against subsequent billing cycles or milestone invoices.
+                The full payment of <strong className="font-mono font-bold text-slate-900">{formatMoney(numReceived)}</strong> will be recorded as unapplied customer credit. It can be applied against subsequent billing cycles or milestone invoices.
               </p>
             </div>
           )}

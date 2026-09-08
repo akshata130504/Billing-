@@ -1,8 +1,9 @@
 import { Payment } from '../types';
-import { formatINR } from '../mockPayments';
 import { X, Download, Mail, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { useToast } from '../../../components/common/Toast';
 import { RoomanLogo } from '../../../components/common/RoomanLogo';
+import { formatMoney } from '../../../utils/format';
+import { useAuth } from '../../../hooks/useAuth';
 
 interface ReceiptModalProps {
   isOpen: boolean;
@@ -12,6 +13,11 @@ interface ReceiptModalProps {
 
 export function ReceiptModal({ isOpen, onClose, payment }: ReceiptModalProps) {
   const { showToast } = useToast();
+  const { organization } = useAuth();
+
+  const issuerLocation = [organization?.city, organization?.state, organization?.country]
+    .filter(Boolean)
+    .join(', ');
 
   if (!isOpen || !payment) return null;
 
@@ -66,13 +72,22 @@ export function ReceiptModal({ isOpen, onClose, payment }: ReceiptModalProps) {
           {/* Header */}
           <div className="flex items-start justify-between border-b border-slate-100 pb-5">
             <div>
-              <RoomanLogo variant="brand" size="md" showBillingBadge={true} />
-              <p className="text-[11px] text-slate-400 mt-1">
-                Rooman Technologies Pvt Ltd · Corporate Billing Division
+              {organization?.logo_url ? (
+                <img
+                  src={organization.logo_url}
+                  alt={organization.name}
+                  className="h-8 max-w-[180px] object-contain"
+                />
+              ) : (
+                <RoomanLogo variant="brand" size="md" showBillingBadge={true} />
+              )}
+              <p className="text-[11px] font-semibold text-slate-700 mt-1">
+                {organization?.legal_name || organization?.name || ''}
               </p>
-              <p className="text-[10px] text-slate-400">
-                GSTIN: 29AAACR4910K1Z8 · Bengaluru, Karnataka, India
-              </p>
+              {issuerLocation && <p className="text-[10px] text-slate-400">{issuerLocation}</p>}
+              {organization?.gstin && (
+                <p className="text-[10px] text-slate-400">GSTIN: {organization.gstin}</p>
+              )}
             </div>
 
             <div className="text-right">
@@ -121,7 +136,7 @@ export function ReceiptModal({ isOpen, onClose, payment }: ReceiptModalProps) {
                 Amount Received
               </span>
               <span className="text-2xl font-bold font-mono text-emerald-900">
-                {formatINR(payment.amount)}
+                {formatMoney(payment.amount)}
               </span>
             </div>
             <div className="text-right flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-white px-3 py-1.5 rounded-lg border border-emerald-200">
@@ -142,8 +157,6 @@ export function ReceiptModal({ isOpen, onClose, payment }: ReceiptModalProps) {
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold text-slate-600">
                       <th className="py-2 px-3">Invoice #</th>
-                      <th className="py-2 px-3">Date</th>
-                      <th className="py-2 px-3 text-right">Invoice Total</th>
                       <th className="py-2 px-3 text-right">Amount Applied</th>
                     </tr>
                   </thead>
@@ -153,12 +166,8 @@ export function ReceiptModal({ isOpen, onClose, payment }: ReceiptModalProps) {
                         <td className="py-2 px-3 font-mono font-medium text-slate-900">
                           {alloc.invoiceNumber}
                         </td>
-                        <td className="py-2 px-3 text-slate-500">{alloc.invoiceDate}</td>
-                        <td className="py-2 px-3 text-right font-mono text-slate-600">
-                          {formatINR(alloc.invoiceTotal)}
-                        </td>
                         <td className="py-2 px-3 text-right font-mono font-bold text-emerald-700">
-                          {formatINR(alloc.appliedAmount)}
+                          {formatMoney(alloc.appliedAmount)}
                         </td>
                       </tr>
                     ))}
@@ -169,7 +178,7 @@ export function ReceiptModal({ isOpen, onClose, payment }: ReceiptModalProps) {
               <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-100 text-xs text-blue-900">
                 <p className="font-semibold">Customer Advance Credit</p>
                 <p className="text-[11px] text-slate-600 mt-0.5">
-                  Full amount of {formatINR(payment.amount)} credited to customer account for upcoming billing cycles.
+                  Full amount of {formatMoney(payment.amount)} credited to customer account for upcoming billing cycles.
                 </p>
               </div>
             )}
@@ -180,7 +189,7 @@ export function ReceiptModal({ isOpen, onClose, payment }: ReceiptModalProps) {
             <div className="p-3 bg-rose-50 rounded-xl border border-rose-100 text-xs text-rose-800">
               <span className="font-bold block">Refund Notice:</span>
               <span>
-                ₹{payment.refundedAmount.toLocaleString('en-IN')} has been refunded against this payment. Net settled amount: {formatINR(payment.amount - payment.refundedAmount)}.
+                ₹{payment.refundedAmount.toLocaleString('en-IN')} has been refunded against this payment. Net settled amount: {formatMoney(payment.amount - payment.refundedAmount)}.
               </span>
             </div>
           )}
@@ -192,8 +201,10 @@ export function ReceiptModal({ isOpen, onClose, payment }: ReceiptModalProps) {
               <span>Digitally verified transaction receipt</span>
             </div>
             <div className="text-right">
-              <p className="font-semibold text-slate-800">Rooman Automated Billing</p>
-              <p className="text-[10px]">Authorized Signature Placeholder</p>
+              <p className="font-semibold text-slate-800">
+                {organization?.name || 'Billing'}
+              </p>
+              {organization?.email && <p className="text-[10px]">{organization.email}</p>}
             </div>
           </div>
         </div>

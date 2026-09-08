@@ -3,7 +3,6 @@ import { useParams, Link } from 'react-router-dom';
 import { usePayments } from './PaymentsContext';
 import { Payment } from './types';
 import { useAuth } from '../../hooks/useAuth';
-import { formatINR } from './mockPayments';
 import { RefundModal } from './components/RefundModal';
 import { ReceiptModal } from './components/ReceiptModal';
 import {
@@ -18,6 +17,7 @@ import {
   Landmark,
 } from 'lucide-react';
 import { useToast } from '../../components/common/Toast';
+import { formatMoney } from '../../utils/format';
 
 export function PaymentDetailsPage() {
   const { paymentId, id: paramId } = useParams<{ paymentId?: string; id?: string }>();
@@ -63,7 +63,7 @@ export function PaymentDetailsPage() {
         </div>
         <h2 className="text-base font-bold text-slate-900">Payment Not Found</h2>
         <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
-          The requested payment record <span className="font-mono font-semibold">{paymentId}</span> does not exist or has been removed.
+          The requested payment record <span className="font-mono font-semibold">{effectiveId}</span> could not be found in this organization.
         </p>
         <div className="mt-4">
           <Link
@@ -90,12 +90,6 @@ export function PaymentDetailsPage() {
         return (
           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
             Pending
-          </span>
-        );
-      case 'processing':
-        return (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-            Processing
           </span>
         );
       case 'failed':
@@ -227,7 +221,7 @@ export function PaymentDetailsPage() {
                   Amount Received
                 </span>
                 <span className="text-xl font-bold text-slate-900 font-mono tracking-tight">
-                  {formatINR(payment.amount)}
+                  {formatMoney(payment.amount)}
                 </span>
               </div>
 
@@ -236,7 +230,7 @@ export function PaymentDetailsPage() {
                   Applied to Invoices
                 </span>
                 <span className="text-xl font-bold text-emerald-700 font-mono tracking-tight">
-                  {formatINR(payment.appliedAmount)}
+                  {formatMoney(payment.appliedAmount)}
                 </span>
               </div>
 
@@ -245,7 +239,7 @@ export function PaymentDetailsPage() {
                   Unapplied / Advance
                 </span>
                 <span className="text-xl font-bold text-blue-700 font-mono tracking-tight">
-                  {formatINR(payment.unappliedAmount)}
+                  {formatMoney(payment.unappliedAmount)}
                 </span>
               </div>
 
@@ -254,7 +248,7 @@ export function PaymentDetailsPage() {
                   Net Settlement
                 </span>
                 <span className="text-xl font-bold text-slate-900 font-mono tracking-tight">
-                  {formatINR(netAmount)}
+                  {formatMoney(netAmount)}
                 </span>
               </div>
             </div>
@@ -273,27 +267,19 @@ export function PaymentDetailsPage() {
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold text-slate-600 uppercase">
                       <th className="py-2.5 px-3.5">Invoice #</th>
-                      <th className="py-2.5 px-3">Date</th>
-                      <th className="py-2.5 px-3 text-right">Invoice Total</th>
                       <th className="py-2.5 px-3 text-right">Applied This Payment</th>
-                      <th className="py-2.5 px-3 text-right">Remaining Balance</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {payment.allocations.map((alloc) => (
                       <tr key={alloc.invoiceId} className="hover:bg-slate-50/50">
                         <td className="py-2.5 px-3.5 font-mono font-medium text-brand-600">
-                          {alloc.invoiceNumber}
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-500">{alloc.invoiceDate}</td>
-                        <td className="py-2.5 px-3 text-right font-mono text-slate-600">
-                          {formatINR(alloc.invoiceTotal)}
+                          <Link to={`/invoices/${alloc.invoiceId}`} className="hover:underline">
+                            {alloc.invoiceNumber}
+                          </Link>
                         </td>
                         <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-700">
-                          {formatINR(alloc.appliedAmount)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-mono text-slate-500">
-                          {formatINR(alloc.remainingAmount)}
+                          {formatMoney(alloc.appliedAmount)}
                         </td>
                       </tr>
                     ))}
@@ -304,7 +290,7 @@ export function PaymentDetailsPage() {
               <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-100 text-xs text-blue-900 space-y-1">
                 <p className="font-semibold">Customer Advance Credit (Unallocated)</p>
                 <p className="text-slate-600 leading-relaxed text-[11px]">
-                  This payment was recorded as an advance customer credit. The full received amount of {formatINR(payment.amount)} is preserved as available credit on the customer's account.
+                  This payment was recorded as an advance customer credit. The full received amount of {formatMoney(payment.amount)} is preserved as available credit on the customer's account.
                 </p>
               </div>
             )}
@@ -337,7 +323,7 @@ export function PaymentDetailsPage() {
                         <td className="py-2 px-3 text-slate-700">{ref.reason}</td>
                         <td className="py-2 px-3 text-slate-600">{ref.refundMode}</td>
                         <td className="py-2 px-3 text-right font-mono font-bold text-rose-700">
-                          {formatINR(ref.amount)}
+                          {formatMoney(ref.amount)}
                         </td>
                       </tr>
                     ))}
@@ -351,25 +337,25 @@ export function PaymentDetailsPage() {
           <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-2xs space-y-3">
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2">
               <Landmark className="w-3.5 h-3.5 text-slate-500" />
-              Banking & Deposit Details
+              Settlement Details
             </h2>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
                 <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-0.5">
-                  Deposit Account
+                  Channel
                 </span>
                 <span className="font-semibold text-slate-800">
-                  {payment.bankAccount || 'HDFC Bank - A/C **4920'}
+                  {payment.gateway === 'razorpay' ? 'Razorpay gateway' : 'Recorded manually'}
                 </span>
               </div>
 
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
                 <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-0.5">
-                  Transaction Reference
+                  {payment.gateway === 'razorpay' ? 'Gateway reference' : 'Transaction reference'}
                 </span>
                 <span className="font-mono font-semibold text-slate-800">
-                  {payment.referenceNumber}
+                  {payment.gatewayReference || payment.referenceNumber || '—'}
                 </span>
               </div>
             </div>

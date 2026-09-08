@@ -58,7 +58,7 @@ export function toUiPaymentMethod(backendMethod: BackendPaymentMethod | string):
     case 'cheque':
       return 'Cheque';
     case 'razorpay':
-      return 'Other';
+      return 'Razorpay';
     default:
       return 'Other';
   }
@@ -81,7 +81,8 @@ export function toUiPaymentStatus(backendStatus: BackendPaymentStatus | string):
     case 'partially_refunded':
       return 'partially_refunded';
     default:
-      return 'completed';
+      // An unrecognised status must never be presented as collected money.
+      return 'pending';
   }
 }
 
@@ -109,10 +110,7 @@ export function paymentOutToUi(p: PaymentOut): Payment {
   const allocations: InvoiceAllocation[] = (p.allocations || []).map((a) => ({
     invoiceId: a.invoice_id,
     invoiceNumber: a.invoice_number,
-    invoiceDate: '',
-    invoiceTotal: parseFloat(a.amount) || 0,
     appliedAmount: parseFloat(a.amount) || 0,
-    remainingAmount: 0,
   }));
 
   const refunds: PaymentRefund[] = (p.refunds || []).map((r) => ({
@@ -149,8 +147,8 @@ export function paymentOutToUi(p: PaymentOut): Payment {
     refundedAmount,
     allocations,
     refunds,
-    bankAccount: 'Corporate Settlement A/C',
-    gatewayFee: 0,
+    gatewayReference: p.gateway_payment_id || p.gateway_order_id || undefined,
+    gateway: p.gateway,
     createdAt: p.created_at,
     updatedAt: p.updated_at,
   };
@@ -193,7 +191,7 @@ export function customerToUi(c: CustomerOut, invoices: InvoiceOut[] = []): Payme
   const openInvoices: OutstandingInvoice[] = invoices
     .filter(
       (inv) =>
-        inv.customer?.id === c.id &&
+        (!inv.customer || inv.customer.id === c.id) &&
         (inv.status === 'sent' || inv.status === 'partially_paid' || inv.status === 'overdue')
     )
     .map((inv) => ({
@@ -217,9 +215,9 @@ export function customerToUi(c: CustomerOut, invoices: InvoiceOut[] = []): Payme
   return {
     id: c.id,
     name: c.display_name,
+    companyName: c.company_name || undefined,
     email: c.email || '',
     phone: c.phone || '',
-    creditBalance: 0,
     outstandingInvoices: openInvoices,
   };
 }
