@@ -1,0 +1,1 @@
+export { HostedPaymentPagesPage } from './HostedPaymentPagesPage';

@@ -101,8 +101,8 @@ export function QuoteFormPage() {
       setIsLoading(true);
       try {
         const [custRes, offRes] = await Promise.all([
-          customerService.list({ page_size: 200 }),
-          catalogCpqService.listOfferings({ page_size: 200 }),
+          customerService.list({ page_size: 100 }),
+          catalogCpqService.listOfferings({ page_size: 100 }),
         ]);
         setCustomers(custRes.items);
         setOfferings(offRes.items);

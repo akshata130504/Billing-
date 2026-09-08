@@ -81,9 +81,9 @@ export const InvoiceFormPage: React.FC = () => {
     try {
       setLoading(true);
       const [custRes, planRes, catRes] = await Promise.all([
-        customerService.list({ page_size: 200 }),
-        planPricingService.getPlans({ page_size: 200 }),
-        catalogCpqService.listOfferings({ page_size: 200 }),
+        customerService.list({ page_size: 100 }),
+        planPricingService.getPlans({ page_size: 100 }),
+        catalogCpqService.listOfferings({ page_size: 100 }),
       ]);
       setCustomers(custRes.items || []);
       setPlans(planRes.items || []);
