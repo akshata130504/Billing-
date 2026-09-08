@@ -37,11 +37,12 @@ export const meterService = {
     return data;
   },
 
+  /** Rates every meter with usage in the cycle; returns one aggregate per meter. */
   finalizeCycleUsage: async (
     subscriptionId: string,
     cycleId: string
-  ): Promise<UsageAggregateOut> => {
-    const { data } = await apiClient.post<UsageAggregateOut>(
+  ): Promise<UsageAggregateOut[]> => {
+    const { data } = await apiClient.post<UsageAggregateOut[]>(
       `/meters/subscriptions/${encodeURIComponent(subscriptionId)}/billing-cycles/${encodeURIComponent(cycleId)}/finalize-usage`
     );
     return data;

@@ -216,14 +216,54 @@ def aggregate_subscription_usage(
     return Decimal("0")
 
 
+def _resolve_metered_unit_price(db: Session, sub: Subscription) -> Decimal:
+    """The rate to bill usage at: the subscription's price override, else the plan's list price.
+
+    Metered usage used to be rated at a hard-coded Decimal("0.50") regardless of the
+    customer's contract, which mis-billed every metered subscription. There is exactly
+    one price on a subscription/plan pair, so ASSUMPTION: every meter on the org rates
+    at that same per-unit price. Per-meter pricing would need a meter->price mapping
+    (e.g. a price column on UsageMeter or a plan/meter join table) which does not exist
+    in the schema today.
+    """
+    from backend.app.models.catalog import Plan
+    from backend.app.services.subscription_service import effective_unit_price
+
+    plan = db.query(Plan).filter(Plan.id == sub.plan_id).first() if sub.plan_id else None
+    if plan is None:
+        raise ValidationAppError(
+            "Cannot rate usage: subscription "
+            f"{sub.id} has no resolvable plan, so there is no unit price to bill usage at. "
+            "Attach a plan to the subscription or pass an explicit unit_price override."
+        )
+
+    price = effective_unit_price(sub, plan)
+    if price is None or Decimal(str(price)) <= 0:
+        raise ValidationAppError(
+            "Cannot rate usage: neither subscription "
+            f"{sub.id} nor plan '{plan.name}' defines a positive unit price. "
+            "Set the plan's unit amount or pass an explicit unit_price override."
+        )
+    return Decimal(str(price))
+
+
 def finalize_usage_for_cycle(
     db: Session,
     ctx: CurrentContext,
     subscription_id: str,
     billing_cycle_id: str,
-    unit_price: Decimal = Decimal("0.50"),
-) -> UsageAggregate:
-    """Aggregates and finalizes usage charges for a billing cycle."""
+    unit_price: Optional[Decimal] = None,
+) -> List[UsageAggregate]:
+    """Aggregates and finalizes usage charges for a billing cycle.
+
+    Every meter on the organization that recorded usage for this subscription inside the
+    cycle is rated (previously only the first meter alphabetically was billed and all the
+    others were silently dropped). One UsageAggregate and one invoice line is produced per
+    meter with usage.
+
+    `unit_price` is an optional caller override; when omitted the real contracted price is
+    derived from the subscription/plan instead of a made-up default rate.
+    """
     cycle = (
         db.query(BillingCycle)
         .filter(BillingCycle.id == billing_cycle_id, BillingCycle.organization_id == ctx.organization_id)
@@ -240,61 +280,94 @@ def finalize_usage_for_cycle(
     if not sub:
         raise NotFoundAppError(f"Subscription {subscription_id} not found.")
 
-    # Find meters used by subscription
     meters = list_meters(db, ctx.organization_id)
     if not meters:
         raise ValidationAppError("No usage meters configured for this organization.")
 
-    primary_meter = meters[0]
-    total_qty = aggregate_subscription_usage(
-        db,
-        organization_id=ctx.organization_id,
-        meter_id=primary_meter.id,
-        subscription_id=subscription_id,
-        period_start=cycle.period_start,
-        period_end=cycle.period_end,
-    )
+    if unit_price is not None:
+        rate = Decimal(str(unit_price))
+    else:
+        rate = _resolve_metered_unit_price(db, sub)
 
-    rated_amount = (total_qty * Decimal(str(unit_price))).quantize(Decimal("0.01"))
-
-    # Create or update aggregate
-    aggregate = (
-        db.query(UsageAggregate)
-        .filter(
-            UsageAggregate.organization_id == ctx.organization_id,
-            UsageAggregate.meter_id == primary_meter.id,
-            UsageAggregate.subscription_id == subscription_id,
-            UsageAggregate.period_start == cycle.period_start,
-            UsageAggregate.period_end == cycle.period_end,
-        )
-        .first()
-    )
-    if not aggregate:
-        aggregate = UsageAggregate(
+    # Rate EVERY meter that has usage in this cycle, not just the first one.
+    rated: List[Dict[str, Any]] = []
+    for meter in meters:
+        qty = aggregate_subscription_usage(
+            db,
             organization_id=ctx.organization_id,
-            meter_id=primary_meter.id,
+            meter_id=meter.id,
             subscription_id=subscription_id,
-            billing_cycle_id=cycle.id,
             period_start=cycle.period_start,
             period_end=cycle.period_end,
-            total_quantity=total_qty,
-            rated_amount=rated_amount,
-            status=UsageAggregateStatus.FINALIZED,
-            finalized_at=utcnow(),
         )
-        db.add(aggregate)
-    else:
-        aggregate.total_quantity = total_qty
-        aggregate.rated_amount = rated_amount
-        aggregate.status = UsageAggregateStatus.FINALIZED
-        aggregate.finalized_at = utcnow()
+        if qty <= 0:
+            continue
+        rated.append(
+            {
+                "meter": meter,
+                "quantity": qty,
+                "amount": (qty * rate).quantize(Decimal("0.01")),
+            }
+        )
+
+    aggregates: List[UsageAggregate] = []
+    for entry in rated:
+        meter = entry["meter"]
+        aggregate = (
+            db.query(UsageAggregate)
+            .filter(
+                UsageAggregate.organization_id == ctx.organization_id,
+                UsageAggregate.meter_id == meter.id,
+                UsageAggregate.subscription_id == subscription_id,
+                UsageAggregate.period_start == cycle.period_start,
+                UsageAggregate.period_end == cycle.period_end,
+            )
+            .first()
+        )
+        if not aggregate:
+            aggregate = UsageAggregate(
+                organization_id=ctx.organization_id,
+                meter_id=meter.id,
+                subscription_id=subscription_id,
+                billing_cycle_id=cycle.id,
+                period_start=cycle.period_start,
+                period_end=cycle.period_end,
+                total_quantity=entry["quantity"],
+                rated_amount=entry["amount"],
+                status=UsageAggregateStatus.FINALIZED,
+                finalized_at=utcnow(),
+            )
+            db.add(aggregate)
+        else:
+            aggregate.billing_cycle_id = cycle.id
+            aggregate.total_quantity = entry["quantity"]
+            aggregate.rated_amount = entry["amount"]
+            aggregate.status = UsageAggregateStatus.FINALIZED
+            aggregate.finalized_at = utcnow()
+        aggregates.append(aggregate)
 
     # Freeze billing cycle
-    from backend.app.models.billing_cycles import BillingCycleStatus, SubscriptionItem, SubscriptionItemStatus, SubscriptionItemType
+    from backend.app.models.billing_cycles import (
+        BillingCycleStatus,
+        SubscriptionItem,
+        SubscriptionItemStatus,
+        SubscriptionItemType,
+    )
     cycle.status = BillingCycleStatus.FINALIZED
     cycle.finalized_at = utcnow()
 
-    # Link metered usage to SubscriptionItem
+    prior_invoice_id = next((a.invoice_id for a in aggregates if a.invoice_id), None)
+    invoice = _build_usage_invoice(db, ctx, sub, cycle, rated, rate, prior_invoice_id)
+    if invoice is not None:
+        db.flush()
+        for aggregate in aggregates:
+            aggregate.invoice_id = invoice.id
+        if not cycle.invoice_id:
+            cycle.invoice_id = invoice.id
+
+    # Link metered usage to SubscriptionItem. SubscriptionItem has no meter reference,
+    # so a single METERED item carries the combined usage across meters at the contracted rate.
+    total_qty = sum((e["quantity"] for e in rated), Decimal("0"))
     metered_item = db.query(SubscriptionItem).filter(
         SubscriptionItem.subscription_id == subscription_id,
         SubscriptionItem.item_type == SubscriptionItemType.METERED,
@@ -302,18 +375,93 @@ def finalize_usage_for_cycle(
     ).first()
     if metered_item:
         metered_item.quantity = total_qty
-        metered_item.unit_price = Decimal(str(unit_price))
+        metered_item.unit_price = rate
     else:
         metered_item = SubscriptionItem(
             organization_id=ctx.organization_id,
             subscription_id=subscription_id,
             item_type=SubscriptionItemType.METERED,
             quantity=total_qty,
-            unit_price=Decimal(str(unit_price)),
+            unit_price=rate,
             status=SubscriptionItemStatus.ACTIVE,
         )
         db.add(metered_item)
 
     db.commit()
-    db.refresh(aggregate)
-    return aggregate
+    for aggregate in aggregates:
+        db.refresh(aggregate)
+    return aggregates
+
+
+def _build_usage_invoice(
+    db: Session,
+    ctx: CurrentContext,
+    sub: Subscription,
+    cycle: BillingCycle,
+    rated: List[Dict[str, Any]],
+    rate: Decimal,
+    prior_invoice_id: Optional[str] = None,
+) -> Optional[Invoice]:
+    """Creates (or rebuilds) the draft usage invoice for a cycle with one line per meter.
+
+    Only an invoice this function previously raised (reached through the aggregates'
+    invoice_id) is rebuilt; the cycle's recurring subscription invoice is never touched.
+    """
+    if not rated:
+        return None
+
+    from backend.app.core.security import generate_opaque_token
+    from backend.app.services.numbering import next_number
+
+    existing_id = prior_invoice_id
+    invoice = None
+    if existing_id:
+        invoice = (
+            db.query(Invoice)
+            .filter(Invoice.id == existing_id, Invoice.organization_id == ctx.organization_id)
+            .first()
+        )
+        if invoice is not None and invoice.status != InvoiceStatus.DRAFT:
+            # Never mutate an issued document; the aggregates keep pointing at it.
+            return invoice
+
+    subtotal = sum((e["amount"] for e in rated), Decimal("0")).quantize(Decimal("0.01"))
+    currency = sub.plan.currency if sub.plan is not None else "INR"
+
+    if invoice is None:
+        invoice = Invoice(
+            organization_id=ctx.organization_id,
+            customer_id=sub.customer_id,
+            subscription_id=sub.id,
+            invoice_number=next_number(db, ctx.organization_id, "invoice"),
+            issue_date=cycle.period_end,
+            due_date=cycle.period_end,
+            status=InvoiceStatus.DRAFT,
+            currency=currency,
+            public_token=generate_opaque_token(32),
+            notes=f"Metered usage for {cycle.period_start} to {cycle.period_end}",
+        )
+        db.add(invoice)
+    else:
+        invoice.items.clear()
+
+    for position, entry in enumerate(rated):
+        meter = entry["meter"]
+        invoice.items.append(
+            InvoiceItem(
+                organization_id=ctx.organization_id,
+                description=f"{meter.name} - {entry['quantity']} {meter.unit_name}",
+                quantity=entry["quantity"],
+                unit_price=rate,
+                amount=entry["amount"],
+                tax_rate_pct=Decimal("0"),
+                position=position,
+            )
+        )
+
+    invoice.subtotal = subtotal
+    invoice.tax_amount = Decimal("0.00")
+    invoice.total = subtotal
+    invoice.amount_paid = Decimal("0.00")
+    invoice.amount_due = subtotal
+    return invoice

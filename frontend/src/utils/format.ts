@@ -32,7 +32,9 @@ function currencyFormatter(currency: string, minimumFractionDigits = 2): Intl.Nu
 
 /** Parses a contract money string ("1250.00") or number; returns NaN if invalid. */
 export function parseMoney(amount: string | number | null | undefined): number {
-  if (amount === null || amount === undefined || amount === '') return NaN;
+  if (amount === null || amount === undefined) return NaN;
+  // A whitespace-only field is "no value", not zero — Number('  ') is 0.
+  if (typeof amount === 'string' && amount.trim() === '') return NaN;
   const n = typeof amount === 'number' ? amount : Number(amount);
   return Number.isFinite(n) ? n : NaN;
 }
@@ -46,9 +48,12 @@ export function formatMoney(
   const n = parseMoney(amount);
   if (Number.isNaN(n)) return '—';
   if (options.compact && Math.abs(n) >= 100000) {
-    // Indian short scale: lakh / crore
-    if (Math.abs(n) >= 10000000) return `${currencySymbol(currency)}${(n / 10000000).toFixed(2)} Cr`;
-    return `${currencySymbol(currency)}${(n / 100000).toFixed(2)} L`;
+    // Indian short scale: lakh / crore. The sign goes before the symbol
+    // ("-₹1.50 L"), never between it and the digits.
+    const sign = n < 0 ? '-' : '';
+    const magnitude = Math.abs(n);
+    if (magnitude >= 10000000) return `${sign}${currencySymbol(currency)}${(magnitude / 10000000).toFixed(2)} Cr`;
+    return `${sign}${currencySymbol(currency)}${(magnitude / 100000).toFixed(2)} L`;
   }
   return currencyFormatter(currency).format(n);
 }
@@ -65,7 +70,13 @@ export function currencySymbol(currency = 'INR'): string {
 /** Serialises a number the way the API expects money: 2 decimals, string. */
 export function toMoneyString(value: number | string): string {
   const n = parseMoney(value);
-  return Number.isNaN(n) ? '0.00' : n.toFixed(2);
+  if (Number.isNaN(n)) return '0.00';
+  // toFixed rounds the binary double, so 2.675 -> "2.67" and 1.005 -> "1.00",
+  // under-stating money on exact half-paise. Round on the decimal representation
+  // instead so half-way values go up, matching the backend's ROUND_HALF_UP.
+  const scaled = Number(`${n}e2`);
+  const rounded = Math.sign(scaled) * Math.round(Math.abs(scaled));
+  return (Number(`${rounded}e-2`)).toFixed(2);
 }
 
 /** formatPercent("12.5") → "12.5%" */

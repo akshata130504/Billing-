@@ -6,7 +6,8 @@
 # Services
 #   db         PostgreSQL 16 with a named volume (not published to the host)
 #   backend    FastAPI via gunicorn/uvicorn; runs migrations on start; SCHEDULER_ENABLED=false
-#   scheduler  same image, one instance, runs renewals / overdue marking / dunning
+#   scheduler  same image, one instance, SCHEDULER_ENABLED=true - runs renewals /
+#              trial conversion / overdue marking / dunning. REQUIRED: nothing else runs them.
 #   frontend   nginx serving the SPA and proxying /api/ to backend:8000 (port 80)
 #
 # TLS: terminate HTTPS in front of `frontend` (see docker-compose.caddy.yml and
@@ -60,6 +61,9 @@ services:
     # Not published: the frontend container proxies /api/. Uncomment for local debugging only.
     # ports:
     #   - "127.0.0.1:8000:8000"
+    # Liveness only: /api/v1/health is a SELECT 1 and always returns 200. The deep probe
+    # GET /api/v1/health/ready returns 503 while migrations are behind - use that one for a
+    # load balancer or a deploy gate, not here (it would flap during the migration step).
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4).status==200 else 1)"]
       interval: 30s
@@ -73,6 +77,9 @@ services:
     restart: unless-stopped
     env_file: .env.production
     environment:
+      # REQUIRED. Without exactly one process running with this enabled, subscription
+      # renewals, trial conversion, overdue marking and dunning silently never happen.
+      # Never set it to "true" on `backend` as well: that produces duplicate invoices.
       SCHEDULER_ENABLED: "true"
       RUN_MIGRATIONS: "false"      # backend already migrated; avoid two migrators racing
       POSTGRES_SERVER: db

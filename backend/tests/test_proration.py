@@ -201,3 +201,88 @@ def test_scheduled_change_execution_via_worker_and_scheduler(client, tenant, aut
     # Verify subscription is now on plan2
     sub = db.query(Subscription).filter(Subscription.id == sub_id).first()
     assert sub.plan_id == plan2.id
+
+
+def test_scheduled_change_with_future_date_is_deferred_not_applied(client, tenant, auth_headers, db):
+    """A SCHEDULED change dated in the future must NOT mutate the subscription today."""
+    from datetime import date, timedelta
+    from backend.app.models.subscriptions import Subscription
+    from backend.app.models.invoices import Invoice
+    from backend.app.services.subscription_change_service import execute_due_scheduled_changes
+
+    customer = tenant.customer()
+    p1, plan1 = tenant.product_with_plan(unit_amount="1000.00")
+    p2, plan2 = tenant.product_with_plan(unit_amount="3000.00")
+
+    sub_resp = client.post(
+        "/api/v1/subscriptions",
+        json={"customer_id": customer.id, "plan_id": plan1.id, "quantity": 1},
+        headers=auth_headers,
+    )
+    sub_id = sub_resp.json()["id"]
+    invoices_before = db.query(Invoice).filter(Invoice.subscription_id == sub_id).count()
+
+    future_date = date.today() + timedelta(days=10)
+    sched_resp = client.post(
+        f"/api/v1/subscriptions/{sub_id}/changes",
+        json={
+            "target_plan_id": plan2.id,
+            "effective_type": "scheduled",
+            "effective_date": future_date.isoformat(),
+        },
+        headers=auth_headers,
+    )
+    assert sched_resp.status_code == 201, sched_resp.text
+    body = sched_resp.json()
+    assert body["status"] == SubscriptionChangeStatus.SCHEDULED.value
+    assert body["effective_date"] == future_date.isoformat()
+
+    # Subscription untouched and no proration invoice raised today
+    sub = db.query(Subscription).filter(Subscription.id == sub_id).first()
+    db.refresh(sub)
+    assert sub.plan_id == plan1.id
+    assert db.query(Invoice).filter(Invoice.subscription_id == sub_id).count() == invoices_before
+
+    # Worker does not pick it up before the effective date...
+    assert execute_due_scheduled_changes(
+        db, organization_id=tenant.organization.id, today=future_date - timedelta(days=1)
+    ) == []
+
+    # ...but does on the effective date.
+    applied = execute_due_scheduled_changes(db, organization_id=tenant.organization.id, today=future_date)
+    db.commit()
+    assert [c.id for c in applied] == [body["id"]]
+    db.refresh(sub)
+    assert sub.plan_id == plan2.id
+
+
+def test_scheduled_change_dated_today_applies_immediately(client, tenant, auth_headers, db):
+    from datetime import date
+    from backend.app.models.subscriptions import Subscription
+
+    customer = tenant.customer()
+    p1, plan1 = tenant.product_with_plan(unit_amount="1000.00")
+    p2, plan2 = tenant.product_with_plan(unit_amount="2000.00")
+
+    sub_resp = client.post(
+        "/api/v1/subscriptions",
+        json={"customer_id": customer.id, "plan_id": plan1.id, "quantity": 1},
+        headers=auth_headers,
+    )
+    sub_id = sub_resp.json()["id"]
+
+    resp = client.post(
+        f"/api/v1/subscriptions/{sub_id}/changes",
+        json={
+            "target_plan_id": plan2.id,
+            "effective_type": "scheduled",
+            "effective_date": date.today().isoformat(),
+        },
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["status"] == SubscriptionChangeStatus.APPLIED.value
+
+    sub = db.query(Subscription).filter(Subscription.id == sub_id).first()
+    db.refresh(sub)
+    assert sub.plan_id == plan2.id

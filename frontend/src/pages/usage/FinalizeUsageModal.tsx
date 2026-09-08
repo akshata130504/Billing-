@@ -16,7 +16,7 @@ interface FinalizeUsageModalProps {
   isOpen: boolean;
   onClose: () => void;
   meters: UsageMeterOut[];
-  onFinalized: (aggregate: UsageAggregateOut, subscription: SubscriptionOut | null) => void;
+  onFinalized: (aggregates: UsageAggregateOut[], subscription: SubscriptionOut | null) => void;
 }
 
 export function FinalizeUsageModal({ isOpen, onClose, meters, onFinalized }: FinalizeUsageModalProps) {
@@ -27,13 +27,11 @@ export function FinalizeUsageModal({ isOpen, onClose, meters, onFinalized }: Fin
   const [cycleId, setCycleId] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<UsageAggregateOut | null>(null);
+  const [result, setResult] = useState<UsageAggregateOut[] | null>(null);
 
-  // The backend rates the first meter (alphabetical by name) — surface that so the outcome is predictable.
-  const ratedMeter = useMemo(
-    () => [...meters].sort((a, b) => a.name.localeCompare(b.name))[0] ?? null,
-    [meters]
-  );
+  // Every meter with usage in the period is rated, one aggregate each.
+  const meterById = useMemo(() => new Map(meters.map((m) => [m.id, m])), [meters]);
+  const unitFor = (aggregate: UsageAggregateOut) => meterById.get(aggregate.meter_id)?.unit_name ?? '';
   const selectedSub = useMemo(() => subscriptions.find((s) => s.id === subscriptionId) ?? null, [subscriptions, subscriptionId]);
 
   useEffect(() => {
@@ -69,14 +67,19 @@ export function FinalizeUsageModal({ isOpen, onClose, meters, onFinalized }: Fin
     if (Object.keys(next).length) return;
     try {
       setSubmitting(true);
-      const agg = await meterService.finalizeCycleUsage(subscriptionId, cycleId.trim());
-      setResult(agg);
-      onFinalized(agg, selectedSub);
-      showToast(
-        'success',
-        'Usage finalised',
-        `${formatQuantity(agg.total_quantity)} ${ratedMeter?.unit_name ?? ''} rated at ${formatMoney(agg.rated_amount)} for ${formatDate(agg.period_start)} – ${formatDate(agg.period_end)}.`
-      );
+      const aggregates = await meterService.finalizeCycleUsage(subscriptionId, cycleId.trim());
+      setResult(aggregates);
+      onFinalized(aggregates, selectedSub);
+      if (aggregates.length === 0) {
+        showToast('success', 'Nothing to rate', 'No accepted usage events fell in this cycle period.');
+      } else {
+        const rated = aggregates.reduce((sum, a) => sum + Number(a.rated_amount || 0), 0);
+        showToast(
+          'success',
+          'Usage finalised',
+          `${aggregates.length} meter${aggregates.length === 1 ? '' : 's'} rated at ${formatMoney(rated, selectedSub?.currency ?? 'INR')} for ${formatDate(aggregates[0].period_start)} – ${formatDate(aggregates[0].period_end)}.`
+        );
+      }
     } catch (err: any) {
       showToast('error', err?.message || 'Failed to finalise usage');
     } finally {
@@ -94,34 +97,38 @@ export function FinalizeUsageModal({ isOpen, onClose, meters, onFinalized }: Fin
     >
       {result ? (
         <div className="space-y-4">
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-4 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 text-sm">
-            <div>
-              <dt className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Period</dt>
-              <dd className="mt-1 text-slate-900">
-                {formatDate(result.period_start)} – {formatDate(result.period_end)}
-              </dd>
+          {result.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+              No accepted usage events fell inside this cycle period, so nothing was rated. The cycle is now frozen.
             </div>
-            <div>
-              <dt className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Status</dt>
-              <dd className="mt-1 text-slate-900">{humanize(result.status)}</dd>
+          ) : (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 divide-y divide-emerald-100">
+              <div className="flex items-center justify-between px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-700">
+                <span>Meter</span>
+                <span>Quantity &middot; Rated</span>
+              </div>
+              {result.map((aggregate) => (
+                <div key={aggregate.id} className="flex items-start justify-between gap-4 px-4 py-3 text-sm">
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-900 truncate">
+                      {meterById.get(aggregate.meter_id)?.name ?? aggregate.meter_id}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {formatDate(aggregate.period_start)} – {formatDate(aggregate.period_end)} &middot; {humanize(aggregate.status)}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0 tabular-nums">
+                    <p className="text-slate-900">
+                      {formatQuantity(aggregate.total_quantity)} {unitFor(aggregate)}
+                    </p>
+                    <p className="font-semibold text-slate-900">
+                      {formatMoney(aggregate.rated_amount, selectedSub?.currency ?? 'INR')}
+                    </p>
+                  </div>
+                </div>
+              ))}
             </div>
-            <div>
-              <dt className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Total quantity</dt>
-              <dd className="mt-1 text-slate-900 tabular-nums">
-                {formatQuantity(result.total_quantity)} {ratedMeter?.unit_name ?? ''}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Rated amount</dt>
-              <dd className="mt-1 text-slate-900 font-semibold tabular-nums">
-                {formatMoney(result.rated_amount, selectedSub?.currency ?? 'INR')}
-              </dd>
-            </div>
-            <div className="col-span-2">
-              <dt className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Aggregate ID</dt>
-              <dd className="mt-1 font-mono text-xs text-slate-700 break-all">{result.id}</dd>
-            </div>
-          </dl>
+          )}
           <p className="text-xs text-slate-500">
             The rated quantity is now on the subscription's metered line item and will be picked up by the next invoice
             generated for {selectedSub?.subscription_number ?? 'this subscription'}.
@@ -168,15 +175,17 @@ export function FinalizeUsageModal({ isOpen, onClose, meters, onFinalized }: Fin
             <div className="space-y-1">
               <p>
                 Rates{' '}
-                {ratedMeter ? (
+                {meters.length > 0 ? (
                   <>
-                    <span className="font-semibold">{ratedMeter.name}</span> ({ratedMeter.code}, {humanize(ratedMeter.aggregation_type)}{' '}
-                    of {ratedMeter.unit_name})
+                    every meter with usage in the period (
+                    <span className="font-semibold">{meters.length}</span> defined:{' '}
+                    {meters.map((m) => m.name).slice(0, 3).join(', ')}
+                    {meters.length > 3 ? ', …' : ''})
                   </>
                 ) : (
-                  'the organisation’s primary meter'
+                  'every meter with usage in the period'
                 )}{' '}
-                for events linked to the chosen subscription within the cycle period.
+                for events linked to the chosen subscription within the cycle period, one invoice line each.
               </p>
               <p>This freezes the cycle: further usage for that period will be rejected.</p>
             </div>

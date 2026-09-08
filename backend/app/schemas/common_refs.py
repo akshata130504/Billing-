@@ -77,6 +77,14 @@ class LineItemOut(BaseModel):
     unit_price: str
     tax_rate_pct: str
     amount: str
+    # GST heads for this line. Zero for exports and for pre-GST historic rows.
+    cgst_amount: str = "0.00"
+    sgst_amount: str = "0.00"
+    igst_amount: str = "0.00"
+    cgst_rate_pct: str = "0.00"
+    sgst_rate_pct: str = "0.00"
+    igst_rate_pct: str = "0.00"
+    hsn_sac_code: Optional[str] = None
     position: int
     pricing_explanation: Optional[str] = None
 
@@ -146,6 +154,13 @@ def line_item_out(item) -> Dict[str, Any]:
         "unit_price": money_str(item.unit_price),
         "tax_rate_pct": money_str(item.tax_rate_pct),
         "amount": money_str(item.amount),
+        "cgst_amount": money_str(getattr(item, "cgst_amount", 0)),
+        "sgst_amount": money_str(getattr(item, "sgst_amount", 0)),
+        "igst_amount": money_str(getattr(item, "igst_amount", 0)),
+        "cgst_rate_pct": money_str(getattr(item, "cgst_rate_pct", 0)),
+        "sgst_rate_pct": money_str(getattr(item, "sgst_rate_pct", 0)),
+        "igst_rate_pct": money_str(getattr(item, "igst_rate_pct", 0)),
+        "hsn_sac_code": getattr(item, "hsn_sac_code", None),
         "position": int(item.position or 0),
         "pricing_explanation": getattr(item, "pricing_explanation", None),
     }

@@ -35,6 +35,7 @@ class LineInput:
     product_id: Optional[str] = None
     plan_id: Optional[str] = None
     pricing_explanation: Optional[str] = None
+    hsn_sac_code: Optional[str] = None
 
 
 @dataclass
@@ -49,6 +50,15 @@ class LineComputed:
     product_id: Optional[str] = None
     plan_id: Optional[str] = None
     pricing_explanation: Optional[str] = None
+    # GST split of this line's tax. Zero everywhere when no supply context was
+    # supplied (non-GST callers) or for exports.
+    cgst_amount: Decimal = ZERO
+    sgst_amount: Decimal = ZERO
+    igst_amount: Decimal = ZERO
+    cgst_rate_pct: Decimal = ZERO
+    sgst_rate_pct: Decimal = ZERO
+    igst_rate_pct: Decimal = ZERO
+    hsn_sac_code: Optional[str] = None
 
 
 @dataclass
@@ -59,9 +69,14 @@ class Totals:
     tax_amount: Decimal
     total: Decimal
     lines: List[LineComputed]
+    # Document-level GST heads: the exact sum of the per-line splits, so the
+    # document always reconciles to its lines.
+    cgst_amount: Decimal = ZERO
+    sgst_amount: Decimal = ZERO
+    igst_amount: Decimal = ZERO
 
 
-def compute_totals(lines: Iterable[LineInput], discount_pct=0) -> Totals:
+def compute_totals(lines: Iterable[LineInput], discount_pct=0, supply=None) -> Totals:
     """Apply the contract's rounding rules.
 
     amount          = quantity * unit_price                (2dp)
@@ -69,13 +84,23 @@ def compute_totals(lines: Iterable[LineInput], discount_pct=0) -> Totals:
     discount_amount = subtotal * discount_pct / 100        (2dp)
     tax_amount      = sum((amount - amount*discount_pct/100) * tax_rate_pct / 100) (2dp per line)
     total           = subtotal - discount_amount + tax_amount
+
+    When `supply` (a `gst.SupplyContext`) is given, each line's tax is also split
+    into CGST/SGST/IGST and the document heads are the exact sum of the line
+    splits, so lines and totals always reconcile to the paisa.
     """
+    # Imported lazily: gst imports from this module, so a top-level import
+    # would be circular.
+    from backend.app.services import gst as _gst
     disc = D(discount_pct)
     if disc < 0 or disc > 100:
         raise ValueError("discount_pct must be between 0 and 100")
     computed: List[LineComputed] = []
     subtotal = Decimal("0")
     tax_total = Decimal("0")
+    cgst_total = Decimal("0")
+    sgst_total = Decimal("0")
+    igst_total = Decimal("0")
     for idx, line in enumerate(lines):
         qty = D(line.quantity)
         price = D(line.unit_price)
@@ -88,8 +113,16 @@ def compute_totals(lines: Iterable[LineInput], discount_pct=0) -> Totals:
             raise ValueError(f"Line {idx + 1}: tax rate must be between 0 and 100")
         amount = q2(qty * price)
         taxable = amount - q2(amount * disc / 100)
-        tax_total += q2(taxable * rate / 100)
+        line_tax = q2(taxable * rate / 100)
+        tax_total += line_tax
         subtotal += amount
+
+        split = _gst.split_tax(line_tax, supply) if supply is not None else _gst.ZERO_SPLIT
+        rate_split = _gst.split_rate(rate, supply) if supply is not None else _gst.ZERO_SPLIT
+        cgst_total += split.cgst
+        sgst_total += split.sgst
+        igst_total += split.igst
+
         computed.append(
             LineComputed(
                 description=line.description.strip(),
@@ -102,6 +135,13 @@ def compute_totals(lines: Iterable[LineInput], discount_pct=0) -> Totals:
                 product_id=line.product_id,
                 plan_id=line.plan_id,
                 pricing_explanation=line.pricing_explanation,
+                cgst_amount=split.cgst,
+                sgst_amount=split.sgst,
+                igst_amount=split.igst,
+                cgst_rate_pct=rate_split.cgst,
+                sgst_rate_pct=rate_split.sgst,
+                igst_rate_pct=rate_split.igst,
+                hsn_sac_code=line.hsn_sac_code,
             )
         )
     if not computed:
@@ -115,6 +155,9 @@ def compute_totals(lines: Iterable[LineInput], discount_pct=0) -> Totals:
         tax_amount=q2(tax_total),
         total=total,
         lines=computed,
+        cgst_amount=q2(cgst_total),
+        sgst_amount=q2(sgst_total),
+        igst_amount=q2(igst_total),
     )
 
 

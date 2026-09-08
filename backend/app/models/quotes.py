@@ -37,6 +37,13 @@ class Quote(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
     discount_pct = Column(Numeric(5, 2), nullable=False, default=0)
     discount_amount = Column(Numeric(14, 2), nullable=False, default=0)
     tax_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    # GST heads, so a quote shows the same tax breakup the resulting invoice will.
+    cgst_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    sgst_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    igst_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    supply_type = Column(String(16), nullable=True)
+    place_of_supply_code = Column(String(2), nullable=True)
+    place_of_supply_name = Column(String(120), nullable=True)
     total = Column(Numeric(14, 2), nullable=False, default=0)
 
     title = Column(String(200), nullable=True)
@@ -68,6 +75,13 @@ class QuoteItem(UUIDPrimaryKeyMixin, TenantMixin, Base):
     unit_price = Column(Numeric(14, 2), nullable=False, default=0)
     tax_rate_pct = Column(Numeric(5, 2), nullable=False, default=0)
     amount = Column(Numeric(14, 2), nullable=False, default=0)  # quantity * unit_price (pre-tax)
+    cgst_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    sgst_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    igst_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    cgst_rate_pct = Column(Numeric(5, 2), nullable=False, default=0)
+    sgst_rate_pct = Column(Numeric(5, 2), nullable=False, default=0)
+    igst_rate_pct = Column(Numeric(5, 2), nullable=False, default=0)
+    hsn_sac_code = Column(String(16), nullable=True)
     position = Column(Integer, nullable=False, default=0)
     pricing_explanation = Column(Text, nullable=True)
 

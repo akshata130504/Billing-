@@ -94,16 +94,21 @@ def _apply_approved_effect(db: Session, ctx: CurrentContext, approval: ApprovalR
             quote_service.mark_sent(db, quote, ctx.organization, ctx)
         return
     if approval.type == ApprovalType.REFUND:
-        # TODO(payments builder): payment_service.execute_refund(db, approval=approval, ctx=ctx)
-        # should create the Refund row / call Razorpay and reverse allocations.
+        # Money moves here. If the effect cannot run, fail the approval rather than
+        # recording it as approved — a refund that is "approved" but never executed
+        # tells finance the customer was paid when they were not.
         if not _call_hook("backend.app.services.payment_service", "execute_refund", db, approval, ctx):
-            logger.warning("Refund approval %s approved but payment_service.execute_refund is not available yet", approval.id)
+            raise InvalidStateError(
+                "Refunds cannot be executed right now: the payments module is unavailable. "
+                "The approval has not been recorded; retry once the service is back."
+            )
         return
     if approval.type == ApprovalType.INVOICE_VOID:
-        # TODO(invoices builder): invoice_service.void_invoice(db, approval=approval, ctx=ctx)
-        # should mark the invoice void with the justification as reason.
         if not _call_hook("backend.app.services.invoice_service", "void_invoice", db, approval, ctx):
-            logger.warning("Void approval %s approved but invoice_service.void_invoice is not available yet", approval.id)
+            raise InvalidStateError(
+                "This invoice cannot be voided right now: the invoicing module is unavailable. "
+                "The approval has not been recorded; retry once the service is back."
+            )
         return
     # INVOICE_DISCOUNT and any future type: recording the decision is the effect for now.
 

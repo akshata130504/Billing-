@@ -306,7 +306,15 @@ export function PayInvoicePage() {
           },
         ]
       : []),
-    { label: 'Tax', value: formatMoney(invoice.tax_amount, currency) },
+    // GST heads, so the customer's on-screen copy matches the tax invoice PDF.
+    ...(Number(invoice.cgst_amount || 0) > 0 || Number(invoice.sgst_amount || 0) > 0
+      ? [
+          { label: 'CGST', value: formatMoney(invoice.cgst_amount, currency) },
+          { label: 'SGST/UTGST', value: formatMoney(invoice.sgst_amount, currency) },
+        ]
+      : Number(invoice.igst_amount || 0) > 0
+        ? [{ label: 'IGST', value: formatMoney(invoice.igst_amount, currency) }]
+        : [{ label: 'Tax', value: formatMoney(invoice.tax_amount, currency) }]),
     { label: 'Total', value: formatMoney(invoice.total, currency), kind: 'total' },
     ...(paid > 0
       ? [{ label: 'Amount paid', value: `− ${formatMoney(invoice.amount_paid, currency)}`, kind: 'paid' as const }]

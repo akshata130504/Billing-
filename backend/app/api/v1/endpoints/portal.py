@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from backend.app.api.deps import CurrentContext, get_db, require_admin, require_viewer
 from backend.app.core.exceptions import UnauthorizedError, ValidationAppError
+from backend.app.core.rate_limit import auth_rate_limit, limiter, public_rate_limit
 from backend.app.models.invoices import Invoice
 from backend.app.models.identity import Organization
 from backend.app.models.payments import (
@@ -90,7 +91,9 @@ def update_portal_settings(
 
 
 @router.post("/auth/signup", response_model=PortalUserOut, status_code=status.HTTP_201_CREATED, summary="Customer portal self sign-up")
+@limiter.limit(auth_rate_limit)
 def portal_signup(
+    request: Request,
     body: PortalSignupIn,
     db: Session = Depends(get_db),
 ):
@@ -100,7 +103,9 @@ def portal_signup(
 
 
 @router.post("/auth/login", response_model=PortalAuthOut, summary="Customer portal login")
+@limiter.limit(auth_rate_limit)
 def portal_login(
+    request: Request,
     body: PortalLoginIn,
     db: Session = Depends(get_db),
 ):
@@ -211,7 +216,9 @@ def get_signed_invoice_download_url(
 
 
 @router.get("/invoices/signed-download", response_class=RawResponse, summary="Download invoice via signed token")
+@limiter.limit(public_rate_limit)
 def download_signed_invoice_pdf(
+    request: Request,
     token: str = Query(...),
     db: Session = Depends(get_db),
 ):

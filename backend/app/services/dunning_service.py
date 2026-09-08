@@ -219,8 +219,26 @@ def update_policy(db: Session, policy_id: str, organization_id: str, data: Dunni
 
 
 def list_policies(db: Session, organization_id: str) -> List[DunningPolicy]:
-    """Lists all active and configured dunning policies for an organization."""
-    get_or_create_default_policy(db, organization_id)
+    """Lists all active and configured dunning policies for an organization.
+
+    Auto-provisions the org's default policy on first read. That row must be COMMITTED
+    here: this is only reached from the read-only GET /dunning/policies endpoint, which
+    never commits, so the previously flushed-only policy was rolled back when the request
+    session closed and the id returned to the client 404'd on a subsequent PUT.
+    Committing is safe because nothing else is pending on this read path; the flush-only
+    contract is kept for the write paths that call get_or_create_default_policy and
+    commit at the endpoint layer.
+    """
+    existing_default = db.scalars(
+        select(DunningPolicy).where(
+            DunningPolicy.organization_id == organization_id,
+            DunningPolicy.is_default.is_(True),
+            DunningPolicy.is_active.is_(True),
+        )
+    ).first()
+    if existing_default is None:
+        get_or_create_default_policy(db, organization_id)
+        db.commit()
     return list(
         db.scalars(
             select(DunningPolicy)

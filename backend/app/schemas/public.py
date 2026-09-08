@@ -56,6 +56,12 @@ class PublicInvoice(BaseModel):
     discount_pct: str
     discount_amount: str
     tax_amount: str
+    # GST heads so the customer's copy matches the tax invoice PDF.
+    cgst_amount: str = "0.00"
+    sgst_amount: str = "0.00"
+    igst_amount: str = "0.00"
+    supply_type: Optional[str] = None
+    place_of_supply_name: Optional[str] = None
     total: str
     amount_paid: str
     amount_due: str

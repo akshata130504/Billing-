@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     PASSWORD_MIN_LENGTH: int = 10
     # Requests per minute allowed on credential endpoints (login, signup, reset), per client IP.
     AUTH_RATE_LIMIT: str = "10/minute"
+    # Unauthenticated hosted pages (/public/invoices, /public/quotes, /checkout/public).
+    # The opaque token in the URL is the only credential, so these are enumerable:
+    # keep reads generous enough for a real customer refreshing a page, and writes tight.
+    PUBLIC_RATE_LIMIT: str = "60/minute"
+    PUBLIC_ACTION_RATE_LIMIT: str = "10/minute"
     # Set to true once the app is served over HTTPS so cookies/links assume TLS.
     SECURE_COOKIES: bool = False
 
@@ -124,6 +129,14 @@ class Settings(BaseSettings):
 
     # --- Observability ------------------------------------------------------------------
     LOG_JSON: bool = False
+    # Error tracking. Entirely optional: leave SENTRY_DSN empty and no Sentry code
+    # (or import) is executed at all. See backend/app/core/sentry.py for the PII scrubber.
+    SENTRY_DSN: str | None = None
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.0
+
+    @property
+    def sentry_enabled(self) -> bool:
+        return bool(self.SENTRY_DSN)
 
     @property
     def is_production(self) -> bool:

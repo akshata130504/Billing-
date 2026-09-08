@@ -105,6 +105,14 @@ export interface LineItemIn {
 export interface LineItemOut extends LineItemIn {
   id: string;
   amount: string;
+  /** Per-line GST split; zero for exports and pre-GST historic rows. */
+  cgst_amount: string;
+  sgst_amount: string;
+  igst_amount: string;
+  cgst_rate_pct: string;
+  sgst_rate_pct: string;
+  igst_rate_pct: string;
+  hsn_sac_code: string | null;
   position: number;
 }
 
@@ -614,6 +622,16 @@ export interface InvoiceOut {
   discount_pct: string;
   discount_amount: string;
   tax_amount: string;
+  /** GST heads. cgst+sgst+igst always reconcile to tax_amount. */
+  cgst_amount: string;
+  sgst_amount: string;
+  igst_amount: string;
+  /** intra_state | inter_state | export */
+  supply_type: string | null;
+  place_of_supply_code: string | null;
+  place_of_supply_name: string | null;
+  customer_gstin: string | null;
+  supplier_gstin: string | null;
   total: string;
   amount_paid: string;
   amount_due: string;
@@ -811,6 +829,11 @@ export interface PublicInvoice {
   subtotal: string;
   discount_amount: string;
   tax_amount: string;
+  cgst_amount: string;
+  sgst_amount: string;
+  igst_amount: string;
+  supply_type: string | null;
+  place_of_supply_name: string | null;
   total: string;
   amount_paid: string;
   amount_due: string;

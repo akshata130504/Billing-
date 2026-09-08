@@ -13,6 +13,8 @@ from backend.app.api.deps import CurrentContext
 from backend.app.models import AuditLog
 from backend.app.schemas.common_refs import enum_value, iso_dt, user_ref
 from backend.app.services.pagination import Page, PageParams, paginate
+from backend.app.services import timezones
+from types import SimpleNamespace
 
 EXPORT_MAX_ROWS = 10_000
 EXPORT_BATCH = 500
@@ -43,7 +45,7 @@ class AuditFilters:
     date_to: Optional[date] = None
 
 
-def build_query(organization_id: str, filters: AuditFilters) -> Select:
+def build_query(organization_id: str, filters: AuditFilters, tz_name: Optional[str] = None) -> Select:
     stmt = (
         select(AuditLog)
         .where(AuditLog.organization_id == organization_id)
@@ -65,15 +67,20 @@ def build_query(organization_id: str, filters: AuditFilters) -> Select:
         stmt = stmt.where(AuditLog.entity_type == filters.entity_type.strip().lower())
     if filters.actor_user_id:
         stmt = stmt.where(AuditLog.actor_user_id == filters.actor_user_id)
-    if filters.date_from:
-        stmt = stmt.where(AuditLog.created_at >= datetime.combine(filters.date_from, time.min, tzinfo=timezone.utc))
-    if filters.date_to:
-        stmt = stmt.where(AuditLog.created_at <= datetime.combine(filters.date_to, time.max, tzinfo=timezone.utc))
+    # Date filters are calendar dates in the organization's timezone, resolved to
+    # UTC instants here. Comparing them against UTC midnight would drop everything
+    # logged between 00:00 and 05:30 IST from a "today" filter.
+    tz = timezones.tz_for(SimpleNamespace(timezone=tz_name))
+    start, end = timezones.range_bounds_utc(filters.date_from, filters.date_to, tz)
+    if start is not None:
+        stmt = stmt.where(AuditLog.created_at >= start)
+    if end is not None:
+        stmt = stmt.where(AuditLog.created_at < end)
     return stmt.order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
 
 
 def list_logs(db: Session, ctx: CurrentContext, params: PageParams, filters: AuditFilters) -> Page:
-    return paginate(db, build_query(ctx.organization_id, filters), params)
+    return paginate(db, build_query(ctx.organization_id, filters, getattr(ctx.organization, 'timezone', None)), params)
 
 
 def serialize_log(log: AuditLog) -> Dict[str, Any]:
@@ -93,8 +100,8 @@ def serialize_log(log: AuditLog) -> Dict[str, Any]:
     }
 
 
-def _iter_rows(db: Session, organization_id: str, filters: AuditFilters) -> Iterator[AuditLog]:
-    stmt = build_query(organization_id, filters)
+def _iter_rows(db: Session, organization_id: str, filters: AuditFilters, tz_name: Optional[str] = None) -> Iterator[AuditLog]:
+    stmt = build_query(organization_id, filters, tz_name)
     emitted = 0
     offset = 0
     while emitted < EXPORT_MAX_ROWS:
@@ -120,14 +127,14 @@ def _dt_text(value: Optional[datetime]) -> str:
     return normalised.isoformat().replace("+00:00", "Z") if normalised else ""
 
 
-def export_csv(db: Session, organization_id: str, filters: AuditFilters) -> Iterator[str]:
+def export_csv(db: Session, organization_id: str, filters: AuditFilters, tz_name: Optional[str] = None) -> Iterator[str]:
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(CSV_COLUMNS)
     yield buffer.getvalue()
     buffer.seek(0)
     buffer.truncate(0)
-    for log in _iter_rows(db, organization_id, filters):
+    for log in _iter_rows(db, organization_id, filters, tz_name):
         actor = log.actor
         writer.writerow(
             [
@@ -150,10 +157,10 @@ def export_csv(db: Session, organization_id: str, filters: AuditFilters) -> Iter
         buffer.truncate(0)
 
 
-def export_json(db: Session, organization_id: str, filters: AuditFilters) -> Iterator[str]:
+def export_json(db: Session, organization_id: str, filters: AuditFilters, tz_name: Optional[str] = None) -> Iterator[str]:
     yield "["
     first = True
-    for log in _iter_rows(db, organization_id, filters):
+    for log in _iter_rows(db, organization_id, filters, tz_name):
         chunk = json.dumps(serialize_log(log), default=_json_default)
         yield chunk if first else "," + chunk
         first = False
