@@ -24,3 +24,6 @@ export { paymentService } from './paymentService';
 export { collectionsService } from './collectionsService';
 export { controlCenterService } from './controlCenterService';
 export { publicService } from './publicService';
+export { reportsService } from './reportsService';
+export { lifecycleService } from './lifecycleService';
+export { timesheetService } from './timesheetService';

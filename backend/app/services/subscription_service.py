@@ -41,18 +41,37 @@ SUBSCRIPTION_SNAPSHOT_FIELDS = (
     "subscription_number",
     "status",
     "quantity",
+    "billing_frequency",
+    "currency",
+    "pricing_model",
+    "unit_price",
+    "subtotal",
+    "discount_amount",
+    "tax_amount",
+    "total_amount",
     "start_date",
+    "trial_start",
     "trial_end",
     "current_period_start",
     "current_period_end",
     "next_billing_date",
+    "auto_renewal",
     "cancel_at_period_end",
     "cancelled_at",
+    "cancellation_reason",
     "paused_at",
     "ended_at",
     "notes",
 )
-SUBSCRIPTION_SORT_FIELDS = ("created_at", "start_date", "next_billing_date", "status", "subscription_number", "updated_at")
+SUBSCRIPTION_SORT_FIELDS = (
+    "created_at",
+    "start_date",
+    "next_billing_date",
+    "status",
+    "subscription_number",
+    "updated_at",
+    "total_amount",
+)
 
 
 # --- period arithmetic ----------------------------------------------------------------------------
@@ -84,13 +103,14 @@ def period_end_for(start: date, plan: Plan, anchor_day: Optional[int] = None) ->
     return add_months(start, interval_months(plan), anchor_day)
 
 
-def compute_mrr(plan: Plan, quantity: int) -> Decimal:
+def compute_mrr(plan: Plan, quantity: int, unit_price_override: Optional[Decimal] = None) -> Decimal:
     months = INTERVAL_MONTHS.get(plan.billing_interval)
     if not months:
         return Decimal("0.00")
     months *= max(1, int(plan.interval_count or 1))
     units = D(quantity) if plan.pricing_model == PricingModel.PER_UNIT else Decimal("1")
-    return q2(D(plan.unit_amount) * units / Decimal(months))
+    price = D(unit_price_override) if unit_price_override is not None else D(plan.unit_amount)
+    return q2(price * units / Decimal(months))
 
 
 def anchor_day(subscription: Subscription) -> int:
@@ -106,6 +126,24 @@ def snapshot(subscription: Subscription) -> Dict[str, Any]:
 
 def serialize_subscription(subscription: Subscription) -> Dict[str, Any]:
     plan = subscription.plan
+    qty = int(subscription.quantity or 1)
+    unit_price = D(subscription.unit_price if subscription.unit_price is not None else plan.unit_amount)
+    subtotal = D(
+        subscription.subtotal
+        if subscription.subtotal is not None
+        else (unit_price * qty if plan.pricing_model == PricingModel.PER_UNIT else unit_price)
+    )
+    discount = D(subscription.discount_amount or 0)
+    tax = D(subscription.tax_amount or 0)
+    total = D(subscription.total_amount if subscription.total_amount is not None else (subtotal - discount + tax))
+
+    billing_freq = subscription.billing_frequency or (
+        plan.billing_interval.value if hasattr(plan.billing_interval, "value") else str(plan.billing_interval)
+    )
+    pricing_model_val = subscription.pricing_model or (
+        plan.pricing_model.value if hasattr(plan.pricing_model, "value") else str(plan.pricing_model)
+    )
+
     return {
         "id": subscription.id,
         "subscription_number": subscription.subscription_number,
@@ -119,20 +157,32 @@ def serialize_subscription(subscription: Subscription) -> Dict[str, Any]:
             "unit_amount": money_str(plan.unit_amount),
             "currency": plan.currency,
             "product_name": plan.product.name if plan.product else "",
+            "pricing_model": pricing_model_val,
         },
-        "quantity": int(subscription.quantity or 1),
+        "quantity": qty,
         "status": subscription.status,
+        "billing_frequency": billing_freq,
+        "currency": subscription.currency or plan.currency,
+        "pricing_model": pricing_model_val,
+        "unit_price": money_str(unit_price),
+        "subtotal": money_str(subtotal),
+        "discount_amount": money_str(discount),
+        "tax_amount": money_str(tax),
+        "total_amount": money_str(total),
         "start_date": subscription.start_date,
+        "trial_start": subscription.trial_start,
         "trial_end": subscription.trial_end,
         "current_period_start": subscription.current_period_start,
         "current_period_end": subscription.current_period_end,
         "next_billing_date": subscription.next_billing_date,
+        "auto_renewal": bool(subscription.auto_renewal if subscription.auto_renewal is not None else True),
         "cancel_at_period_end": bool(subscription.cancel_at_period_end),
         "cancelled_at": iso_dt(subscription.cancelled_at),
+        "cancellation_reason": subscription.cancellation_reason,
         "paused_at": iso_dt(subscription.paused_at),
         "ended_at": iso_dt(subscription.ended_at),
         "notes": subscription.notes,
-        "mrr": money_str(compute_mrr(plan, subscription.quantity or 1)),
+        "mrr": money_str(compute_mrr(plan, qty, unit_price)),
         "created_at": iso_dt(subscription.created_at),
         "updated_at": iso_dt(subscription.updated_at),
     }
@@ -175,6 +225,7 @@ def list_subscriptions(
     status: Optional[str] = None,
     customer_id: Optional[str] = None,
     plan_id: Optional[str] = None,
+    billing_frequency: Optional[str] = None,
 ):
     stmt = _base_query().where(Subscription.organization_id == organization_id)
     if search:
@@ -193,8 +244,53 @@ def list_subscriptions(
         stmt = stmt.where(Subscription.customer_id == customer_id)
     if plan_id:
         stmt = stmt.where(Subscription.plan_id == plan_id)
+    if billing_frequency:
+        stmt = stmt.where(Subscription.billing_frequency == billing_frequency)
     stmt = apply_sort(stmt, Subscription, params.sort, SUBSCRIPTION_SORT_FIELDS, "-created_at")
     return paginate(db, stmt, params)
+
+
+def get_subscriptions_summary(db: Session, organization_id: str) -> Dict[str, Any]:
+    """Computes real database aggregation for subscription KPIs."""
+    today = date.today()
+    seven_days = today + timedelta(days=7)
+
+    subs = db.scalars(
+        select(Subscription).options(selectinload(Subscription.plan)).where(Subscription.organization_id == organization_id)
+    ).all()
+
+    total_count = len(subs)
+    active_count = 0
+    trialing_count = 0
+    paused_count = 0
+    renewing_soon_count = 0
+    cancelled_count = 0
+    total_mrr = Decimal("0.00")
+
+    for s in subs:
+        if s.status == SubscriptionStatus.ACTIVE:
+            active_count += 1
+            if s.plan:
+                unit_price = D(s.unit_price if s.unit_price is not None else s.plan.unit_amount)
+                total_mrr += compute_mrr(s.plan, s.quantity or 1, unit_price)
+            if s.next_billing_date and today <= s.next_billing_date <= seven_days:
+                renewing_soon_count += 1
+        elif s.status == SubscriptionStatus.TRIALING:
+            trialing_count += 1
+        elif s.status == SubscriptionStatus.PAUSED:
+            paused_count += 1
+        elif s.status == SubscriptionStatus.CANCELLED:
+            cancelled_count += 1
+
+    return {
+        "total_subscriptions": total_count,
+        "active_count": active_count,
+        "trialing_count": trialing_count,
+        "paused_count": paused_count,
+        "renewing_soon_count": renewing_soon_count,
+        "cancelled_count": cancelled_count,
+        "total_mrr": money_str(q2(total_mrr)),
+    }
 
 
 # --- renewal invoices ------------------------------------------------------------------------------------------------
@@ -221,24 +317,27 @@ def generate_period_invoice(
     send: bool = True,
 ) -> Invoice:
     """Issue (status sent) the invoice for the subscription's current period. Idempotent per period. No commit."""
-    if subscription.status == SubscriptionStatus.CANCELLED:
-        raise InvalidStateError("A cancelled subscription cannot be invoiced.")
+    if subscription.status in (SubscriptionStatus.CANCELLED, SubscriptionStatus.EXPIRED, SubscriptionStatus.DRAFT):
+        raise InvalidStateError(f"A {subscription.status.value} subscription cannot be invoiced.")
     if period_invoice_exists(db, subscription):
         raise InvalidStateError(
             f"An invoice for the period starting {subscription.current_period_start.isoformat()} already exists."
         )
     plan = subscription.plan
-    product = plan.product
+    product = plan.product if plan else None
     customer = subscription.customer
     quantity = Decimal(int(subscription.quantity or 1)) if plan.pricing_model == PricingModel.PER_UNIT else Decimal("1")
+    unit_price = D(subscription.unit_price if subscription.unit_price is not None else plan.unit_amount)
+
     tax_rate = D(product.tax_rate_pct if product is not None else 0)
     if customer.tax_exempt:
         tax_rate = Decimal("0")
+
     lines = [
         LineInput(
             description=f"{plan.name} ({subscription.current_period_start.isoformat()} – {subscription.current_period_end.isoformat()})",
             quantity=quantity,
-            unit_price=D(plan.unit_amount),
+            unit_price=unit_price,
             tax_rate_pct=tax_rate,
             product_id=plan.product_id,
             plan_id=plan.id,
@@ -261,7 +360,7 @@ def generate_period_invoice(
         customer=customer,
         lines=lines,
         issue_date=date.today(),
-        currency=plan.currency or customer.currency,
+        currency=subscription.currency or plan.currency or customer.currency,
         subscription_id=subscription.id,
         period_start=subscription.current_period_start,
         period_end=subscription.current_period_end,
@@ -313,19 +412,47 @@ def create_subscription(db: Session, ctx: CurrentContext, data: SubscriptionCrea
     months = interval_months(plan)  # 422 for one_time plans
     start = data.start_date or date.today()
     trial_days = data.trial_days if data.trial_days is not None else int(plan.trial_days or 0)
+    qty = max(1, int(data.quantity or 1))
 
-    if trial_days > 0:
+    # Calculate commercial pricing snapshot using Decimal precision
+    unit_price = D(plan.unit_amount)
+    product = plan.product
+    tax_rate = D(product.tax_rate_pct if product else 0)
+    if customer.tax_exempt:
+        tax_rate = Decimal("0")
+
+    units = Decimal(qty) if plan.pricing_model == PricingModel.PER_UNIT else Decimal("1")
+    subtotal = q2(unit_price * units)
+    discount_amount = Decimal("0.00")
+    tax_amount = q2(subtotal * tax_rate / Decimal("100"))
+    total_amount = q2(subtotal - discount_amount + tax_amount)
+
+    billing_freq = data.billing_frequency or (
+        plan.billing_interval.value if hasattr(plan.billing_interval, "value") else str(plan.billing_interval)
+    )
+    pricing_model_val = plan.pricing_model.value if hasattr(plan.pricing_model, "value") else str(plan.pricing_model)
+
+    if data.status == SubscriptionStatus.DRAFT:
+        status = SubscriptionStatus.DRAFT
+        trial_start = None
+        trial_end = None
+        period_start = start
+        next_billing = None
+    elif trial_days > 0:
+        trial_start = start
         trial_end = start + timedelta(days=trial_days)
         status = SubscriptionStatus.TRIALING
         period_start = trial_end
         next_billing = trial_end
     else:
+        trial_start = None
         trial_end = None
-        status = SubscriptionStatus.ACTIVE
+        status = data.status or SubscriptionStatus.ACTIVE
         period_start = start
-        next_billing = None  # set below once the period end is known
+        next_billing = None
+
     period_end = add_months(period_start, months, period_start.day)
-    if next_billing is None:
+    if status == SubscriptionStatus.ACTIVE and next_billing is None:
         next_billing = period_end
 
     subscription = Subscription(
@@ -333,13 +460,23 @@ def create_subscription(db: Session, ctx: CurrentContext, data: SubscriptionCrea
         subscription_number=next_number(db, ctx.organization_id, "subscription"),
         customer_id=customer.id,
         plan_id=plan.id,
-        quantity=int(data.quantity or 1),
+        quantity=qty,
         status=status,
+        billing_frequency=billing_freq,
+        currency=plan.currency or customer.currency,
+        pricing_model=pricing_model_val,
+        unit_price=unit_price,
+        subtotal=subtotal,
+        discount_amount=discount_amount,
+        tax_amount=tax_amount,
+        total_amount=total_amount,
         start_date=start,
+        trial_start=trial_start,
         trial_end=trial_end,
         current_period_start=period_start,
         current_period_end=period_end,
         next_billing_date=next_billing,
+        auto_renewal=bool(data.auto_renewal),
         cancel_at_period_end=False,
         notes=data.notes,
         created_by_id=ctx.user.id,
@@ -364,18 +501,65 @@ def create_subscription(db: Session, ctx: CurrentContext, data: SubscriptionCrea
     return get_subscription(db, ctx.organization_id, subscription.id)
 
 
+def activate_subscription(db: Session, ctx: CurrentContext, subscription: Subscription) -> Subscription:
+    """Transition DRAFT or PENDING_ACTIVATION subscription to ACTIVE."""
+    if subscription.status not in (SubscriptionStatus.DRAFT, SubscriptionStatus.PENDING_ACTIVATION):
+        raise InvalidStateError(f"Only draft or pending subscriptions can be activated; this one is {subscription.status.value}.")
+    before = snapshot(subscription)
+    today = date.today()
+    months = interval_months(subscription.plan)
+    subscription.status = SubscriptionStatus.ACTIVE
+    subscription.current_period_start = today
+    subscription.current_period_end = add_months(today, months, today.day)
+    subscription.next_billing_date = subscription.current_period_end
+    subscription.updated_at = utcnow()
+    subscription.updated_by_id = ctx.user.id
+    db.flush()
+
+    audit.record(
+        db,
+        action="SUBSCRIPTION_ACTIVATED",
+        entity_type="subscription",
+        entity_id=subscription.id,
+        entity_label=subscription.subscription_number,
+        ctx=ctx,
+        before=before,
+        after=snapshot(subscription),
+    )
+    db.commit()
+    return get_subscription(db, ctx.organization_id, subscription.id)
+
+
 def update_subscription(db: Session, ctx: CurrentContext, subscription: Subscription, data: SubscriptionUpdate) -> Subscription:
-    if subscription.status == SubscriptionStatus.CANCELLED:
-        raise InvalidStateError("A cancelled subscription cannot be edited.")
+    if subscription.status in (SubscriptionStatus.CANCELLED, SubscriptionStatus.EXPIRED):
+        raise InvalidStateError(f"A {subscription.status.value} subscription cannot be edited.")
     before = snapshot(subscription)
     changes = data.model_dump(exclude_unset=True)
+    plan = subscription.plan
+
     if "quantity" in changes and changes["quantity"] is not None:
-        subscription.quantity = int(changes["quantity"])
+        qty = int(changes["quantity"])
+        subscription.quantity = qty
+        # Update snapshot amounts
+        units = Decimal(qty) if plan.pricing_model == PricingModel.PER_UNIT else Decimal("1")
+        subtotal = q2(D(subscription.unit_price or plan.unit_amount) * units)
+        tax_rate = D(plan.product.tax_rate_pct if plan.product and not subscription.customer.tax_exempt else 0)
+        tax = q2(subtotal * tax_rate / Decimal("100"))
+        subscription.subtotal = subtotal
+        subscription.tax_amount = tax
+        subscription.total_amount = q2(subtotal - D(subscription.discount_amount or 0) + tax)
+
     if "notes" in changes:
         subscription.notes = changes["notes"]
+    if "auto_renewal" in changes and changes["auto_renewal"] is not None:
+        subscription.auto_renewal = bool(changes["auto_renewal"])
     if "cancel_at_period_end" in changes and changes["cancel_at_period_end"] is not None:
         subscription.cancel_at_period_end = bool(changes["cancel_at_period_end"])
+    if "billing_frequency" in changes and changes["billing_frequency"]:
+        subscription.billing_frequency = changes["billing_frequency"]
+
     subscription.updated_at = utcnow()
+    subscription.updated_by_id = ctx.user.id
     db.flush()
     audit.record(
         db,
@@ -399,6 +583,7 @@ def pause_subscription(db: Session, ctx: CurrentContext, subscription: Subscript
     subscription.paused_at = utcnow()
     subscription.next_billing_date = None
     subscription.updated_at = utcnow()
+    subscription.updated_by_id = ctx.user.id
     db.flush()
     audit.record(
         db,
@@ -425,6 +610,7 @@ def resume_subscription(db: Session, ctx: CurrentContext, subscription: Subscrip
     subscription.current_period_end = period_end_for(today, subscription.plan, today.day)
     subscription.next_billing_date = subscription.current_period_end
     subscription.updated_at = utcnow()
+    subscription.updated_by_id = ctx.user.id
     db.flush()
     audit.record(
         db,
@@ -440,10 +626,11 @@ def resume_subscription(db: Session, ctx: CurrentContext, subscription: Subscrip
     return get_subscription(db, ctx.organization_id, subscription.id)
 
 
-def _end_now(subscription: Subscription) -> None:
+def _end_now(subscription: Subscription, reason: Optional[str] = None) -> None:
     now = utcnow()
     subscription.status = SubscriptionStatus.CANCELLED
     subscription.cancelled_at = subscription.cancelled_at or now
+    subscription.cancellation_reason = reason
     subscription.ended_at = now
     subscription.next_billing_date = None
     subscription.cancel_at_period_end = False
@@ -459,9 +646,12 @@ def cancel_subscription(
     if at_period_end and subscription.status != SubscriptionStatus.PAUSED:
         subscription.cancel_at_period_end = True
         subscription.cancelled_at = utcnow()
+        subscription.cancellation_reason = reason
         subscription.updated_at = utcnow()
+        subscription.updated_by_id = ctx.user.id
     else:
-        _end_now(subscription)
+        _end_now(subscription, reason=reason)
+        subscription.updated_by_id = ctx.user.id
     db.flush()
     audit.record(
         db,
@@ -481,7 +671,7 @@ def cancel_subscription(
 
 
 def convert_trial(db: Session, subscription: Subscription, *, actor_label: str = audit.SYSTEM_ACTOR) -> Optional[Invoice]:
-    """Scheduler (a): trialing -> active at trial end, first period starts, renewal invoice issued."""
+    """Scheduler: trialing -> active at trial end, first period starts, renewal invoice issued."""
     if subscription.status != SubscriptionStatus.TRIALING:
         return None
     before = snapshot(subscription)
@@ -510,15 +700,12 @@ def convert_trial(db: Session, subscription: Subscription, *, actor_label: str =
 
 
 def renew_subscription(db: Session, subscription: Subscription, *, actor_label: str = audit.SYSTEM_ACTOR) -> str:
-    """Scheduler (b): advance the period and issue the renewal invoice, or end it when cancel_at_period_end.
-
-    Returns "renewed", "ended" or "skipped".
-    """
+    """Advance the period and issue the renewal invoice, or end it when cancel_at_period_end."""
     if subscription.status != SubscriptionStatus.ACTIVE:
         return "skipped"
     before = snapshot(subscription)
     if subscription.cancel_at_period_end:
-        _end_now(subscription)
+        _end_now(subscription, reason="cancel_at_period_end reached")
         db.flush()
         audit.record(
             db,
@@ -562,7 +749,9 @@ __all__ = [
     "serialize_subscription",
     "get_subscription",
     "list_subscriptions",
+    "get_subscriptions_summary",
     "create_subscription",
+    "activate_subscription",
     "update_subscription",
     "pause_subscription",
     "resume_subscription",

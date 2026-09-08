@@ -7,6 +7,7 @@ import type {
   PaymentMethod as BackendPaymentMethod,
   PaymentStatus as BackendPaymentStatus,
 } from '../../types/api';
+import type { Invoice } from '../../types/invoices';
 import type {
   Payment,
   PaymentMethod as UiPaymentMethod,
@@ -187,7 +188,7 @@ export function uiToPaymentIn(input: RecordPaymentInput): PaymentIn {
 /**
  * Maps a customer and their invoices to the frontend PaymentCustomer interface.
  */
-export function customerToUi(c: CustomerOut, invoices: InvoiceOut[] = []): PaymentCustomer {
+export function customerToUi(c: CustomerOut, invoices: (InvoiceOut | Invoice)[] = []): PaymentCustomer {
   const openInvoices: OutstandingInvoice[] = invoices
     .filter(
       (inv) =>
@@ -201,9 +202,9 @@ export function customerToUi(c: CustomerOut, invoices: InvoiceOut[] = []): Payme
       customerName: c.display_name,
       date: inv.issue_date,
       dueDate: inv.due_date,
-      totalAmount: parseFloat(inv.total) || 0,
-      amountPaid: parseFloat(inv.amount_paid) || 0,
-      balanceDue: parseFloat(inv.amount_due) || 0,
+      totalAmount: typeof inv.total === 'number' ? inv.total : parseFloat(inv.total) || 0,
+      amountPaid: typeof inv.amount_paid === 'number' ? inv.amount_paid : parseFloat(inv.amount_paid) || 0,
+      balanceDue: typeof inv.amount_due === 'number' ? inv.amount_due : parseFloat(inv.amount_due) || 0,
       status:
         inv.status === 'partially_paid'
           ? 'partially_paid'

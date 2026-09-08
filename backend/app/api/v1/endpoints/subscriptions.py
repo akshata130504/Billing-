@@ -11,6 +11,7 @@ from backend.app.schemas.subscriptions import (
     SubscriptionCancelIn,
     SubscriptionCreate,
     SubscriptionOut,
+    SubscriptionSummaryOut,
     SubscriptionUpdate,
 )
 from backend.app.services import invoice_service, subscription_service
@@ -19,18 +20,34 @@ from backend.app.services.pagination import PageParams, page_params
 router = APIRouter()
 
 
+@router.get("/summary", response_model=SubscriptionSummaryOut, summary="Get subscription KPI summary")
+def subscriptions_summary(
+    ctx: CurrentContext = Depends(require_viewer),
+    db: Session = Depends(get_db),
+):
+    return subscription_service.get_subscriptions_summary(db, ctx.organization_id)
+
+
 @router.get("", response_model=PaginatedResponse[SubscriptionOut], summary="List subscriptions")
 def list_subscriptions(
     search: Optional[str] = Query(None),
     status_: Optional[str] = Query(None, alias="status"),
     customer_id: Optional[str] = Query(None),
     plan_id: Optional[str] = Query(None),
+    billing_frequency: Optional[str] = Query(None),
     params: PageParams = Depends(page_params),
     ctx: CurrentContext = Depends(require_viewer),
     db: Session = Depends(get_db),
 ):
     page = subscription_service.list_subscriptions(
-        db, ctx.organization_id, params, search=search, status=status_, customer_id=customer_id, plan_id=plan_id
+        db,
+        ctx.organization_id,
+        params,
+        search=search,
+        status=status_,
+        customer_id=customer_id,
+        plan_id=plan_id,
+        billing_frequency=billing_frequency,
     )
     return page.to_response(subscription_service.serialize_subscription)
 
@@ -55,7 +72,7 @@ def get_subscription(
     )
 
 
-@router.patch("/{subscription_id}", response_model=SubscriptionOut, summary="Update quantity / notes / cancel_at_period_end")
+@router.patch("/{subscription_id}", response_model=SubscriptionOut, summary="Update quantity / notes / auto_renewal / cancel_at_period_end")
 def update_subscription(
     subscription_id: str,
     body: SubscriptionUpdate,
@@ -64,6 +81,16 @@ def update_subscription(
 ):
     sub = subscription_service.get_subscription(db, ctx.organization_id, subscription_id)
     return subscription_service.serialize_subscription(subscription_service.update_subscription(db, ctx, sub, body))
+
+
+@router.post("/{subscription_id}/activate", response_model=SubscriptionOut, summary="Activate draft subscription")
+def activate_subscription(
+    subscription_id: str,
+    ctx: CurrentContext = Depends(require_finance),
+    db: Session = Depends(get_db),
+):
+    sub = subscription_service.get_subscription(db, ctx.organization_id, subscription_id)
+    return subscription_service.serialize_subscription(subscription_service.activate_subscription(db, ctx, sub))
 
 
 @router.post("/{subscription_id}/pause", response_model=SubscriptionOut, summary="Pause")
@@ -84,6 +111,18 @@ def resume_subscription(
 ):
     sub = subscription_service.get_subscription(db, ctx.organization_id, subscription_id)
     return subscription_service.serialize_subscription(subscription_service.resume_subscription(db, ctx, sub))
+
+
+@router.post("/{subscription_id}/renew", response_model=SubscriptionOut, summary="Manual period renewal")
+def renew_subscription(
+    subscription_id: str,
+    ctx: CurrentContext = Depends(require_finance),
+    db: Session = Depends(get_db),
+):
+    sub = subscription_service.get_subscription(db, ctx.organization_id, subscription_id)
+    subscription_service.renew_subscription(db, sub, actor_label=ctx.user.full_name)
+    db.commit()
+    return subscription_service.serialize_subscription(subscription_service.get_subscription(db, ctx.organization_id, subscription_id))
 
 
 @router.post("/{subscription_id}/cancel", response_model=SubscriptionOut, summary="Cancel now or at period end")

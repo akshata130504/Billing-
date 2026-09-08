@@ -59,6 +59,8 @@ from backend.app.models.catalog_cpq import (
     PriceBookStatus,
     RuleType,
 )
+from backend.app.models.lifecycle import CustomerLifecycle, CustomerLifecycleStage, HealthStatus
+from backend.app.models.timesheets import TimeEntry, TimeEntryStatus
 
 __all__ = [
     "TenantMixin",
@@ -121,6 +123,11 @@ __all__ = [
     "CPQDeal",
     "CPQDealItem",
     "CPQDealStatus",
+    "CustomerLifecycle",
+    "CustomerLifecycleStage",
+    "HealthStatus",
+    "TimeEntry",
+    "TimeEntryStatus",
     "InvoiceCollection",
     "CollectionActivity",
     "CollectionActivityType",
