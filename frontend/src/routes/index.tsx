@@ -27,7 +27,7 @@ import {
   TrialsPage,
 } from '../pages/subscriptions';
 import { InvoicesListPage, InvoiceFormPage, InvoiceDetailPage, CollectionsPage } from '../pages/invoices';
-import { PaymentsListPage, PaymentDetailPage } from '../pages/payments';
+import { PaymentsListPage, PaymentDetailPage, PaymentsProvider } from '../pages/payments';
 import { PayInvoicePage, PublicQuotePage } from '../pages/public';
 import { ActivityPage } from '../pages/activity';
 import {
@@ -146,7 +146,8 @@ export function AppRoutes() {
   return (
     <ProjectsProvider>
       <ExpensesProvider>
-        <Routes>
+        <PaymentsProvider>
+          <Routes>
           {/* Public: auth */}
           <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
           <Route path="/signup" element={<PublicOnly><SignupPage /></PublicOnly>} />
@@ -182,6 +183,7 @@ export function AppRoutes() {
               <Route path="invoices/:id/edit" element={<InvoiceFormPage />} />
               <Route path="payments" element={<PaymentsListPage />} />
               <Route path="payments/:id" element={<PaymentDetailPage />} />
+              <Route path="payments/:paymentId" element={<PaymentDetailPage />} />
               <Route path="collections" element={<CollectionsPage />} />
 
               {/* Subscriptions */}
@@ -266,6 +268,7 @@ export function AppRoutes() {
             </Route>
           </Route>
         </Routes>
+        </PaymentsProvider>
       </ExpensesProvider>
     </ProjectsProvider>
   );
