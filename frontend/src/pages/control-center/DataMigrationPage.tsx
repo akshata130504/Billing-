@@ -1,8 +1,17 @@
-import { useState, useRef, useEffect } from 'react';
+import { useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { useToast } from '../../components/common/Toast';
+import { LoadingState } from '../../components/common/LoadingState';
+import { ErrorState } from '../../components/common/ErrorState';
+import { controlCenterService, downloadAuthenticated, toApiError, triggerBlobDownload } from '../../services';
+import { queryKeys } from '../../hooks/queries';
+import { useAuth } from '../../hooks/useAuth';
+import { formatDateTime, humanize, type BadgeVariant } from '../../utils/format';
+import type { ImportEntity, ImportResult, ImportRowError } from '../../types/api';
 import {
   UploadCloud,
   FileSpreadsheet,
@@ -10,139 +19,208 @@ import {
   Download,
   Users,
   Package,
-  Receipt,
-  Repeat,
-  CreditCard,
+  Layers,
   ArrowRight,
   RefreshCw,
   FileCheck,
+  AlertTriangle,
+  History,
+  Lock,
 } from 'lucide-react';
 
-export type MigrationEntity = 'customers' | 'products' | 'invoices' | 'subscriptions' | 'payments';
-
+// The backend only supports importing these three entities via CSV (see
+// backend/app/models/governance.py ImportEntity). Invoices, subscriptions and
+// payments have no import endpoint — that is a real backend limitation, not
+// something this page can add on the frontend.
 interface EntityConfig {
-  key: MigrationEntity;
+  key: ImportEntity;
   title: string;
   description: string;
   icon: React.ComponentType<{ className?: string }>;
-  sampleFields: string[];
+  requiredFields: string[];
+  optionalFields: string[];
+  route: string;
 }
 
 const entityConfigs: EntityConfig[] = [
   {
     key: 'customers',
     title: 'Customers',
-    description: 'Import client directories, GSTIN / tax IDs, primary contacts, and currencies.',
+    description: 'Import your customer directory — GSTIN/PAN, billing addresses, currency and payment terms.',
     icon: Users,
-    sampleFields: ['customer_name', 'email', 'phone', 'gstin', 'currency', 'billing_street', 'country'],
+    requiredFields: ['display_name'],
+    optionalFields: [
+      'company_name',
+      'email',
+      'phone',
+      'gstin',
+      'pan',
+      'currency',
+      'payment_terms_days',
+      'billing_address_line1',
+      'billing_address_line2',
+      'billing_city',
+      'billing_state',
+      'billing_postal_code',
+      'billing_country',
+      'notes',
+    ],
+    route: '/customers',
   },
   {
     key: 'products',
-    title: 'Products & Plans',
-    description: 'Import recurring subscription plans, SKU tiers, units of measure, and one-off add-ons.',
+    title: 'Products',
+    description: 'Import products and SKUs — HSN/SAC codes, units of measure and default tax rates.',
     icon: Package,
-    sampleFields: ['product_name', 'sku', 'billing_interval', 'unit_price', 'currency', 'tax_code'],
+    requiredFields: ['name', 'sku'],
+    optionalFields: ['description', 'type', 'unit', 'hsn_sac_code', 'tax_rate_pct', 'is_active'],
+    route: '/catalog',
   },
   {
-    key: 'invoices',
-    title: 'Invoices & Balances',
-    description: 'Historical invoices, line item breakdowns, tax amounts, and payment due dates.',
-    icon: Receipt,
-    sampleFields: ['invoice_number', 'customer_email', 'issue_date', 'due_date', 'subtotal', 'tax', 'status'],
-  },
-  {
-    key: 'subscriptions',
-    title: 'Subscriptions',
-    description: 'Active subscriptions, renewal cycle anchors, seat counts, and trial states.',
-    icon: Repeat,
-    sampleFields: ['subscription_id', 'customer_email', 'plan_sku', 'started_at', 'current_period_end', 'status'],
-  },
-  {
-    key: 'payments',
-    title: 'Payments & Collections',
-    description: 'Past payment settlements, gateway reference IDs, wire UTR numbers, and allocations.',
-    icon: CreditCard,
-    sampleFields: ['payment_ref', 'invoice_number', 'amount', 'gateway', 'transaction_id', 'paid_at'],
+    key: 'plans',
+    title: 'Plans',
+    description:
+      'Import recurring billing plans. Each row links to an existing product by SKU, so import Products before Plans.',
+    icon: Layers,
+    requiredFields: ['product_sku', 'name', 'code', 'billing_interval', 'unit_amount'],
+    optionalFields: ['interval_count', 'pricing_model', 'currency', 'setup_fee', 'trial_days', 'is_active'],
+    route: '/plans-pricing',
   },
 ];
 
+type Step = 'upload' | 'validating' | 'preview' | 'importing' | 'completed';
+
+const STATUS_BADGE: Record<string, BadgeVariant> = {
+  completed: 'success',
+  completed_with_errors: 'warning',
+  failed: 'danger',
+};
+
+function formatFileSize(bytes: number): string {
+  return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function downloadErrorCsv(errors: ImportRowError[], filenamePrefix: string) {
+  const escape = (value: string) => `"${value.replace(/"/g, '""')}"`;
+  const lines = ['row,error', ...errors.map((e) => `${e.row},${escape(e.error)}`)];
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+  triggerBlobDownload(blob, `${filenamePrefix}_errors.csv`);
+}
+
+function ImportErrorsList({ errors, onDownload }: { errors: ImportRowError[]; onDownload: () => void }) {
+  if (errors.length === 0) return null;
+  return (
+    <div className="rounded-xl border border-rose-200 bg-rose-50/60 text-left">
+      <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-rose-200 gap-2">
+        <span className="text-xs font-bold text-rose-800">
+          {errors.length} row error{errors.length === 1 ? '' : 's'}
+          {errors.length >= 100 ? ' (first 100 shown)' : ''}
+        </span>
+        <Button variant="outline" size="sm" leadingIcon={<Download className="w-3.5 h-3.5" />} onClick={onDownload}>
+          Download error CSV
+        </Button>
+      </div>
+      <div className="max-h-56 overflow-y-auto divide-y divide-rose-100">
+        {errors.map((e, i) => (
+          <div key={`${e.row}-${i}`} className="px-3.5 py-2 text-xs flex gap-2">
+            <span className="font-mono font-semibold text-rose-700 shrink-0">Row {e.row}</span>
+            <span className="text-rose-800">{e.error}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function DataMigrationPage() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const [selectedEntity, setSelectedEntity] = useState<MigrationEntity>('customers');
+  const { hasRole } = useAuth();
+  const canImport = hasRole('finance');
+
+  const [selectedEntity, setSelectedEntity] = useState<ImportEntity>('customers');
   const [dragOver, setDragOver] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<{ name: string; size: string } | null>(null);
-  const [step, setStep] = useState<'upload' | 'validating' | 'preview' | 'importing' | 'completed'>('upload');
-  const [progress, setProgress] = useState(0);
-
-  // Pending simulated async work, so a reset or unmount can cancel it cleanly
-  const validationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const importIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const clearPendingTimers = () => {
-    if (validationTimerRef.current !== null) {
-      clearTimeout(validationTimerRef.current);
-      validationTimerRef.current = null;
-    }
-    if (importIntervalRef.current !== null) {
-      clearInterval(importIntervalRef.current);
-      importIntervalRef.current = null;
-    }
-  };
-
-  useEffect(() => clearPendingTimers, []);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [step, setStep] = useState<Step>('upload');
+  const [dryRunResult, setDryRunResult] = useState<ImportResult | null>(null);
+  const [finalResult, setFinalResult] = useState<ImportResult | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const activeConfig = entityConfigs.find((c) => c.key === selectedEntity)!;
 
-  const handleDownloadTemplate = () => {
-    const csvContent = activeConfig.sampleFields.join(',') + '\n';
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `rooman_${selectedEntity}_template.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast('info', 'Template Downloaded', `Downloaded sample CSV template for ${activeConfig.title}.`);
-  };
-
-  const handleFileSelect = (name: string, size: string) => {
-    clearPendingTimers();
-    setSelectedFile({ name, size });
-    setStep('validating');
-    validationTimerRef.current = setTimeout(() => {
-      validationTimerRef.current = null;
-      setStep('preview');
-      showToast('success', 'File Validated', 'All columns mapped successfully against schema.');
-    }, 600);
-  };
-
-  const handleStartImport = () => {
-    clearPendingTimers();
-    setStep('importing');
-    let current = 15;
-    setProgress(current);
-    importIntervalRef.current = setInterval(() => {
-      current = Math.min(current + 25, 100);
-      setProgress(current);
-      if (current >= 100) {
-        clearPendingTimers();
-        setStep('completed');
-        showToast('success', 'Import Successful', `Migrated 142 records into ${activeConfig.title}.`);
-      }
-    }, 300);
-  };
+  const importsHistory = useQuery({
+    queryKey: queryKeys.controlCenter.imports(),
+    queryFn: () => controlCenterService.listImports({ page: 1, page_size: 10 }),
+  });
 
   const handleReset = () => {
-    clearPendingTimers();
     setSelectedFile(null);
+    setDryRunResult(null);
+    setFinalResult(null);
     setStep('upload');
-    setProgress(0);
+    validateMutation.reset();
+    importMutation.reset();
   };
 
-  const formatFileSize = (bytes: number) =>
-    bytes >= 1024 * 1024
-      ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-      : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  const handleDownloadTemplate = async () => {
+    try {
+      await downloadAuthenticated(controlCenterService.importTemplateUrl(selectedEntity), `${selectedEntity}_template.csv`);
+      showToast('info', 'Template downloaded', `Downloaded the CSV template for ${activeConfig.title}.`);
+    } catch (err) {
+      showToast('error', 'Download failed', toApiError(err).message);
+    }
+  };
+
+  const validateMutation = useMutation({
+    mutationFn: (file: File) => controlCenterService.runImport(selectedEntity, file, true),
+    onSuccess: (result) => {
+      setDryRunResult(result);
+      setStep('preview');
+    },
+    onError: (err) => {
+      showToast('error', 'Validation failed', toApiError(err).message);
+      setStep('upload');
+      setSelectedFile(null);
+    },
+  });
+
+  const importMutation = useMutation({
+    mutationFn: () => controlCenterService.runImport(selectedEntity, selectedFile as File, false),
+    onSuccess: (result) => {
+      setFinalResult(result);
+      setStep('completed');
+      void queryClient.invalidateQueries({ queryKey: queryKeys.controlCenter.imports() });
+      showToast(
+        result.failed_rows > 0 ? 'warning' : 'success',
+        result.failed_rows > 0 ? 'Import completed with errors' : 'Import successful',
+        `Imported ${result.imported_rows} of ${result.total_rows} ${activeConfig.title.toLowerCase()} row(s).`
+      );
+    },
+    onError: (err) => {
+      showToast('error', 'Import failed', toApiError(err).message);
+      setStep('preview');
+    },
+  });
+
+  const handleFileSelect = (file: File) => {
+    if (!canImport) {
+      showToast('error', 'Finance role required', 'You need the Finance role to import data.');
+      return;
+    }
+    setSelectedFile(file);
+    setDryRunResult(null);
+    setStep('validating');
+    validateMutation.mutate(file);
+  };
+
+  const openFilePicker = () => {
+    if (!canImport) {
+      showToast('error', 'Finance role required', 'You need the Finance role to import data.');
+      return;
+    }
+    fileInputRef.current?.click();
+  };
 
   return (
     <div className="space-y-6">
@@ -163,7 +241,8 @@ export function DataMigrationPage() {
             Data Migration & Onboarding
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-            Import legacy billing data, customer registries, product catalogs, and historical invoices seamlessly via validated CSV and JSON templates.
+            Import customers, products and plans via validated CSV templates. Every import is validated in a
+            dry run first, so nothing is written until you confirm.
           </p>
         </div>
 
@@ -171,18 +250,28 @@ export function DataMigrationPage() {
           variant="outline"
           size="sm"
           leadingIcon={<Download className="w-3.5 h-3.5" />}
-          onClick={handleDownloadTemplate}
+          onClick={() => void handleDownloadTemplate()}
         >
           Download Template
         </Button>
       </div>
+
+      {!canImport && (
+        <div className="flex items-center gap-2.5 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800">
+          <Lock className="w-4 h-4 shrink-0" />
+          <span>
+            You have read-only access to this page. Importing data requires the <strong>Finance</strong> role or
+            above.
+          </span>
+        </div>
+      )}
 
       {/* Entity Selector Cards */}
       <div>
         <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2.5">
           1. Select Target Data Model
         </h3>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {entityConfigs.map((config) => {
             const Icon = config.icon;
             const isSelected = selectedEntity === config.key;
@@ -222,59 +311,84 @@ export function DataMigrationPage() {
         <CardContent className="p-6">
           {step === 'upload' && (
             <div className="space-y-4">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleFileSelect(file);
+                  e.target.value = '';
+                }}
+              />
               <div
                 onDragOver={(e) => {
                   e.preventDefault();
-                  setDragOver(true);
+                  if (canImport) setDragOver(true);
                 }}
                 onDragLeave={() => setDragOver(false)}
                 onDrop={(e) => {
                   e.preventDefault();
                   setDragOver(false);
-                  // Reflect the dropped file's real name/size; the parsing itself is still simulated
                   const dropped = e.dataTransfer.files[0];
-                  if (dropped) {
-                    handleFileSelect(dropped.name, formatFileSize(dropped.size));
-                  } else {
-                    handleFileSelect('legacy_export_data.csv', '248 KB');
-                  }
+                  if (dropped) handleFileSelect(dropped);
                 }}
-                onClick={() => handleFileSelect(`${selectedEntity}_export_sample.csv`, '184 KB')}
-                className={`border-2 border-dashed rounded-2xl p-8 sm:p-12 text-center transition-colors cursor-pointer ${
-                  dragOver
-                    ? 'border-brand-500 bg-brand-50/50'
-                    : 'border-slate-200 hover:border-brand-400 hover:bg-slate-50/50'
+                onClick={openFilePicker}
+                className={`border-2 border-dashed rounded-2xl p-8 sm:p-12 text-center transition-colors ${
+                  !canImport
+                    ? 'border-slate-200 opacity-60 cursor-not-allowed'
+                    : dragOver
+                    ? 'border-brand-500 bg-brand-50/50 cursor-pointer'
+                    : 'border-slate-200 hover:border-brand-400 hover:bg-slate-50/50 cursor-pointer'
                 }`}
               >
                 <div className="w-12 h-12 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center mx-auto mb-3">
                   <UploadCloud className="w-6 h-6" />
                 </div>
                 <h4 className="text-sm font-bold text-slate-900">
-                  Drop your CSV or JSON file here, or browse
+                  Drop your CSV file here, or browse
                 </h4>
                 <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                  Supports .csv and .json exports from Stripe, Chargebee, Zoho Billing, or customized spreadsheets.
+                  Supports .csv exports up to 5 MB and 5,000 rows.
                 </p>
                 <div className="mt-4 inline-flex items-center gap-2 text-xs font-semibold text-brand-600 bg-brand-50 px-3 py-1.5 rounded-lg border border-brand-100">
                   <FileSpreadsheet className="w-4 h-4" />
-                  <span>Click to simulate upload</span>
+                  <span>Click to choose a file</span>
                 </div>
               </div>
 
               {/* Field Schema Hint */}
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
-                <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                  Expected Column Headers for {activeConfig.title}:
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {activeConfig.sampleFields.map((field) => (
-                    <span
-                      key={field}
-                      className="font-mono text-[11px] bg-white text-slate-700 px-2 py-0.5 rounded border border-slate-200"
-                    >
-                      {field}
-                    </span>
-                  ))}
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2.5">
+                <div>
+                  <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                    Required columns for {activeConfig.title}:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {activeConfig.requiredFields.map((field) => (
+                      <span
+                        key={field}
+                        className="font-mono text-[11px] bg-white text-rose-700 px-2 py-0.5 rounded border border-rose-200"
+                      >
+                        {field}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                    Optional columns:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {activeConfig.optionalFields.map((field) => (
+                      <span
+                        key={field}
+                        className="font-mono text-[11px] bg-white text-slate-700 px-2 py-0.5 rounded border border-slate-200"
+                      >
+                        {field}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -283,43 +397,88 @@ export function DataMigrationPage() {
           {step === 'validating' && (
             <div className="py-12 text-center space-y-3">
               <RefreshCw className="w-8 h-8 text-brand-600 animate-spin mx-auto" />
-              <h4 className="text-sm font-bold text-slate-900">Validating Data Model & Headers...</h4>
-              <p className="text-xs text-slate-500">Checking rows against validation constraints...</p>
+              <h4 className="text-sm font-bold text-slate-900">Validating {selectedFile?.name}...</h4>
+              <p className="text-xs text-slate-500">
+                Checking every row against the {activeConfig.title.toLowerCase()} schema — nothing is written yet.
+              </p>
             </div>
           )}
 
-          {step === 'preview' && selectedFile && (
+          {step === 'preview' && selectedFile && dryRunResult && (
             <div className="space-y-5">
-              <div className="flex items-center justify-between p-3.5 rounded-xl bg-emerald-50/80 border border-emerald-200">
-                <div className="flex items-center gap-3">
-                  <FileCheck className="w-5 h-5 text-emerald-600 shrink-0" />
-                  <div>
-                    <h5 className="text-xs font-bold text-emerald-950">
-                      File Ready for Migration: {selectedFile.name} ({selectedFile.size})
+              <div
+                className={`flex items-center justify-between p-3.5 rounded-xl border gap-3 ${
+                  dryRunResult.failed_rows > 0
+                    ? 'bg-amber-50/80 border-amber-200'
+                    : 'bg-emerald-50/80 border-emerald-200'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  {dryRunResult.failed_rows > 0 ? (
+                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                  ) : (
+                    <FileCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+                  )}
+                  <div className="min-w-0">
+                    <h5
+                      className={`text-xs font-bold truncate ${
+                        dryRunResult.failed_rows > 0 ? 'text-amber-950' : 'text-emerald-950'
+                      }`}
+                    >
+                      {selectedFile.name} ({formatFileSize(selectedFile.size)})
                     </h5>
-                    <p className="text-[11px] text-emerald-800">
-                      142 records parsed • 7 columns matched • 0 critical errors detected
+                    <p className={`text-[11px] ${dryRunResult.failed_rows > 0 ? 'text-amber-800' : 'text-emerald-800'}`}>
+                      {dryRunResult.total_rows} row{dryRunResult.total_rows === 1 ? '' : 's'} parsed •{' '}
+                      {dryRunResult.imported_rows} would import
+                      {dryRunResult.failed_rows > 0
+                        ? ` • ${dryRunResult.failed_rows} would fail`
+                        : ' • 0 errors detected'}
                     </p>
                   </div>
                 </div>
-                <Badge variant="success" size="sm">Schema Valid</Badge>
+                <Badge variant={dryRunResult.failed_rows > 0 ? 'warning' : 'success'} size="sm">
+                  {dryRunResult.failed_rows > 0 ? 'Errors Found' : 'Schema Valid'}
+                </Badge>
               </div>
 
               {/* Validation Summary Cards */}
               <div className="grid grid-cols-3 gap-3 text-center">
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                  <span className="text-xs text-slate-500">Total Records</span>
-                  <p className="text-lg font-bold text-slate-900 mt-0.5">142</p>
+                  <span className="text-xs text-slate-500">Total Rows</span>
+                  <p className="text-lg font-bold text-slate-900 mt-0.5">{dryRunResult.total_rows}</p>
                 </div>
-                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                  <span className="text-xs text-slate-500">Auto-Mapped</span>
-                  <p className="text-lg font-bold text-emerald-600 mt-0.5">100%</p>
+                <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200">
+                  <span className="text-xs text-emerald-700">Would Import</span>
+                  <p className="text-lg font-bold text-emerald-600 mt-0.5">{dryRunResult.imported_rows}</p>
                 </div>
-                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                  <span className="text-xs text-slate-500">Format Warnings</span>
-                  <p className="text-lg font-bold text-amber-600 mt-0.5">2 (Coerced)</p>
+                <div
+                  className={`p-3 rounded-xl border ${
+                    dryRunResult.failed_rows > 0 ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'
+                  }`}
+                >
+                  <span className={`text-xs ${dryRunResult.failed_rows > 0 ? 'text-amber-700' : 'text-slate-500'}`}>
+                    Would Fail
+                  </span>
+                  <p
+                    className={`text-lg font-bold mt-0.5 ${
+                      dryRunResult.failed_rows > 0 ? 'text-amber-600' : 'text-slate-900'
+                    }`}
+                  >
+                    {dryRunResult.failed_rows}
+                  </p>
                 </div>
               </div>
+
+              <ImportErrorsList
+                errors={dryRunResult.errors}
+                onDownload={() => downloadErrorCsv(dryRunResult.errors, `${selectedEntity}_validation`)}
+              />
+
+              {dryRunResult.imported_rows === 0 && (
+                <p className="text-xs text-rose-600 font-medium">
+                  Every row failed validation — fix the file and upload again before importing.
+                </p>
+              )}
 
               <div className="flex items-center justify-between pt-2">
                 <Button variant="outline" size="sm" onClick={handleReset}>
@@ -329,7 +488,11 @@ export function DataMigrationPage() {
                   variant="primary"
                   size="sm"
                   leadingIcon={<ArrowRight className="w-3.5 h-3.5" />}
-                  onClick={handleStartImport}
+                  disabled={!canImport || dryRunResult.imported_rows === 0}
+                  onClick={() => {
+                    setStep('importing');
+                    importMutation.mutate();
+                  }}
                 >
                   Confirm & Execute Migration
                 </Button>
@@ -338,45 +501,53 @@ export function DataMigrationPage() {
           )}
 
           {step === 'importing' && (
-            <div className="py-8 space-y-4 text-center">
+            <div className="py-12 text-center space-y-3">
+              <RefreshCw className="w-8 h-8 text-brand-600 animate-spin mx-auto" />
               <h4 className="text-sm font-bold text-slate-900">
                 Importing {activeConfig.title} Records...
               </h4>
-              <p className="text-xs text-slate-500">
-                Inserting and indexing into multi-tenant database ({progress}%)
-              </p>
-              <div className="w-full bg-slate-100 rounded-full h-2 max-w-md mx-auto overflow-hidden">
-                <div
-                  className="bg-brand-600 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
+              <p className="text-xs text-slate-500">Writing valid rows into your organization's database.</p>
             </div>
           )}
 
-          {step === 'completed' && (
+          {step === 'completed' && finalResult && (
             <div className="py-8 text-center space-y-4">
-              <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto">
-                <CheckCircle2 className="w-6 h-6" />
+              <div
+                className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto ${
+                  finalResult.failed_rows > 0 ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'
+                }`}
+              >
+                {finalResult.failed_rows > 0 ? (
+                  <AlertTriangle className="w-6 h-6" />
+                ) : (
+                  <CheckCircle2 className="w-6 h-6" />
+                )}
               </div>
               <div>
-                <h4 className="text-base font-bold text-slate-900">Data Migration Complete!</h4>
+                <h4 className="text-base font-bold text-slate-900">
+                  {finalResult.failed_rows > 0 ? 'Migration Completed With Errors' : 'Data Migration Complete!'}
+                </h4>
                 <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                  Successfully imported 142 {activeConfig.title} records into your Rooman Billing workspace. All IDs and financial balances are active.
+                  Imported {finalResult.imported_rows} of {finalResult.total_rows} {activeConfig.title.toLowerCase()}{' '}
+                  row(s) into your Rooman Billing workspace.
+                  {finalResult.failed_rows > 0 && ` ${finalResult.failed_rows} row(s) failed and were skipped.`}
                 </p>
               </div>
+
+              {finalResult.errors.length > 0 && (
+                <div className="max-w-lg mx-auto">
+                  <ImportErrorsList
+                    errors={finalResult.errors}
+                    onDownload={() => downloadErrorCsv(finalResult.errors, `${selectedEntity}_import`)}
+                  />
+                </div>
+              )}
+
               <div className="flex items-center justify-center gap-3 pt-2">
                 <Button variant="outline" size="sm" onClick={handleReset}>
                   Import Another File
                 </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => {
-                    handleReset();
-                    showToast('info', 'Workspace', `Navigating to ${activeConfig.title}`);
-                  }}
-                >
+                <Button variant="primary" size="sm" onClick={() => navigate(activeConfig.route)}>
                   View Imported {activeConfig.title}
                 </Button>
               </div>
@@ -384,6 +555,76 @@ export function DataMigrationPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Import History */}
+      <div>
+        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+          <History className="w-3.5 h-3.5" />
+          Recent Imports
+        </h3>
+        <Card>
+          <CardContent className="p-0">
+            {importsHistory.isPending ? (
+              <LoadingState message="Loading import history..." className="py-8" />
+            ) : importsHistory.isError ? (
+              <ErrorState
+                message={toApiError(importsHistory.error).message}
+                onRetry={() => void importsHistory.refetch()}
+              />
+            ) : (importsHistory.data?.items.length ?? 0) === 0 ? (
+              <p className="py-8 text-center text-xs text-slate-400">No imports have been run yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[640px]">
+                  <thead>
+                    <tr className="text-xs font-semibold text-slate-500 uppercase tracking-wider text-left border-b border-slate-100">
+                      <th className="py-2.5 px-5">Entity</th>
+                      <th className="py-2.5 px-3">File</th>
+                      <th className="py-2.5 px-3">Status</th>
+                      <th className="py-2.5 px-3 text-right">Imported</th>
+                      <th className="py-2.5 px-3 text-right">Failed</th>
+                      <th className="py-2.5 px-3 text-right">Total</th>
+                      <th className="py-2.5 px-5 text-right">When</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {importsHistory.data?.items.map((job) => {
+                      // The API response includes `created_at` (see
+                      // backend/app/schemas/imports.py), but the shared ImportResult
+                      // type does not declare it — read it defensively rather than
+                      // widening the shared type from this page.
+                      const createdAt = (job as ImportResult & { created_at?: string | null }).created_at;
+                      return (
+                        <tr key={job.id ?? `${job.entity}-${job.file_name}`}>
+                          <td className="py-2.5 px-5 text-xs font-medium text-slate-900 capitalize">{job.entity}</td>
+                          <td className="py-2.5 px-3 text-xs text-slate-600 truncate max-w-[220px]">
+                            {job.file_name}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <Badge variant={STATUS_BADGE[job.status] ?? 'neutral'} size="sm">
+                              {humanize(job.status)}
+                            </Badge>
+                          </td>
+                          <td className="py-2.5 px-3 text-xs text-right text-emerald-600 font-semibold">
+                            {job.imported_rows}
+                          </td>
+                          <td className="py-2.5 px-3 text-xs text-right font-semibold text-rose-600">
+                            {job.failed_rows}
+                          </td>
+                          <td className="py-2.5 px-3 text-xs text-right text-slate-500">{job.total_rows}</td>
+                          <td className="py-2.5 px-5 text-xs text-right text-slate-500 whitespace-nowrap">
+                            {createdAt ? formatDateTime(createdAt) : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

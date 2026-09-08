@@ -1,177 +1,208 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
+import { Input } from '../../components/common/Input';
+import { Select } from '../../components/common/Select';
+import { DataTable, type Column } from '../../components/common/DataTable';
+import { LoadingState } from '../../components/common/LoadingState';
+import { ErrorState } from '../../components/common/ErrorState';
 import { useToast } from '../../components/common/Toast';
-import {
-  ArrowLeftRight,
-  ArrowRight,
-  RefreshCw,
-  ShieldCheck,
-  CreditCard,
-  Building2,
-  FileText,
-  UserCheck,
-} from 'lucide-react';
+import { paymentService } from '../../services/paymentService';
+import { invoiceService } from '../../services/invoiceService';
+import { toApiError } from '../../services/apiClient';
+import { queryKeys } from '../../hooks/queries';
+import { useAuth } from '../../hooks/useAuth';
+import { formatDate, formatMoney, parseMoney, toMoneyString } from '../../utils/format';
+import type { Invoice } from '../../types/invoices';
+import type {
+  PaymentGateway,
+  PaymentMethod,
+  PaymentOut,
+  ReconciliationStatus,
+} from '../../types/api';
+import { ArrowLeftRight, Info, RefreshCw } from 'lucide-react';
 
-export type ReconStatus = 'auto-reconciled' | 'matched' | 'unmatched' | 'exception';
+const PAGE_SIZE = 20;
 
-export interface ReconciliationRecord {
-  id: string;
-  paymentRef: string;
-  externalTxn: string;
-  invoiceRef: string;
-  customer: string;
-  amount: string;
-  gateway: 'Razorpay' | 'Stripe' | 'HDFC Wire' | 'ICICI ACH';
-  status: ReconStatus;
-  variance?: string;
-  discrepancyNote?: string;
-  date: string;
+const METHOD_LABELS: Record<PaymentMethod, string> = {
+  razorpay: 'Razorpay',
+  bank_transfer: 'Bank Transfer',
+  upi: 'UPI',
+  card: 'Card',
+  cash: 'Cash',
+  cheque: 'Cheque',
+  other: 'Other',
+};
+
+const GATEWAY_LABELS: Record<PaymentGateway, string> = {
+  manual: 'Manual',
+  razorpay: 'Razorpay',
+};
+
+function getStatusBadge(status: ReconciliationStatus) {
+  switch (status) {
+    case 'auto_matched':
+      return (
+        <Badge variant="success" size="sm">
+          Auto-Reconciled
+        </Badge>
+      );
+    case 'matched':
+      return (
+        <Badge variant="primary" size="sm">
+          Matched
+        </Badge>
+      );
+    case 'unmatched':
+      return (
+        <Badge variant="warning" size="sm">
+          Unmatched
+        </Badge>
+      );
+    case 'exception':
+      return (
+        <Badge variant="danger" size="sm">
+          Exception
+        </Badge>
+      );
+    default:
+      return (
+        <Badge variant="neutral" size="sm">
+          {status}
+        </Badge>
+      );
+  }
 }
 
-const initialReconciliations: ReconciliationRecord[] = [
-  {
-    id: 'REC-501',
-    paymentRef: 'PAY-2026-8921',
-    externalTxn: 'pay_N9m0Lq3x89vB',
-    invoiceRef: 'INV-2026-0089',
-    customer: 'Acme Cloud Dynamics',
-    amount: '₹34,000.00',
-    gateway: 'Razorpay',
-    status: 'auto-reconciled',
-    date: 'Sep 7, 2026',
-  },
-  {
-    id: 'REC-502',
-    paymentRef: 'PAY-2026-8922',
-    externalTxn: 'ch_3N8zKq2eZvKYlo2C',
-    invoiceRef: 'INV-2026-0088',
-    customer: 'Solaria Robotics Corp',
-    amount: '₹18,500.00',
-    gateway: 'Stripe',
-    status: 'matched',
-    date: 'Sep 6, 2026',
-  },
-  {
-    id: 'REC-503',
-    paymentRef: 'PAY-2026-8923',
-    externalTxn: 'UTR_HDFC002938102',
-    invoiceRef: 'INV-2026-0087',
-    customer: 'Hyperion FinTech Ltd',
-    amount: '₹42,000.00',
-    gateway: 'HDFC Wire',
-    status: 'exception',
-    variance: '+₹500.00',
-    discrepancyNote: 'Customer added wire bank transfer fee allowance of ₹500 above invoice total.',
-    date: 'Sep 6, 2026',
-  },
-  {
-    id: 'REC-504',
-    paymentRef: 'PAY-2026-8924',
-    externalTxn: 'pay_P1k8Jq4w12zC',
-    invoiceRef: 'Pending Match',
-    customer: 'Unidentified Depositor',
-    amount: '₹15,000.00',
-    gateway: 'Razorpay',
-    status: 'unmatched',
-    discrepancyNote: 'Gateway direct deposit received without customer metadata reference.',
-    date: 'Sep 5, 2026',
-  },
-  {
-    id: 'REC-505',
-    paymentRef: 'PAY-2026-8925',
-    externalTxn: 'ACH_ICICI_889210',
-    invoiceRef: 'INV-2026-0084',
-    customer: 'Vanguard Biometrics',
-    amount: '₹84,000.00',
-    gateway: 'ICICI ACH',
-    status: 'auto-reconciled',
-    date: 'Sep 4, 2026',
-  },
-  {
-    id: 'REC-506',
-    paymentRef: 'PAY-2026-8926',
-    externalTxn: 'UTR_HDFC002939881',
-    invoiceRef: 'INV-2026-0083',
-    customer: 'Nexus Global Logistics',
-    amount: '₹26,750.00',
-    gateway: 'HDFC Wire',
-    status: 'exception',
-    variance: '-₹1,200.00',
-    discrepancyNote: 'Client deducted TDS (Tax Deducted at Source) without attaching 16A TDS certificate.',
-    date: 'Sep 3, 2026',
-  },
-];
+/** Debounces a fast-changing value (e.g. a search input) before it drives a query. */
+function useDebouncedValue<T>(value: T, delay = 300): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
+}
 
 export function ReconciliationPage() {
-  const { showToast } = useToast();
-  const [records, setRecords] = useState<ReconciliationRecord[]>(initialReconciliations);
-  const [statusFilter, setStatusFilter] = useState<'all' | ReconStatus>('all');
-  const [isReconciling, setIsReconciling] = useState(false);
-  const [selectedRecord, setSelectedRecord] = useState<ReconciliationRecord | null>(null);
+  const { hasRole } = useAuth();
+  const canAllocate = hasRole('finance');
 
-  const filteredRecords = useMemo(() => {
-    if (statusFilter === 'all') return records;
-    return records.filter((r) => r.status === statusFilter);
-  }, [records, statusFilter]);
+  const [statusFilter, setStatusFilter] = useState<'all' | ReconciliationStatus>('all');
+  const [page, setPage] = useState(1);
+  const [selectedPayment, setSelectedPayment] = useState<PaymentOut | null>(null);
 
-  const stats = useMemo(() => {
-    const auto = records.filter((r) => r.status === 'auto-reconciled').length;
-    const matched = records.filter((r) => r.status === 'matched').length;
-    const unmatched = records.filter((r) => r.status === 'unmatched').length;
-    const exceptions = records.filter((r) => r.status === 'exception').length;
-    return { auto, matched, unmatched, exceptions, total: records.length };
-  }, [records]);
+  const summaryQuery = useQuery({
+    queryKey: queryKeys.payments.reconciliationSummary(),
+    queryFn: paymentService.reconciliationSummary,
+  });
 
-  const handleRunReconciliation = () => {
-    setIsReconciling(true);
-    setTimeout(() => {
-      setIsReconciling(false);
-      setRecords((prev) =>
-        prev.map((r) => (r.status === 'unmatched' ? { ...r, status: 'matched', customer: 'Resolved Customer (Matched)' } : r))
-      );
-      showToast('success', 'Reconciliation Completed', 'All settlement batches matched against ledger.');
-    }, 750);
+  const listParams = useMemo(
+    () => ({
+      reconciliation_status: statusFilter === 'all' ? undefined : statusFilter,
+      page,
+      page_size: PAGE_SIZE,
+    }),
+    [statusFilter, page]
+  );
+
+  const paymentsQuery = useQuery({
+    queryKey: queryKeys.payments.list(listParams),
+    queryFn: () => paymentService.list(listParams),
+  });
+
+  const summary = summaryQuery.data;
+
+  const selectFilter = (key: 'all' | ReconciliationStatus) => {
+    setStatusFilter(key);
+    setPage(1);
   };
 
-  const handleManualMatch = (id: string) => {
-    setRecords((prev) =>
-      prev.map((r) =>
-        r.id === id
-          ? { ...r, status: 'matched', invoiceRef: 'INV-2026-0092', customer: 'Orbit Retail India' }
-          : r
-      )
-    );
-    setSelectedRecord(null);
-    showToast('success', 'Manual Match Saved', 'Transaction linked to Invoice #INV-2026-0092.');
+  const handleRefresh = () => {
+    void summaryQuery.refetch();
+    void paymentsQuery.refetch();
   };
 
-  const handleResolveException = (id: string) => {
-    setRecords((prev) =>
-      prev.map((r) =>
-        r.id === id
-          ? { ...r, status: 'matched', discrepancyNote: 'Resolved via TDS adjustment ledger entry' }
-          : r
-      )
-    );
-    setSelectedRecord(null);
-    showToast('success', 'Exception Resolved', 'Adjustment entry posted to ledger.');
-  };
-
-  const getStatusBadge = (status: ReconStatus) => {
-    switch (status) {
-      case 'auto-reconciled':
-        return <Badge variant="success" size="sm">Auto-Reconciled</Badge>;
-      case 'matched':
-        return <Badge variant="primary" size="sm">Matched</Badge>;
-      case 'unmatched':
-        return <Badge variant="warning" size="sm">Unmatched</Badge>;
-      case 'exception':
-        return <Badge variant="danger" size="sm">Exception</Badge>;
-    }
-  };
+  const columns: Column<PaymentOut>[] = [
+    {
+      key: 'payment_number',
+      title: 'Payment',
+      render: (item) => (
+        <div>
+          <div className="font-mono font-bold text-slate-700 text-xs">{item.payment_number}</div>
+          <div className="text-[10px] text-slate-400">
+            {item.paid_at ? formatDate(item.paid_at) : 'Not yet paid'}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'customer',
+      title: 'Customer',
+      render: (item) => (
+        <span className="font-semibold text-slate-900 text-xs">
+          {item.customer?.display_name ?? 'Unlinked deposit'}
+        </span>
+      ),
+    },
+    {
+      key: 'method',
+      title: 'Method / Gateway',
+      render: (item) => (
+        <div className="text-xs">
+          <div className="font-semibold text-slate-900">{METHOD_LABELS[item.method] ?? item.method}</div>
+          <div className="text-[10px] text-slate-500">{GATEWAY_LABELS[item.gateway] ?? item.gateway}</div>
+        </div>
+      ),
+    },
+    {
+      key: 'amount',
+      title: 'Amount',
+      align: 'right',
+      render: (item) => (
+        <div className="text-right">
+          <div className="font-bold text-slate-900 tabular-nums text-xs">
+            {formatMoney(item.amount, item.currency)}
+          </div>
+          {parseMoney(item.amount_unallocated) > 0 && (
+            <div className="text-[10px] text-amber-600 font-medium">
+              {formatMoney(item.amount_unallocated, item.currency)} unallocated
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'invoices',
+      title: 'Allocated Invoice(s)',
+      render: (item) =>
+        item.allocations.length === 0 ? (
+          <span className="text-xs text-slate-400 italic">Unallocated</span>
+        ) : (
+          <span className="text-xs text-slate-700">
+            {item.allocations.map((a) => a.invoice_number).join(', ')}
+          </span>
+        ),
+    },
+    {
+      key: 'status',
+      title: 'Status',
+      render: (item) => getStatusBadge(item.reconciliation_status),
+    },
+    {
+      key: 'action',
+      title: 'Action',
+      align: 'right',
+      render: (item) => (
+        <Button variant="outline" size="sm" onClick={() => setSelectedPayment(item)}>
+          Inspect
+        </Button>
+      ),
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -192,137 +223,113 @@ export function ReconciliationPage() {
             Reconciliation Workspace
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-            Match bank transactions, gateway payouts, and external provider settlements against issued invoices and customer balances.
+            Review how recorded payments have been allocated against invoices, and manually allocate
+            any that still need it.
           </p>
         </div>
 
         <div className="flex items-center gap-2.5">
           <Button
-            variant="primary"
+            variant="outline"
             size="sm"
-            isLoading={isReconciling}
+            isLoading={summaryQuery.isFetching || paymentsQuery.isFetching}
             leadingIcon={<RefreshCw className="w-3.5 h-3.5" />}
-            onClick={handleRunReconciliation}
+            onClick={handleRefresh}
           >
-            Run Auto-Reconciliation
+            Refresh
           </Button>
         </div>
       </div>
 
-      {/* Matching Flow Banner */}
+      {/* Explanation Banner */}
       <Card className="bg-gradient-to-r from-blue-50/70 via-slate-50 to-indigo-50/70 border-blue-200/70">
         <CardContent className="p-4 sm:p-5">
-          <div className="flex items-center justify-between gap-2 overflow-x-auto pb-1 text-xs">
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="p-2 rounded-lg bg-white border border-blue-200 text-brand-600 shadow-2xs">
-                <CreditCard className="w-4 h-4" />
-              </span>
-              <div>
-                <p className="font-bold text-slate-900">1. Inward Payment</p>
-                <p className="text-[10px] text-slate-500">Gateway or Bank UTR</p>
-              </div>
-            </div>
-
-            <ArrowRight className="w-4 h-4 text-slate-400 shrink-0" />
-
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="p-2 rounded-lg bg-white border border-blue-200 text-brand-600 shadow-2xs">
-                <Building2 className="w-4 h-4" />
-              </span>
-              <div>
-                <p className="font-bold text-slate-900">2. External Txn</p>
-                <p className="text-[10px] text-slate-500">Bank Statement / Settlement</p>
-              </div>
-            </div>
-
-            <ArrowRight className="w-4 h-4 text-slate-400 shrink-0" />
-
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="p-2 rounded-lg bg-white border border-blue-200 text-brand-600 shadow-2xs">
-                <FileText className="w-4 h-4" />
-              </span>
-              <div>
-                <p className="font-bold text-slate-900">3. Invoice</p>
-                <p className="text-[10px] text-slate-500">Matched Open AR</p>
-              </div>
-            </div>
-
-            <ArrowRight className="w-4 h-4 text-slate-400 shrink-0" />
-
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="p-2 rounded-lg bg-white border border-blue-200 text-brand-600 shadow-2xs">
-                <UserCheck className="w-4 h-4" />
-              </span>
-              <div>
-                <p className="font-bold text-slate-900">4. Customer</p>
-                <p className="text-[10px] text-slate-500">Credit Ledger Offset</p>
-              </div>
-            </div>
-
-            <ArrowRight className="w-4 h-4 text-slate-400 shrink-0" />
-
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="p-2 rounded-lg bg-emerald-500 text-white shadow-2xs">
-                <ShieldCheck className="w-4 h-4" />
-              </span>
-              <div>
-                <p className="font-bold text-emerald-900">5. Reconciled</p>
-                <p className="text-[10px] text-emerald-700">Audit Proof Logged</p>
-              </div>
+          <div className="flex items-start gap-3">
+            <span className="p-2 rounded-lg bg-white border border-blue-200 text-brand-600 shadow-2xs shrink-0">
+              <Info className="w-4 h-4" />
+            </span>
+            <div className="text-xs text-slate-600 leading-relaxed">
+              <p className="font-bold text-slate-900 mb-0.5">How reconciliation works here</p>
+              <p>
+                Reconciliation matches recorded payments to invoices via allocations — Rooman Billing
+                does not currently ingest external bank or gateway settlement feeds. A payment becomes{' '}
+                <span className="font-semibold text-emerald-700">Auto-Reconciled</span> or{' '}
+                <span className="font-semibold text-brand-700">Matched</span> automatically once it is
+                fully allocated to invoices; payments that are{' '}
+                <span className="font-semibold text-amber-700">Unmatched</span> or an{' '}
+                <span className="font-semibold text-rose-700">Exception</span> below need manual
+                allocation.
+              </p>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Metric Counters */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-        <div
-          onClick={() => setStatusFilter('auto-reconciled')}
-          className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-emerald-300"
-        >
-          <span className="text-xs text-slate-500 font-medium">Auto-Reconciled</span>
-          <p className="text-xl font-bold text-emerald-600 mt-1">{stats.auto}</p>
-          <span className="text-[10px] text-slate-400">100% matched via webhook</span>
+      {/* KPI Tiles */}
+      {summaryQuery.isPending ? (
+        <LoadingState message="Loading reconciliation summary..." className="py-8" />
+      ) : summaryQuery.isError ? (
+        <ErrorState
+          message={toApiError(summaryQuery.error).message}
+          onRetry={() => void summaryQuery.refetch()}
+        />
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4">
+          <div
+            onClick={() => selectFilter('auto_matched')}
+            className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-emerald-300"
+          >
+            <span className="text-xs text-slate-500 font-medium">Auto-Reconciled</span>
+            <p className="text-xl font-bold text-emerald-600 mt-1">{summary?.auto_matched ?? 0}</p>
+            <span className="text-[10px] text-slate-400">Fully allocated automatically</span>
+          </div>
+          <div
+            onClick={() => selectFilter('matched')}
+            className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-blue-300"
+          >
+            <span className="text-xs text-slate-500 font-medium">Manual Matched</span>
+            <p className="text-xl font-bold text-brand-600 mt-1">{summary?.matched ?? 0}</p>
+            <span className="text-[10px] text-slate-400">Fully allocated manually</span>
+          </div>
+          <div
+            onClick={() => selectFilter('unmatched')}
+            className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-amber-300"
+          >
+            <span className="text-xs text-slate-500 font-medium">Unmatched Records</span>
+            <p className="text-xl font-bold text-amber-600 mt-1">{summary?.unmatched ?? 0}</p>
+            <span className="text-[10px] text-slate-400">No allocation yet</span>
+          </div>
+          <div
+            onClick={() => selectFilter('exception')}
+            className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-rose-300"
+          >
+            <span className="text-xs text-slate-500 font-medium">Discrepancy Exceptions</span>
+            <p className="text-xl font-bold text-rose-600 mt-1">{summary?.exception ?? 0}</p>
+            <span className="text-[10px] text-slate-400">Allocation vs. available mismatch</span>
+          </div>
+          <div className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs">
+            <span className="text-xs text-slate-500 font-medium">Unallocated Amount</span>
+            <p className="text-xl font-bold text-slate-700 mt-1">
+              {formatMoney(summary?.unallocated_amount ?? '0')}
+            </p>
+            <span className="text-[10px] text-slate-400">Across all open payments</span>
+          </div>
         </div>
-        <div
-          onClick={() => setStatusFilter('matched')}
-          className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-blue-300"
-        >
-          <span className="text-xs text-slate-500 font-medium">Manual Matched</span>
-          <p className="text-xl font-bold text-brand-600 mt-1">{stats.matched}</p>
-          <span className="text-[10px] text-slate-400">Audited & approved</span>
-        </div>
-        <div
-          onClick={() => setStatusFilter('unmatched')}
-          className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-amber-300"
-        >
-          <span className="text-xs text-slate-500 font-medium">Unmatched Records</span>
-          <p className="text-xl font-bold text-amber-600 mt-1">{stats.unmatched}</p>
-          <span className="text-[10px] text-slate-400">Pending customer link</span>
-        </div>
-        <div
-          onClick={() => setStatusFilter('exception')}
-          className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-rose-300"
-        >
-          <span className="text-xs text-slate-500 font-medium">Discrepancy Exceptions</span>
-          <p className="text-xl font-bold text-rose-600 mt-1">{stats.exceptions}</p>
-          <span className="text-[10px] text-slate-400">Fee variance or TDS notes</span>
-        </div>
-      </div>
+      )}
 
       {/* Filter Tabs */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-slate-200/90">
         {[
-          { key: 'all', label: `All Transactions (${stats.total})` },
-          { key: 'auto-reconciled', label: `Auto-Reconciled (${stats.auto})` },
-          { key: 'matched', label: `Matched (${stats.matched})` },
-          { key: 'unmatched', label: `Unmatched (${stats.unmatched})` },
-          { key: 'exception', label: `Exceptions (${stats.exceptions})` },
+          { key: 'all' as const, label: `All Transactions (${summary?.total ?? 0})` },
+          { key: 'auto_matched' as const, label: `Auto-Reconciled (${summary?.auto_matched ?? 0})` },
+          { key: 'matched' as const, label: `Matched (${summary?.matched ?? 0})` },
+          { key: 'unmatched' as const, label: `Unmatched (${summary?.unmatched ?? 0})` },
+          { key: 'exception' as const, label: `Exceptions (${summary?.exception ?? 0})` },
         ].map((tab) => (
           <button
             key={tab.key}
             type="button"
-            onClick={() => setStatusFilter(tab.key as typeof statusFilter)}
+            onClick={() => selectFilter(tab.key)}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
               statusFilter === tab.key
                 ? 'bg-slate-900 text-white shadow-xs'
@@ -335,142 +342,220 @@ export function ReconciliationPage() {
       </div>
 
       {/* Records Table */}
-      <Card>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs text-left">
-            <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200/80">
-              <tr>
-                <th className="px-4 py-3">Internal Ref</th>
-                <th className="px-4 py-3">Gateway / Ext Txn</th>
-                <th className="px-4 py-3">Invoice & Customer</th>
-                <th className="px-4 py-3 text-right">Amount</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredRecords.map((item) => (
-                <tr key={item.id} className="hover:bg-slate-50/70 transition-colors">
-                  <td className="px-4 py-3 font-mono font-bold text-slate-700">
-                    <div>{item.paymentRef}</div>
-                    <div className="text-[10px] text-slate-400 font-normal">{item.date}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="font-semibold text-slate-900 flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-brand-500" />
-                      {item.gateway}
-                    </div>
-                    <div className="text-[11px] font-mono text-slate-500 truncate max-w-[170px]">
-                      {item.externalTxn}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="font-bold text-slate-900">{item.customer}</div>
-                    <div className="text-[11px] text-slate-500">{item.invoiceRef}</div>
-                  </td>
-                  <td className="px-4 py-3 text-right font-bold text-slate-900 tabular-nums">
-                    {item.amount}
-                    {item.variance && (
-                      <span className="block text-[10px] text-rose-600 font-medium">
-                        Var: {item.variance}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {getStatusBadge(item.status)}
-                    {item.discrepancyNote && (
-                      <span className="block text-[10px] text-slate-500 truncate max-w-[180px] mt-0.5" title={item.discrepancyNote}>
-                        {item.discrepancyNote}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setSelectedRecord(item)}
-                    >
-                      Inspect
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+      {paymentsQuery.isPending ? (
+        <LoadingState message="Loading payments..." className="py-12" />
+      ) : paymentsQuery.isError ? (
+        <ErrorState
+          message={toApiError(paymentsQuery.error).message}
+          onRetry={() => void paymentsQuery.refetch()}
+        />
+      ) : (
+        <DataTable
+          columns={columns}
+          data={paymentsQuery.data?.items ?? []}
+          keyExtractor={(item) => item.id}
+          page={paymentsQuery.data?.page ?? page}
+          pageSize={PAGE_SIZE}
+          total={paymentsQuery.data?.total}
+          onPageChange={setPage}
+          emptyMessage="No payments found"
+          emptySubtext="Try a different reconciliation status filter."
+        />
+      )}
 
-      {/* Inspect Modal */}
-      {selectedRecord && (
-        <Modal
-          isOpen={true}
-          onClose={() => setSelectedRecord(null)}
-          title={`Reconciliation Record: ${selectedRecord.paymentRef}`}
-          size="lg"
-        >
-          <div className="space-y-4 text-xs">
-            <div className="grid grid-cols-2 gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-              <div>
-                <span className="text-slate-500 block font-medium">External Gateway</span>
-                <span className="font-bold text-slate-900">{selectedRecord.gateway}</span>
-              </div>
-              <div>
-                <span className="text-slate-500 block font-medium">Gateway Txn ID</span>
-                <span className="font-mono text-slate-800">{selectedRecord.externalTxn}</span>
-              </div>
-              <div>
-                <span className="text-slate-500 block font-medium">Customer Account</span>
-                <span className="font-bold text-slate-900">{selectedRecord.customer}</span>
-              </div>
-              <div>
-                <span className="text-slate-500 block font-medium">Matched Invoice</span>
-                <span className="font-bold text-slate-900">{selectedRecord.invoiceRef}</span>
-              </div>
-              <div>
-                <span className="text-slate-500 block font-medium">Transaction Amount</span>
-                <span className="font-bold text-slate-900 text-sm tabular-nums">
-                  {selectedRecord.amount}
-                </span>
-              </div>
-              <div>
-                <span className="text-slate-500 block font-medium">Reconciliation State</span>
-                <div>{getStatusBadge(selectedRecord.status)}</div>
-              </div>
-            </div>
-
-            {selectedRecord.discrepancyNote && (
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900">
-                <span className="font-bold block mb-0.5">Discrepancy Analysis:</span>
-                {selectedRecord.discrepancyNote}
-              </div>
-            )}
-
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" size="sm" onClick={() => setSelectedRecord(null)}>
-                Close
-              </Button>
-              {selectedRecord.status === 'unmatched' && (
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => handleManualMatch(selectedRecord.id)}
-                >
-                  Link to Invoice
-                </Button>
-              )}
-              {selectedRecord.status === 'exception' && (
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => handleResolveException(selectedRecord.id)}
-                >
-                  Post Ledger Adjustment
-                </Button>
-              )}
-            </div>
-          </div>
-        </Modal>
+      {/* Inspect / Allocate Modal */}
+      {selectedPayment && (
+        <PaymentInspectModal
+          payment={selectedPayment}
+          canAllocate={canAllocate}
+          onClose={() => setSelectedPayment(null)}
+        />
       )}
     </div>
+  );
+}
+
+function PaymentInspectModal({
+  payment,
+  canAllocate,
+  onClose,
+}: {
+  payment: PaymentOut;
+  canAllocate: boolean;
+  onClose: () => void;
+}) {
+  const { showToast } = useToast();
+  const queryClient = useQueryClient();
+
+  const needsAllocation = payment.reconciliation_status === 'unmatched' || payment.reconciliation_status === 'exception';
+
+  const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
+  const [amount, setAmount] = useState('');
+  const debouncedSearch = useDebouncedValue(invoiceSearch, 300);
+
+  const invoiceSearchParams = {
+    search: debouncedSearch || undefined,
+    customer_id: payment.customer?.id,
+    page_size: 20,
+  };
+
+  const invoicesQuery = useQuery({
+    queryKey: queryKeys.invoices.list(invoiceSearchParams),
+    queryFn: () => invoiceService.listInvoices(invoiceSearchParams),
+    enabled: needsAllocation && canAllocate,
+  });
+
+  const invoiceOptions = (invoicesQuery.data?.items ?? []).map((inv: Invoice) => ({
+    value: inv.id,
+    label: `${inv.invoice_number} — ${formatMoney(inv.amount_due)} due`,
+  }));
+
+  const allocateMutation = useMutation({
+    mutationFn: () => paymentService.setAllocations(payment.id, [{ invoice_id: selectedInvoiceId, amount: toMoneyString(amount) }]),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.payments.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
+      showToast('success', 'Payment allocated', 'The payment was linked to the invoice.');
+      onClose();
+    },
+    onError: (err) => showToast('error', 'Could not allocate payment', toApiError(err).message),
+  });
+
+  const handleInvoiceSelect = (invoiceId: string) => {
+    setSelectedInvoiceId(invoiceId);
+    const inv = invoicesQuery.data?.items.find((i) => i.id === invoiceId);
+    if (inv) {
+      const suggested = Math.min(parseMoney(payment.amount_unallocated), parseMoney(inv.amount_due));
+      if (Number.isFinite(suggested) && suggested > 0) setAmount(suggested.toFixed(2));
+    }
+  };
+
+  const canSubmit = selectedInvoiceId !== '' && parseMoney(amount) > 0;
+
+  return (
+    <Modal
+      isOpen={true}
+      onClose={onClose}
+      title={`Payment: ${payment.payment_number}`}
+      size="lg"
+    >
+      <div className="space-y-4 text-xs">
+        <div className="grid grid-cols-2 gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+          <div>
+            <span className="text-slate-500 block font-medium">Method / Gateway</span>
+            <span className="font-bold text-slate-900">
+              {METHOD_LABELS[payment.method] ?? payment.method} ({GATEWAY_LABELS[payment.gateway] ?? payment.gateway})
+            </span>
+          </div>
+          <div>
+            <span className="text-slate-500 block font-medium">Reference</span>
+            <span className="font-mono text-slate-800">{payment.reference || payment.gateway_payment_id || '—'}</span>
+          </div>
+          <div>
+            <span className="text-slate-500 block font-medium">Customer</span>
+            <span className="font-bold text-slate-900">{payment.customer?.display_name ?? 'Unlinked deposit'}</span>
+          </div>
+          <div>
+            <span className="text-slate-500 block font-medium">Allocated Invoice(s)</span>
+            <span className="font-bold text-slate-900">
+              {payment.allocations.length === 0
+                ? 'Unallocated'
+                : payment.allocations.map((a) => a.invoice_number).join(', ')}
+            </span>
+          </div>
+          <div>
+            <span className="text-slate-500 block font-medium">Payment Amount</span>
+            <span className="font-bold text-slate-900 text-sm tabular-nums">
+              {formatMoney(payment.amount, payment.currency)}
+            </span>
+          </div>
+          <div>
+            <span className="text-slate-500 block font-medium">Reconciliation State</span>
+            <div>{getStatusBadge(payment.reconciliation_status)}</div>
+          </div>
+          <div>
+            <span className="text-slate-500 block font-medium">Allocated</span>
+            <span className="font-bold text-slate-900 tabular-nums">
+              {formatMoney(payment.amount_allocated, payment.currency)}
+            </span>
+          </div>
+          <div>
+            <span className="text-slate-500 block font-medium">Unallocated</span>
+            <span className="font-bold text-amber-700 tabular-nums">
+              {formatMoney(payment.amount_unallocated, payment.currency)}
+            </span>
+          </div>
+        </div>
+
+        {parseMoney(payment.amount_refunded) > 0 && (
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-700">
+            <span className="font-bold block mb-0.5">Refunds:</span>
+            {formatMoney(payment.amount_refunded, payment.currency)} refunded across{' '}
+            {payment.refunds.length} refund{payment.refunds.length === 1 ? '' : 's'}. This reduces the
+            amount available to allocate, which can produce an Exception status if allocations now
+            exceed what remains available.
+          </div>
+        )}
+
+        {needsAllocation && (
+          <div className="p-3.5 bg-white border border-slate-200 rounded-xl space-y-3">
+            <p className="font-bold text-slate-900">Manually allocate to an invoice</p>
+            {!canAllocate ? (
+              <p className="text-slate-500">
+                Manual allocation requires the Finance role. Ask a finance user or admin to complete
+                this match.
+              </p>
+            ) : (
+              <>
+                <Input
+                  label="Search invoices"
+                  placeholder="Invoice number..."
+                  value={invoiceSearch}
+                  onChange={(e) => setInvoiceSearch(e.target.value)}
+                />
+                <Select
+                  label="Invoice"
+                  placeholder={invoicesQuery.isFetching ? 'Searching…' : 'Select an invoice'}
+                  value={selectedInvoiceId}
+                  onChange={(e) => handleInvoiceSelect(e.target.value)}
+                  options={invoiceOptions}
+                  disabled={invoicesQuery.isFetching}
+                />
+                {!invoicesQuery.isFetching && invoiceOptions.length === 0 && (
+                  <p className="text-slate-400">No matching invoices found.</p>
+                )}
+                <Input
+                  label="Amount to allocate"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  helperText={`Up to ${formatMoney(payment.amount_unallocated, payment.currency)} unallocated on this payment.`}
+                />
+              </>
+            )}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="outline" size="sm" onClick={onClose}>
+            Close
+          </Button>
+          {needsAllocation && canAllocate && (
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!canSubmit}
+              isLoading={allocateMutation.isPending}
+              onClick={() => allocateMutation.mutate()}
+            >
+              Save Allocation
+            </Button>
+          )}
+        </div>
+      </div>
+    </Modal>
   );
 }
