@@ -55,6 +55,7 @@ export interface PaymentsContextType {
   fetchPaymentById: (id: string) => Promise<Payment | undefined>;
   getCustomerById: (id: string) => PaymentCustomer | undefined;
   getCustomerPayments: (customerId: string) => Promise<Payment[]>;
+  createCustomer: (data: { displayName: string; companyName?: string; email?: string; phone?: string }) => Promise<PaymentCustomer>;
   refreshPayments: () => Promise<void>;
 }
 
@@ -315,6 +316,29 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
     [payments]
   );
 
+  const createCustomer = useCallback(
+    async (data: { displayName: string; companyName?: string; email?: string; phone?: string }): Promise<PaymentCustomer> => {
+      try {
+        const created = await customerService.create({
+          display_name: data.displayName,
+          company_name: data.companyName || undefined,
+          email: data.email || undefined,
+          phone: data.phone || undefined,
+          currency: 'INR',
+        });
+        const uiCust = customerToUi(created, []);
+        setCustomers((prev) => [uiCust, ...prev.filter((c) => c.id !== uiCust.id)]);
+        showToast('success', 'Customer Created', `Customer "${uiCust.name}" has been registered.`);
+        return uiCust;
+      } catch (err) {
+        const apiErr = toApiError(err);
+        showToast('error', 'Creation Failed', apiErr.message || 'Failed to create customer on the server.');
+        throw err;
+      }
+    },
+    [showToast]
+  );
+
   return (
     <PaymentsContext.Provider
       value={{
@@ -331,6 +355,7 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
         fetchPaymentById,
         getCustomerById,
         getCustomerPayments,
+        createCustomer,
         refreshPayments,
       }}
     >
