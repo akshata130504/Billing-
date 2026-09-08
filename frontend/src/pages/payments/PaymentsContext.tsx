@@ -22,7 +22,7 @@ import { invoiceService } from '../../services/invoiceService';
 import { toApiError } from '../../services/apiClient';
 import { useToast } from '../../components/common/Toast';
 import { paymentOutToUi, uiToPaymentIn, customerToUi, toBackendPaymentMethod } from './paymentMapper';
-import type { ApiError, PaymentListParams, PaymentStatus as BackendPaymentStatus } from '../../types/api';
+import type { ApiError, InvoiceOut, PaymentListParams, PaymentStatus as BackendPaymentStatus } from '../../types/api';
 
 export const PAYMENTS_PAGE_SIZE = 25;
 
@@ -249,7 +249,7 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
           customerService.get(customerId),
           Promise.all(
             OPEN_INVOICE_STATUSES.map((status) =>
-              invoiceService.list({
+              invoiceService.listInvoices({
                 customer_id: customerId,
                 status,
                 page_size: 100,
@@ -259,7 +259,10 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
           ),
         ]);
         const openInvoices = pages.flatMap((p) => p.items);
-        const mapped = customerToUi(detail, openInvoices);
+        // `invoiceService.listInvoices` types its rows against `types/invoices.ts`'s `Invoice`,
+        // while `customerToUi` expects `types/api.ts`'s `InvoiceOut` — two pre-existing, not yet
+        // unified invoice type definitions for the same backend response shape.
+        const mapped = customerToUi(detail, openInvoices as unknown as InvoiceOut[]);
         setCustomers((prev) => {
           const next = prev.filter((c) => c.id !== mapped.id);
           return [mapped, ...next];

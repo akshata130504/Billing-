@@ -58,6 +58,12 @@ export const queryKeys = {
     detail: (id: string) => ['payments', 'detail', id] as const,
     reconciliationSummary: () => ['payments', 'reconciliation-summary'] as const,
   },
+  collections: {
+    all: ['collections'] as const,
+    dashboard: () => ['collections', 'dashboard'] as const,
+    list: (params?: object) => ['collections', 'list', params ?? {}] as const,
+    detail: (id: string) => ['collections', 'detail', id] as const,
+  },
   controlCenter: {
     all: ['control-center'] as const,
     dashboard: (range: string) => ['control-center', 'dashboard', range] as const,

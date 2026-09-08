@@ -21,5 +21,6 @@ export { planPricingService } from './planPricingService';
 export { subscriptionService } from './subscriptionService';
 export { invoiceService } from './invoiceService';
 export { paymentService } from './paymentService';
+export { collectionsService } from './collectionsService';
 export { controlCenterService } from './controlCenterService';
 export { publicService } from './publicService';

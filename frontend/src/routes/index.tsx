@@ -28,8 +28,13 @@ import {
   SubscriptionDetailPage,
   TrialsPage,
 } from '../pages/subscriptions';
-import { InvoicesListPage, InvoiceFormPage, InvoiceDetailPage, CollectionsPage } from '../pages/invoices';
+import { InvoicesListPage, InvoiceFormPage, InvoiceDetailPage } from '../pages/invoices';
 import { PaymentsListPage, PaymentDetailPage, PaymentsProvider } from '../pages/payments';
+import {
+  CollectionsDashboardPage,
+  CollectionsInvoiceListPage,
+  CollectionsInvoiceDetailPage,
+} from '../pages/collections';
 import { PayInvoicePage, PublicQuotePage } from '../pages/public';
 import { ActivityPage } from '../pages/activity';
 import {
@@ -191,7 +196,11 @@ export function AppRoutes() {
                 <Route index element={<PaymentsListPage />} />
                 <Route path=":id" element={<PaymentDetailPage />} />
               </Route>
-              <Route path="collections" element={<CollectionsPage />} />
+              <Route path="collections">
+                <Route index element={<CollectionsDashboardPage />} />
+                <Route path="invoices" element={<CollectionsInvoiceListPage />} />
+                <Route path="invoices/:id" element={<CollectionsInvoiceDetailPage />} />
+              </Route>
 
               {/* Subscriptions & Plans */}
               <Route path="plans-pricing" element={<PlansPricingPage />} />
