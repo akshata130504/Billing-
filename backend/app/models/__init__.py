@@ -1,6 +1,15 @@
 """All SQLAlchemy models. Importing this package registers every table on Base.metadata."""
 from backend.app.models.base import TenantMixin, TimestampMixin, UUIDPrimaryKeyMixin, new_uuid, utcnow
 from backend.app.models.catalog import INTERVAL_MONTHS, BillingInterval, Plan, PricingModel, Product, ProductType
+from backend.app.models.collections import (
+    MANUAL_COLLECTION_STATUSES,
+    CollectionActivity,
+    CollectionActivityType,
+    CollectionStatus,
+    InvoiceCollection,
+    PromiseToPay,
+    PromiseToPayStatus,
+)
 from backend.app.models.customers import Customer, CustomerContact, CustomerStatus
 from backend.app.models.governance import (
     ApprovalRequest,
@@ -112,4 +121,11 @@ __all__ = [
     "CPQDeal",
     "CPQDealItem",
     "CPQDealStatus",
+    "InvoiceCollection",
+    "CollectionActivity",
+    "CollectionActivityType",
+    "CollectionStatus",
+    "MANUAL_COLLECTION_STATUSES",
+    "PromiseToPay",
+    "PromiseToPayStatus",
 ]
