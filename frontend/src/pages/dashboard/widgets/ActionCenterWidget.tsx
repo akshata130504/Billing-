@@ -1,34 +1,45 @@
 import { useState } from 'react';
-import { AlertCircle, Clock, AlertTriangle, FileText, ArrowRight } from 'lucide-react';
-import { mockActionCenterItems, ActionCenterItem } from '../mockDashboardData';
+import { AlertCircle, Clock, AlertTriangle, FileText, ClipboardCheck, CheckCircle2 } from 'lucide-react';
+import type { ActionCategory, ActionItem } from '../../../types';
+import { formatMoney } from '../../../utils/format';
 import { useToast } from '../../../components/common/Toast';
 
-export function ActionCenterWidget() {
-  const [filter, setFilter] = useState<'all' | 'overdue' | 'failed_payment' | 'expiring_trial' | 'pending_quote'>('all');
+export interface ActionCenterWidgetProps {
+  items: ActionItem[];
+}
+
+const FILTERS: { key: 'all' | ActionCategory; label: string }[] = [
+  { key: 'all', label: 'All Attention' },
+  { key: 'overdue', label: 'Overdue Invoices' },
+  { key: 'failed_payment', label: 'Failed Payments' },
+  { key: 'expiring_trial', label: 'Expiring Trials' },
+  { key: 'pending_quote', label: 'Pending Quotes' },
+  { key: 'pending_approval', label: 'Pending Approvals' },
+];
+
+const ACTION_LABELS: Record<ActionItem['suggested_action'], string> = {
+  send_reminder: 'Send Reminder',
+  retry_payment: 'Retry Payment',
+  convert_trial: 'Convert Trial',
+  review_quote: 'Review Quote',
+  review_approval: 'Review Approval',
+};
+
+export function ActionCenterWidget({ items }: ActionCenterWidgetProps) {
+  const [filter, setFilter] = useState<'all' | ActionCategory>('all');
   const { showToast } = useToast();
 
-  const filteredItems = mockActionCenterItems.filter(
-    (item) => filter === 'all' || item.category === filter
-  );
+  const filteredItems = items.filter((item) => filter === 'all' || item.category === filter);
 
-  const handleAction = (item: ActionCenterItem) => {
-    switch (item.category) {
-      case 'overdue':
-        showToast('success', 'Reminder Dispatched', `Automated payment notification sent to ${item.account}`);
-        break;
-      case 'failed_payment':
-        showToast('info', 'Retry Triggered', `Gateway retry initiated for ${item.account}`);
-        break;
-      case 'expiring_trial':
-        showToast('info', 'Trial Conversion', `Initiated enterprise upgrade checkout for ${item.account}`);
-        break;
-      case 'pending_quote':
-        showToast('info', 'Quote Viewed', `Opening proposal for ${item.account}`);
-        break;
-    }
+  const handleAction = (_item: ActionItem) => {
+    showToast(
+      'info',
+      'Not wired up yet',
+      'Quick actions from the dashboard aren\'t connected to the backend yet — open the relevant record to continue.'
+    );
   };
 
-  const getCategoryBadge = (category: ActionCenterItem['category']) => {
+  const getCategoryBadge = (category: ActionItem['category']) => {
     switch (category) {
       case 'overdue':
         return (
@@ -58,19 +69,13 @@ export function ActionCenterWidget() {
             Pending Quote
           </span>
         );
-    }
-  };
-
-  const getActionLabel = (category: ActionCenterItem['category']) => {
-    switch (category) {
-      case 'overdue':
-        return 'Send Reminder';
-      case 'failed_payment':
-        return 'Retry Payment';
-      case 'expiring_trial':
-        return 'Convert Trial';
-      case 'pending_quote':
-        return 'Review Quote';
+      case 'pending_approval':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+            <ClipboardCheck className="w-3 h-3" />
+            Pending Approval
+          </span>
+        );
     }
   };
 
@@ -82,9 +87,11 @@ export function ActionCenterWidget() {
           <h3 className="text-sm font-bold text-slate-900 tracking-tight">
             Action Center
           </h3>
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">
-            {mockActionCenterItems.length} Urgent Items
-          </span>
+          {items.length > 0 && (
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">
+              {items.length} Item{items.length === 1 ? '' : 's'}
+            </span>
+          )}
         </div>
         <p className="text-xs text-slate-400">
           Items requiring operator intervention
@@ -93,16 +100,10 @@ export function ActionCenterWidget() {
 
       {/* Filter Tabs */}
       <div className="flex items-center gap-1.5 overflow-x-auto text-xs pb-1 border-b border-slate-100">
-        {[
-          { key: 'all', label: 'All Attention' },
-          { key: 'overdue', label: 'Overdue Invoices' },
-          { key: 'failed_payment', label: 'Failed Payments' },
-          { key: 'expiring_trial', label: 'Expiring Trials' },
-          { key: 'pending_quote', label: 'Pending Quotes' },
-        ].map((t) => (
+        {FILTERS.map((t) => (
           <button
             key={t.key}
-            onClick={() => setFilter(t.key as typeof filter)}
+            onClick={() => setFilter(t.key)}
             className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
               filter === t.key
                 ? 'bg-slate-900 text-white shadow-xs'
@@ -115,42 +116,51 @@ export function ActionCenterWidget() {
       </div>
 
       {/* Item List */}
-      <div className="space-y-2.5">
-        {filteredItems.map((item) => (
-          <div
-            key={item.id}
-            className="p-3 rounded-xl border border-slate-200/80 hover:border-slate-300 hover:bg-slate-50/50 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-          >
-            <div className="space-y-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                {getCategoryBadge(item.category)}
-                <span className="text-xs font-bold text-slate-900 truncate">
-                  {item.title}
-                </span>
+      {filteredItems.length === 0 ? (
+        <div className="py-8 flex flex-col items-center gap-2 text-center">
+          <CheckCircle2 className="w-6 h-6 text-emerald-500" />
+          <p className="text-xs text-slate-400">
+            {items.length === 0 ? "You're all caught up." : 'Nothing matches this filter.'}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {filteredItems.map((item) => (
+            <div
+              key={item.id}
+              className="p-3 rounded-xl border border-slate-200/80 hover:border-slate-300 hover:bg-slate-50/50 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+            >
+              <div className="space-y-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {getCategoryBadge(item.category)}
+                  <span className="text-xs font-bold text-slate-900 truncate">
+                    {item.title}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 line-clamp-1">
+                  {item.description}
+                </p>
+                <p className="text-[10px] text-slate-400">{item.due_info}</p>
               </div>
-              <p className="text-[11px] text-slate-500 line-clamp-1">
-                {item.description}
-              </p>
-            </div>
 
-            <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
-              {item.amount && (
-                <span className="text-xs font-bold text-slate-900 tabular-nums">
-                  {item.amount}
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => handleAction(item)}
-                className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-brand-50 text-brand-700 border border-blue-200/70 hover:bg-brand-600 hover:text-white transition-colors cursor-pointer"
-              >
-                <span>{getActionLabel(item.category)}</span>
-                <ArrowRight className="w-3 h-3" />
-              </button>
+              <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
+                {item.amount && (
+                  <span className="text-xs font-bold text-slate-900 tabular-nums">
+                    {formatMoney(item.amount)}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleAction(item)}
+                  className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-brand-50 text-brand-700 border border-blue-200/70 hover:bg-brand-600 hover:text-white transition-colors cursor-pointer"
+                >
+                  <span>{ACTION_LABELS[item.suggested_action]}</span>
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

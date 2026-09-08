@@ -1,8 +1,17 @@
-import { RotateCcw, CheckCircle2, AlertTriangle, TrendingUp } from 'lucide-react';
-import { mockPaymentRecovery } from '../mockDashboardData';
+import { Bell, CheckCircle2, AlertTriangle, TrendingUp } from 'lucide-react';
+import type { DashboardRecovery } from '../../../types';
+import { formatMoney, formatNumber, parseMoney } from '../../../utils/format';
 
-export function PaymentRecoveryWidget() {
-  const recovery = mockPaymentRecovery;
+export interface PaymentRecoveryWidgetProps {
+  recovery: DashboardRecovery;
+  currency: string;
+}
+
+export function PaymentRecoveryWidget({ recovery, currency }: PaymentRecoveryWidgetProps) {
+  const failedAmount = parseMoney(recovery.failed_amount) || 0;
+  const recoveredAmount = parseMoney(recovery.recovered_amount) || 0;
+  const base = failedAmount + recoveredAmount;
+  const recoveryRatePct = base > 0 ? (recoveredAmount / base) * 100 : 0;
 
   return (
     <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-sm space-y-4">
@@ -10,16 +19,12 @@ export function PaymentRecoveryWidget() {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-            Payment Recovery (Smart Dunning)
+            Payment Recovery (Dunning)
           </h3>
           <p className="text-xs text-slate-400">
-            Automated payment retry & failed invoice reclamation
+            Failed payment retries & reminder-driven collections
           </p>
         </div>
-        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-          <TrendingUp className="w-3 h-3" />
-          {recovery.rateImprovement}
-        </span>
       </div>
 
       {/* 4 Cards Grid */}
@@ -31,24 +36,24 @@ export function PaymentRecoveryWidget() {
             <span>Failed Payments</span>
           </div>
           <span className="text-base font-bold text-slate-900 tabular-nums block mt-2">
-            {recovery.failedPaymentsAmount}
+            {formatMoney(recovery.failed_amount, currency)}
           </span>
           <span className="text-[10px] text-slate-400 block mt-0.5">
-            {recovery.failedCount} transaction failures
+            {formatNumber(recovery.failed_payments)} transaction failures
           </span>
         </div>
 
-        {/* Retry Scheduled */}
+        {/* Reminders Sent */}
         <div className="p-3.5 rounded-xl border border-amber-200/80 bg-amber-50/30">
           <div className="flex items-center gap-2 text-amber-700 text-xs font-bold">
-            <RotateCcw className="w-4 h-4 text-amber-500" />
-            <span>Retry Scheduled</span>
+            <Bell className="w-4 h-4 text-amber-500" />
+            <span>Reminders Sent</span>
           </div>
           <span className="text-base font-bold text-slate-900 tabular-nums block mt-2">
-            {recovery.retryScheduledAmount}
+            {formatNumber(recovery.reminders_sent)}
           </span>
           <span className="text-[10px] text-slate-400 block mt-0.5">
-            {recovery.retryCount} auto-retries queued
+            dunning reminders this period
           </span>
         </div>
 
@@ -59,10 +64,7 @@ export function PaymentRecoveryWidget() {
             <span>Recovered</span>
           </div>
           <span className="text-base font-bold text-slate-900 tabular-nums block mt-2">
-            {recovery.recoveredPaymentsAmount}
-          </span>
-          <span className="text-[10px] text-slate-400 block mt-0.5">
-            {recovery.recoveredCount} salvaged accounts
+            {formatMoney(recovery.recovered_amount, currency)}
           </span>
         </div>
 
@@ -73,10 +75,7 @@ export function PaymentRecoveryWidget() {
             <span>Recovery Rate</span>
           </div>
           <span className="text-xl font-bold text-brand-700 tabular-nums block mt-1.5">
-            {recovery.recoveryRate}
-          </span>
-          <span className="text-[10px] text-emerald-600 font-semibold block mt-0.5">
-            Industry benchmark: 62%
+            {base > 0 ? `${recoveryRatePct.toFixed(1)}%` : '—'}
           </span>
         </div>
       </div>

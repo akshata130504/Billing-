@@ -114,7 +114,10 @@ class Settings(BaseSettings):
     # --- Background scheduler ---------------------------------------------------------
     # Runs renewals, overdue marking and dunning reminders in-process. Enable on exactly
     # one backend instance when running several replicas.
-    SCHEDULER_ENABLED: bool = True
+    # Defaults to OFF: dunning retries and trial conversion currently mark payments
+    # successful without contacting a real gateway (see Rooman-Billing security audit).
+    # Do not flip this to true until those paths are fixed and verified.
+    SCHEDULER_ENABLED: bool = False
     SCHEDULER_INTERVAL_MINUTES: int = 15
     DUNNING_REMINDER_INTERVAL_DAYS: int = 3
     DUNNING_MAX_REMINDERS: int = 3

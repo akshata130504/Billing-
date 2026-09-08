@@ -1,9 +1,21 @@
+import contextvars
 import json
 import logging
 import sys
 from datetime import datetime, timezone
 
 from backend.app.core.config import settings
+
+correlation_id_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar("correlation_id", default=None)
+
+
+class CorrelationIdFilter(logging.Filter):
+    """Injects current correlation/request ID from contextvars into every log record."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not hasattr(record, "request_id"):
+            record.request_id = correlation_id_ctx.get()
+        return True
 
 
 class JsonFormatter(logging.Formatter):
@@ -19,7 +31,7 @@ class JsonFormatter(logging.Formatter):
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         for key in ("request_id", "path", "method", "status_code", "duration_ms"):
-            if hasattr(record, key):
+            if hasattr(record, key) and getattr(record, key) is not None:
                 payload[key] = getattr(record, key)
         return json.dumps(payload, default=str)
 
@@ -28,6 +40,7 @@ def setup_logging() -> logging.Logger:
     log_level = logging.DEBUG if settings.DEBUG else logging.INFO
 
     handler = logging.StreamHandler(sys.stdout)
+    handler.addFilter(CorrelationIdFilter())
     if settings.LOG_JSON:
         handler.setFormatter(JsonFormatter())
     else:

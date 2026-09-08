@@ -1,4 +1,6 @@
+import time
 import traceback
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -10,8 +12,9 @@ from backend.app import __version__
 from backend.app.api.v1.api_router import api_router
 from backend.app.core.config import settings
 from backend.app.core.exceptions import AppException, app_exception_handler, validation_exception_handler
-from backend.app.core.logging import logger
+from backend.app.core.logging import correlation_id_ctx, logger
 from backend.app.core.rate_limit import RateLimitExceeded, limiter, rate_limit_exceeded_handler
+
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -102,6 +105,51 @@ def create_application() -> FastAPI:
         if settings.SECURE_COOKIES:
             response.headers.setdefault("Strict-Transport-Security", HSTS_HEADER)
         return response
+
+    @app.middleware("http")
+    async def request_correlation_and_logging(request: Request, call_next):
+        req_id = request.headers.get("X-Request-ID") or request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
+        request.state.request_id = req_id
+        token = correlation_id_ctx.set(req_id)
+        start_time = time.perf_counter()
+        try:
+            response = await call_next(request)
+            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            response.headers["X-Request-ID"] = req_id
+            if not request.url.path.endswith("/health"):
+                logger.info(
+                    "%s %s -> %s (%sms)",
+                    request.method,
+                    request.url.path,
+                    response.status_code,
+                    duration_ms,
+                    extra={
+                        "request_id": req_id,
+                        "path": request.url.path,
+                        "method": request.method,
+                        "status_code": response.status_code,
+                        "duration_ms": duration_ms,
+                    },
+                )
+            return response
+        except Exception:
+            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            logger.exception(
+                "Request failed: %s %s (%sms)",
+                request.method,
+                request.url.path,
+                duration_ms,
+                extra={
+                    "request_id": req_id,
+                    "path": request.url.path,
+                    "method": request.method,
+                    "duration_ms": duration_ms,
+                },
+            )
+            raise
+        finally:
+            correlation_id_ctx.reset(token)
+
 
     # Rate limiting (per client IP) on credential endpoints
     app.state.limiter = limiter

@@ -7,6 +7,7 @@ import importlib
 
 from fastapi import APIRouter
 
+from backend.app.core.config import settings
 from backend.app.core.logging import logger
 
 api_router = APIRouter()
@@ -26,6 +27,11 @@ ROUTERS = [
     ("subscriptions", "/subscriptions", ["Subscriptions"]),
     ("invoices", "/invoices", ["Invoices"]),
     ("payments", "/payments", ["Payments"]),
+    ("credit_notes", "/credit-notes", ["Credit Notes"]),
+    ("payment_methods", "", ["Payment Methods"]),
+    ("subscription_changes", "", ["Subscriptions & Proration"]),
+    ("meters", "/meters", ["Metered Billing"]),
+    ("trials", "/trials", ["Trial Management"]),
     ("collections", "/collections", ["Collections"]),
     ("approvals", "/approvals", ["Control Center"]),
     ("dashboard", "", ["Control Center"]),
@@ -35,16 +41,21 @@ ROUTERS = [
     ("admin", "/admin", ["Admin"]),
     ("public_invoices", "/public/invoices", ["Public"]),
     ("public_quotes", "/public/quotes", ["Public"]),
+    ("hosted_checkout", "/checkout", ["Hosted Checkout"]),
+    ("portal", "/portal", ["Customer Portal"]),
+    ("dunning", "", ["Dunning Management"]),
+    ("customization", "", ["Customization & Automation"]),
+    ("devices", "", ["Client Platforms"]),
+    ("ai", "", ["AI in Billing"]),
     ("reports", "/reports", ["Reports"]),
     ("lifecycle", "/lifecycle", ["Customer Lifecycle"]),
     ("timesheets", "/timesheets", ["Timesheets"]),
-    ("collections", "/collections", ["Collections"]),
     ("webhooks", "/webhooks", ["Webhooks"]),
 ]
 
-# STRICT is flipped to True once every module exists; during the build a missing
-# module is logged instead of crashing the app so partial work stays testable.
-STRICT = False
+# In test, staging, and production environments, missing endpoints MUST fail fast.
+STRICT = settings.ENVIRONMENT in ("test", "staging", "production")
+
 
 for module_name, prefix, tags in ROUTERS:
     try:

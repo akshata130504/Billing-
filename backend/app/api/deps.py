@@ -27,6 +27,10 @@ class CurrentContext:
     user_agent: Optional[str]
 
     @property
+    def user_id(self) -> str:
+        return self.user.id
+
+    @property
     def role(self) -> MemberRole:
         return self.membership.role
 

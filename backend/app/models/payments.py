@@ -1,7 +1,8 @@
 """Payments, allocations to invoices, refunds and gateway webhook events."""
 import enum
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Enum, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Column, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+
 from sqlalchemy.orm import relationship
 
 from backend.app.core.database import Base
@@ -119,3 +120,62 @@ class WebhookEvent(UUIDPrimaryKeyMixin, Base):
     processed_at = Column(DateTime(timezone=True), nullable=True)
     error = Column(Text, nullable=True)
     received_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+
+class CustomerPaymentMethodStatus(str, enum.Enum):
+    ACTIVE = "active"
+    EXPIRED = "expired"
+    REVOKED = "revoked"
+
+
+class CustomerPaymentMethod(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
+    """Tokenized customer payment instrument (card, upi mandate, etc.) stored at the gateway."""
+    __tablename__ = "customer_payment_methods"
+
+    customer_id = Column(String(36), ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True)
+    gateway = Column(Enum(PaymentGateway, name="customer_payment_method_gateway"), nullable=False, default=PaymentGateway.RAZORPAY)
+    gateway_customer_id = Column(String(80), nullable=True, index=True)
+    gateway_token = Column(String(120), nullable=False, index=True)
+    type = Column(String(30), nullable=False, default="card")
+    card_brand = Column(String(30), nullable=True)
+    last4 = Column(String(4), nullable=True)
+    exp_month = Column(Integer, nullable=True)
+    exp_year = Column(Integer, nullable=True)
+    is_default = Column(Boolean, nullable=False, default=False)
+    is_autocharge_eligible = Column(Boolean, nullable=False, default=True)
+    status = Column(Enum(CustomerPaymentMethodStatus, name="customer_payment_method_status"), nullable=False, default=CustomerPaymentMethodStatus.ACTIVE, index=True)
+
+    customer = relationship("Customer")
+
+
+class PaymentAttemptStatus(str, enum.Enum):
+    CREATED = "created"
+    SUBMITTED = "submitted"
+    PENDING = "pending"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class PaymentAttempt(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
+    """Every discrete charge attempt on a gateway, supporting automated dunning and retries."""
+    __tablename__ = "payment_attempts"
+
+    invoice_id = Column(String(36), ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False, index=True)
+    payment_id = Column(String(36), ForeignKey("payments.id", ondelete="SET NULL"), nullable=True, index=True)
+    customer_id = Column(String(36), ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True)
+    customer_payment_method_id = Column(String(36), ForeignKey("customer_payment_methods.id", ondelete="SET NULL"), nullable=True, index=True)
+    gateway = Column(Enum(PaymentGateway, name="payment_attempt_gateway"), nullable=False, default=PaymentGateway.RAZORPAY)
+    amount = Column(Numeric(14, 2), nullable=False)
+    currency = Column(String(3), nullable=False, default="INR")
+    status = Column(Enum(PaymentAttemptStatus, name="payment_attempt_status"), nullable=False, default=PaymentAttemptStatus.CREATED, index=True)
+    attempt_number = Column(Integer, nullable=False, default=1)
+    gateway_attempt_reference = Column(String(100), nullable=True, index=True)
+    failure_reason = Column(String(500), nullable=True)
+    failure_category = Column(String(50), nullable=True)
+    payload = Column(JSON, nullable=True)
+
+    invoice = relationship("Invoice")
+    payment = relationship("Payment")
+    customer = relationship("Customer")
+    payment_method = relationship("CustomerPaymentMethod")

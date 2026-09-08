@@ -32,6 +32,19 @@ class EntityNotFoundError(AppException):
         )
 
 
+class NotFoundError(AppException):
+    def __init__(self, message: str = "Resource not found.", details: Optional[Dict[str, Any]] = None):
+        super().__init__(
+            message=message,
+            code="NOT_FOUND",
+            status_code=status.HTTP_404_NOT_FOUND,
+            details=details or {},
+        )
+
+
+NotFoundAppError = NotFoundError
+
+
 class ValidationAppError(AppException):
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
         super().__init__(
@@ -50,6 +63,9 @@ class ConflictError(AppException):
             status_code=status.HTTP_409_CONFLICT,
             details=details or {},
         )
+
+
+ConflictAppError = ConflictError
 
 
 class InvalidStateError(AppException):

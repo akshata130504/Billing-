@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   DollarSign,
   Receipt,
@@ -10,7 +11,14 @@ import {
   ArrowDown,
   SlidersHorizontal,
 } from 'lucide-react';
-import { mockDashboardMetrics } from './mockDashboardData';
+import { controlCenterService } from '../../services/controlCenterService';
+import { toApiError } from '../../services/apiClient';
+import { queryKeys } from '../../hooks/queries';
+import { useAuth } from '../../hooks/useAuth';
+import { useToast } from '../../components/common/Toast';
+import { LoadingState } from '../../components/common/LoadingState';
+import { ErrorState } from '../../components/common/ErrorState';
+import { formatMoney, formatNumber, formatPercent, parseMoney } from '../../utils/format';
 import { RevenueIntelligenceWidget } from './widgets/RevenueIntelligenceWidget';
 import { ActionCenterWidget } from './widgets/ActionCenterWidget';
 import { BillingPipelineWidget } from './widgets/BillingPipelineWidget';
@@ -19,14 +27,16 @@ import { PaymentRecoveryWidget } from './widgets/PaymentRecoveryWidget';
 import { RecentTransactionsWidget } from './widgets/RecentTransactionsWidget';
 import { ActivityTimelineWidget } from './widgets/ActivityTimelineWidget';
 import { CustomizeDashboardModal } from './widgets/CustomizeDashboardModal';
-import { DateRangeFilter, WidgetVisibilityState } from '../../types';
-import { useToast } from '../../components/common/Toast';
+import type { DashboardRange, WidgetVisibilityState } from '../../types';
 
 export function DashboardPage() {
   const { showToast } = useToast();
+  const { user } = useAuth();
 
-  // Date Range Filter State
-  const [dateFilter, setDateFilter] = useState<DateRangeFilter>('30_days');
+  // Date Range Filter State. The backend only understands the five DashboardRange
+  // values below; "custom" is a UI-only placeholder until a real custom-range
+  // query is implemented.
+  const [dateFilter, setDateFilter] = useState<DashboardRange>('30_days');
   const [dateDropdownOpen, setDateDropdownOpen] = useState(false);
 
   // Customize Dashboard State
@@ -58,28 +68,92 @@ export function DashboardPage() {
     showToast('info', 'Reset Layout', 'All dashboard widgets restored to default view.');
   };
 
-  const dateFilterLabels: Record<DateRangeFilter, string> = {
+  const dateFilterLabels: Record<DashboardRange, string> = {
     today: 'Today',
     '7_days': 'Last 7 Days',
     '30_days': 'Last 30 Days',
     '3_months': 'Last 3 Months',
     '12_months': 'Last 12 Months',
-    custom: 'Custom Range',
   };
 
-  const statIcons = [
-    <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-      <DollarSign className="w-5 h-5" />
-    </div>,
-    <div className="w-10 h-10 rounded-xl bg-blue-50 text-brand-600 flex items-center justify-center shrink-0">
-      <Receipt className="w-5 h-5" />
-    </div>,
-    <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
-      <Users className="w-5 h-5" />
-    </div>,
-    <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
-      <AlertTriangle className="w-5 h-5" />
-    </div>,
+  const summary = useQuery({
+    queryKey: queryKeys.controlCenter.dashboard(dateFilter),
+    queryFn: () => controlCenterService.dashboard(dateFilter),
+  });
+
+  const actionCenter = useQuery({
+    queryKey: queryKeys.controlCenter.actionCenter(),
+    queryFn: () => controlCenterService.actionCenter(),
+  });
+
+  const firstName = user?.full_name?.trim().split(/\s+/)[0] || 'there';
+
+  if (summary.isPending) {
+    return <LoadingState message="Loading your dashboard..." />;
+  }
+  if (summary.isError) {
+    return (
+      <ErrorState
+        message={toApiError(summary.error).message}
+        onRetry={() => void summary.refetch()}
+      />
+    );
+  }
+
+  const { metrics, revenue, pipeline, customer_health, recovery, recent_transactions, activity, currency } =
+    summary.data;
+
+  const revenueChangePct = metrics.revenue_change_pct ? parseMoney(metrics.revenue_change_pct) : null;
+
+  const kpiCards = [
+    {
+      title: 'Total Revenue',
+      value: formatMoney(metrics.total_revenue, currency),
+      change: revenueChangePct === null ? null : formatPercent(metrics.revenue_change_pct),
+      isPositive: revenueChangePct !== null && revenueChangePct >= 0,
+      comparisonText: 'vs prior period',
+      icon: (
+        <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+          <DollarSign className="w-5 h-5" />
+        </div>
+      ),
+    },
+    {
+      title: 'Outstanding Invoices',
+      value: formatMoney(metrics.outstanding_amount, currency),
+      change: null,
+      isPositive: true,
+      comparisonText: `${formatNumber(metrics.outstanding_count)} unpaid (${formatNumber(metrics.overdue_count)} overdue)`,
+      icon: (
+        <div className="w-10 h-10 rounded-xl bg-blue-50 text-brand-600 flex items-center justify-center shrink-0">
+          <Receipt className="w-5 h-5" />
+        </div>
+      ),
+    },
+    {
+      title: 'Active Customers',
+      value: formatNumber(metrics.active_customers),
+      change: null,
+      isPositive: true,
+      comparisonText: `${formatNumber(metrics.new_customers)} new this period`,
+      icon: (
+        <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
+          <Users className="w-5 h-5" />
+        </div>
+      ),
+    },
+    {
+      title: 'At-Risk Revenue',
+      value: formatMoney(metrics.at_risk_amount, currency),
+      change: null,
+      isPositive: false,
+      comparisonText: `${formatNumber(metrics.at_risk_count)} accounts in grace period`,
+      icon: (
+        <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+          <AlertTriangle className="w-5 h-5" />
+        </div>
+      ),
+    },
   ];
 
   return (
@@ -89,7 +163,7 @@ export function DashboardPage() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
-              Welcome back, Akshata!
+              Welcome back, {firstName}!
             </h1>
             <span className="text-xl">👋</span>
           </div>
@@ -119,23 +193,13 @@ export function DashboardPage() {
                   onClick={() => setDateDropdownOpen(false)}
                 />
                 <div className="absolute right-0 mt-1.5 w-44 bg-white rounded-xl shadow-modal border border-slate-200 py-1.5 z-30 divide-y divide-slate-100">
-                  {(
-                    [
-                      'today',
-                      '7_days',
-                      '30_days',
-                      '3_months',
-                      '12_months',
-                      'custom',
-                    ] as const
-                  ).map((option) => (
+                  {(['today', '7_days', '30_days', '3_months', '12_months'] as const).map((option) => (
                     <button
                       key={option}
                       type="button"
                       onClick={() => {
                         setDateFilter(option);
                         setDateDropdownOpen(false);
-                        showToast('info', 'Filter Updated', `Dashboard recalculating for ${dateFilterLabels[option]}`);
                       }}
                       className={`w-full px-3.5 py-2 text-xs text-left font-medium transition-colors ${
                         dateFilter === option
@@ -165,13 +229,13 @@ export function DashboardPage() {
 
       {/* 4 Core Financial KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {mockDashboardMetrics.map((metric, idx) => (
+        {kpiCards.map((metric) => (
           <div
             key={metric.title}
             className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-sm flex flex-col justify-between"
           >
             <div className="flex items-center gap-3">
-              {statIcons[idx]}
+              {metric.icon}
               <div className="min-w-0">
                 <span className="text-xs font-medium text-slate-500 block truncate">
                   {metric.title}
@@ -183,20 +247,22 @@ export function DashboardPage() {
             </div>
 
             <div className="mt-4 flex items-center gap-1.5 text-xs">
-              <span
-                className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md font-bold text-[11px] shrink-0 ${
-                  metric.isPositive
-                    ? 'bg-emerald-50 text-emerald-600'
-                    : 'bg-rose-50 text-rose-600'
-                }`}
-              >
-                {metric.isPositive ? (
-                  <ArrowUp className="w-3 h-3 stroke-[3]" />
-                ) : (
-                  <ArrowDown className="w-3 h-3 stroke-[3]" />
-                )}
-                {metric.change}
-              </span>
+              {metric.change !== null && (
+                <span
+                  className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md font-bold text-[11px] shrink-0 ${
+                    metric.isPositive
+                      ? 'bg-emerald-50 text-emerald-600'
+                      : 'bg-rose-50 text-rose-600'
+                  }`}
+                >
+                  {metric.isPositive ? (
+                    <ArrowUp className="w-3 h-3 stroke-[3]" />
+                  ) : (
+                    <ArrowDown className="w-3 h-3 stroke-[3]" />
+                  )}
+                  {metric.change}
+                </span>
+              )}
               <span className="text-slate-400 text-[11px] truncate">
                 {metric.comparisonText}
               </span>
@@ -216,7 +282,7 @@ export function DashboardPage() {
                   visibility.actionCenter ? 'lg:col-span-7' : 'lg:col-span-12'
                 }
               >
-                <RevenueIntelligenceWidget />
+                <RevenueIntelligenceWidget revenue={revenue} currency={currency} />
               </div>
             )}
             {visibility.actionCenter && (
@@ -227,7 +293,16 @@ export function DashboardPage() {
                     : 'lg:col-span-12'
                 }
               >
-                <ActionCenterWidget />
+                {actionCenter.isPending ? (
+                  <LoadingState message="Loading action items..." />
+                ) : actionCenter.isError ? (
+                  <ErrorState
+                    message={toApiError(actionCenter.error).message}
+                    onRetry={() => void actionCenter.refetch()}
+                  />
+                ) : (
+                  <ActionCenterWidget items={actionCenter.data.items} />
+                )}
               </div>
             )}
           </div>
@@ -236,7 +311,7 @@ export function DashboardPage() {
         {/* Row 2: Billing Pipeline (Full width flow) */}
         {visibility.billingPipeline && (
           <div>
-            <BillingPipelineWidget />
+            <BillingPipelineWidget pipeline={pipeline} currency={currency} />
           </div>
         )}
 
@@ -249,7 +324,7 @@ export function DashboardPage() {
                   visibility.paymentRecovery ? 'lg:col-span-6' : 'lg:col-span-12'
                 }
               >
-                <CustomerHealthWidget />
+                <CustomerHealthWidget health={customer_health} />
               </div>
             )}
             {visibility.paymentRecovery && (
@@ -258,7 +333,7 @@ export function DashboardPage() {
                   visibility.customerHealth ? 'lg:col-span-6' : 'lg:col-span-12'
                 }
               >
-                <PaymentRecoveryWidget />
+                <PaymentRecoveryWidget recovery={recovery} currency={currency} />
               </div>
             )}
           </div>
@@ -273,7 +348,7 @@ export function DashboardPage() {
                   visibility.activityTimeline ? 'lg:col-span-7' : 'lg:col-span-12'
                 }
               >
-                <RecentTransactionsWidget />
+                <RecentTransactionsWidget transactions={recent_transactions} />
               </div>
             )}
             {visibility.activityTimeline && (
@@ -282,7 +357,7 @@ export function DashboardPage() {
                   visibility.recentTransactions ? 'lg:col-span-5' : 'lg:col-span-12'
                 }
               >
-                <ActivityTimelineWidget />
+                <ActivityTimelineWidget activity={activity} />
               </div>
             )}
           </div>

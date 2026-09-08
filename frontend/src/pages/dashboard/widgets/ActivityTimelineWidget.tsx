@@ -1,12 +1,16 @@
 import { useState } from 'react';
-import { ActivityItem, ActivityCategory } from '../../../types';
-import { mockActivityTimeline } from '../mockDashboardData';
-import { Receipt, Users, CreditCard, Cpu, ArrowRight } from 'lucide-react';
+import { Receipt, Users, CreditCard, Cpu } from 'lucide-react';
+import type { ActivityCategory, ActivityItem } from '../../../types';
+import { formatRelative } from '../../../utils/format';
 
-export function ActivityTimelineWidget() {
+export interface ActivityTimelineWidgetProps {
+  activity: ActivityItem[];
+}
+
+export function ActivityTimelineWidget({ activity }: ActivityTimelineWidgetProps) {
   const [activeCategory, setActiveCategory] = useState<ActivityCategory>('all');
 
-  const filtered = mockActivityTimeline.filter(
+  const filtered = activity.filter(
     (item) => activeCategory === 'all' || item.category === activeCategory
   );
 
@@ -47,7 +51,7 @@ export function ActivityTimelineWidget() {
             Recent Activity Timeline
           </h3>
           <p className="text-xs text-slate-400">
-            Real-time audit log across all system subsystems
+            Latest entries from the audit log
           </p>
         </div>
 
@@ -86,12 +90,10 @@ export function ActivityTimelineWidget() {
         ) : (
           filtered.map((item, idx) => (
             <div key={item.id} className="flex items-start gap-3 relative">
-              {/* Vertical connector line */}
               {idx < filtered.length - 1 && (
                 <div className="absolute left-3.5 top-7 bottom-0 w-px bg-slate-100 -mb-3.5" />
               )}
 
-              {/* Icon */}
               <div
                 className={`w-7 h-7 rounded-xl border flex items-center justify-center shrink-0 z-10 ${getCategoryBg(
                   item.category
@@ -100,14 +102,13 @@ export function ActivityTimelineWidget() {
                 {getCategoryIcon(item.category)}
               </div>
 
-              {/* Body */}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
                   <h4 className="text-xs font-bold text-slate-900 truncate">
                     {item.title}
                   </h4>
                   <span className="text-[10px] text-slate-400 shrink-0 font-medium">
-                    {item.timestamp}
+                    {formatRelative(item.timestamp)}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
@@ -117,17 +118,6 @@ export function ActivityTimelineWidget() {
             </div>
           ))
         )}
-      </div>
-
-      {/* Footer View Full Audit Trail */}
-      <div className="pt-2 border-t border-slate-100 flex justify-end">
-        <button
-          type="button"
-          className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700"
-        >
-          <span>View Full Audit Trail</span>
-          <ArrowRight className="w-3 h-3" />
-        </button>
       </div>
     </div>
   );
