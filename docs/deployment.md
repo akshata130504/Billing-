@@ -89,7 +89,20 @@ Expected backend log sequence: `waiting for database` -> `database reachable` ->
 curl -s https://billing.example.com/api/v1/health
 # {"status":"healthy", ..., "database":{"status":"connected","dialect":"postgresql"}}
 curl -s https://billing.example.com/healthz          # ok
+
+# Deep readiness: 200 only when the DB is up AND the schema is at the Alembic head.
+curl -si https://billing.example.com/api/v1/health/ready | head -1   # HTTP/2 200
+curl -s  https://billing.example.com/api/v1/health/ready | jq '.ready, .checks.migrations, .features'
 ```
+
+A 503 from `/api/v1/health/ready` right after a deploy usually just means migrations are still
+running; if it persists, `failures` names the culprit (`database` or `migrations`) - see
+[`operations.md`](operations.md) section 3. Gate your deploy on this endpoint rather than on
+`/api/v1/health`, which returns 200 even when the schema is behind.
+
+Also check `features` in that response: `scheduler_enabled` must be `false` on the `backend`
+service (the separate `scheduler` service runs the jobs), and `razorpay_configured` /
+`smtp_configured` / `sentry_enabled` should match what you put in `.env.production`.
 
 ## 5. First login
 
@@ -158,13 +171,28 @@ images remain available for rollback.
 | Razorpay keys / webhook secret | regenerate in the dashboard, update env, `up -d backend scheduler` | in-flight checkouts created with old keys may fail; do it during a quiet period. |
 | SMTP credentials | update env, restart | none. |
 
+Before the first real customer, work through the **pre-launch checklist** in
+[`operations.md`](operations.md) section 9 - secrets rotation, a rehearsed backup restore, and the
+Razorpay test-to-live key switchover.
+
 ## 10. Monitoring
 
 - **Liveness**: `GET https://<DOMAIN>/healthz` (nginx) and container `docker compose ps` health
   columns (backend uses `/api/v1/health` internally).
-- **Readiness/DB**: `GET https://<DOMAIN>/api/v1/health` - alert when `status != "healthy"` or the
-  HTTP code is not 200. It is public and cheap (a `SELECT 1`).
-- **Scheduler**: it logs one summary line per run (renewals, trials converted, overdue marked,
+- **Readiness**: `GET https://<DOMAIN>/api/v1/health/ready` - **alert on any non-200**. It returns
+  503 when the database is unreachable or the schema is not at the Alembic head, and its `features`
+  block reports scheduler/Razorpay/SMTP/Sentry configuration. This is also the right probe for a
+  load balancer and for gating a deploy. See [`operations.md`](operations.md) section 3.
+- **DB only**: `GET https://<DOMAIN>/api/v1/health` - always 200; alert when
+  `status != "healthy"`. Cheap (a `SELECT 1`) and used by the container healthcheck.
+- **Errors**: set `SENTRY_DSN` to send exceptions to Sentry. Optional - with it empty the SDK is
+  never imported. Events are scrubbed of tokens, passwords, GSTIN/PAN and card-like fields before
+  leaving the host; see [`operations.md`](operations.md) section 4.
+- **Scheduler**: **required in production.** `docker-compose.prod.yml` runs a dedicated `scheduler`
+  service with `SCHEDULER_ENABLED=true` while the API replicas keep it `false`. If no process has
+  it enabled, renewals, trial conversion, overdue marking and dunning never run and nothing looks
+  broken - the API logs a startup WARNING for exactly this case. Exactly one process may have it
+  enabled. It logs one summary line per run (renewals, trials converted, overdue marked,
   reminders sent). Alert if no line appears for `2 x SCHEDULER_INTERVAL_MINUTES`.
   Owners can also trigger a run with `POST /api/v1/admin/jobs/run`.
 - **Disk**: `postgres_data` volume and Docker log files (rotated at 5 x 20 MB per container by the
@@ -178,7 +206,12 @@ images remain available for rollback.
 - [ ] `.env.production` mode 600, owned by the deploy user, not in git.
 - [ ] Only 80/443 (and restricted 22) open on the host firewall.
 - [ ] `SECURE_COOKIES=true`, `FRONTEND_URL` and `ALLOWED_ORIGINS` use `https://`.
-- [ ] HSTS enabled at the TLS terminator (already in `deploy/Caddyfile`).
+- [ ] HSTS enabled at the TLS terminator (already in `deploy/Caddyfile`); the web container also
+      emits it, plus a CSP, on requests it sees as `https` (`frontend/docker/security-headers.conf`).
+- [ ] Hosted payment page verified **after** any CSP change - the Razorpay modal needs
+      `https://checkout.razorpay.com` and `https://api.razorpay.com` to stay allow-listed.
+- [ ] `/api/v1/health/ready` returns 200 and is wired to an alert.
+- [ ] Exactly one process with `SCHEDULER_ENABLED=true`.
 - [ ] Daily `pg_dump` to off-host storage with a tested restore (see `operations.md`).
 - [ ] Razorpay live keys restricted to the production account; webhook secret set.
 - [ ] Docker and base images updated on a schedule (`docker compose pull db caddy`, rebuild app images).

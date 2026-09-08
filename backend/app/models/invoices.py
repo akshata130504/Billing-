@@ -38,6 +38,20 @@ class Invoice(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
     discount_pct = Column(Numeric(5, 2), nullable=False, default=0)
     discount_amount = Column(Numeric(14, 2), nullable=False, default=0)
     tax_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    # GST heads. cgst+sgst+igst always reconcile to tax_amount for Indian supplies;
+    # all three are zero for exports, where tax_amount is zero too.
+    cgst_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    sgst_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    igst_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    # intra_state | inter_state | export — determines which heads are populated.
+    supply_type = Column(String(16), nullable=True)
+    # GST state code (first two digits of the recipient GSTIN) + its name, frozen
+    # at issue time so a later change to the customer's address cannot alter an
+    # already-issued tax invoice.
+    place_of_supply_code = Column(String(2), nullable=True)
+    place_of_supply_name = Column(String(120), nullable=True)
+    customer_gstin = Column(String(15), nullable=True)
+    supplier_gstin = Column(String(15), nullable=True)
     total = Column(Numeric(14, 2), nullable=False, default=0)
     amount_paid = Column(Numeric(14, 2), nullable=False, default=0)
     amount_due = Column(Numeric(14, 2), nullable=False, default=0)
@@ -78,6 +92,15 @@ class InvoiceItem(UUIDPrimaryKeyMixin, TenantMixin, Base):
     unit_price = Column(Numeric(14, 2), nullable=False, default=0)
     tax_rate_pct = Column(Numeric(5, 2), nullable=False, default=0)
     amount = Column(Numeric(14, 2), nullable=False, default=0)  # quantity * unit_price (pre-tax)
+    # Per-line GST split; the line's share of the document totals.
+    cgst_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    sgst_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    igst_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    cgst_rate_pct = Column(Numeric(5, 2), nullable=False, default=0)
+    sgst_rate_pct = Column(Numeric(5, 2), nullable=False, default=0)
+    igst_rate_pct = Column(Numeric(5, 2), nullable=False, default=0)
+    # HSN/SAC copied from the product at issue time (required on a tax invoice).
+    hsn_sac_code = Column(String(16), nullable=True)
     position = Column(Integer, nullable=False, default=0)
     pricing_explanation = Column(Text, nullable=True)
 

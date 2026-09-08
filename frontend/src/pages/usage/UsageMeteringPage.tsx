@@ -141,17 +141,17 @@ export function UsageMeteringPage() {
     });
   };
 
-  const handleFinalized = (aggregate: UsageAggregateOut, subscription: SubscriptionOut | null) => {
-    setSessionAggregates((prev) => [
-      {
-        aggregate,
-        subscription_label: subscription
-          ? `${subscription.subscription_number} · ${subscription.customer.display_name}`
-          : aggregate.subscription_id,
-        currency: subscription?.currency ?? 'INR',
-      },
-      ...prev.filter((a) => a.aggregate.id !== aggregate.id),
-    ]);
+  const handleFinalized = (aggregates: UsageAggregateOut[], subscription: SubscriptionOut | null) => {
+    if (aggregates.length === 0) return;
+    const added = aggregates.map((aggregate) => ({
+      aggregate,
+      subscription_label: subscription
+        ? `${subscription.subscription_number} · ${subscription.customer.display_name}`
+        : aggregate.subscription_id,
+      currency: subscription?.currency ?? 'INR',
+    }));
+    const addedIds = new Set(aggregates.map((a) => a.id));
+    setSessionAggregates((prev) => [...added, ...prev.filter((a) => !addedIds.has(a.aggregate.id))]);
   };
 
   const hasFilters = search.trim() !== '' || aggregationFilter !== 'all' || statusFilter !== 'all';

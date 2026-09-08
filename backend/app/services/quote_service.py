@@ -37,6 +37,7 @@ from backend.app.schemas.quotes import QuoteConvertIn, QuoteCreate, QuoteUpdate
 from backend.app.services import audit
 from backend.app.services.email import frontend_url, send_email
 from backend.app.services.money import D, LineInput, Totals, compute_totals
+from backend.app.services import gst
 from backend.app.services.numbering import next_number
 from backend.app.services.pagination import Page, PageParams, apply_sort, paginate
 
@@ -181,7 +182,7 @@ def _validate_refs(db: Session, organization_id: str, items: Sequence[LineItemIn
         raise ValidationAppError("One or more line items reference an unknown product, offering or plan.", {"fields": fields})
 
 
-def compute_quote_totals(items: Iterable[LineItemIn], discount_pct) -> Totals:
+def compute_quote_totals(items: Iterable[LineItemIn], discount_pct, supply=None) -> Totals:
     lines = [
         LineInput(
             description=i.description,
@@ -192,20 +193,28 @@ def compute_quote_totals(items: Iterable[LineItemIn], discount_pct) -> Totals:
             product_id=i.product_id,
             plan_id=i.plan_id,
             pricing_explanation=getattr(i, "pricing_explanation", None),
+            hsn_sac_code=getattr(i, "hsn_sac_code", None),
         )
         for i in items
     ]
     try:
-        return compute_totals(lines, discount_pct)
+        return compute_totals(lines, discount_pct, supply=supply)
     except ValueError as exc:
         raise ValidationAppError(str(exc), {"fields": {"items": str(exc)}})
 
 
-def _apply_totals(quote: Quote, totals: Totals) -> None:
+def _apply_totals(quote: Quote, totals: Totals, supply=None) -> None:
     quote.subtotal = totals.subtotal
     quote.discount_pct = totals.discount_pct
     quote.discount_amount = totals.discount_amount
     quote.tax_amount = totals.tax_amount
+    quote.cgst_amount = totals.cgst_amount
+    quote.sgst_amount = totals.sgst_amount
+    quote.igst_amount = totals.igst_amount
+    if supply is not None:
+        quote.supply_type = supply.supply_type
+        quote.place_of_supply_code = supply.place_of_supply_code
+        quote.place_of_supply_name = supply.place_of_supply_name
     quote.total = totals.total
     quote.items.clear()
     for line in totals.lines:
@@ -220,6 +229,13 @@ def _apply_totals(quote: Quote, totals: Totals) -> None:
                 unit_price=line.unit_price,
                 tax_rate_pct=line.tax_rate_pct,
                 amount=line.amount,
+                cgst_amount=line.cgst_amount,
+                sgst_amount=line.sgst_amount,
+                igst_amount=line.igst_amount,
+                cgst_rate_pct=line.cgst_rate_pct,
+                sgst_rate_pct=line.sgst_rate_pct,
+                igst_rate_pct=line.igst_rate_pct,
+                hsn_sac_code=line.hsn_sac_code,
                 position=line.position,
                 pricing_explanation=line.pricing_explanation,
             )
@@ -241,7 +257,8 @@ def _customer_or_404(db: Session, organization_id: str, customer_id: str) -> Cus
 def create_quote(db: Session, ctx: CurrentContext, data: QuoteCreate) -> Quote:
     customer = _customer_or_404(db, ctx.organization_id, data.customer_id)
     _validate_refs(db, ctx.organization_id, data.items)
-    totals = compute_quote_totals(data.items, data.discount_pct)
+    supply = gst.resolve_supply(ctx.organization, customer)
+    totals = compute_quote_totals(data.items, data.discount_pct, supply=supply)
     quote = Quote(
         organization_id=ctx.organization_id,
         quote_number=next_number(db, ctx.organization_id, "quote"),
@@ -256,7 +273,7 @@ def create_quote(db: Session, ctx: CurrentContext, data: QuoteCreate) -> Quote:
         created_by_id=ctx.user.id,
     )
     db.add(quote)
-    _apply_totals(quote, totals)
+    _apply_totals(quote, totals, supply)
     db.flush()
     audit.record(
         db,
@@ -292,10 +309,11 @@ def update_quote(db: Session, ctx: CurrentContext, quote_id: str, data: QuoteUpd
         quote.currency = changes["currency"]
 
     discount = changes["discount_pct"] if changes.get("discount_pct") is not None else quote.discount_pct
+    quote_supply = gst.resolve_supply(ctx.organization, quote.customer)
     if data.items is not None:
         _validate_refs(db, ctx.organization_id, data.items)
-        totals = compute_quote_totals(data.items, discount)
-        _apply_totals(quote, totals)
+        totals = compute_quote_totals(data.items, discount, supply=quote_supply)
+        _apply_totals(quote, totals, quote_supply)
     elif "discount_pct" in changes and changes["discount_pct"] is not None:
         current = [
             LineItemIn(
@@ -308,8 +326,8 @@ def update_quote(db: Session, ctx: CurrentContext, quote_id: str, data: QuoteUpd
             )
             for i in sorted(quote.items, key=lambda x: x.position or 0)
         ]
-        totals = compute_quote_totals(current, discount)
-        _apply_totals(quote, totals)
+        totals = compute_quote_totals(current, discount, supply=quote_supply)
+        _apply_totals(quote, totals, quote_supply)
     db.flush()
     audit.record(
         db,
@@ -502,6 +520,9 @@ def _create_invoice_from_quote(db: Session, ctx: CurrentContext, quote: Quote, d
     due_date = data.due_date or issue_date + timedelta(days=terms_days)
     if due_date < issue_date:
         raise ValidationAppError("due_date cannot be before issue_date.", {"fields": {"due_date": "before issue_date"}})
+    # Re-resolve the supply at conversion time: the invoice is the tax document,
+    # and the customer's GSTIN/state may have been corrected since the quote.
+    supply = gst.resolve_supply(ctx.organization, customer)
     invoice = Invoice(
         organization_id=ctx.organization_id,
         invoice_number=next_number(db, ctx.organization_id, "invoice"),
@@ -515,6 +536,14 @@ def _create_invoice_from_quote(db: Session, ctx: CurrentContext, quote: Quote, d
         discount_pct=quote.discount_pct,
         discount_amount=quote.discount_amount,
         tax_amount=quote.tax_amount,
+        cgst_amount=quote.cgst_amount,
+        sgst_amount=quote.sgst_amount,
+        igst_amount=quote.igst_amount,
+        supply_type=supply.supply_type,
+        place_of_supply_code=supply.place_of_supply_code,
+        place_of_supply_name=supply.place_of_supply_name,
+        customer_gstin=supply.customer_gstin,
+        supplier_gstin=getattr(ctx.organization, "gstin", None),
         total=quote.total,
         amount_paid=Decimal("0.00"),
         amount_due=quote.total,
@@ -536,6 +565,13 @@ def _create_invoice_from_quote(db: Session, ctx: CurrentContext, quote: Quote, d
                 unit_price=item.unit_price,
                 tax_rate_pct=item.tax_rate_pct,
                 amount=item.amount,
+                cgst_amount=item.cgst_amount,
+                sgst_amount=item.sgst_amount,
+                igst_amount=item.igst_amount,
+                cgst_rate_pct=item.cgst_rate_pct,
+                sgst_rate_pct=item.sgst_rate_pct,
+                igst_rate_pct=item.igst_rate_pct,
+                hsn_sac_code=getattr(item, "hsn_sac_code", None),
                 position=item.position,
                 pricing_explanation=getattr(item, "pricing_explanation", None),
             )
@@ -790,6 +826,12 @@ def serialize_quote(
         "discount_pct": money_str(quote.discount_pct),
         "discount_amount": money_str(quote.discount_amount),
         "tax_amount": money_str(quote.tax_amount),
+        "cgst_amount": money_str(quote.cgst_amount),
+        "sgst_amount": money_str(quote.sgst_amount),
+        "igst_amount": money_str(quote.igst_amount),
+        "supply_type": quote.supply_type,
+        "place_of_supply_code": quote.place_of_supply_code,
+        "place_of_supply_name": quote.place_of_supply_name,
         "total": money_str(quote.total),
         "notes": quote.notes,
         "terms": quote.terms,

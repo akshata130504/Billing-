@@ -209,6 +209,14 @@ export function BatchImportModal({ isOpen, onClose, meters, knownKeys, onRecorde
                 {parsed.errors.length > 25 && <li>…and {parsed.errors.length - 25} more</li>}
               </ul>
             )}
+            {/* Warnings are informational: the rows still import. */}
+            {parsed.warnings.length > 0 && (
+              <ul className="list-disc pl-4 space-y-0.5 text-amber-700">
+                {parsed.warnings.map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
 

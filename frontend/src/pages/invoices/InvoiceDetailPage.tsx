@@ -287,6 +287,16 @@ export const InvoiceDetailPage = () => {
                 {invoice.customer?.phone && (
                   <div className="text-sm text-gray-600">{invoice.customer.phone}</div>
                 )}
+                {/* Mandatory fields on a GST tax invoice. */}
+                {invoice.customer_gstin && (
+                  <div className="text-sm text-gray-600">GSTIN: {invoice.customer_gstin}</div>
+                )}
+                {invoice.place_of_supply_name && (
+                  <div className="text-sm text-gray-600">
+                    Place of supply: {invoice.place_of_supply_name}
+                    {invoice.place_of_supply_code ? ` (${invoice.place_of_supply_code})` : ''}
+                  </div>
+                )}
               </div>
               <div>
                 <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
@@ -371,12 +381,30 @@ export const InvoiceDetailPage = () => {
                     <span>-₹{Number(invoice.discount_amount || 0).toLocaleString()}</span>
                   </div>
                 )}
-                {Number(invoice.tax_amount || 0) > 0 && (
+                {/* GST heads, matching the tax invoice PDF. Falls back to a single
+                    "Tax" row for exports and documents predating the GST split. */}
+                {Number(invoice.cgst_amount || 0) > 0 || Number(invoice.sgst_amount || 0) > 0 ? (
+                  <>
+                    <div className="flex justify-between text-gray-600">
+                      <span>CGST</span>
+                      <span>+₹{Number(invoice.cgst_amount || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-gray-600">
+                      <span>SGST/UTGST</span>
+                      <span>+₹{Number(invoice.sgst_amount || 0).toLocaleString()}</span>
+                    </div>
+                  </>
+                ) : Number(invoice.igst_amount || 0) > 0 ? (
+                  <div className="flex justify-between text-gray-600">
+                    <span>IGST</span>
+                    <span>+₹{Number(invoice.igst_amount || 0).toLocaleString()}</span>
+                  </div>
+                ) : Number(invoice.tax_amount || 0) > 0 ? (
                   <div className="flex justify-between text-gray-600">
                     <span>Tax</span>
                     <span>+₹{Number(invoice.tax_amount || 0).toLocaleString()}</span>
                   </div>
-                )}
+                ) : null}
                 {Number(invoice.adjustment || 0) !== 0 && (
                   <div className="flex justify-between text-gray-600">
                     <span>Adjustment</span>

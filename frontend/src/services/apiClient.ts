@@ -64,9 +64,15 @@ interface ErrorEnvelope {
 }
 
 export function isApiError(value: unknown): value is ApiError {
+  // An AxiosError also has string `code` and `message` (e.g. "ERR_BAD_REQUEST",
+  // "Request failed with status code 422"), so it must be excluded explicitly.
+  // Without this, toApiError returned the raw AxiosError unchanged: toasts showed
+  // the axios message instead of the backend one, and fieldErrors() always came
+  // back empty so inline form validation never rendered.
   return (
     typeof value === 'object' &&
     value !== null &&
+    (value as { isAxiosError?: boolean }).isAxiosError !== true &&
     typeof (value as ApiError).code === 'string' &&
     typeof (value as ApiError).message === 'string'
   );

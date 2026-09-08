@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_db
 from backend.app.core.exceptions import GatewayNotConfiguredError, InvalidStateError, UnauthorizedError, ValidationAppError
+from backend.app.core.rate_limit import limiter, public_action_rate_limit, public_rate_limit
 from backend.app.models import (
     OPEN_INVOICE_STATUSES,
     AuditStatus,
@@ -42,6 +43,11 @@ def _public_invoice(db: Session, invoice) -> Dict[str, Any]:
         "discount_pct": data["discount_pct"],
         "discount_amount": data["discount_amount"],
         "tax_amount": data["tax_amount"],
+        "cgst_amount": data.get("cgst_amount", "0.00"),
+        "sgst_amount": data.get("sgst_amount", "0.00"),
+        "igst_amount": data.get("igst_amount", "0.00"),
+        "supply_type": data.get("supply_type"),
+        "place_of_supply_name": data.get("place_of_supply_name"),
         "total": data["total"],
         "amount_paid": data["amount_paid"],
         "amount_due": data["amount_due"],
@@ -87,13 +93,15 @@ def _public_invoice(db: Session, invoice) -> Dict[str, Any]:
 
 
 @router.get("/{token}", response_model=PublicInvoice, summary="Hosted invoice view")
-def public_invoice(token: str, db: Session = Depends(get_db)):
+@limiter.limit(public_rate_limit)
+def public_invoice(request: Request, token: str, db: Session = Depends(get_db)):
     invoice = invoice_service.get_invoice_by_token(db, token)
     return _public_invoice(db, invoice)
 
 
 @router.get("/{token}/pdf", response_class=RawResponse, summary="Invoice PDF", responses={200: {"content": {"application/pdf": {}}}})
-def public_invoice_pdf(token: str, db: Session = Depends(get_db)):
+@limiter.limit(public_rate_limit)
+def public_invoice_pdf(request: Request, token: str, db: Session = Depends(get_db)):
     invoice = invoice_service.get_invoice_by_token(db, token)
     organization = db.get(Organization, invoice.organization_id)
     pdf = render_invoice_pdf(invoice, organization)
@@ -105,7 +113,8 @@ def public_invoice_pdf(token: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{token}/razorpay-order", response_model=RazorpayOrderOut, summary="Create a Razorpay order for the invoice")
-def create_razorpay_order(token: str, body: RazorpayOrderIn, request: Request, db: Session = Depends(get_db)):
+@limiter.limit(public_action_rate_limit)
+def create_razorpay_order(request: Request, token: str, body: RazorpayOrderIn, db: Session = Depends(get_db)):
     invoice = invoice_service.get_invoice_by_token(db, token)
     if not razorpay_gateway.is_configured():
         raise GatewayNotConfiguredError("razorpay")
@@ -172,7 +181,8 @@ def create_razorpay_order(token: str, body: RazorpayOrderIn, request: Request, d
 
 
 @router.post("/{token}/razorpay-verify", response_model=RazorpayVerifyOut, summary="Verify the checkout signature and capture")
-def verify_razorpay_payment(token: str, body: RazorpayVerifyIn, db: Session = Depends(get_db)):
+@limiter.limit(public_action_rate_limit)
+def verify_razorpay_payment(request: Request, token: str, body: RazorpayVerifyIn, db: Session = Depends(get_db)):
     invoice = invoice_service.get_invoice_by_token(db, token)
     payment = payment_service.find_by_order_id(db, body.razorpay_order_id, invoice.organization_id)
     if payment is None:

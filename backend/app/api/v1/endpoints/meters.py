@@ -153,8 +153,8 @@ def record_batch_events(
 
 @router.post(
     "/subscriptions/{subscription_id}/billing-cycles/{cycle_id}/finalize-usage",
-    response_model=UsageAggregateOut,
-    summary="Finalize rated usage for a subscription billing cycle",
+    response_model=List[UsageAggregateOut],
+    summary="Finalize rated usage for a subscription billing cycle (one aggregate per meter)",
 )
 def finalize_cycle_usage(
     subscription_id: str,
@@ -162,7 +162,7 @@ def finalize_cycle_usage(
     ctx: CurrentContext = Depends(require_finance),
     db: Session = Depends(get_db),
 ):
-    agg = meter_service.finalize_usage_for_cycle(
+    aggregates = meter_service.finalize_usage_for_cycle(
         db, ctx=ctx, subscription_id=subscription_id, billing_cycle_id=cycle_id
     )
-    return _serialize_aggregate(agg)
+    return [_serialize_aggregate(agg) for agg in aggregates]

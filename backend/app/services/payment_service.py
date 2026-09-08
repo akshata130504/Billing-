@@ -647,6 +647,38 @@ def refund_payment(db: Session, ctx: CurrentContext, payment: Payment, amount: D
     return _reload(db, payment)
 
 
+
+def execute_refund(db: Session, *, approval, ctx: CurrentContext) -> Payment:
+    """Effect hook for an approved REFUND approval request.
+
+    The approval carries the payment and amount in its payload; this performs the
+    same refund `refund_payment` does (gateway call for online payments, ledger
+    reversal and invoice re-open for all of them) but on behalf of the approver.
+    Raises rather than returning quietly: an approved refund that silently does
+    nothing would tell finance the customer was paid when they were not.
+    """
+    payload = approval.payload or {}
+    payment_id = payload.get("payment_id") or approval.entity_id
+    if not payment_id:
+        raise ValidationAppError("This refund approval does not reference a payment.")
+
+    payment = db.scalars(
+        select(Payment).where(Payment.id == payment_id, Payment.organization_id == approval.organization_id)
+    ).first()
+    if payment is None:
+        raise EntityNotFoundError("Payment", str(payment_id))
+
+    raw_amount = payload.get("amount")
+    amount = q2(raw_amount) if raw_amount is not None else effective_amount(payment)
+    if amount <= 0:
+        raise ValidationAppError("Refund amount must be greater than zero.", {"fields": {"amount": "must be > 0"}})
+
+    reason = payload.get("reason") or approval.justification
+    # Reuse the full refund path so gateway handling, allocation reversal and
+    # audit stay in one place. It commits; the caller's own commit is a no-op.
+    return refund_payment(db, ctx, payment, amount, reason)
+
+
 # --- gateway capture / failure (hosted page + webhook) -------------------------------------------------------------------
 
 

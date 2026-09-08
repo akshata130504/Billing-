@@ -47,6 +47,13 @@ export interface InvoiceLineItemOut {
   tax_rate_pct: number | string;
   tax_rate?: number | string;
   tax_amount?: number | string;
+  cgst_amount?: number | string;
+  sgst_amount?: number | string;
+  igst_amount?: number | string;
+  cgst_rate_pct?: number | string;
+  sgst_rate_pct?: number | string;
+  igst_rate_pct?: number | string;
+  hsn_sac_code?: string | null;
   amount: number | string;
   total_amount?: number | string;
   position: number;
@@ -91,6 +98,15 @@ export interface Invoice {
   discount_pct: number | string;
   discount_amount: number | string;
   tax_amount: number | string;
+  /** GST heads; cgst+sgst+igst reconcile to tax_amount. */
+  cgst_amount?: number | string;
+  sgst_amount?: number | string;
+  igst_amount?: number | string;
+  supply_type?: string | null;
+  place_of_supply_code?: string | null;
+  place_of_supply_name?: string | null;
+  customer_gstin?: string | null;
+  supplier_gstin?: string | null;
   adjustment?: number | string;
   total: number | string;
   total_amount?: number | string;

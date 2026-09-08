@@ -59,7 +59,7 @@ def render_invoice_pdf(invoice, organization) -> bytes:
         rightMargin=18 * mm,
         topMargin=18 * mm,
         bottomMargin=18 * mm,
-        title=f"Invoice {invoice.invoice_number}",
+        title=f"{'Tax Invoice' if organization.gstin else 'Invoice'} {invoice.invoice_number}",
         author=organization.legal_name or organization.name,
     )
     styles = getSampleStyleSheet()
@@ -75,6 +75,11 @@ def render_invoice_pdf(invoice, organization) -> bytes:
 
     currency = invoice.currency or organization.default_currency or "INR"
     customer = invoice.customer
+    # Only a GST-registered supplier issues a "Tax Invoice". An unregistered
+    # supplier (below the registration threshold) issues a Bill of Supply and
+    # charges no GST — labelling that a tax invoice would misrepresent it.
+    is_tax_invoice = bool(organization.gstin) and D(invoice.tax_amount) > 0
+    doc_heading = "TAX INVOICE" if is_tax_invoice else "BILL OF SUPPLY" if organization.country == "IN" and not organization.gstin else "INVOICE"
     story = []
 
     # --- Header: organization block + invoice meta --------------------------------
@@ -97,7 +102,7 @@ def render_invoice_pdf(invoice, organization) -> bytes:
 
     status_label = (invoice.status.value if hasattr(invoice.status, "value") else str(invoice.status)).replace("_", " ").upper()
     meta_rows = [
-        [_p("INVOICE", ParagraphStyle("inv", parent=heading, alignment=TA_RIGHT)), ""],
+        [_p(doc_heading, ParagraphStyle("inv", parent=heading, alignment=TA_RIGHT)), ""],
         [_p("Invoice number", small), _p(invoice.invoice_number, right_bold)],
         [_p("Issue date", small), _p(fmt_date(invoice.issue_date), right)],
         [_p("Due date", small), _p(fmt_date(invoice.due_date), right)],
@@ -126,25 +131,34 @@ def render_invoice_pdf(invoice, organization) -> bytes:
         bill_lines.append(_p(line, base))
     if customer.gstin:
         bill_lines.append(_p(f"GSTIN: {customer.gstin}", base))
+    # Place of supply is a mandatory field on a GST tax invoice.
+    pos_name = getattr(invoice, "place_of_supply_name", None)
+    pos_code = getattr(invoice, "place_of_supply_code", None)
+    if pos_name:
+        bill_lines.append(_p(f"Place of supply: {pos_name}{f' ({pos_code})' if pos_code else ''}", base))
     for line in _address_lines(customer.email, customer.phone):
         bill_lines.append(_p(line, small))
     story.extend(bill_lines)
     story.append(Spacer(1, 6 * mm))
 
     # --- Line items ---------------------------------------------------------------------------
-    rows = [[_p("#", bold), _p("Description", bold), _p("Qty", right_bold), _p("Unit price", right_bold), _p("Tax %", right_bold), _p("Amount", right_bold)]]
+    rows = [[
+        _p("#", bold), _p("Description", bold), _p("HSN/SAC", bold), _p("Qty", right_bold),
+        _p("Unit price", right_bold), _p("Tax %", right_bold), _p("Amount", right_bold),
+    ]]
     for idx, item in enumerate(sorted(invoice.items, key=lambda i: i.position or 0), start=1):
         rows.append(
             [
                 _p(str(idx), base),
                 _p(item.description, base),
+                _p(getattr(item, "hsn_sac_code", None) or "-", small),
                 _p(fmt_qty(item.quantity), right),
                 _p(fmt_money(item.unit_price, currency), right),
                 _p(f"{q2(item.tax_rate_pct):.2f}", right),
                 _p(fmt_money(item.amount, currency), right),
             ]
         )
-    items_table = Table(rows, colWidths=[8 * mm, 76 * mm, 16 * mm, 30 * mm, 14 * mm, 30 * mm], repeatRows=1)
+    items_table = Table(rows, colWidths=[7 * mm, 54 * mm, 21 * mm, 14 * mm, 28 * mm, 13 * mm, 30 * mm], repeatRows=1)
     items_table.setStyle(
         TableStyle(
             [
@@ -164,7 +178,19 @@ def render_invoice_pdf(invoice, organization) -> bytes:
     totals_rows = [[_p("Subtotal", base), _p(fmt_money(invoice.subtotal, currency), right)]]
     if D(invoice.discount_amount) > 0:
         totals_rows.append([_p(f"Discount ({q2(invoice.discount_pct):.2f}%)", base), _p("- " + fmt_money(invoice.discount_amount, currency), right)])
-    totals_rows.append([_p("Tax", base), _p(fmt_money(invoice.tax_amount, currency), right)])
+    # A tax invoice must show the heads, not one combined figure. Fall back to a
+    # single "Tax" line only for documents with no split (exports, or rows
+    # predating the GST migration).
+    cgst = D(getattr(invoice, "cgst_amount", 0))
+    sgst = D(getattr(invoice, "sgst_amount", 0))
+    igst = D(getattr(invoice, "igst_amount", 0))
+    if cgst > 0 or sgst > 0:
+        totals_rows.append([_p("CGST", base), _p(fmt_money(cgst, currency), right)])
+        totals_rows.append([_p("SGST/UTGST", base), _p(fmt_money(sgst, currency), right)])
+    elif igst > 0:
+        totals_rows.append([_p("IGST", base), _p(fmt_money(igst, currency), right)])
+    else:
+        totals_rows.append([_p("Tax", base), _p(fmt_money(invoice.tax_amount, currency), right)])
     totals_rows.append([_p("Total", bold), _p(fmt_money(invoice.total, currency), right_bold)])
     totals_rows.append([_p("Amount paid", base), _p(fmt_money(invoice.amount_paid, currency), right)])
     totals_rows.append([_p("Amount due", bold), _p(fmt_money(invoice.amount_due, currency), right_bold)])
