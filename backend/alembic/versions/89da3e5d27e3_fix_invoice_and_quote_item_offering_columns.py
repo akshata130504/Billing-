@@ -10,7 +10,7 @@ endpoint touching invoice or quote line items errored with
 `UndefinedColumn: invoice_items.offering_id does not exist`.
 
 Revision ID: 89da3e5d27e3
-Revises: bb647ceacf66
+Revises: cbbe51c36b05
 Create Date: 2026-09-08 17:05:00.000000
 
 """
@@ -23,7 +23,7 @@ from sqlalchemy import inspect
 
 # revision identifiers, used by Alembic.
 revision: str = '89da3e5d27e3'
-down_revision: Union[str, None] = 'bb647ceacf66'
+down_revision: Union[str, None] = 'cbbe51c36b05'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

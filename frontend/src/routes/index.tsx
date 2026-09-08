@@ -29,12 +29,12 @@ import {
   TrialsPage,
 } from '../pages/subscriptions';
 import { InvoicesListPage, InvoiceFormPage, InvoiceDetailPage } from '../pages/invoices';
+import { PaymentsListPage, PaymentDetailPage, PaymentsProvider } from '../pages/payments';
 import {
   CollectionsDashboardPage,
   CollectionsInvoiceListPage,
   CollectionsInvoiceDetailPage,
 } from '../pages/collections';
-import { PaymentsListPage, PaymentDetailPage, PaymentsProvider } from '../pages/payments';
 import { PayInvoicePage, PublicQuotePage, LandingPage } from '../pages/public';
 import { ActivityPage } from '../pages/activity';
 import {
