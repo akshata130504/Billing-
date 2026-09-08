@@ -47,6 +47,7 @@ export interface PaymentRefund {
 
 export interface Payment {
   id: string; // e.g. PAY-2026-001
+  backendId?: string;
   receiptNumber: string; // e.g. RCT-2026-001
   paymentType: PaymentType;
   customerId: string;

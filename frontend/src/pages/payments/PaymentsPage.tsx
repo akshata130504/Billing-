@@ -7,10 +7,13 @@ import { PaymentTable } from './components/PaymentTable';
 import { RecordPaymentModal } from './components/RecordPaymentModal';
 import { RefundModal } from './components/RefundModal';
 import { ReceiptModal } from './components/ReceiptModal';
-import { Plus } from 'lucide-react';
+import { useAuth } from '../../hooks/useAuth';
+import { Plus, RefreshCw } from 'lucide-react';
 
 export function PaymentsPage() {
-  const { payments, customers } = usePayments();
+  const { payments, customers, isLoading, refreshPayments } = usePayments();
+  const { hasRole } = useAuth();
+  const canRecord = hasRole('finance');
 
   // Filters State
   const [filters, setFilters] = useState<PaymentFilterState>({
@@ -114,21 +117,32 @@ export function PaymentsPage() {
             <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
               {filteredPayments.length}
             </span>
+            <button
+              type="button"
+              onClick={() => refreshPayments()}
+              disabled={isLoading}
+              title="Refresh payments"
+              className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-brand-600' : ''}`} />
+            </button>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
             Track customer payments, invoice settlements and refunds.
           </p>
         </div>
 
-        {/* Primary Action */}
-        <button
-          type="button"
-          onClick={() => setIsRecordOpen(true)}
-          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 shadow-2xs transition-colors self-start sm:self-auto"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Record Payment</span>
-        </button>
+        {/* Primary Action - Gated by Finance/Admin/Owner RBAC */}
+        {canRecord && (
+          <button
+            type="button"
+            onClick={() => setIsRecordOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 shadow-2xs transition-colors self-start sm:self-auto"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Record Payment</span>
+          </button>
+        )}
       </div>
 
       {/* Summary Cards */}

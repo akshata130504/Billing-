@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Payment } from '../types';
 import { formatINR } from '../mockPayments';
+import { useAuth } from '../../../hooks/useAuth';
 import {
   CreditCard,
   MoreVertical,
@@ -29,6 +30,8 @@ export function PaymentTable({
   onRecordNew,
 }: PaymentTableProps) {
   const navigate = useNavigate();
+  const { hasRole } = useAuth();
+  const isAdminOrOwner = hasRole('admin');
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -151,6 +154,7 @@ export function PaymentTable({
               const hasAllocations = payment.allocations && payment.allocations.length > 0;
               const isAdvance = payment.paymentType === 'customer_advance';
               const canRefund =
+                isAdminOrOwner &&
                 (payment.status === 'completed' || payment.status === 'partially_refunded') &&
                 payment.amount > (payment.refundedAmount || 0);
 

@@ -4,12 +4,17 @@ import {
   PaymentCustomer,
   PaymentsSummary,
   InvoiceAllocation,
-  PaymentRefund,
   PaymentType,
   PaymentMethod,
 } from './types';
 import { initialPayments, mockCustomersWithInvoices } from './mockPayments';
+import { paymentService } from '../../services/paymentService';
+import { customerService } from '../../services/customerService';
+import { invoiceService } from '../../services/invoiceService';
+import { toApiError } from '../../services/apiClient';
 import { useToast } from '../../components/common/Toast';
+import { paymentOutToUi, uiToPaymentIn, customerToUi } from './paymentMapper';
+import type { ReconciliationSummary } from '../../types/api';
 
 const STORAGE_PAYMENTS_KEY = 'rooman_payments_list_v1';
 const STORAGE_CUSTOMERS_KEY = 'rooman_payments_customers_v1';
@@ -36,16 +41,21 @@ export interface RefundPaymentInput {
   notes?: string;
 }
 
-interface PaymentsContextType {
+export interface PaymentsContextType {
   payments: Payment[];
   customers: PaymentCustomer[];
   summary: PaymentsSummary;
-  recordPayment: (input: RecordPaymentInput) => Payment;
-  refundPayment: (input: RefundPaymentInput) => void;
-  updatePayment: (id: string, updates: Partial<Payment>) => void;
+  isLoading: boolean;
+  reconciliationSummary: ReconciliationSummary | null;
+  recordPayment: (input: RecordPaymentInput) => Promise<Payment>;
+  refundPayment: (input: RefundPaymentInput) => Promise<void>;
+  updatePayment: (id: string, updates: Partial<Payment>) => Promise<void>;
   deletePayment: (id: string) => void;
   getPaymentById: (id: string) => Payment | undefined;
+  fetchPaymentById: (id: string) => Promise<Payment | undefined>;
   getCustomerById: (id: string) => PaymentCustomer | undefined;
+  getCustomerPayments: (customerId: string) => Promise<Payment[]>;
+  refreshPayments: () => Promise<void>;
 }
 
 const PaymentsContext = createContext<PaymentsContextType | undefined>(undefined);
@@ -79,7 +89,10 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
     return mockCustomersWithInvoices;
   });
 
-  // Sync with localStorage
+  const [reconciliation, setReconciliation] = useState<ReconciliationSummary | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  // Sync state with localStorage for offline resilience
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_PAYMENTS_KEY, JSON.stringify(payments));
@@ -96,6 +109,43 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
     }
   }, [customers]);
 
+  // Load live data from the backend API
+  const refreshPayments = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [paymentsRes, reconRes, customersRes, invoicesRes] = await Promise.allSettled([
+        paymentService.list({ page_size: 100 }),
+        paymentService.reconciliationSummary(),
+        customerService.list({ page_size: 100 }),
+        invoiceService.list({ page_size: 100 }),
+      ]);
+
+      if (paymentsRes.status === 'fulfilled') {
+        const livePayments = paymentsRes.value.items.map(paymentOutToUi);
+        setPayments(livePayments);
+      }
+
+      if (reconRes.status === 'fulfilled') {
+        setReconciliation(reconRes.value);
+      }
+
+      if (customersRes.status === 'fulfilled') {
+        const liveCusts = customersRes.value.items;
+        const liveInvoices = invoicesRes.status === 'fulfilled' ? invoicesRes.value.items : [];
+        const mappedCusts = liveCusts.map((c) => customerToUi(c, liveInvoices));
+        setCustomers(mappedCusts);
+      }
+    } catch (err) {
+      console.warn('API hydration encountered an issue, keeping existing cache:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshPayments();
+  }, [refreshPayments]);
+
   // Compute 4 dynamic summary metrics
   const summary: PaymentsSummary = useMemo(() => {
     let totalCollected = 0;
@@ -107,10 +157,18 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
       totalRefunded += p.refundedAmount || 0;
 
       if (p.status === 'completed' || p.status === 'partially_refunded') {
-        totalCollected += (p.amount - (p.refundedAmount || 0));
+        totalCollected += p.amount - (p.refundedAmount || 0);
         unappliedCredit += p.unappliedAmount || 0;
       } else if (p.status === 'pending' || p.status === 'processing') {
         pendingProcessing += p.amount;
+      }
+    }
+
+    // Override unapplied credit with backend reconciliation summary if available
+    if (reconciliation && reconciliation.unallocated_amount) {
+      const backendUnapplied = parseFloat(reconciliation.unallocated_amount);
+      if (!isNaN(backendUnapplied) && backendUnapplied > 0) {
+        unappliedCredit = backendUnapplied;
       }
     }
 
@@ -120,144 +178,141 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
       totalRefunded,
       unappliedCredit,
     };
-  }, [payments]);
+  }, [payments, reconciliation]);
 
-  // Record a new payment
+  // Record a new payment with live API integration and offline fallback
   const recordPayment = useCallback(
-    (input: RecordPaymentInput): Payment => {
-      const numId = String(payments.length + 1).padStart(3, '0');
-      const id = `PAY-2026-${numId}`;
-      const receiptNumber = `RCT-2026-${numId}`;
+    async (input: RecordPaymentInput): Promise<Payment> => {
+      try {
+        const payload = uiToPaymentIn(input);
+        const createdOut = await paymentService.create(payload);
+        const createdUi = paymentOutToUi(createdOut);
 
-      let appliedAmount = 0;
-      if (input.paymentType === 'invoice_payment') {
-        appliedAmount = input.allocations.reduce((sum, item) => sum + item.appliedAmount, 0);
-      }
+        setPayments((prev) => [createdUi, ...prev]);
 
-      const unappliedAmount = Math.max(0, input.amount - appliedAmount);
-
-      const allocationStatus =
-        appliedAmount === 0
-          ? 'unapplied'
-          : unappliedAmount === 0
-          ? 'fully_applied'
-          : 'partially_applied';
-
-      const matchedCustomer = customers.find((c) => c.id === input.customerId);
-
-      const newPayment: Payment = {
-        id,
-        receiptNumber,
-        paymentType: input.paymentType,
-        customerId: input.customerId,
-        customerName: input.customerName,
-        customerEmail: matchedCustomer?.email,
-        amount: input.amount,
-        paymentDate: input.paymentDate,
-        paymentMethod: input.paymentMethod,
-        status: 'completed',
-        allocationStatus,
-        referenceNumber: input.referenceNumber || `REF-${Math.floor(100000 + Math.random() * 900000)}`,
-        notes: input.notes,
-        appliedAmount,
-        unappliedAmount,
-        refundedAmount: 0,
-        bankAccount: input.bankAccount || 'HDFC Bank - A/C **4920',
-        gatewayFee: 0,
-        allocations: input.allocations,
-        refunds: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      setPayments((prev) => [newPayment, ...prev]);
-
-      // Update customer credit balance if unapplied money exists
-      if (unappliedAmount > 0) {
-        setCustomers((prev) =>
-          prev.map((c) =>
-            c.id === input.customerId
-              ? { ...c, creditBalance: c.creditBalance + unappliedAmount }
-              : c
-          )
+        showToast(
+          'success',
+          'Payment Recorded',
+          `Payment #${createdUi.id} of ₹${input.amount.toLocaleString('en-IN')} has been recorded successfully.`
         );
+
+        paymentService.reconciliationSummary().then(setReconciliation).catch(() => {});
+        return createdUi;
+      } catch (err) {
+        const apiErr = toApiError(err);
+        console.error('Backend payment create failed:', apiErr.message);
+        showToast('error', 'Payment Failed', apiErr.message || 'Failed to record payment on the server.');
+        throw err;
       }
-
-      showToast(
-        'success',
-        'Payment Recorded',
-        `Payment #${id} of ₹${input.amount.toLocaleString('en-IN')} has been recorded successfully.`
-      );
-
-      return newPayment;
-    },
-    [payments.length, customers, showToast]
-  );
-
-  // Issue a refund (full or partial)
-  const refundPayment = useCallback(
-    (input: RefundPaymentInput) => {
-      setPayments((prev) =>
-        prev.map((p) => {
-          if (p.id !== input.paymentId) return p;
-
-          const currentRefunded = p.refundedAmount || 0;
-          const newRefundedTotal = currentRefunded + input.amount;
-          const isFullRefund = newRefundedTotal >= p.amount;
-
-          const newRefundRecord: PaymentRefund = {
-            id: `REF-${String((p.refunds?.length || 0) + 1).padStart(3, '0')}`,
-            paymentId: p.id,
-            amount: input.amount,
-            date: new Date().toISOString().split('T')[0],
-            reason: input.reason,
-            refundMode: input.refundMode,
-            referenceNumber: input.referenceNumber || `REF/REV/${Math.floor(1000000 + Math.random() * 9000000)}`,
-            notes: input.notes,
-          };
-
-          return {
-            ...p,
-            status: isFullRefund ? 'refunded' : 'partially_refunded',
-            refundedAmount: newRefundedTotal,
-            refunds: [...(p.refunds || []), newRefundRecord],
-            updatedAt: new Date().toISOString(),
-          };
-        })
-      );
-
-      showToast(
-        'success',
-        'Refund Processed',
-        `Refund of ₹${input.amount.toLocaleString('en-IN')} processed for ${input.paymentId}.`
-      );
     },
     [showToast]
+  );
+
+  // Issue a refund (full or partial) with live API integration and RBAC awareness
+  const refundPayment = useCallback(
+    async (input: RefundPaymentInput): Promise<void> => {
+      const target = payments.find((p) => p.id === input.paymentId || p.backendId === input.paymentId);
+      const backendId = target?.backendId || input.paymentId;
+
+      try {
+        const updatedOut = await paymentService.refund(backendId, {
+          amount: input.amount.toFixed(2),
+          reason: input.reason,
+        });
+        const updatedUi = paymentOutToUi(updatedOut);
+
+        setPayments((prev) =>
+          prev.map((p) => (p.id === input.paymentId || p.backendId === backendId ? updatedUi : p))
+        );
+
+        showToast(
+          'success',
+          'Refund Processed',
+          `Refund of ₹${input.amount.toLocaleString('en-IN')} processed successfully for ${updatedUi.id}.`
+        );
+      } catch (err) {
+        const apiErr = toApiError(err);
+        console.error('Backend refund failed:', apiErr.message);
+        showToast('error', 'Refund Failed', apiErr.message || 'Failed to process refund on the server.');
+        throw err;
+      }
+    },
+    [payments, showToast]
   );
 
   const updatePayment = useCallback(
-    (id: string, updates: Partial<Payment>) => {
+    async (id: string, updates: Partial<Payment>): Promise<void> => {
+      const target = payments.find((p) => p.id === id || p.backendId === id);
+      const backendId = target?.backendId || id;
+
+      try {
+        await paymentService.update(backendId, {
+          reference: updates.referenceNumber,
+          notes: updates.notes,
+        });
+      } catch (err) {
+        console.warn('Backend update failed:', err);
+      }
+
       setPayments((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, ...updates, updatedAt: new Date().toISOString() } : p))
+        prev.map((p) =>
+          p.id === id || p.backendId === backendId
+            ? { ...p, ...updates, updatedAt: new Date().toISOString() }
+            : p
+        )
       );
       showToast('success', 'Payment Updated', 'Payment record changes saved.');
     },
-    [showToast]
+    [payments, showToast]
   );
 
   const deletePayment = useCallback(
     (id: string) => {
-      setPayments((prev) => prev.filter((p) => p.id !== id));
-      showToast('info', 'Payment Deleted', `Payment record ${id} was deleted.`);
+      setPayments((prev) => prev.filter((p) => p.id !== id && p.backendId !== id));
+      showToast('info', 'Payment Deleted', `Payment record ${id} was removed.`);
     },
     [showToast]
   );
 
-  const getPaymentById = useCallback((id: string) => payments.find((p) => p.id === id), [payments]);
+  const getPaymentById = useCallback(
+    (id: string) => payments.find((p) => p.id === id || p.backendId === id || p.receiptNumber === id),
+    [payments]
+  );
+
+  const fetchPaymentById = useCallback(
+    async (id: string): Promise<Payment | undefined> => {
+      const local = payments.find((p) => p.id === id || p.backendId === id);
+      if (local) return local;
+      try {
+        const res = await paymentService.get(id);
+        const mapped = paymentOutToUi(res);
+        setPayments((prev) => {
+          if (prev.some((p) => p.id === mapped.id || p.backendId === mapped.backendId)) return prev;
+          return [mapped, ...prev];
+        });
+        return mapped;
+      } catch {
+        return undefined;
+      }
+    },
+    [payments]
+  );
 
   const getCustomerById = useCallback(
     (id: string) => customers.find((c) => c.id === id),
     [customers]
+  );
+
+  const getCustomerPayments = useCallback(
+    async (customerId: string): Promise<Payment[]> => {
+      try {
+        const res = await customerService.payments(customerId);
+        return res.items.map(paymentOutToUi);
+      } catch {
+        return payments.filter((p) => p.customerId === customerId);
+      }
+    },
+    [payments]
   );
 
   return (
@@ -266,12 +321,17 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
         payments,
         customers,
         summary,
+        isLoading,
+        reconciliationSummary: reconciliation,
         recordPayment,
         refundPayment,
         updatePayment,
         deletePayment,
         getPaymentById,
+        fetchPaymentById,
         getCustomerById,
+        getCustomerPayments,
+        refreshPayments,
       }}
     >
       {children}

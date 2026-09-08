@@ -51,6 +51,7 @@ export function RecordPaymentModal({
   const [allocatedAmounts, setAllocatedAmounts] = useState<Record<string, string>>({});
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
 
   const selectedCustomer = customers.find((c) => c.id === customerId);
   const outstandingInvoices = selectedCustomer?.outstandingInvoices || [];
@@ -189,7 +190,7 @@ export function RecordPaymentModal({
     return Object.keys(errs).length === 0;
   };
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!validate()) return;
 
@@ -227,8 +228,15 @@ export function RecordPaymentModal({
       allocations,
     };
 
-    recordPayment(input);
-    onClose();
+    setSubmitting(true);
+    try {
+      await recordPayment(input);
+      onClose();
+    } catch (err) {
+      console.error('Failed to record payment:', err);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -590,10 +598,11 @@ export function RecordPaymentModal({
           <button
             type="button"
             onClick={handleSubmit}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg shadow-2xs transition-colors"
+            disabled={submitting}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-2xs transition-colors"
           >
             <CheckCircle className="w-3.5 h-3.5" />
-            <span>Record Payment</span>
+            <span>{submitting ? 'Recording...' : 'Record Payment'}</span>
           </button>
         </div>
       </div>

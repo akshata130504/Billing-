@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { usePayments } from './PaymentsContext';
+import { Payment } from './types';
+import { useAuth } from '../../hooks/useAuth';
 import { formatINR } from './mockPayments';
 import { RefundModal } from './components/RefundModal';
 import { ReceiptModal } from './components/ReceiptModal';
@@ -18,14 +20,40 @@ import {
 import { useToast } from '../../components/common/Toast';
 
 export function PaymentDetailsPage() {
-  const { paymentId } = useParams<{ paymentId: string }>();
-  const { getPaymentById } = usePayments();
+  const { paymentId, id: paramId } = useParams<{ paymentId?: string; id?: string }>();
+  const effectiveId = paymentId || paramId;
+  const { getPaymentById, fetchPaymentById } = usePayments();
+  const { hasRole } = useAuth();
+  const isAdminOrOwner = hasRole('admin');
   const { showToast } = useToast();
 
   const [isRefundOpen, setIsRefundOpen] = useState(false);
   const [isReceiptOpen, setIsReceiptOpen] = useState(false);
+  const [livePayment, setLivePayment] = useState<Payment | null>(null);
+  const [loadingLive, setLoadingLive] = useState(false);
 
-  const payment = paymentId ? getPaymentById(paymentId) : undefined;
+  const localPayment = effectiveId ? getPaymentById(effectiveId) : undefined;
+  const payment = livePayment || localPayment;
+
+  useEffect(() => {
+    if (!localPayment && effectiveId) {
+      setLoadingLive(true);
+      fetchPaymentById(effectiveId)
+        .then((p) => {
+          if (p) setLivePayment(p);
+        })
+        .finally(() => setLoadingLive(false));
+    }
+  }, [localPayment, effectiveId, fetchPaymentById]);
+
+  if (loadingLive) {
+    return (
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-12 text-center shadow-2xs">
+        <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+        <p className="text-xs text-slate-500 font-medium">Loading payment details...</p>
+      </div>
+    );
+  }
 
   if (!payment) {
     return (
@@ -103,6 +131,7 @@ export function PaymentDetailsPage() {
 
   const netAmount = payment.amount - (payment.refundedAmount || 0);
   const canRefund =
+    isAdminOrOwner &&
     (payment.status === 'completed' || payment.status === 'partially_refunded') &&
     payment.amount > (payment.refundedAmount || 0);
 
