@@ -3,10 +3,24 @@ import { CheckCircle2, Clock, RotateCcw, CreditCard } from 'lucide-react';
 import { formatMoney } from '../../../utils/format';
 
 export function PaymentSummaryCards() {
-  const { summary } = usePayments();
+  const { summary, filters, total } = usePayments();
+
+  // The totals honour the active filters, so say so rather than implying they
+  // are always organization-wide.
+  const isFiltered =
+    filters.searchQuery.trim() !== '' ||
+    filters.statusTab !== 'all' ||
+    filters.customer !== 'all' ||
+    filters.paymentMethod !== 'all' ||
+    filters.status !== 'all';
 
   return (
     <div className="bg-white border border-slate-200/80 rounded-xl px-4 py-3.5 shadow-2xs">
+      {isFiltered && (
+        <p className="text-[10.5px] text-slate-400 mb-2.5">
+          Totals cover the {total} payment{total === 1 ? '' : 's'} matching the current filters.
+        </p>
+      )}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 divide-y md:divide-y-0 md:divide-x divide-slate-100">
         {/* Total Collected */}
         <div className="flex items-center gap-3">
@@ -30,7 +44,7 @@ export function PaymentSummaryCards() {
           </div>
           <div className="min-w-0">
             <span className="text-[11px] font-medium text-amber-700 block uppercase tracking-wider">
-              Pending / Processing
+              Pending
             </span>
             <span className="text-base font-bold text-amber-900 tracking-tight">
               {formatMoney(summary.pendingProcessing)}
