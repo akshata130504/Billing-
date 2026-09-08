@@ -18,9 +18,48 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+# --- idempotent DDL helpers ---------------------------------------------------
+# The baseline migration (bb647ceacf66) builds the schema with
+# Base.metadata.create_all(), so by the time this revision runs the tables it
+# declares may already exist. Mirrors the guard style used by the lifecycle /
+# timesheet migrations.
+
+
+def _inspector():
+    return sa.inspect(op.get_bind())
+
+
+def _create_table(table_name, *args, **kwargs):
+    if not _inspector().has_table(table_name):
+        op.create_table(table_name, *args, **kwargs)
+
+
+def _create_index(index_name, table_name, *args, **kwargs):
+    insp = _inspector()
+    if not insp.has_table(table_name):
+        return
+    if index_name in {ix["name"] for ix in insp.get_indexes(table_name)}:
+        return
+    op.create_index(index_name, table_name, *args, **kwargs)
+
+
+def _drop_index(index_name, table_name=None, **kwargs):
+    insp = _inspector()
+    if table_name is None or not insp.has_table(table_name):
+        return
+    if index_name not in {ix["name"] for ix in insp.get_indexes(table_name)}:
+        return
+    op.drop_index(index_name, table_name, **kwargs)
+
+
+def _drop_table(table_name):
+    if _inspector().has_table(table_name):
+        op.drop_table(table_name)
+
+
 def upgrade() -> None:
     # 1. dunning_policies
-    op.create_table(
+    _create_table(
         'dunning_policies',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -50,10 +89,10 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('organization_id', 'name', name='uq_dunning_policy_name_per_org'),
     )
-    op.create_index(op.f('ix_dunning_policies_organization_id'), 'dunning_policies', ['organization_id'], unique=False)
+    _create_index(op.f('ix_dunning_policies_organization_id'), 'dunning_policies', ['organization_id'], unique=False)
 
     # 2. dunning_cases
-    op.create_table(
+    _create_table(
         'dunning_cases',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -94,17 +133,17 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('organization_id', 'case_number', name='uq_dunning_case_number_per_org'),
     )
-    op.create_index(op.f('ix_dunning_cases_organization_id'), 'dunning_cases', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_dunning_cases_case_number'), 'dunning_cases', ['case_number'], unique=False)
-    op.create_index(op.f('ix_dunning_cases_policy_id'), 'dunning_cases', ['policy_id'], unique=False)
-    op.create_index(op.f('ix_dunning_cases_customer_id'), 'dunning_cases', ['customer_id'], unique=False)
-    op.create_index(op.f('ix_dunning_cases_subscription_id'), 'dunning_cases', ['subscription_id'], unique=False)
-    op.create_index(op.f('ix_dunning_cases_invoice_id'), 'dunning_cases', ['invoice_id'], unique=False)
-    op.create_index(op.f('ix_dunning_cases_status'), 'dunning_cases', ['status'], unique=False)
-    op.create_index(op.f('ix_dunning_cases_next_retry_at'), 'dunning_cases', ['next_retry_at'], unique=False)
+    _create_index(op.f('ix_dunning_cases_organization_id'), 'dunning_cases', ['organization_id'], unique=False)
+    _create_index(op.f('ix_dunning_cases_case_number'), 'dunning_cases', ['case_number'], unique=False)
+    _create_index(op.f('ix_dunning_cases_policy_id'), 'dunning_cases', ['policy_id'], unique=False)
+    _create_index(op.f('ix_dunning_cases_customer_id'), 'dunning_cases', ['customer_id'], unique=False)
+    _create_index(op.f('ix_dunning_cases_subscription_id'), 'dunning_cases', ['subscription_id'], unique=False)
+    _create_index(op.f('ix_dunning_cases_invoice_id'), 'dunning_cases', ['invoice_id'], unique=False)
+    _create_index(op.f('ix_dunning_cases_status'), 'dunning_cases', ['status'], unique=False)
+    _create_index(op.f('ix_dunning_cases_next_retry_at'), 'dunning_cases', ['next_retry_at'], unique=False)
 
     # 3. dunning_attempts
-    op.create_table(
+    _create_table(
         'dunning_attempts',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -129,12 +168,12 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['payment_attempt_id'], ['payment_attempts.id'], ondelete='SET NULL'),
         sa.PrimaryKeyConstraint('id'),
     )
-    op.create_index(op.f('ix_dunning_attempts_organization_id'), 'dunning_attempts', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_dunning_attempts_case_id'), 'dunning_attempts', ['case_id'], unique=False)
-    op.create_index(op.f('ix_dunning_attempts_status'), 'dunning_attempts', ['status'], unique=False)
+    _create_index(op.f('ix_dunning_attempts_organization_id'), 'dunning_attempts', ['organization_id'], unique=False)
+    _create_index(op.f('ix_dunning_attempts_case_id'), 'dunning_attempts', ['case_id'], unique=False)
+    _create_index(op.f('ix_dunning_attempts_status'), 'dunning_attempts', ['status'], unique=False)
 
     # 4. dunning_communications
-    op.create_table(
+    _create_table(
         'dunning_communications',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -150,15 +189,15 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
     )
-    op.create_index(op.f('ix_dunning_communications_organization_id'), 'dunning_communications', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_dunning_communications_case_id'), 'dunning_communications', ['case_id'], unique=False)
+    _create_index(op.f('ix_dunning_communications_organization_id'), 'dunning_communications', ['organization_id'], unique=False)
+    _create_index(op.f('ix_dunning_communications_case_id'), 'dunning_communications', ['case_id'], unique=False)
 
 
 def downgrade() -> None:
-    op.drop_table('dunning_communications')
-    op.drop_table('dunning_attempts')
-    op.drop_table('dunning_cases')
-    op.drop_table('dunning_policies')
+    _drop_table('dunning_communications')
+    _drop_table('dunning_attempts')
+    _drop_table('dunning_cases')
+    _drop_table('dunning_policies')
     # Enum types
     bind = op.get_bind()
     if bind.dialect.name == 'postgresql':

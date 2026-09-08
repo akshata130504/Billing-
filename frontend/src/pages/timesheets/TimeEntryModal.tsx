@@ -1,0 +1,268 @@
+import React, { useState, useEffect } from 'react';
+import type { TimeEntryCreate, TimeEntryRead, TimeEntryUpdate } from '../../types/api';
+import { Button } from '../../components/common/Button';
+import { Modal } from '../../components/common/Modal';
+import { customerService } from '../../services/customerService';
+
+interface TimeEntryModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSave: (data: TimeEntryCreate | TimeEntryUpdate) => Promise<void>;
+  initialEntry?: TimeEntryRead | null;
+  loading?: boolean;
+}
+
+export function TimeEntryModal({
+  isOpen,
+  onClose,
+  onSave,
+  initialEntry,
+  loading = false,
+}: TimeEntryModalProps) {
+  const [customers, setCustomers] = useState<Array<{ id: string; display_name: string; customer_number: string }>>([]);
+  const [customerId, setCustomerId] = useState('');
+  const [projectTitle, setProjectTitle] = useState('');
+  const [dateStr, setDateStr] = useState(new Date().toISOString().split('T')[0]);
+  const [startTime, setStartTime] = useState('');
+  const [endTime, setEndTime] = useState('');
+  const [durationHours, setDurationHours] = useState<number | string>(1);
+  const [description, setDescription] = useState('');
+  const [billable, setBillable] = useState(true);
+  const [billingRate, setBillingRate] = useState<number | string>(100);
+
+  useEffect(() => {
+    customerService.list({ page_size: 100 }).then((res) => {
+      setCustomers(res.items || []);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (initialEntry) {
+      setCustomerId(initialEntry.customer_id || '');
+      setProjectTitle(initialEntry.project_name || '');
+      setDateStr(initialEntry.date);
+      setStartTime(initialEntry.start_time || '');
+      setEndTime(initialEntry.end_time || '');
+      setDurationHours(parseFloat(initialEntry.duration_hours) || 1);
+      setDescription(initialEntry.description);
+      setBillable(initialEntry.billable);
+      setBillingRate(parseFloat(initialEntry.billing_rate) || 0);
+    } else {
+      setCustomerId('');
+      setProjectTitle('');
+      setDateStr(new Date().toISOString().split('T')[0]);
+      setStartTime('');
+      setEndTime('');
+      setDurationHours(1);
+      setDescription('');
+      setBillable(true);
+      setBillingRate(100);
+    }
+  }, [initialEntry, isOpen]);
+
+  // Auto calculate duration from start and end time if entered
+  useEffect(() => {
+    if (startTime && endTime) {
+      const [sh, sm] = startTime.split(':').map(Number);
+      const [eh, em] = endTime.split(':').map(Number);
+      if (!isNaN(sh) && !isNaN(sm) && !isNaN(eh) && !isNaN(em)) {
+        const startMin = sh * 60 + sm;
+        const endMin = eh * 60 + em;
+        if (endMin > startMin) {
+          const diffHours = (endMin - startMin) / 60;
+          setDurationHours(parseFloat(diffHours.toFixed(2)));
+        }
+      }
+    }
+  }, [startTime, endTime]);
+
+  const numDuration = typeof durationHours === 'number' ? durationHours : parseFloat(durationHours) || 0;
+  const numRate = typeof billingRate === 'number' ? billingRate : parseFloat(billingRate) || 0;
+  const estimatedAmount = billable ? (numDuration * numRate).toFixed(2) : '0.00';
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const payload: TimeEntryCreate = {
+      customer_id: customerId || null,
+      project_name: projectTitle.trim() || null,
+      date: dateStr,
+      start_time: startTime || null,
+      end_time: endTime || null,
+      duration_hours: numDuration,
+      description: description.trim(),
+      billable,
+      billing_rate: billable ? numRate : 0,
+    };
+    await onSave(payload);
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={initialEntry ? 'Edit Time Entry' : 'Log Time Entry'}
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              Work Date <span className="text-rose-500">*</span>
+            </label>
+            <div className="relative">
+              <input
+                type="date"
+                required
+                value={dateStr}
+                onChange={(e) => setDateStr(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              Customer / Account
+            </label>
+            <select
+              value={customerId}
+              onChange={(e) => setCustomerId(e.target.value)}
+              className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            >
+              <option value="">No Customer / Internal</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.display_name} ({c.customer_number})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+            Project / Engagement Name
+          </label>
+          <input
+            type="text"
+            placeholder="e.g. Cloud Migration, Q3 Security Audit, Frontend Sprint"
+            value={projectTitle}
+            onChange={(e) => setProjectTitle(e.target.value)}
+            className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          />
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              Start Time
+            </label>
+            <input
+              type="time"
+              value={startTime}
+              onChange={(e) => setStartTime(e.target.value)}
+              className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              End Time
+            </label>
+            <input
+              type="time"
+              value={endTime}
+              onChange={(e) => setEndTime(e.target.value)}
+              className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              Duration (Hours) <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="number"
+              step="0.25"
+              min="0.1"
+              max="24"
+              required
+              value={durationHours}
+              onChange={(e) => setDurationHours(e.target.value)}
+              className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none font-semibold text-slate-900"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+            Work Description <span className="text-rose-500">*</span>
+          </label>
+          <textarea
+            rows={3}
+            required
+            placeholder="Detailed description of tasks completed, client deliverables, or deliverables achieved..."
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          />
+        </div>
+
+        <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="billableCheck"
+                checked={billable}
+                onChange={(e) => setBillable(e.target.checked)}
+                className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+              />
+              <label htmlFor="billableCheck" className="text-sm font-semibold text-slate-900 cursor-pointer">
+                Billable to Client
+              </label>
+            </div>
+            {billable && (
+              <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                Billable Entry
+              </span>
+            )}
+          </div>
+
+          {billable && (
+            <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-200/80">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">
+                  Hourly Billing Rate
+                </label>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  value={billingRate}
+                  onChange={(e) => setBillingRate(e.target.value)}
+                  className="w-full px-3 py-1.5 text-sm bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none font-medium"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">
+                  Estimated Total Amount
+                </label>
+                <div className="px-3 py-1.5 text-sm bg-emerald-50/70 border border-emerald-200 rounded-lg font-bold text-emerald-800 flex items-center justify-between">
+                  <span>INR</span>
+                  <span>{estimatedAmount}</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-200">
+          <Button variant="ghost" size="sm" type="button" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" size="sm" type="submit" disabled={loading}>
+            {loading ? 'Saving...' : initialEntry ? 'Update Entry' : 'Log Time'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}

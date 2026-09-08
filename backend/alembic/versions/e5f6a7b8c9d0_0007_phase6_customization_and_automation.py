@@ -18,9 +18,48 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+# --- idempotent DDL helpers ---------------------------------------------------
+# The baseline migration (bb647ceacf66) builds the schema with
+# Base.metadata.create_all(), so by the time this revision runs the tables it
+# declares may already exist. Mirrors the guard style used by the lifecycle /
+# timesheet migrations.
+
+
+def _inspector():
+    return sa.inspect(op.get_bind())
+
+
+def _create_table(table_name, *args, **kwargs):
+    if not _inspector().has_table(table_name):
+        op.create_table(table_name, *args, **kwargs)
+
+
+def _create_index(index_name, table_name, *args, **kwargs):
+    insp = _inspector()
+    if not insp.has_table(table_name):
+        return
+    if index_name in {ix["name"] for ix in insp.get_indexes(table_name)}:
+        return
+    op.create_index(index_name, table_name, *args, **kwargs)
+
+
+def _drop_index(index_name, table_name=None, **kwargs):
+    insp = _inspector()
+    if table_name is None or not insp.has_table(table_name):
+        return
+    if index_name not in {ix["name"] for ix in insp.get_indexes(table_name)}:
+        return
+    op.drop_index(index_name, table_name, **kwargs)
+
+
+def _drop_table(table_name):
+    if _inspector().has_table(table_name):
+        op.drop_table(table_name)
+
+
 def upgrade() -> None:
     # 1. transaction_number_series
-    op.create_table(
+    _create_table(
         'transaction_number_series',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -40,11 +79,11 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('organization_id', 'module', 'name', name='uq_number_series_name_per_module'),
     )
-    op.create_index(op.f('ix_transaction_number_series_organization_id'), 'transaction_number_series', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_transaction_number_series_module'), 'transaction_number_series', ['module'], unique=False)
+    _create_index(op.f('ix_transaction_number_series_organization_id'), 'transaction_number_series', ['organization_id'], unique=False)
+    _create_index(op.f('ix_transaction_number_series_module'), 'transaction_number_series', ['module'], unique=False)
 
     # 2. document_templates
-    op.create_table(
+    _create_table(
         'document_templates',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -79,10 +118,10 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('organization_id', 'document_type', 'name', name='uq_document_template_name'),
     )
-    op.create_index(op.f('ix_document_templates_organization_id'), 'document_templates', ['organization_id'], unique=False)
+    _create_index(op.f('ix_document_templates_organization_id'), 'document_templates', ['organization_id'], unique=False)
 
     # 3. reporting_tags
-    op.create_table(
+    _create_table(
         'reporting_tags',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -96,10 +135,10 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('organization_id', 'name', name='uq_reporting_tag_name'),
     )
-    op.create_index(op.f('ix_reporting_tags_organization_id'), 'reporting_tags', ['organization_id'], unique=False)
+    _create_index(op.f('ix_reporting_tags_organization_id'), 'reporting_tags', ['organization_id'], unique=False)
 
     # 4. web_tabs
-    op.create_table(
+    _create_table(
         'web_tabs',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -113,10 +152,10 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('organization_id', 'tab_name', name='uq_web_tab_name'),
     )
-    op.create_index(op.f('ix_web_tabs_organization_id'), 'web_tabs', ['organization_id'], unique=False)
+    _create_index(op.f('ix_web_tabs_organization_id'), 'web_tabs', ['organization_id'], unique=False)
 
     # 5. automation_rules
-    op.create_table(
+    _create_table(
         'automation_rules',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -137,10 +176,10 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('organization_id', 'name', name='uq_automation_rule_name'),
     )
-    op.create_index(op.f('ix_automation_rules_organization_id'), 'automation_rules', ['organization_id'], unique=False)
+    _create_index(op.f('ix_automation_rules_organization_id'), 'automation_rules', ['organization_id'], unique=False)
 
     # 6. automation_actions
-    op.create_table(
+    _create_table(
         'automation_actions',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -160,11 +199,11 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['rule_id'], ['automation_rules.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
     )
-    op.create_index(op.f('ix_automation_actions_organization_id'), 'automation_actions', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_automation_actions_rule_id'), 'automation_actions', ['rule_id'], unique=False)
+    _create_index(op.f('ix_automation_actions_organization_id'), 'automation_actions', ['organization_id'], unique=False)
+    _create_index(op.f('ix_automation_actions_rule_id'), 'automation_actions', ['rule_id'], unique=False)
 
     # 7. outbound_webhook_deliveries
-    op.create_table(
+    _create_table(
         'outbound_webhook_deliveries',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -184,10 +223,10 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['rule_id'], ['automation_rules.id'], ondelete='SET NULL'),
         sa.PrimaryKeyConstraint('id'),
     )
-    op.create_index(op.f('ix_outbound_webhook_deliveries_organization_id'), 'outbound_webhook_deliveries', ['organization_id'], unique=False)
+    _create_index(op.f('ix_outbound_webhook_deliveries_organization_id'), 'outbound_webhook_deliveries', ['organization_id'], unique=False)
 
     # 8. automation_logs
-    op.create_table(
+    _create_table(
         'automation_logs',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -209,13 +248,13 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
     )
-    op.create_index(op.f('ix_automation_logs_organization_id'), 'automation_logs', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_automation_logs_action_type'), 'automation_logs', ['action_type'], unique=False)
-    op.create_index(op.f('ix_automation_logs_status'), 'automation_logs', ['status'], unique=False)
-    op.create_index(op.f('ix_automation_logs_occurred_at'), 'automation_logs', ['occurred_at'], unique=False)
+    _create_index(op.f('ix_automation_logs_organization_id'), 'automation_logs', ['organization_id'], unique=False)
+    _create_index(op.f('ix_automation_logs_action_type'), 'automation_logs', ['action_type'], unique=False)
+    _create_index(op.f('ix_automation_logs_status'), 'automation_logs', ['status'], unique=False)
+    _create_index(op.f('ix_automation_logs_occurred_at'), 'automation_logs', ['occurred_at'], unique=False)
 
     # 9. automation_schedules
-    op.create_table(
+    _create_table(
         'automation_schedules',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -239,19 +278,19 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('organization_id', 'name', name='uq_automation_schedule_name'),
     )
-    op.create_index(op.f('ix_automation_schedules_organization_id'), 'automation_schedules', ['organization_id'], unique=False)
+    _create_index(op.f('ix_automation_schedules_organization_id'), 'automation_schedules', ['organization_id'], unique=False)
 
 
 def downgrade() -> None:
-    op.drop_table('automation_schedules')
-    op.drop_table('automation_logs')
-    op.drop_table('outbound_webhook_deliveries')
-    op.drop_table('automation_actions')
-    op.drop_table('automation_rules')
-    op.drop_table('web_tabs')
-    op.drop_table('reporting_tags')
-    op.drop_table('document_templates')
-    op.drop_table('transaction_number_series')
+    _drop_table('automation_schedules')
+    _drop_table('automation_logs')
+    _drop_table('outbound_webhook_deliveries')
+    _drop_table('automation_actions')
+    _drop_table('automation_rules')
+    _drop_table('web_tabs')
+    _drop_table('reporting_tags')
+    _drop_table('document_templates')
+    _drop_table('transaction_number_series')
 
     bind = op.get_bind()
     if bind.dialect.name == 'postgresql':

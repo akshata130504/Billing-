@@ -22,7 +22,7 @@ export type QuoteStatus =
   | 'declined'
   | 'expired'
   | 'converted';
-export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'paused' | 'cancelled';
+export type SubscriptionStatus = 'draft' | 'pending_activation' | 'active' | 'trialing' | 'past_due' | 'paused' | 'cancelled' | 'expired';
 export type InvoiceStatus = 'draft' | 'sent' | 'partially_paid' | 'paid' | 'overdue' | 'void';
 /**
  * `razorpay` is only ever set by the gateway flow; manual recording accepts
@@ -507,7 +507,18 @@ export interface SubscriptionOut {
   plan: SubscriptionPlanRef;
   quantity: number;
   status: SubscriptionStatus;
+  billing_frequency?: string;
+  currency?: string;
+  pricing_model?: string;
+  unit_price?: string;
+  subtotal?: string;
+  discount_amount?: string;
+  tax_amount?: string;
+  total_amount?: string;
+  auto_renewal?: boolean;
+  cancellation_reason?: string | null;
   start_date: string;
+  trial_start?: string | null;
   trial_end: string | null;
   current_period_start: string;
   current_period_end: string;
@@ -527,10 +538,14 @@ export interface SubscriptionIn {
   customer_id: string;
   plan_id: string;
   quantity?: number;
+  status?: SubscriptionStatus;
+  billing_frequency?: string;
+  auto_renewal?: boolean;
   start_date?: string;
   /** null = plan default */
   trial_days?: number | null;
   notes?: string | null;
+  discount_amount?: number;
   /** default true when no trial */
   generate_first_invoice?: boolean;
 }
@@ -538,7 +553,9 @@ export interface SubscriptionIn {
 export interface SubscriptionUpdate {
   quantity?: number;
   notes?: string | null;
+  auto_renewal?: boolean;
   cancel_at_period_end?: boolean;
+  billing_frequency?: string;
 }
 
 export interface SubscriptionCancelRequest {
@@ -551,6 +568,22 @@ export interface SubscriptionListParams extends PageParams {
   status?: SubscriptionStatus;
   customer_id?: string;
   plan_id?: string;
+  billing_frequency?: string;
+}
+
+export interface SubscriptionSummaryOut {
+  total_subscriptions: number;
+  active_count: number;
+  trialing_count: number;
+  paused_count: number;
+  past_due_count: number;
+  cancelled_count: number;
+  draft_count: number;
+  total_mrr: string;
+  total_arr: string;
+  expiring_soon_count: number;
+  trial_expiring_soon_count: number;
+  auto_renew_enabled_count: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -1065,4 +1098,257 @@ export interface RunJobsResult {
   trials_converted: number;
   marked_overdue: number;
   reminders_sent: number;
+}
+
+// ---------------------------------------------------------------------------
+// Customer Lifecycle
+// ---------------------------------------------------------------------------
+
+export type CustomerLifecycleStage =
+  | 'prospect'
+  | 'onboarding'
+  | 'active'
+  | 'renewal_due'
+  | 'expansion'
+  | 'at_risk'
+  | 'churned';
+
+export type HealthStatus = 'healthy' | 'neutral' | 'at_risk' | 'critical';
+
+export interface CustomerLifecycleItem {
+  id: string;
+  customer_id: string;
+  customer_name: string;
+  customer_number: string;
+  customer_email: string | null;
+  company_name: string | null;
+  lifecycle_stage: CustomerLifecycleStage;
+  stage_entered_at: string;
+  health_status: HealthStatus;
+  health_score: number;
+  next_action: string | null;
+  next_action_due: string | null;
+  notes: string | null;
+  total_spent: string;
+  amount_due: string;
+  active_subscriptions_count: number;
+  total_invoices_count: number;
+  total_quotes_count: number;
+  total_billable_hours: string;
+  last_activity_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LifecycleKPIs {
+  total_customers: number;
+  new_onboarding_count: number;
+  active_customers_count: number;
+  renewal_due_count: number;
+  at_risk_count: number;
+  churned_count: number;
+  expansion_count: number;
+}
+
+export interface TimelineEvent {
+  id: string;
+  event_type: string;
+  title: string;
+  description: string | null;
+  timestamp: string;
+  related_entity_type: string | null;
+  related_entity_id: string | null;
+  status: string | null;
+  actor_label: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface CustomerLifecycleDetail {
+  customer: {
+    id: string;
+    customer_number: string;
+    display_name: string;
+    company_name: string | null;
+    email: string | null;
+    phone: string | null;
+    website: string | null;
+    gstin: string | null;
+    currency: string;
+    payment_terms_days: number;
+    billing_city: string | null;
+    billing_state: string | null;
+    billing_country: string;
+    created_at: string | null;
+  };
+  lifecycle: CustomerLifecycleItem;
+  timeline: TimelineEvent[];
+  subscriptions: Array<{
+    id: string;
+    subscription_number: string;
+    status: string;
+    billing_frequency: string;
+    total_amount: string;
+    start_date: string | null;
+    current_period_end: string | null;
+    next_billing_date: string | null;
+  }>;
+  quotes: Array<{
+    id: string;
+    quote_number: string;
+    status: string;
+    total: string;
+    issue_date: string | null;
+    expiry_date: string | null;
+  }>;
+  invoices: Array<{
+    id: string;
+    invoice_number: string;
+    status: string;
+    total: string;
+    amount_paid: string;
+    amount_due: string;
+    issue_date: string | null;
+    due_date: string | null;
+  }>;
+  payments: Array<{
+    id: string;
+    payment_number: string;
+    amount: string;
+    status: string;
+    payment_date: string | null;
+    method: string;
+    reference: string | null;
+  }>;
+  timesheet_summary: {
+    total_entries: number;
+    total_hours: string;
+    billable_hours: string;
+    non_billable_hours: string;
+    billable_amount: string;
+    unbilled_amount: string;
+    billed_amount: string;
+    recent_entries: Array<{
+      id: string;
+      date: string | null;
+      project_name: string;
+      duration_hours: string;
+      description: string;
+      billable: boolean;
+      status: string;
+      billable_amount: string;
+    }>;
+  };
+}
+
+export interface CustomerLifecycleUpdate {
+  lifecycle_stage?: CustomerLifecycleStage;
+  health_status?: HealthStatus;
+  health_score?: number;
+  next_action?: string | null;
+  next_action_due?: string | null;
+  notes?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Timesheets & Time Tracking
+// ---------------------------------------------------------------------------
+
+export type TimeEntryStatus = 'draft' | 'submitted' | 'approved' | 'rejected' | 'billed';
+
+export interface TimeEntryRead {
+  id: string;
+  organization_id: string;
+  user_id: string;
+  user_name: string | null;
+  user_email: string | null;
+  customer_id: string | null;
+  customer_name: string | null;
+  customer_number: string | null;
+  project_id: string | null;
+  project_name: string | null;
+  date: string;
+  start_time: string | null;
+  end_time: string | null;
+  duration_hours: string;
+  description: string;
+  billable: boolean;
+  billing_rate: string;
+  billable_amount: string;
+  status: TimeEntryStatus;
+  invoice_id: string | null;
+  invoice_number: string | null;
+  rejection_reason: string | null;
+  approved_by_id: string | null;
+  approved_by_name: string | null;
+  approved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TimeEntryCreate {
+  customer_id?: string | null;
+  project_id?: string | null;
+  project_name?: string | null;
+  date: string;
+  start_time?: string | null;
+  end_time?: string | null;
+  duration_hours: number | string;
+  description: string;
+  billable?: boolean;
+  billing_rate?: number | string;
+}
+
+export interface TimeEntryUpdate {
+  customer_id?: string | null;
+  project_id?: string | null;
+  project_name?: string | null;
+  date?: string;
+  start_time?: string | null;
+  end_time?: string | null;
+  duration_hours?: number | string;
+  description?: string;
+  billable?: boolean;
+  billing_rate?: number | string;
+}
+
+export interface TimeEntrySummaryKPIs {
+  total_hours: string;
+  billable_hours: string;
+  non_billable_hours: string;
+  billable_amount: string;
+  unbilled_amount: string;
+  billed_amount: string;
+  pending_approval_count: number;
+}
+
+export interface WeeklyMatrixRow {
+  key: string;
+  user_id: string;
+  user_name: string;
+  customer_id: string | null;
+  customer_name: string | null;
+  project_id: string | null;
+  project_name: string | null;
+  daily_hours: Record<string, string>;
+  total_hours: string;
+  billable_hours: string;
+  billable_amount: string;
+}
+
+export interface WeeklyTimesheetResponse {
+  week_start: string;
+  week_end: string;
+  total_hours: string;
+  billable_hours: string;
+  non_billable_hours: string;
+  rows: WeeklyMatrixRow[];
+  day_totals: Record<string, string>;
+}
+
+export interface TimesheetInvoiceCreate {
+  customer_id: string;
+  time_entry_ids: string[];
+  issue_date?: string | null;
+  due_date?: string | null;
+  notes?: string | null;
 }

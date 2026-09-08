@@ -14,6 +14,7 @@ export const invoiceService = {
     overdue_only?: boolean;
     page?: number;
     page_size?: number;
+    sort?: string;
   }): Promise<{ items: Invoice[]; total: number; kpis?: any }> {
     const q = new URLSearchParams();
     if (params?.search) q.set('search', params.search);
@@ -24,9 +25,24 @@ export const invoiceService = {
     if (params?.overdue_only) q.set('overdue_only', 'true');
     if (params?.page) q.set('page', String(params.page));
     if (params?.page_size) q.set('page_size', String(params.page_size));
+    if (params?.sort) q.set('sort', params.sort);
 
     const res = await apiClient.get<{ items: Invoice[]; total: number; kpis?: any }>(`/invoices?${q.toString()}`);
     return res.data;
+  },
+
+  async list(params?: {
+    search?: string;
+    status?: string;
+    customer_id?: string;
+    date_from?: string;
+    date_to?: string;
+    overdue_only?: boolean;
+    page?: number;
+    page_size?: number;
+    sort?: string;
+  }): Promise<{ items: Invoice[]; total: number; kpis?: any }> {
+    return this.listInvoices(params);
   },
 
   async getInvoices(params?: any) {

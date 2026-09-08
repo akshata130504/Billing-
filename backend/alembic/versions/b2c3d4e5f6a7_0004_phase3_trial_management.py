@@ -18,13 +18,52 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+# --- idempotent DDL helpers ---------------------------------------------------
+# The baseline migration (bb647ceacf66) builds the schema with
+# Base.metadata.create_all(), so by the time this revision runs the tables it
+# declares may already exist. Mirrors the guard style used by the lifecycle /
+# timesheet migrations.
+
+
+def _inspector():
+    return sa.inspect(op.get_bind())
+
+
+def _create_table(table_name, *args, **kwargs):
+    if not _inspector().has_table(table_name):
+        op.create_table(table_name, *args, **kwargs)
+
+
+def _create_index(index_name, table_name, *args, **kwargs):
+    insp = _inspector()
+    if not insp.has_table(table_name):
+        return
+    if index_name in {ix["name"] for ix in insp.get_indexes(table_name)}:
+        return
+    op.create_index(index_name, table_name, *args, **kwargs)
+
+
+def _drop_index(index_name, table_name=None, **kwargs):
+    insp = _inspector()
+    if table_name is None or not insp.has_table(table_name):
+        return
+    if index_name not in {ix["name"] for ix in insp.get_indexes(table_name)}:
+        return
+    op.drop_index(index_name, table_name, **kwargs)
+
+
+def _drop_table(table_name):
+    if _inspector().has_table(table_name):
+        op.drop_table(table_name)
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
         op.execute("ALTER TYPE subscription_status ADD VALUE IF NOT EXISTS 'TRIAL_EXPIRED'")
 
     # 1. trial_periods
-    op.create_table(
+    _create_table(
         'trial_periods',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -54,13 +93,13 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('organization_id', 'subscription_id', name='uq_trial_period_subscription'),
     )
-    op.create_index(op.f('ix_trial_periods_organization_id'), 'trial_periods', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_trial_periods_subscription_id'), 'trial_periods', ['subscription_id'], unique=False)
-    op.create_index(op.f('ix_trial_periods_trial_end_date'), 'trial_periods', ['trial_end_date'], unique=False)
-    op.create_index(op.f('ix_trial_periods_status'), 'trial_periods', ['status'], unique=False)
+    _create_index(op.f('ix_trial_periods_organization_id'), 'trial_periods', ['organization_id'], unique=False)
+    _create_index(op.f('ix_trial_periods_subscription_id'), 'trial_periods', ['subscription_id'], unique=False)
+    _create_index(op.f('ix_trial_periods_trial_end_date'), 'trial_periods', ['trial_end_date'], unique=False)
+    _create_index(op.f('ix_trial_periods_status'), 'trial_periods', ['status'], unique=False)
 
     # 2. trial_extensions
-    op.create_table(
+    _create_table(
         'trial_extensions',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -80,12 +119,12 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['trial_period_id'], ['trial_periods.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
     )
-    op.create_index(op.f('ix_trial_extensions_organization_id'), 'trial_extensions', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_trial_extensions_trial_period_id'), 'trial_extensions', ['trial_period_id'], unique=False)
-    op.create_index(op.f('ix_trial_extensions_subscription_id'), 'trial_extensions', ['subscription_id'], unique=False)
+    _create_index(op.f('ix_trial_extensions_organization_id'), 'trial_extensions', ['organization_id'], unique=False)
+    _create_index(op.f('ix_trial_extensions_trial_period_id'), 'trial_extensions', ['trial_period_id'], unique=False)
+    _create_index(op.f('ix_trial_extensions_subscription_id'), 'trial_extensions', ['subscription_id'], unique=False)
 
     # 3. trial_conversion_attempts
-    op.create_table(
+    _create_table(
         'trial_conversion_attempts',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -116,12 +155,12 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['trial_period_id'], ['trial_periods.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
     )
-    op.create_index(op.f('ix_trial_conversion_attempts_organization_id'), 'trial_conversion_attempts', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_trial_conversion_attempts_trial_period_id'), 'trial_conversion_attempts', ['trial_period_id'], unique=False)
-    op.create_index(op.f('ix_trial_conversion_attempts_subscription_id'), 'trial_conversion_attempts', ['subscription_id'], unique=False)
+    _create_index(op.f('ix_trial_conversion_attempts_organization_id'), 'trial_conversion_attempts', ['organization_id'], unique=False)
+    _create_index(op.f('ix_trial_conversion_attempts_trial_period_id'), 'trial_conversion_attempts', ['trial_period_id'], unique=False)
+    _create_index(op.f('ix_trial_conversion_attempts_subscription_id'), 'trial_conversion_attempts', ['subscription_id'], unique=False)
 
     # 4. trial_reminders
-    op.create_table(
+    _create_table(
         'trial_reminders',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -140,31 +179,31 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['trial_period_id'], ['trial_periods.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
     )
-    op.create_index(op.f('ix_trial_reminders_organization_id'), 'trial_reminders', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_trial_reminders_trial_period_id'), 'trial_reminders', ['trial_period_id'], unique=False)
-    op.create_index(op.f('ix_trial_reminders_subscription_id'), 'trial_reminders', ['subscription_id'], unique=False)
-    op.create_index(op.f('ix_trial_reminders_scheduled_for'), 'trial_reminders', ['scheduled_for'], unique=False)
+    _create_index(op.f('ix_trial_reminders_organization_id'), 'trial_reminders', ['organization_id'], unique=False)
+    _create_index(op.f('ix_trial_reminders_trial_period_id'), 'trial_reminders', ['trial_period_id'], unique=False)
+    _create_index(op.f('ix_trial_reminders_subscription_id'), 'trial_reminders', ['subscription_id'], unique=False)
+    _create_index(op.f('ix_trial_reminders_scheduled_for'), 'trial_reminders', ['scheduled_for'], unique=False)
 
 
 def downgrade() -> None:
-    op.drop_index(op.f('ix_trial_reminders_scheduled_for'), table_name='trial_reminders')
-    op.drop_index(op.f('ix_trial_reminders_subscription_id'), table_name='trial_reminders')
-    op.drop_index(op.f('ix_trial_reminders_trial_period_id'), table_name='trial_reminders')
-    op.drop_index(op.f('ix_trial_reminders_organization_id'), table_name='trial_reminders')
-    op.drop_table('trial_reminders')
+    _drop_index(op.f('ix_trial_reminders_scheduled_for'), table_name='trial_reminders')
+    _drop_index(op.f('ix_trial_reminders_subscription_id'), table_name='trial_reminders')
+    _drop_index(op.f('ix_trial_reminders_trial_period_id'), table_name='trial_reminders')
+    _drop_index(op.f('ix_trial_reminders_organization_id'), table_name='trial_reminders')
+    _drop_table('trial_reminders')
 
-    op.drop_index(op.f('ix_trial_conversion_attempts_subscription_id'), table_name='trial_conversion_attempts')
-    op.drop_index(op.f('ix_trial_conversion_attempts_trial_period_id'), table_name='trial_conversion_attempts')
-    op.drop_index(op.f('ix_trial_conversion_attempts_organization_id'), table_name='trial_conversion_attempts')
-    op.drop_table('trial_conversion_attempts')
+    _drop_index(op.f('ix_trial_conversion_attempts_subscription_id'), table_name='trial_conversion_attempts')
+    _drop_index(op.f('ix_trial_conversion_attempts_trial_period_id'), table_name='trial_conversion_attempts')
+    _drop_index(op.f('ix_trial_conversion_attempts_organization_id'), table_name='trial_conversion_attempts')
+    _drop_table('trial_conversion_attempts')
 
-    op.drop_index(op.f('ix_trial_extensions_subscription_id'), table_name='trial_extensions')
-    op.drop_index(op.f('ix_trial_extensions_trial_period_id'), table_name='trial_extensions')
-    op.drop_index(op.f('ix_trial_extensions_organization_id'), table_name='trial_extensions')
-    op.drop_table('trial_extensions')
+    _drop_index(op.f('ix_trial_extensions_subscription_id'), table_name='trial_extensions')
+    _drop_index(op.f('ix_trial_extensions_trial_period_id'), table_name='trial_extensions')
+    _drop_index(op.f('ix_trial_extensions_organization_id'), table_name='trial_extensions')
+    _drop_table('trial_extensions')
 
-    op.drop_index(op.f('ix_trial_periods_status'), table_name='trial_periods')
-    op.drop_index(op.f('ix_trial_periods_trial_end_date'), table_name='trial_periods')
-    op.drop_index(op.f('ix_trial_periods_subscription_id'), table_name='trial_periods')
-    op.drop_index(op.f('ix_trial_periods_organization_id'), table_name='trial_periods')
-    op.drop_table('trial_periods')
+    _drop_index(op.f('ix_trial_periods_status'), table_name='trial_periods')
+    _drop_index(op.f('ix_trial_periods_trial_end_date'), table_name='trial_periods')
+    _drop_index(op.f('ix_trial_periods_subscription_id'), table_name='trial_periods')
+    _drop_index(op.f('ix_trial_periods_organization_id'), table_name='trial_periods')
+    _drop_table('trial_periods')

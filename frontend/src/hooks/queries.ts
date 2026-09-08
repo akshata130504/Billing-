@@ -58,6 +58,12 @@ export const queryKeys = {
     detail: (id: string) => ['payments', 'detail', id] as const,
     reconciliationSummary: () => ['payments', 'reconciliation-summary'] as const,
   },
+  collections: {
+    all: ['collections'] as const,
+    dashboard: () => ['collections', 'dashboard'] as const,
+    list: (params?: object) => ['collections', 'list', params ?? {}] as const,
+    detail: (id: string) => ['collections', 'detail', id] as const,
+  },
   controlCenter: {
     all: ['control-center'] as const,
     dashboard: (range: string) => ['control-center', 'dashboard', range] as const,
@@ -72,6 +78,16 @@ export const queryKeys = {
   public: {
     invoice: (token: string) => ['public', 'invoice', token] as const,
     quote: (token: string) => ['public', 'quote', token] as const,
+  },
+  reports: {
+    all: ['reports'] as const,
+    dashboard: (params?: object) => ['reports', 'dashboard', params ?? {}] as const,
+    revenue: (params?: object) => ['reports', 'revenue', params ?? {}] as const,
+    receivables: (params?: object) => ['reports', 'receivables', params ?? {}] as const,
+    invoices: (params?: object) => ['reports', 'invoices', params ?? {}] as const,
+    payments: (params?: object) => ['reports', 'payments', params ?? {}] as const,
+    customers: (params?: object) => ['reports', 'customers', params ?? {}] as const,
+    products: (params?: object) => ['reports', 'products', params ?? {}] as const,
   },
 } as const;
 

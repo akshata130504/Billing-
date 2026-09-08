@@ -18,9 +18,48 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+# --- idempotent DDL helpers ---------------------------------------------------
+# The baseline migration (bb647ceacf66) builds the schema with
+# Base.metadata.create_all(), so by the time this revision runs the tables it
+# declares may already exist. Mirrors the guard style used by the lifecycle /
+# timesheet migrations.
+
+
+def _inspector():
+    return sa.inspect(op.get_bind())
+
+
+def _create_table(table_name, *args, **kwargs):
+    if not _inspector().has_table(table_name):
+        op.create_table(table_name, *args, **kwargs)
+
+
+def _create_index(index_name, table_name, *args, **kwargs):
+    insp = _inspector()
+    if not insp.has_table(table_name):
+        return
+    if index_name in {ix["name"] for ix in insp.get_indexes(table_name)}:
+        return
+    op.create_index(index_name, table_name, *args, **kwargs)
+
+
+def _drop_index(index_name, table_name=None, **kwargs):
+    insp = _inspector()
+    if table_name is None or not insp.has_table(table_name):
+        return
+    if index_name not in {ix["name"] for ix in insp.get_indexes(table_name)}:
+        return
+    op.drop_index(index_name, table_name, **kwargs)
+
+
+def _drop_table(table_name):
+    if _inspector().has_table(table_name):
+        op.drop_table(table_name)
+
+
 def upgrade() -> None:
     # 1. subscription_changes
-    op.create_table(
+    _create_table(
         'subscription_changes',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -51,12 +90,12 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['target_plan_id'], ['plans.id'], ondelete='SET NULL'),
         sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_subscription_changes_organization_id'), 'subscription_changes', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_subscription_changes_subscription_id'), 'subscription_changes', ['subscription_id'], unique=False)
-    op.create_index(op.f('ix_subscription_changes_status'), 'subscription_changes', ['status'], unique=False)
+    _create_index(op.f('ix_subscription_changes_organization_id'), 'subscription_changes', ['organization_id'], unique=False)
+    _create_index(op.f('ix_subscription_changes_subscription_id'), 'subscription_changes', ['subscription_id'], unique=False)
+    _create_index(op.f('ix_subscription_changes_status'), 'subscription_changes', ['status'], unique=False)
 
     # 2. proration_adjustments
-    op.create_table(
+    _create_table(
         'proration_adjustments',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -83,11 +122,11 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('subscription_change_id', name='uq_proration_sub_change')
     )
-    op.create_index(op.f('ix_proration_adjustments_organization_id'), 'proration_adjustments', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_proration_adjustments_subscription_id'), 'proration_adjustments', ['subscription_id'], unique=False)
+    _create_index(op.f('ix_proration_adjustments_organization_id'), 'proration_adjustments', ['organization_id'], unique=False)
+    _create_index(op.f('ix_proration_adjustments_subscription_id'), 'proration_adjustments', ['subscription_id'], unique=False)
 
     # 3. usage_meters
-    op.create_table(
+    _create_table(
         'usage_meters',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -103,11 +142,11 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('organization_id', 'code', name='uq_usage_meter_code_per_org')
     )
-    op.create_index(op.f('ix_usage_meters_organization_id'), 'usage_meters', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_usage_meters_code'), 'usage_meters', ['code'], unique=False)
+    _create_index(op.f('ix_usage_meters_organization_id'), 'usage_meters', ['organization_id'], unique=False)
+    _create_index(op.f('ix_usage_meters_code'), 'usage_meters', ['code'], unique=False)
 
     # 4. usage_events
-    op.create_table(
+    _create_table(
         'usage_events',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -127,14 +166,14 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('organization_id', 'meter_id', 'idempotency_key', name='uq_usage_event_idempotency')
     )
-    op.create_index(op.f('ix_usage_events_organization_id'), 'usage_events', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_usage_events_meter_id'), 'usage_events', ['meter_id'], unique=False)
-    op.create_index(op.f('ix_usage_events_customer_id'), 'usage_events', ['customer_id'], unique=False)
-    op.create_index(op.f('ix_usage_events_subscription_id'), 'usage_events', ['subscription_id'], unique=False)
-    op.create_index(op.f('ix_usage_events_idempotency_key'), 'usage_events', ['idempotency_key'], unique=False)
+    _create_index(op.f('ix_usage_events_organization_id'), 'usage_events', ['organization_id'], unique=False)
+    _create_index(op.f('ix_usage_events_meter_id'), 'usage_events', ['meter_id'], unique=False)
+    _create_index(op.f('ix_usage_events_customer_id'), 'usage_events', ['customer_id'], unique=False)
+    _create_index(op.f('ix_usage_events_subscription_id'), 'usage_events', ['subscription_id'], unique=False)
+    _create_index(op.f('ix_usage_events_idempotency_key'), 'usage_events', ['idempotency_key'], unique=False)
 
     # 5. usage_aggregates
-    op.create_table(
+    _create_table(
         'usage_aggregates',
         sa.Column('id', sa.String(length=36), nullable=False),
         sa.Column('organization_id', sa.String(length=36), nullable=False),
@@ -158,15 +197,15 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('organization_id', 'meter_id', 'subscription_id', 'period_start', 'period_end', name='uq_sub_meter_period')
     )
-    op.create_index(op.f('ix_usage_aggregates_organization_id'), 'usage_aggregates', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_usage_aggregates_meter_id'), 'usage_aggregates', ['meter_id'], unique=False)
-    op.create_index(op.f('ix_usage_aggregates_subscription_id'), 'usage_aggregates', ['subscription_id'], unique=False)
-    op.create_index(op.f('ix_usage_aggregates_status'), 'usage_aggregates', ['status'], unique=False)
+    _create_index(op.f('ix_usage_aggregates_organization_id'), 'usage_aggregates', ['organization_id'], unique=False)
+    _create_index(op.f('ix_usage_aggregates_meter_id'), 'usage_aggregates', ['meter_id'], unique=False)
+    _create_index(op.f('ix_usage_aggregates_subscription_id'), 'usage_aggregates', ['subscription_id'], unique=False)
+    _create_index(op.f('ix_usage_aggregates_status'), 'usage_aggregates', ['status'], unique=False)
 
 
 def downgrade() -> None:
-    op.drop_table('usage_aggregates')
-    op.drop_table('usage_events')
-    op.drop_table('usage_meters')
-    op.drop_table('proration_adjustments')
-    op.drop_table('subscription_changes')
+    _drop_table('usage_aggregates')
+    _drop_table('usage_events')
+    _drop_table('usage_meters')
+    _drop_table('proration_adjustments')
+    _drop_table('subscription_changes')

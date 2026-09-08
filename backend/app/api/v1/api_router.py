@@ -32,6 +32,7 @@ ROUTERS = [
     ("subscription_changes", "", ["Subscriptions & Proration"]),
     ("meters", "/meters", ["Metered Billing"]),
     ("trials", "/trials", ["Trial Management"]),
+    ("collections", "/collections", ["Collections"]),
     ("approvals", "/approvals", ["Control Center"]),
     ("dashboard", "", ["Control Center"]),
     ("audit_logs", "/audit-logs", ["Control Center"]),
@@ -46,6 +47,9 @@ ROUTERS = [
     ("customization", "", ["Customization & Automation"]),
     ("devices", "", ["Client Platforms"]),
     ("ai", "", ["AI in Billing"]),
+    ("reports", "/reports", ["Reports"]),
+    ("lifecycle", "/lifecycle", ["Customer Lifecycle"]),
+    ("timesheets", "/timesheets", ["Timesheets"]),
     ("webhooks", "/webhooks", ["Webhooks"]),
 ]
 
