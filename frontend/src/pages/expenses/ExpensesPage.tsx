@@ -7,19 +7,19 @@ import { ExpenseFilters } from './components/ExpenseFilters';
 import { ExpenseTable } from './components/ExpenseTable';
 import { ExpenseFormModal } from './components/ExpenseFormModal';
 import { DeleteExpenseModal } from './components/DeleteExpenseModal';
+import { ImportExpenseModal } from './components/ImportExpenseModal';
 import { Plus, UploadCloud, Receipt } from 'lucide-react';
-import { useToast } from '../../components/common/Toast';
 
 export function ExpensesPage() {
   const {
     expenses,
     addExpense,
+    importExpenses,
     updateExpense,
     deleteExpense,
     duplicateExpense,
     addToInvoice,
   } = useExpenses();
-  const { showToast } = useToast();
 
   // Filters State
   const [filters, setFilters] = useState<ExpenseFilterState>({
@@ -35,6 +35,7 @@ export function ExpensesPage() {
 
   // Modals state
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
 
@@ -128,7 +129,7 @@ export function ExpensesPage() {
   };
 
   const handleImportExpenses = () => {
-    showToast('info', 'Import CSV / Excel', 'Upload CSV template to batch import corporate and vendor expenses.');
+    setIsImportOpen(true);
   };
 
   return (
@@ -249,6 +250,13 @@ export function ExpensesPage() {
         }}
         title="Delete Expense"
         itemName={deleteTarget?.name || ''}
+      />
+
+      {/* Import Expenses Modal */}
+      <ImportExpenseModal
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+        onImport={importExpenses}
       />
     </div>
   );

@@ -33,10 +33,12 @@ export function PricingSimulatorPage() {
   const [isCalculating, setIsCalculating] = useState(false);
   const [result, setResult] = useState<PricingSimulationResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadData() {
       setIsLoading(true);
+      setLoadError(null);
       try {
         const [plansRes, custRes, pbRes] = await Promise.all([
           planPricingService.listPlans(),
@@ -49,8 +51,9 @@ export function PricingSimulatorPage() {
         if (plansRes.items.length > 0) {
           setSelectedPlanId(plansRes.items[0].id);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Failed to load simulator data', err);
+        setLoadError(err?.response?.data?.detail || err?.message || 'Failed to load plans, customers or price books.');
       } finally {
         setIsLoading(false);
       }
@@ -82,7 +85,7 @@ export function PricingSimulatorPage() {
     if (selectedPlanId) {
       handleCalculate();
     }
-  }, [selectedPlanId, selectedPriceBookId, quantity, discountPct]);
+  }, [selectedPlanId, selectedCustomerId, selectedPriceBookId, quantity, discountPct]);
 
   const handleReset = () => {
     if (plans.length > 0) setSelectedPlanId(plans[0].id);
@@ -161,6 +164,22 @@ export function PricingSimulatorPage() {
           </Button>
         </div>
       </div>
+
+      {loadError && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600">
+          {loadError}
+        </div>
+      )}
+
+      {!loadError && plans.length === 0 && (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
+          No plans or offerings found yet. Create one on the{' '}
+          <Link to="/plans-pricing" className="font-semibold underline">
+            Plans & Pricing
+          </Link>{' '}
+          page, then come back here to simulate its price.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Form: Inputs */}

@@ -393,10 +393,10 @@ export function LandingPage() {
                 variant="primary"
                 size="md"
                 onClick={() => navigate('/dashboard')}
+                trailingIcon={<ArrowRight className="w-4 h-4" />}
                 className="shadow-sm font-semibold active:scale-[0.98] transition-transform"
               >
                 Dashboard
-                <ArrowRight className="w-4 h-4 ml-1.5" />
               </Button>
             ) : (
               <>
@@ -542,10 +542,10 @@ export function LandingPage() {
                 <Button
                   variant="primary"
                   size="lg"
+                  trailingIcon={<ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />}
                   className="w-full sm:w-auto font-semibold px-8 py-3.5 text-base shadow-elevated group active:scale-[0.98] transition-all"
                 >
                   Get Started
-                  <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
                 </Button>
               </Link>
               <button
@@ -800,9 +800,13 @@ export function LandingPage() {
                         <p className="text-xs text-slate-500">Configure bundles and test automated discount rules in real-time</p>
                       </div>
                       <Link to="/cpq">
-                        <Button variant="outline" size="sm" className="font-semibold text-xs">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          trailingIcon={<ArrowRight className="w-3.5 h-3.5" />}
+                          className="font-semibold text-xs"
+                        >
                           Open Full CPQ
-                          <ArrowRight className="w-3.5 h-3.5 ml-1" />
                         </Button>
                       </Link>
                     </div>
@@ -1247,9 +1251,13 @@ export function LandingPage() {
 
                 <div className="mt-6 flex items-center gap-4">
                   <Link to={workflowSteps[activeWorkflowTab].route}>
-                    <Button variant="primary" size="md" className="font-semibold shadow-sm active:scale-[0.98]">
+                    <Button
+                      variant="primary"
+                      size="md"
+                      trailingIcon={<ArrowRight className="w-4 h-4" />}
+                      className="font-semibold shadow-sm active:scale-[0.98]"
+                    >
                       Open {workflowSteps[activeWorkflowTab].label} in App
-                      <ArrowRight className="w-4 h-4 ml-1.5" />
                     </Button>
                   </Link>
                   <span className="text-xs text-slate-400 hidden sm:inline">
@@ -1393,15 +1401,23 @@ export function LandingPage() {
           {/* Pricing CTA */}
           <div className="mt-10 text-center flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link to="/plans-pricing">
-              <Button variant="primary" size="lg" className="font-semibold shadow-sm active:scale-[0.98]">
+              <Button
+                variant="primary"
+                size="lg"
+                trailingIcon={<ArrowRight className="w-4 h-4" />}
+                className="font-semibold shadow-sm active:scale-[0.98]"
+              >
                 Explore Plans & Pricing
-                <ArrowRight className="w-4 h-4 ml-2" />
               </Button>
             </Link>
             <Link to="/plans-pricing/simulator">
-              <Button variant="outline" size="lg" className="font-medium">
+              <Button
+                variant="outline"
+                size="lg"
+                trailingIcon={<ArrowUpRight className="w-4 h-4" />}
+                className="font-medium"
+              >
                 Open Full Pricing Simulator
-                <ArrowUpRight className="w-4 h-4 ml-1.5" />
               </Button>
             </Link>
           </div>
@@ -1930,10 +1946,10 @@ export function LandingPage() {
               <Button
                 variant="primary"
                 size="lg"
+                trailingIcon={<ArrowRight className="w-4 h-4" />}
                 className="w-full sm:w-auto font-semibold px-8 py-3.5 text-base bg-white text-brand-900 hover:bg-slate-100 shadow-elevated active:scale-[0.98]"
               >
                 Get Started
-                <ArrowRight className="w-4 h-4 ml-2" />
               </Button>
             </Link>
             <button

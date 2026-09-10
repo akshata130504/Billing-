@@ -1,5 +1,4 @@
-import React from 'react';
-import { Search, Repeat, ChevronRight } from 'lucide-react';
+import { Search, Repeat } from 'lucide-react';
 import type { SubscriptionOut } from '../../types/api';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
@@ -105,7 +104,7 @@ export function SubscriptionPicker({
                 <th className="py-3 px-4">Current period</th>
                 <th className="py-3 px-4 text-right">Recurring</th>
                 <th className="py-3 px-4">Status</th>
-                <th className="py-3 px-4 w-8" />
+                <th className="py-3 px-4 text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -150,8 +149,18 @@ export function SubscriptionPicker({
                         {humanize(sub.status)}
                       </Badge>
                     </td>
-                    <td className="py-3 px-4 text-slate-400">
-                      <ChevronRight className={cn('w-4 h-4', isSelected && 'text-brand-600')} />
+                    <td className="py-3 px-4 text-right">
+                      <Button
+                        size="sm"
+                        variant={isSelected ? 'primary' : 'outline'}
+                        className="text-xs py-1 px-3 h-7 font-medium whitespace-nowrap"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelect(sub);
+                        }}
+                      >
+                        Change Plan
+                      </Button>
                     </td>
                   </tr>
                 );
