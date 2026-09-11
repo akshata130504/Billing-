@@ -8,67 +8,41 @@ import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { formatDateTime, initials, ROLE_LABELS } from '../../utils/format';
 import { SettingsSection } from './settingsShared';
-
-const PROFILE_PREFS_KEY = 'rooman_user_profile_prefs';
-
-interface ProfilePrefs {
-  displayName?: string;
-  phoneNumber?: string;
-}
-
-function loadProfilePrefs(): ProfilePrefs {
-  try {
-    const raw = localStorage.getItem(PROFILE_PREFS_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveProfilePrefs(prefs: ProfilePrefs) {
-  try {
-    localStorage.setItem(PROFILE_PREFS_KEY, JSON.stringify(prefs));
-  } catch {
-    // Storage unavailable
-  }
-}
+import { userService } from '../../services/userService';
 
 export function ProfileTab() {
-  const { user, organization, membership } = useAuth();
+  const { user, organization, membership, refreshMe } = useAuth();
   const { showToast } = useToast();
 
-  const [prefs, setPrefs] = useState<ProfilePrefs>(loadProfilePrefs);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [fullName, setFullName] = useState(user?.full_name || '');
-  const [displayName, setDisplayName] = useState(prefs.displayName || user?.full_name || '');
-  const [phone, setPhone] = useState(prefs.phoneNumber || '');
+  const [phone, setPhone] = useState(user?.phone || '');
   const [isSaving, setIsSaving] = useState(false);
 
   const roleLabel = membership ? ROLE_LABELS[membership.role] ?? membership.role : 'Member';
 
   const handleOpenEdit = () => {
     setFullName(user?.full_name || '');
-    setDisplayName(prefs.displayName || user?.full_name || '');
-    setPhone(prefs.phoneNumber || '');
+    setPhone(user?.phone || '');
     setIsEditOpen(true);
   };
 
-  const handleSaveProfile = (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
+    const name = fullName.trim();
+    if (!name) {
+      showToast('error', 'Name required', 'Your full name cannot be empty.');
+      return;
+    }
     setIsSaving(true);
-
     try {
-      const updatedPrefs: ProfilePrefs = {
-        displayName: displayName.trim() || fullName.trim(),
-        phoneNumber: phone.trim(),
-      };
-      saveProfilePrefs(updatedPrefs);
-      setPrefs(updatedPrefs);
-
+      // Persisted server-side so the change follows the user across devices.
+      await userService.updateMe({ full_name: name, phone: phone.trim() });
+      await refreshMe();
       showToast('success', 'Profile updated', 'Your profile details have been successfully saved.');
       setIsEditOpen(false);
-    } catch {
-      showToast('error', 'Update failed', 'Could not save profile changes.');
+    } catch (err: any) {
+      showToast('error', 'Update failed', err?.message || 'Could not save profile changes.');
     } finally {
       setIsSaving(false);
     }
@@ -144,7 +118,7 @@ export function ProfileTab() {
             <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Display Name</p>
             <p className="text-xs font-semibold text-slate-800 mt-1 flex items-center gap-2">
               <User className="w-3.5 h-3.5 text-brand-600" />
-              {prefs.displayName || user?.full_name || '—'}
+              {user?.full_name || '—'}
             </p>
           </div>
 
@@ -160,7 +134,7 @@ export function ProfileTab() {
             <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Phone Number</p>
             <p className="text-xs font-semibold text-slate-800 mt-1 flex items-center gap-2">
               <Phone className="w-3.5 h-3.5 text-slate-400" />
-              {prefs.phoneNumber ? prefs.phoneNumber : <span className="text-slate-400 font-normal italic">Not specified</span>}
+              {user?.phone ? user.phone : <span className="text-slate-400 font-normal italic">Not specified</span>}
             </p>
           </div>
 
@@ -228,16 +202,6 @@ export function ProfileTab() {
             required
             leadingIcon={<User className="w-4 h-4" />}
             placeholder="Your full legal name"
-          />
-
-          <Input
-            label="Display Name"
-            type="text"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            leadingIcon={<User className="w-4 h-4" />}
-            placeholder="How your name appears across the workspace"
-            helperText="Used in activity logs, comments, and collaborative notes."
           />
 
           <Input

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Save } from 'lucide-react';
+import { Save, AlertCircle } from 'lucide-react';
 import { Button } from '../../components/common/Button';
 import { useToast } from '../../components/common/Toast';
 import { cn } from '../../utils/cn';
@@ -132,7 +132,14 @@ export function NotificationsTab() {
     setIsSaving(true);
     try {
       saveNotifications(prefs);
-      showToast('success', 'Notification preferences saved', 'Your alert and email settings have been updated.');
+      // These choices are stored in this browser. The server does not yet read
+      // them when deciding what to send, so the message must not promise that
+      // outgoing email has changed.
+      showToast(
+        'success',
+        'Preferences saved on this device',
+        'In-app alerts now follow these choices. Emails sent by the server are not filtered by them yet.'
+      );
     } catch {
       showToast('error', 'Save failed', 'Could not save notification preferences.');
     } finally {
@@ -142,6 +149,14 @@ export function NotificationsTab() {
 
   return (
     <form onSubmit={handleSave} className="space-y-6">
+      <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-100 rounded-lg text-xs text-amber-800">
+        <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+        <span>
+          These preferences are stored in this browser and control in-app alerts. Server-sent email
+          (invoice reminders, dunning, trial notices) is not yet filtered by them.
+        </span>
+      </div>
+
       {/* Channels */}
       <SettingsSection
         title="Delivery Channels"

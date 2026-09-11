@@ -14,9 +14,9 @@ import { Select } from '../../components/common/Select';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { useToast } from '../../components/common/Toast';
 import { cn } from '../../utils/cn';
-import { formatMoney, formatDate, todayIso, parseMoney } from '../../utils/format';
+import { formatMoney, formatDate, todayIso } from '../../utils/format';
 import { ProrationPreviewCard } from './ProrationPreviewCard';
-import { changeTypeLabel, formatQuantity, intervalLabel } from './prorationLabels';
+import { changeTypeLabel, formatQuantity, intervalLabel, monthlyEquivalent } from './prorationLabels';
 
 export type ChangeWorkflowType = 'upgrade' | 'downgrade' | 'resize';
 
@@ -49,7 +49,6 @@ export function ChangePlanner({
 }: ChangePlannerProps) {
   const { showToast } = useToast();
   const currency = subscription.currency ?? subscription.plan.currency ?? 'INR';
-  const currentPlanPrice = parseMoney(subscription.plan.unit_amount);
 
   const [changeWorkflow, setChangeWorkflow] = useState<ChangeWorkflowType>('upgrade');
   const [targetPlanId, setTargetPlanId] = useState<string>(subscription.plan.id);
@@ -69,21 +68,23 @@ export function ChangePlanner({
     setChangeWorkflow(wf);
     if (wf === 'resize') {
       setTargetPlanId(subscription.plan.id);
-    } else if (wf === 'upgrade') {
-      // If currently on base plan or lower, try to find a higher priced plan
-      const higherPlan = plans.find(
-        (p) => p.id !== subscription.plan.id && parseMoney(p.unit_amount) > currentPlanPrice
+    } else if (wf === 'upgrade' || wf === 'downgrade') {
+      // Pick the default on price per month and within the same currency, so the
+      // suggestion agrees with the (Upgrade)/(Downgrade) tags in the dropdown.
+      const currentMonthly = monthlyEquivalent(
+        subscription.plan.unit_amount,
+        subscription.plan.billing_interval,
+        subscription.plan.interval_count
       );
-      if (higherPlan && targetPlanId === subscription.plan.id) {
-        setTargetPlanId(higherPlan.id);
-      }
-    } else if (wf === 'downgrade') {
-      // If currently on base plan or higher, try to find a lower priced plan
-      const lowerPlan = plans.find(
-        (p) => p.id !== subscription.plan.id && parseMoney(p.unit_amount) < currentPlanPrice
-      );
-      if (lowerPlan && targetPlanId === subscription.plan.id) {
-        setTargetPlanId(lowerPlan.id);
+      const candidate = plans.find((p) => {
+        if (p.id === subscription.plan.id) return false;
+        if (p.currency !== subscription.plan.currency) return false;
+        const planMonthly = monthlyEquivalent(p.unit_amount, p.billing_interval, p.interval_count);
+        if (currentMonthly === null || planMonthly === null) return false;
+        return wf === 'upgrade' ? planMonthly > currentMonthly : planMonthly < currentMonthly;
+      });
+      if (candidate && targetPlanId === subscription.plan.id) {
+        setTargetPlanId(candidate.id);
       }
     }
   };
@@ -111,17 +112,31 @@ export function ChangePlanner({
     const sorted = [...plans].sort((a, b) => {
       if (a.id === subscription.plan.id) return -1;
       if (b.id === subscription.plan.id) return 1;
-      return Number(a.unit_amount) - Number(b.unit_amount);
+      const am = monthlyEquivalent(a.unit_amount, a.billing_interval, a.interval_count);
+      const bm = monthlyEquivalent(b.unit_amount, b.billing_interval, b.interval_count);
+      return (am ?? Number(a.unit_amount)) - (bm ?? Number(b.unit_amount));
     });
 
+    // Rank on price per month, not the raw unit_amount: a 24,000/year plan is
+    // cheaper per month than a 2,500/month one, and tagging it "Upgrade" would
+    // mislead on a screen where the choice costs the customer money. Plans in a
+    // different currency are left untagged rather than compared numerically.
+    const currentMonthly = monthlyEquivalent(
+      subscription.plan.unit_amount,
+      subscription.plan.billing_interval,
+      subscription.plan.interval_count
+    );
+
     const opts = sorted.map((p) => {
-      const price = parseMoney(p.unit_amount);
+      const planMonthly = monthlyEquivalent(p.unit_amount, p.billing_interval, p.interval_count);
+      const comparable =
+        currentMonthly !== null && planMonthly !== null && p.currency === subscription.plan.currency;
       let tierTag = '';
       if (p.id === subscription.plan.id) {
         tierTag = ' (Current)';
-      } else if (price > currentPlanPrice) {
+      } else if (comparable && planMonthly > currentMonthly) {
         tierTag = ' (Upgrade)';
-      } else if (price < currentPlanPrice) {
+      } else if (comparable && planMonthly < currentMonthly) {
         tierTag = ' (Downgrade)';
       }
 
@@ -145,7 +160,7 @@ export function ChangePlanner({
       });
     }
     return opts;
-  }, [plans, subscription, currency, currentPlanPrice]);
+  }, [plans, subscription, currency]);
 
   const buildBody = useCallback((): SubscriptionChangePreviewIn => {
     const body: SubscriptionChangePreviewIn = {};

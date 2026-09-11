@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 from backend.app.api.deps import CurrentContext, get_current_context, get_db
 from backend.app.core.exceptions import EntityNotFoundError, ForbiddenError
 from backend.app.models.identity import User
-from backend.app.schemas.auth import UserOut
-from backend.app.services import avatar_service
+from backend.app.schemas.auth import UserOut, UserProfileUpdate
+from backend.app.services import audit, avatar_service
 
 router = APIRouter()
 
@@ -15,6 +15,46 @@ router = APIRouter()
 def _ensure_same_user(target_user_id: str, current_user_id: str) -> None:
     if target_user_id != "me" and target_user_id != current_user_id:
         raise ForbiddenError("You cannot modify another user's profile photo.")
+
+
+@router.patch("/me", response_model=UserOut, summary="Update the current user's profile")
+def update_my_profile(
+    payload: UserProfileUpdate,
+    db: Session = Depends(get_db),
+    ctx: CurrentContext = Depends(get_current_context),
+):
+    """Update the signed-in user's own name and phone.
+
+    Only fields actually supplied are written, so a partial update cannot blank
+    out the rest of the profile.
+    """
+    user = db.get(User, ctx.user.id)
+    if user is None:
+        raise EntityNotFoundError("User", ctx.user.id)
+
+    changes = payload.model_dump(exclude_unset=True)
+    before = {"full_name": user.full_name, "phone": user.phone}
+
+    if "full_name" in changes and changes["full_name"] is not None:
+        user.full_name = changes["full_name"].strip()
+    if "phone" in changes:
+        phone = (changes["phone"] or "").strip()
+        user.phone = phone or None
+
+    db.flush()
+    audit.record(
+        db,
+        action="USER_PROFILE_UPDATED",
+        entity_type="user",
+        entity_id=user.id,
+        entity_label=user.full_name,
+        ctx=ctx,
+        before=before,
+        after={"full_name": user.full_name, "phone": user.phone},
+    )
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 @router.post("/me/avatar", response_model=UserOut, summary="Upload current user's profile photo")

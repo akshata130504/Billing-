@@ -150,6 +150,7 @@ export interface MeUser {
   id: string;
   email: string;
   full_name: string;
+  phone?: string | null;
   avatar_url?: string | null;
   last_login_at: string | null;
   created_at: string;

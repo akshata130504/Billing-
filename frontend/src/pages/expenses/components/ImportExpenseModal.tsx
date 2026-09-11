@@ -1,6 +1,12 @@
 import { useState, useRef, ChangeEvent } from 'react';
 import { X, UploadCloud, Download, CheckCircle, AlertCircle, FileSpreadsheet } from 'lucide-react';
-import { Expense, ExpenseCategory, PaymentMethod } from '../types';
+import {
+  Expense,
+  ExpenseCategory,
+  PaymentMethod,
+  EXPENSE_CATEGORIES,
+  EXPENSE_PAYMENT_METHODS,
+} from '../types';
 import { triggerBlobDownload } from '../../../services/download';
 
 interface ImportExpenseModalProps {
@@ -20,6 +26,9 @@ export function ImportExpenseModal({ isOpen, onClose, onImport }: ImportExpenseM
   const [file, setFile] = useState<File | null>(null);
   const [parsedRows, setParsedRows] = useState<Omit<Expense, 'id' | 'createdAt'>[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
+  /** Rows that could not be imported, and values that were coerced. Surfaced to
+   *  the user: silently importing 60 of 100 expenses is a data-loss bug. */
+  const [parseWarnings, setParseWarnings] = useState<string[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -63,6 +72,7 @@ export function ImportExpenseModal({ isOpen, onClose, onImport }: ImportExpenseM
       }
 
       const rows: Omit<Expense, 'id' | 'createdAt'>[] = [];
+      const warnings: string[] = [];
       const defaultDate = new Date().toISOString().split('T')[0];
 
       for (let i = 1; i < lines.length; i++) {
@@ -88,15 +98,36 @@ export function ImportExpenseModal({ isOpen, onClose, onImport }: ImportExpenseM
         const rawAmt = values[amtIdx]?.replace(/[^0-9.-]/g, '') || '0';
         const amount = parseFloat(rawAmt);
 
-        if (!name || isNaN(amount) || amount <= 0) continue;
+        if (!name) {
+          warnings.push(`Row ${i + 1}: skipped — no expense name.`);
+          continue;
+        }
+        if (isNaN(amount) || amount <= 0) {
+          warnings.push(`Row ${i + 1}: skipped — amount "${values[amtIdx] ?? ''}" is not a positive number.`);
+          continue;
+        }
 
-        const category = (catIdx !== -1 && values[catIdx] ? values[catIdx] : 'Other') as ExpenseCategory;
+        const rawCategory = catIdx !== -1 && values[catIdx] ? values[catIdx] : 'Other';
+        // A category outside the canonical list would be invisible to the
+        // category filter (which matches exactly) while still counting in totals.
+        const category = (EXPENSE_CATEGORIES as readonly string[]).includes(rawCategory)
+          ? (rawCategory as ExpenseCategory)
+          : 'Other';
+        if (category !== rawCategory) {
+          warnings.push(`Row ${i + 1}: unknown category "${rawCategory}" imported as "Other".`);
+        }
         const date = (dateIdx !== -1 && values[dateIdx] ? values[dateIdx] : defaultDate);
         const customer = (custIdx !== -1 && values[custIdx] ? values[custIdx] : 'Internal');
         const project = (projIdx !== -1 && values[projIdx] ? values[projIdx] : '—');
         const isBillableRaw = billIdx !== -1 ? values[billIdx]?.toLowerCase() : 'false';
         const billable = isBillableRaw === 'true' || isBillableRaw === '1' || isBillableRaw === 'yes';
-        const paymentMethod = (payIdx !== -1 && values[payIdx] ? values[payIdx] : 'Corporate Card') as PaymentMethod;
+        const rawPaymentMethod = payIdx !== -1 && values[payIdx] ? values[payIdx] : 'Corporate Card';
+        const paymentMethod = (EXPENSE_PAYMENT_METHODS as readonly string[]).includes(rawPaymentMethod)
+          ? (rawPaymentMethod as PaymentMethod)
+          : 'Other';
+        if (paymentMethod !== rawPaymentMethod) {
+          warnings.push(`Row ${i + 1}: unknown payment method "${rawPaymentMethod}" imported as "Other".`);
+        }
         const status = (statusIdx !== -1 && values[statusIdx] ? values[statusIdx].toLowerCase() : 'recorded') as any;
         const description = (descIdx !== -1 ? values[descIdx] : '');
 
@@ -119,16 +150,23 @@ export function ImportExpenseModal({ isOpen, onClose, onImport }: ImportExpenseM
         });
       }
 
+      const dataRowCount = lines.length - 1;
       if (rows.length === 0) {
         setParseError('No valid expense rows could be parsed. Check column formats and numbers.');
         setParsedRows([]);
+        setParseWarnings(warnings);
       } else {
         setParseError(null);
         setParsedRows(rows);
+        if (rows.length < dataRowCount) {
+          warnings.unshift(`${dataRowCount - rows.length} of ${dataRowCount} rows will not be imported.`);
+        }
+        setParseWarnings(warnings);
       }
     } catch (err) {
       setParseError('Failed to parse file. Please verify CSV format.');
       setParsedRows([]);
+      setParseWarnings([]);
     }
   };
 
@@ -243,6 +281,22 @@ export function ImportExpenseModal({ isOpen, onClose, onImport }: ImportExpenseM
             <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-100 rounded-lg text-xs text-red-700">
               <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
               <span>{parseError}</span>
+            </div>
+          )}
+
+          {/* Rows that will not import, and values that were coerced. */}
+          {parseWarnings.length > 0 && (
+            <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg text-xs text-amber-800">
+              <div className="flex items-center gap-2 font-semibold mb-1.5">
+                <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+                <span>Review before importing</span>
+              </div>
+              <ul className="list-disc pl-5 space-y-0.5 max-h-28 overflow-y-auto">
+                {parseWarnings.slice(0, 20).map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+                {parseWarnings.length > 20 && <li>…and {parseWarnings.length - 20} more</li>}
+              </ul>
             </div>
           )}
 

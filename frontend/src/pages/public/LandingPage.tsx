@@ -28,6 +28,9 @@ import {
   Pause,
   Server,
   ArrowLeftRight,
+  TrendingUp,
+  Users,
+  Workflow,
 } from 'lucide-react';
 import { RoomanLogo } from '../../components/common/RoomanLogo';
 import { Button } from '../../components/common/Button';
@@ -134,6 +137,7 @@ export function LandingPage() {
   const [simulatorQuantity, setSimulatorQuantity] = useState<number>(150);
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
   const [activeAudienceIndex, setActiveAudienceIndex] = useState<number>(0);
+  const [activeTabVisual, setActiveTabVisual] = useState<'transactions' | 'cpq'>('transactions');
   const [videoLoaded, setVideoLoaded] = useState<boolean>(false);
   const [videoFailed, setVideoFailed] = useState<boolean>(false);
 
@@ -508,7 +512,6 @@ export function LandingPage() {
                 size="md"
                 onClick={() => navigate('/dashboard')}
                 trailingIcon={<ArrowRight className="w-4 h-4" />}
-                className="shadow-sm font-semibold active:scale-[0.98] transition-transform"
                 className="bg-[#25247A] hover:bg-[#1C1B63] text-white shadow-sm font-semibold active:scale-[0.98] transition-transform"
               >
                 Dashboard
@@ -685,7 +688,6 @@ export function LandingPage() {
                   variant="primary"
                   size="lg"
                   trailingIcon={<ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />}
-                  className="w-full sm:w-auto font-semibold px-8 py-3.5 text-base shadow-elevated group active:scale-[0.98] transition-all"
                   className="w-full sm:w-auto font-semibold px-8 py-3.5 text-base bg-gradient-to-r from-[#25247A] via-[#3F51C9] to-[#E83E8C] text-white shadow-elevated group active:scale-[0.98] transition-all hover:brightness-110"
                 >
                   Get Started
@@ -1231,7 +1233,6 @@ export function LandingPage() {
                       variant="primary"
                       size="md"
                       trailingIcon={<ArrowRight className="w-4 h-4" />}
-                      className="font-semibold shadow-sm active:scale-[0.98]"
                       className="bg-gradient-to-r from-[#3F51C9] to-[#E83E8C] text-white font-semibold shadow-sm active:scale-[0.98]"
                     >
                       Open {workflowSteps[activeWorkflowTab].label} in App
@@ -1381,9 +1382,8 @@ export function LandingPage() {
                 variant="primary"
                 size="lg"
                 trailingIcon={<ArrowRight className="w-4 h-4" />}
-                className="font-semibold shadow-sm active:scale-[0.98]"
+                className="bg-[#25247A] text-white font-semibold shadow-sm active:scale-[0.98]"
               >
-              <Button variant="primary" size="lg" className="bg-[#25247A] text-white font-semibold shadow-sm">
                 Explore Plans & Pricing
               </Button>
             </Link>
@@ -1392,9 +1392,8 @@ export function LandingPage() {
                 variant="outline"
                 size="lg"
                 trailingIcon={<ArrowUpRight className="w-4 h-4" />}
-                className="font-medium"
+                className="font-medium text-[#25247A]"
               >
-              <Button variant="outline" size="lg" className="font-medium text-[#25247A]">
                 Open Full Pricing Simulator
               </Button>
             </Link>
@@ -1805,7 +1804,6 @@ export function LandingPage() {
                 variant="primary"
                 size="lg"
                 trailingIcon={<ArrowRight className="w-4 h-4" />}
-                className="w-full sm:w-auto font-semibold px-8 py-3.5 text-base bg-white text-brand-900 hover:bg-slate-100 shadow-elevated active:scale-[0.98]"
                 className="w-full sm:w-auto font-semibold px-8 py-3.5 text-base bg-gradient-to-r from-[#3F51C9] to-[#E83E8C] text-white hover:opacity-95 shadow-elevated active:scale-[0.98]"
               >
                 Get Started
