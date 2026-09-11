@@ -571,13 +571,29 @@ def email_invoice(db: Session, invoice: Invoice, *, reminder: bool = False, atta
     if not recipient or organization is None:
         return False
     subject, body = _invoice_email(invoice, organization, reminder=reminder)
+
+    smtp_cfg = None
+    try:
+        from backend.app.services.integrations_service import get_active_smtp_credentials
+        smtp_cfg = get_active_smtp_credentials(db, invoice.organization_id)
+    except Exception:
+        pass
+
+    email_active = bool(smtp_cfg.get("host")) if smtp_cfg else settings.email_enabled
     attachments = []
-    if attach_pdf and settings.email_enabled:
+    if attach_pdf and email_active:
         pdf = _render_pdf_safe(invoice, organization)
         if pdf:
             attachments.append((f"{invoice.invoice_number}.pdf", pdf, "application/pdf"))
     try:
-        return send_email(recipient, subject, body, attachments=attachments, reply_to=organization.email)
+        return send_email(
+            recipient,
+            subject,
+            body,
+            attachments=attachments,
+            reply_to=organization.email,
+            smtp_config=smtp_cfg,
+        )
     except Exception:  # SMTP trouble must not fail the state change
         logger.exception("Email delivery failed for invoice %s", invoice.invoice_number)
         return False

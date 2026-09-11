@@ -1,5 +1,6 @@
 """FastAPI dependencies: database session, authenticated user, tenant context, RBAC."""
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Callable, Optional
 
 import jwt
@@ -65,6 +66,23 @@ def get_current_user(
     user = db.get(User, payload.get("sub"))
     if user is None or not user.is_active:
         raise UnauthorizedError("User account is inactive or no longer exists.")
+
+    if user.tokens_valid_after is not None:
+        token_iat = payload.get("iat")
+        if token_iat is None or not isinstance(token_iat, (int, float)):
+            raise UnauthorizedError("Access token is invalid.")
+        try:
+            token_issued_at = datetime.fromtimestamp(token_iat, tz=timezone.utc)
+        except (ValueError, OSError, OverflowError):
+            raise UnauthorizedError("Access token is invalid.")
+
+        valid_after = user.tokens_valid_after
+        if valid_after.tzinfo is None:
+            valid_after = valid_after.replace(tzinfo=timezone.utc)
+
+        if token_issued_at < valid_after:
+            raise UnauthorizedError("Access token has been revoked.")
+
     # Stash the org claim so get_current_context can pick the right membership.
     user._token_org_id = payload.get("org")  # type: ignore[attr-defined]
     return user

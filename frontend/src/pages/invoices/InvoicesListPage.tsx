@@ -111,11 +111,20 @@ export const InvoicesListPage: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="secondary" onClick={fetchInvoices} disabled={loading}>
-            <RefreshCw className={`w-4 h-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          <Button
+            variant="secondary"
+            onClick={fetchInvoices}
+            disabled={loading}
+            leadingIcon={<RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />}
+          >
+            Refresh
           </Button>
-          <Button variant="primary" onClick={() => navigate('/invoices/new')}>
-            <Plus className="w-4 h-4 mr-1.5" /> New Invoice
+          <Button
+            variant="primary"
+            onClick={() => navigate('/invoices/new')}
+            leadingIcon={<Plus className="w-4 h-4" />}
+          >
+            New Invoice
           </Button>
         </div>
       </div>
@@ -232,8 +241,12 @@ export const InvoicesListPage: React.FC = () => {
                 ? 'Try adjusting your search or tab filters.'
                 : 'Create your first invoice to start billing your customers.'}
             </p>
-            <Button variant="primary" onClick={() => navigate('/invoices/new')}>
-              <Plus className="w-4 h-4 mr-1.5" /> Create Invoice
+            <Button
+              variant="primary"
+              onClick={() => navigate('/invoices/new')}
+              leadingIcon={<Plus className="w-4 h-4" />}
+            >
+              Create Invoice
             </Button>
           </div>
         ) : (
@@ -292,8 +305,9 @@ export const InvoicesListPage: React.FC = () => {
                           variant="secondary"
                           size="sm"
                           onClick={() => navigate(`/invoices/${inv.id}`)}
+                          leadingIcon={<Eye className="w-3.5 h-3.5" />}
                         >
-                          <Eye className="w-3.5 h-3.5 mr-1" /> View
+                          View
                         </Button>
                       </div>
                     </td>

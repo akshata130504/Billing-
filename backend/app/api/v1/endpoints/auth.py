@@ -1,5 +1,5 @@
 """Authentication endpoints (contract §2). Mounted at /auth."""
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, File, Request, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import CurrentContext, client_ip, get_current_context, get_db
@@ -19,8 +19,9 @@ from backend.app.schemas.auth import (
     SignupRequest,
     SignupResponse,
     SwitchOrganizationRequest,
+    UserOut,
 )
-from backend.app.services import auth_service
+from backend.app.services import auth_service, avatar_service
 
 router = APIRouter()
 
@@ -73,6 +74,25 @@ def logout(
 @router.get("/me", response_model=MeResponse, summary="Current user, organization and membership")
 def me(ctx: CurrentContext = Depends(get_current_context), db: Session = Depends(get_db)) -> MeResponse:
     return auth_service.build_me(db, ctx)
+
+
+@router.post("/me/avatar", response_model=UserOut, summary="Upload current user's profile photo")
+async def upload_my_avatar(
+    file: UploadFile = File(...),
+    ctx: CurrentContext = Depends(get_current_context),
+    db: Session = Depends(get_db),
+) -> UserOut:
+    user = await avatar_service.save_avatar(db, ctx.user, file)
+    return UserOut.model_validate(user)
+
+
+@router.delete("/me/avatar", response_model=UserOut, summary="Remove current user's profile photo")
+def delete_my_avatar(
+    ctx: CurrentContext = Depends(get_current_context),
+    db: Session = Depends(get_db),
+) -> UserOut:
+    user = avatar_service.delete_avatar(db, ctx.user)
+    return UserOut.model_validate(user)
 
 
 @router.post("/switch-organization", response_model=AuthTokens, summary="Issue tokens for another organization")

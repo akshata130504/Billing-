@@ -504,3 +504,86 @@ def test_customer_portal_signed_document_download(client, tenant, auth_headers, 
     tampered_token = signed_token[:-4] + "dead"
     tampered_res = client.get(f"/api/v1/portal/invoices/signed-download?token={tampered_token}")
     assert tampered_res.status_code == 401
+
+
+def test_customer_portal_invoices_payments_profile_and_isolation(client, tenant, auth_headers, db):
+    """Verify invoice details, payment history, profile endpoints, logout, and strict isolation."""
+    # Setup Customer A
+    cust_a = tenant.customer(email="portal_a@example.com")
+    inv_a = tenant.invoice(cust_a, amount="2500.00")
+    
+    # Setup Customer B
+    cust_b = tenant.customer(email="portal_b@example.com")
+    inv_b = tenant.invoice(cust_b, amount="4000.00")
+
+    # Record a payment for Customer A
+    from backend.app.models.payments import Payment, PaymentMethod, PaymentGateway, PaymentStatus
+    pay_a = Payment(
+        organization_id=tenant.organization.id,
+        payment_number="PAY-PORTAL-001",
+        customer_id=cust_a.id,
+        amount=2500.00,
+        currency="INR",
+        method=PaymentMethod.BANK_TRANSFER,
+        gateway=PaymentGateway.MANUAL,
+        status=PaymentStatus.SUCCEEDED,
+    )
+    db.add(pay_a)
+    db.commit()
+
+    # Signup & Login Customer A
+    client.post(
+        "/api/v1/portal/auth/signup",
+        json={
+            "organization_id": tenant.organization.id,
+            "email": "portal_a@example.com",
+            "password": "SecurePassword123!",
+            "display_name": "Portal User A",
+            "customer_id": cust_a.id,
+        },
+    )
+    login_a = client.post(
+        "/api/v1/portal/auth/login",
+        json={
+            "organization_id": tenant.organization.id,
+            "email": "portal_a@example.com",
+            "password": "SecurePassword123!",
+        },
+    )
+    assert login_a.status_code == 200
+    token_a = login_a.json()["token"]
+    headers_a = {"X-Portal-Token": token_a}
+
+    # 1. Invoice detail for Customer A's own invoice
+    detail_res = client.get(f"/api/v1/portal/invoices/{inv_a.id}", headers=headers_a)
+    assert detail_res.status_code == 200
+    detail_data = detail_res.json()
+    assert detail_data["id"] == inv_a.id
+    assert "public_token" in detail_data
+
+    # 2. Customer A CANNOT access Customer B's invoice -> 404
+    cross_inv_res = client.get(f"/api/v1/portal/invoices/{inv_b.id}", headers=headers_a)
+    assert cross_inv_res.status_code == 404
+
+    # 3. Payments list for Customer A includes pay_a
+    payments_res = client.get("/api/v1/portal/payments", headers=headers_a)
+    assert payments_res.status_code == 200
+    payments_data = payments_res.json()
+    assert len(payments_data) >= 1
+    assert any(p["payment_number"] == "PAY-PORTAL-001" for p in payments_data)
+
+    # 4. Profile endpoint
+    profile_res = client.get("/api/v1/portal/profile", headers=headers_a)
+    assert profile_res.status_code == 200
+    prof = profile_res.json()
+    assert prof["user"]["email"] == "portal_a@example.com"
+    assert prof["customer"]["id"] == cust_a.id
+
+    # 5. Logout invalidates session
+    logout_res = client.post("/api/v1/portal/auth/logout", headers=headers_a)
+    assert logout_res.status_code == 200
+
+    # Subsequent call with revoked token returns 401
+    revoked_res = client.get("/api/v1/portal/profile", headers=headers_a)
+    assert revoked_res.status_code == 401
+

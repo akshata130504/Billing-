@@ -16,6 +16,7 @@ ROUTERS = [
     ("health", "", ["Health"]),
     ("meta", "/meta", ["Meta"]),
     ("auth", "/auth", ["Auth"]),
+    ("users", "/users", ["Users"]),
     ("organization", "", ["Organization & Team"]),
     ("customers", "/customers", ["Customers"]),
     ("products", "/products", ["Catalog"]),
@@ -51,6 +52,7 @@ ROUTERS = [
     ("lifecycle", "/lifecycle", ["Customer Lifecycle"]),
     ("timesheets", "/timesheets", ["Timesheets"]),
     ("webhooks", "/webhooks", ["Webhooks"]),
+    ("integrations", "", ["Settings - Integrations"]),
 ]
 
 # In test, staging, and production environments, missing endpoints MUST fail fast.

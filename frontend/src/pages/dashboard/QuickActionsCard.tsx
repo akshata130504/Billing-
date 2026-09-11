@@ -1,66 +1,67 @@
-import { Plus, UserPlus } from 'lucide-react';
-import { useToast } from '../../components/common/Toast';
+import { useNavigate } from 'react-router-dom';
+import { FileText, CreditCard, User, BarChart3 } from 'lucide-react';
 
 export function QuickActionsCard() {
-  const { showToast } = useToast();
+  const navigate = useNavigate();
 
-  const handleAction = (title: string, phase: string) => {
-    showToast('info', title, `${title} workflow scheduled in ${phase}.`);
-  };
+  const actions = [
+    {
+      title: 'Create Invoice',
+      icon: FileText,
+      iconBg: 'bg-[#E8EBFC]',
+      iconColor: 'text-[#3F51C9]',
+      onClick: () => navigate('/invoices?action=new'),
+    },
+    {
+      title: 'Record Payment',
+      icon: CreditCard,
+      iconBg: 'bg-[#F9D9E8]',
+      iconColor: 'text-[#E83E8C]',
+      onClick: () => navigate('/payments'),
+    },
+    {
+      title: 'Add Customer',
+      icon: User,
+      iconBg: 'bg-[#F9D9E8]',
+      iconColor: 'text-[#E83E8C]',
+      onClick: () => navigate('/customers?action=new'),
+    },
+    {
+      title: 'View Reports',
+      icon: BarChart3,
+      iconBg: 'bg-[#E8EBFC]',
+      iconColor: 'text-[#3F51C9]',
+      onClick: () => navigate('/reports'),
+    },
+  ];
 
   return (
-    <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-sm space-y-3.5">
-      <h3 className="text-sm font-bold text-slate-900 tracking-tight">
+    <div className="bg-white p-5 rounded-2xl border border-[#E7E9F2] shadow-sm space-y-3.5">
+      <h3 className="text-sm font-bold text-[#11194F] tracking-tight">
         Quick Actions
       </h3>
 
-      <div className="space-y-2">
-        {/* Primary Action Button */}
-        <button
-          type="button"
-          onClick={() => handleAction('Create Invoice', 'Phase 2')}
-          className="w-full py-2.5 px-4 bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white font-semibold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-        >
-          <Plus className="w-4 h-4 stroke-[2.5]" />
-          <span>Create Invoice</span>
-        </button>
-
-        {/* Secondary Outline Buttons */}
-        <button
-          type="button"
-          onClick={() => handleAction('Create Quote', 'Phase 2')}
-          className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 text-slate-700 font-medium text-xs rounded-xl border border-slate-200 hover:border-slate-300 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-        >
-          <Plus className="w-3.5 h-3.5 text-slate-500" />
-          <span>Create Quote</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => handleAction('Record Payment', 'Phase 3')}
-          className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 text-slate-700 font-medium text-xs rounded-xl border border-slate-200 hover:border-slate-300 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-        >
-          <Plus className="w-3.5 h-3.5 text-slate-500" />
-          <span>Record Payment</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => handleAction('Add Customer', 'Phase 1')}
-          className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 text-slate-700 font-medium text-xs rounded-xl border border-slate-200 hover:border-slate-300 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-        >
-          <UserPlus className="w-3.5 h-3.5 text-slate-500" />
-          <span>Add Customer</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => handleAction('Create Subscription', 'Phase 4')}
-          className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 text-slate-700 font-medium text-xs rounded-xl border border-slate-200 hover:border-slate-300 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-        >
-          <Plus className="w-3.5 h-3.5 text-slate-500" />
-          <span>Create Subscription</span>
-        </button>
+      <div className="grid grid-cols-2 gap-3">
+        {actions.map((action) => {
+          const Icon = action.icon;
+          return (
+            <button
+              key={action.title}
+              type="button"
+              onClick={action.onClick}
+              className="p-3 rounded-xl bg-[#F7F8FC]/70 hover:bg-[#F0F2FA] border border-[#E7E9F2] hover:border-[#D0D7F9] transition-all flex items-center gap-3 text-left group cursor-pointer"
+            >
+              <div
+                className={`w-9 h-9 rounded-xl ${action.iconBg} ${action.iconColor} flex items-center justify-center shrink-0 shadow-3xs transition-transform group-hover:scale-105`}
+              >
+                <Icon className="w-4 h-4 stroke-[2]" />
+              </div>
+              <span className="text-xs font-semibold text-[#11194F] group-hover:text-[#25247A] leading-snug line-clamp-1">
+                {action.title}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

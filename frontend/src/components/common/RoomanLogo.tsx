@@ -37,22 +37,17 @@ export function RoomanLogo({
     );
   }
 
-  // Brand / Combined: Official company logo graphic (Shield + Rooman + Tagline) + Billing badge
+  // Brand / Combined: Official company logo graphic (Shield + Rooman Billing + Tagline)
   const heightClass =
     size === 'sm' ? 'h-6' : size === 'lg' ? 'h-9' : 'h-7 sm:h-8';
 
   return (
-    <div className={`flex items-center gap-2 ${className}`}>
+    <div className={`flex items-center ${className}`}>
       <img
-        src="/logos/rooman-full-logo.png"
-        alt="Rooman Technologies"
+        src={showBillingBadge ? '/logos/rooman-billing-logo.png' : '/logos/rooman-full-logo.png'}
+        alt="Rooman Billing"
         className={`${heightClass} w-auto object-contain shrink-0 drop-shadow-2xs`}
       />
-      {showBillingBadge && (
-        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-blue-50 text-brand-700 border border-blue-200/80 leading-none shadow-3xs tracking-tight shrink-0 self-center">
-          Billing
-        </span>
-      )}
     </div>
   );
 }

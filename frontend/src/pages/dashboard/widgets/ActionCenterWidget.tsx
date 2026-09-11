@@ -43,35 +43,35 @@ export function ActionCenterWidget({ items }: ActionCenterWidgetProps) {
     switch (category) {
       case 'overdue':
         return (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#F9D9E8] text-[#D81B60] border border-[#F3B8D4]">
             <AlertCircle className="w-3 h-3" />
             Overdue
           </span>
         );
       case 'failed_payment':
         return (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#FCEBD9] text-[#C05621] border border-[#F7D7B5]">
             <AlertTriangle className="w-3 h-3" />
             Failed Payment
           </span>
         );
       case 'expiring_trial':
         return (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#E8EBFC] text-[#25247A] border border-[#D0D7F9]">
             <Clock className="w-3 h-3" />
             Trial Expiring
           </span>
         );
       case 'pending_quote':
         return (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#E9E8FA] text-[#3F51C9] border border-[#D0D7F9]">
             <FileText className="w-3 h-3" />
             Pending Quote
           </span>
         );
       case 'pending_approval':
         return (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#E9E8FA] text-[#25247A] border border-[#D0D7F9]">
             <ClipboardCheck className="w-3 h-3" />
             Pending Approval
           </span>
@@ -88,7 +88,7 @@ export function ActionCenterWidget({ items }: ActionCenterWidgetProps) {
             Action Center
           </h3>
           {items.length > 0 && (
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#F9D9E8] text-[#D81B60]">
               {items.length} Item{items.length === 1 ? '' : 's'}
             </span>
           )}
@@ -106,8 +106,8 @@ export function ActionCenterWidget({ items }: ActionCenterWidgetProps) {
             onClick={() => setFilter(t.key)}
             className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
               filter === t.key
-                ? 'bg-slate-900 text-white shadow-xs'
-                : 'text-slate-600 hover:bg-slate-100'
+                ? 'bg-[#25247A] text-white shadow-xs'
+                : 'text-slate-600 hover:bg-[#F7F8FC]'
             }`}
           >
             {t.label}
@@ -152,7 +152,7 @@ export function ActionCenterWidget({ items }: ActionCenterWidgetProps) {
                 <button
                   type="button"
                   onClick={() => handleAction(item)}
-                  className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-brand-50 text-brand-700 border border-blue-200/70 hover:bg-brand-600 hover:text-white transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-[#E8EBFC] text-[#25247A] border border-[#D0D7F9] hover:bg-[#25247A] hover:text-white transition-colors cursor-pointer"
                 >
                   <span>{ACTION_LABELS[item.suggested_action]}</span>
                 </button>

@@ -276,9 +276,15 @@ def test_logout_revokes_token_and_is_idempotent(client, db, tenant):
     r = client.post(f"{API}/auth/logout", json={"refresh_token": tokens["refresh_token"]}, headers=headers)
     assert r.status_code == 204
     assert client.post(f"{API}/auth/refresh", json={"refresh_token": tokens["refresh_token"]}).status_code == 401
-    # unknown token and repeated logout still 204; anonymous logout is 401
-    assert client.post(f"{API}/auth/logout", json={"refresh_token": "nope"}, headers=headers).status_code == 204
+    # Access token is immediately revoked upon logout:
+    assert client.get(f"{API}/auth/me", headers=headers).status_code == 401
+    assert client.post(f"{API}/auth/logout", json={"refresh_token": "nope"}, headers=headers).status_code == 401
+    # Anonymous logout is 401:
     assert client.post(f"{API}/auth/logout", json={"refresh_token": tokens["refresh_token"]}).status_code == 401
+    # Unknown refresh token with a new valid session is still 204 (idempotent):
+    new_tokens = login(client, tenant.owner.email).json()
+    new_headers = bearer(new_tokens["access_token"])
+    assert client.post(f"{API}/auth/logout", json={"refresh_token": "nope"}, headers=new_headers).status_code == 204
     assert audit_rows(db, "USER_LOGGED_OUT", tenant.owner.id)
 
 

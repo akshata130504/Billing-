@@ -375,7 +375,7 @@ def get_customer_lifecycle_detail(db: Session, ctx: CurrentContext, customer_id:
             "status": p.status.value if hasattr(p.status, "value") else str(p.status),
             "payment_date": p.paid_at.isoformat() if p.paid_at else (p.created_at.isoformat() if p.created_at else None),
             "method": p.method.value if hasattr(p.method, "value") else str(p.method),
-            "reference": p.gateway_reference,
+            "reference": p.reference,
         }
         for p in payments
     ]

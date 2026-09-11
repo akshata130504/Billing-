@@ -18,7 +18,18 @@ _INSECURE_SECRET_KEYS = {
     "change-this-insecure-secret-key-to-a-random-32-char-string-in-production",
     "changeme",
     "secret",
+    "secretkey",
+    "insecure",
+    "admin",
+    "password",
+    "your-secret-key",
+    "your-secret-key-here",
+    "default-secret-key",
+    "insecure-secret-key",
+    "development-secret-key",
+    "replace-in-production",
 }
+
 
 
 class Settings(BaseSettings):
@@ -32,6 +43,9 @@ class Settings(BaseSettings):
     # Public URL of the frontend. Used to build links in emails (invites, password
     # resets, hosted invoice payment pages).
     FRONTEND_URL: str = "http://localhost:5173"
+
+    # Local uploads directory
+    UPLOAD_DIR: str = "backend/uploads"
 
     # --- Security -----------------------------------------------------------
     # In production this MUST be a long random string (e.g. `openssl rand -hex 32`).
@@ -140,14 +154,34 @@ class Settings(BaseSettings):
 
     @property
     def is_production(self) -> bool:
-        return self.ENVIRONMENT.lower() in {"production", "prod", "staging"}
+        env = (self.ENVIRONMENT or "").strip().lower()
+        return env in {"production", "prod", "staging", "stage"}
 
     @model_validator(mode="after")
     def enforce_production_safety(self) -> "Settings":
         if self.is_production:
             problems = []
-            if self.SECRET_KEY in _INSECURE_SECRET_KEYS or len(self.SECRET_KEY) < 32:
-                problems.append("SECRET_KEY must be a random string of at least 32 characters")
+            secret = (self.SECRET_KEY or "").strip()
+            is_weak_secret = (
+                not secret
+                or secret in _INSECURE_SECRET_KEYS
+                or len(secret) < 32
+                or len(set(secret)) < 8
+                or any(
+                    placeholder in secret.lower()
+                    for placeholder in (
+                        "replace-in-production",
+                        "change-this",
+                        "insecure-secret",
+                        "your-secret-key",
+                        "development-secret",
+                    )
+                )
+            )
+            if is_weak_secret:
+                problems.append(
+                    "SECRET_KEY must be a random string of at least 32 characters and cannot be a default or placeholder"
+                )
             if self.DEBUG:
                 problems.append("DEBUG must be false")
             if self.sync_database_url.startswith("sqlite"):
@@ -162,6 +196,26 @@ class Settings(BaseSettings):
                     % (self.ENVIRONMENT, "; ".join(problems))
                 )
         return self
+
+    def __repr__(self) -> str:
+        """Mask sensitive secrets so logging or printing Settings never leaks credentials."""
+        sensitive_fields = {
+            "SECRET_KEY",
+            "POSTGRES_PASSWORD",
+            "RAZORPAY_KEY_SECRET",
+            "RAZORPAY_WEBHOOK_SECRET",
+            "SMTP_PASSWORD",
+        }
+        parts = []
+        for key, value in self.__dict__.items():
+            if key in sensitive_fields and value:
+                parts.append(f"{key}='***'")
+            else:
+                parts.append(f"{key}={value!r}")
+        return f"{self.__class__.__name__}({', '.join(parts)})"
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
     @staticmethod
     def generate_secret_key() -> str:

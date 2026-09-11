@@ -73,6 +73,7 @@ class UserOut(BaseModel):
     id: str
     email: str
     full_name: str
+    avatar_url: Optional[str] = None
     last_login_at: Optional[UTCDateTime] = None
     created_at: UTCDateTime
 
