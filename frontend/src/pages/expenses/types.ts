@@ -1,14 +1,19 @@
-export type ExpenseCategory =
-  | 'Travel'
-  | 'Meals'
-  | 'Office Supplies'
-  | 'Software'
-  | 'Cloud Services'
-  | 'Advertising'
-  | 'Utilities'
-  | 'Equipment'
-  | 'Professional Services'
-  | 'Other';
+/** The canonical category list. Derive the union from it so a value can be
+ *  validated at runtime (CSV import) against exactly what the UI offers. */
+export const EXPENSE_CATEGORIES = [
+  'Travel',
+  'Meals',
+  'Office Supplies',
+  'Software',
+  'Cloud Services',
+  'Advertising',
+  'Utilities',
+  'Equipment',
+  'Professional Services',
+  'Other',
+] as const;
+
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 
 export type ExpenseStatus =
   | 'draft'
@@ -23,13 +28,16 @@ export type InvoiceTreatment =
   | 'add_to_existing_invoice'
   | 'keep_billable';
 
-export type PaymentMethod =
-  | 'Cash'
-  | 'Bank Transfer'
-  | 'Corporate Card'
-  | 'Personal Card'
-  | 'UPI / Net Banking'
-  | 'Other';
+export const EXPENSE_PAYMENT_METHODS = [
+  'Cash',
+  'Bank Transfer',
+  'Corporate Card',
+  'Personal Card',
+  'UPI / Net Banking',
+  'Other',
+] as const;
+
+export type PaymentMethod = (typeof EXPENSE_PAYMENT_METHODS)[number];
 
 export type RecurringExpenseFrequency =
   | 'weekly'

@@ -278,8 +278,9 @@ export function AppRoutes() {
               />
               <Route path="control-center/migration" element={<DataMigrationPage />} />
 
-              {/* Settings (tabs via ?tab=) */}
+              {/* Settings (tabs via path or ?tab=) */}
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="settings/:section" element={<SettingsPage />} />
 
               <Route path="cpq" element={<CPQPage />} />
               <Route path="usage" element={<UsageMeteringPage />} />

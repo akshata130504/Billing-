@@ -5,6 +5,7 @@ import {
   Search,
   Plus,
   Settings,
+  User,
   ChevronDown,
   Check,
   Building2,
@@ -320,6 +321,14 @@ export function Header({ onMenuClick, onQuickCreateClick, onOpenSearch }: Header
                 </div>
               </div>
               <div className="py-1 space-y-0.5">
+                <Link
+                  to="/settings?tab=profile"
+                  onClick={() => setUserMenuOpen(false)}
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-slate-700 hover:bg-slate-50"
+                >
+                  <User className="w-4 h-4 text-slate-400" />
+                  My Profile
+                </Link>
                 <Link
                   to="/settings"
                   onClick={() => setUserMenuOpen(false)}

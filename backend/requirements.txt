@@ -17,6 +17,8 @@ python-dotenv>=1.0.1,<2.0.0
 PyJWT>=2.9.0,<3.0.0
 bcrypt>=4.2.0,<6.0.0
 slowapi>=0.1.9,<0.2.0
+# Fernet, used to encrypt tenant integration credentials at rest.
+cryptography>=43.0.0,<47.0.0
 
 # Payments
 razorpay>=1.4.2,<3.0.0

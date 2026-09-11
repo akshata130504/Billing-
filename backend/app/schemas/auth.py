@@ -73,9 +73,21 @@ class UserOut(BaseModel):
     id: str
     email: str
     full_name: str
+    phone: Optional[str] = None
     avatar_url: Optional[str] = None
     last_login_at: Optional[UTCDateTime] = None
     created_at: UTCDateTime
+
+
+class UserProfileUpdate(BaseModel):
+    """Fields a user may change on their own profile.
+
+    Email is deliberately excluded: changing it is an identity change that has to
+    go through verification, not a profile edit.
+    """
+
+    full_name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    phone: Optional[str] = Field(default=None, max_length=40)
 
 
 class MembershipOut(BaseModel):

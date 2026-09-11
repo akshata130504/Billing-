@@ -36,3 +36,4 @@ export { portalService } from './portalService';
 export { checkoutService } from './checkoutService';
 export { automationService } from './automationService';
 export { customizationService } from './customizationService';
+export { userService } from './userService';

@@ -9,6 +9,8 @@ import {
   changeTypeVariant,
   formatQuantity,
   intervalLabel,
+  intervalMonths,
+  monthlyEquivalent,
 } from './prorationLabels';
 
 describe('change type labels and variants', () => {
@@ -130,5 +132,59 @@ describe('intervalLabel', () => {
   it('treats a count of zero or one as singular', () => {
     expect(intervalLabel('monthly', 1)).toBe('month');
     expect(intervalLabel('monthly', 0)).toBe('month');
+  });
+});
+
+describe('intervalMonths', () => {
+  it('maps each billing interval to its month count', () => {
+    expect(intervalMonths('monthly')).toBe(1);
+    expect(intervalMonths('quarterly')).toBe(3);
+    expect(intervalMonths('semiannual')).toBe(6);
+    expect(intervalMonths('yearly')).toBe(12);
+  });
+
+  it('multiplies by interval_count', () => {
+    expect(intervalMonths('monthly', 3)).toBe(3);
+    expect(intervalMonths('yearly', 2)).toBe(24);
+  });
+
+  it('treats a missing or zero count as one period', () => {
+    expect(intervalMonths('monthly', 0)).toBe(1);
+    expect(intervalMonths('quarterly', undefined as unknown as number)).toBe(3);
+  });
+
+  it('returns null for intervals that cannot be expressed per month', () => {
+    expect(intervalMonths('one_time')).toBeNull();
+    expect(intervalMonths('fortnightly')).toBeNull();
+    expect(intervalMonths(undefined)).toBeNull();
+  });
+});
+
+describe('monthlyEquivalent', () => {
+  it('normalises a yearly price to a monthly one', () => {
+    expect(monthlyEquivalent('24000', 'yearly')).toBe(2000);
+    expect(monthlyEquivalent('45000', 'quarterly')).toBe(15000);
+  });
+
+  it('leaves a monthly price unchanged', () => {
+    expect(monthlyEquivalent('2500', 'monthly')).toBe(2500);
+  });
+
+  it('ranks a cheaper-per-month yearly plan below a monthly one', () => {
+    // The bug this guards: comparing raw unit_amount called the yearly plan an
+    // upgrade (24000 > 2500) when it is actually cheaper per month.
+    const yearly = monthlyEquivalent('24000', 'yearly')!;
+    const monthly = monthlyEquivalent('2500', 'monthly')!;
+    expect(yearly).toBeLessThan(monthly);
+  });
+
+  it('accounts for interval_count', () => {
+    expect(monthlyEquivalent('6000', 'monthly', 3)).toBe(2000);
+  });
+
+  it('returns null when the amount or interval is not comparable', () => {
+    expect(monthlyEquivalent('not-a-number', 'monthly')).toBeNull();
+    expect(monthlyEquivalent(null, 'monthly')).toBeNull();
+    expect(monthlyEquivalent('1000', 'one_time')).toBeNull();
   });
 });

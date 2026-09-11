@@ -92,6 +92,7 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     email = Column(String(255), nullable=False, unique=True, index=True)
     full_name = Column(String(200), nullable=False)
+    phone = Column(String(40), nullable=True)
     # Null until an invited user sets their password.
     hashed_password = Column(String(128), nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)

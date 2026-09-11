@@ -64,3 +64,7 @@ backups/
 *.swo
 .DS_Store
 Thumbs.db
+
+# Runtime upload artifacts (user avatars, etc.) must not be versioned.
+backend/uploads/
+!backend/uploads/.gitkeep

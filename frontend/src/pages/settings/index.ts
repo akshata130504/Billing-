@@ -1,2 +1,11 @@
 export { SettingsPage } from './SettingsPage';
 export type { SettingsTab } from './SettingsPage';
+export { ProfileTab } from './ProfileTab';
+export { PreferencesTab } from './PreferencesTab';
+export { NotificationsTab } from './NotificationsTab';
+export { OrganizationTab } from './OrganizationTab';
+export { TeamTab } from './TeamTab';
+export { BillingTab } from './BillingTab';
+export { IntegrationsTab } from './IntegrationsTab';
+export { SecurityTab } from './SecurityTab';
+export { HelpTab } from './HelpTab';

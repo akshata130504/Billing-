@@ -68,3 +68,39 @@ export function intervalLabel(interval: string | undefined, count = 1): string {
   if (!base || base === 'one-time') return base;
   return count > 1 ? `${count} ${base}s` : base;
 }
+
+/** Months per billing period, mirroring the backend's `interval_months`. */
+const INTERVAL_MONTHS: Record<string, number> = {
+  monthly: 1,
+  quarterly: 3,
+  semiannual: 6,
+  yearly: 12,
+};
+
+export function intervalMonths(interval: string | undefined, count = 1): number | null {
+  const months = INTERVAL_MONTHS[interval ?? ''];
+  if (!months) return null; // one_time or unknown: not comparable per-month
+  return months * Math.max(1, count || 1);
+}
+
+/**
+ * A plan's price normalised to one month, so plans on different billing
+ * intervals can be ranked against each other. Comparing raw `unit_amount`
+ * calls a 24,000/year plan an "upgrade" over a 2,500/month one when it is
+ * actually cheaper per month.
+ */
+export function monthlyEquivalent(
+  unitAmount: string | number | null | undefined,
+  interval: string | undefined,
+  count = 1
+): number | null {
+  // Number(null) and Number('') are 0, which would rank a plan with no price as
+  // the cheapest. Absent means not comparable, not free.
+  if (unitAmount === null || unitAmount === undefined) return null;
+  if (typeof unitAmount === 'string' && unitAmount.trim() === '') return null;
+  const amount = Number(unitAmount);
+  if (!Number.isFinite(amount)) return null;
+  const months = intervalMonths(interval, count);
+  if (!months) return null;
+  return amount / months;
+}
