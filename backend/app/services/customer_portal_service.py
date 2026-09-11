@@ -337,3 +337,17 @@ def get_customer_dashboard(db: Session, portal_user: CustomerPortalUser) -> Port
             for m in methods
         ],
     )
+
+
+def portal_logout(db: Session, token: str) -> None:
+    """Revokes the given portal session token."""
+    hashed_token = _hash_token(token)
+    session = db.scalars(
+        select(CustomerPortalSession).where(
+            CustomerPortalSession.token.in_([hashed_token, token]),
+        )
+    ).first()
+    if session:
+        session.is_revoked = True
+        db.flush()
+

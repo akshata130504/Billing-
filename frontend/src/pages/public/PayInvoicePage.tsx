@@ -195,6 +195,11 @@ export function PayInvoicePage() {
     try {
       const Razorpay = await loadRazorpayCheckout();
       const order = await publicService.createRazorpayOrder(token, amount);
+      const isMobileDevice =
+        typeof window !== 'undefined' &&
+        (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+          window.innerWidth < 768);
+
       const checkout = new Razorpay({
         key: order.key_id,
         amount: order.amount,
@@ -210,6 +215,33 @@ export function PayInvoicePage() {
         },
         notes: { invoice_number: invoice.invoice_number, payment_id: order.payment_id },
         theme: { color: '#2563eb' },
+        config: {
+          display: {
+            blocks: {
+              upi: {
+                name: 'Pay via UPI',
+                instruments: [
+                  {
+                    method: 'upi',
+                    flows: isMobileDevice ? ['intent'] : ['qr'],
+                  },
+                ],
+              },
+              other: {
+                name: 'Cards, Netbanking & Wallets',
+                instruments: [
+                  { method: 'card' },
+                  { method: 'netbanking' },
+                  { method: 'wallet' },
+                ],
+              },
+            },
+            sequence: ['block.upi', 'block.other'],
+            preferences: {
+              show_default_blocks: true,
+            },
+          },
+        },
         handler: (resp) => {
           void finalisePayment(resp);
         },

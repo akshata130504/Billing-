@@ -59,7 +59,7 @@ def create_access_token(user_id: str, organization_id: Optional[str], role: Opti
         "org": organization_id,
         "role": role,
         "type": ACCESS_TOKEN_TYPE,
-        "iat": int(now.timestamp()),
+        "iat": now.timestamp(),
         "exp": int((now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)).timestamp()),
         "jti": secrets.token_hex(8),
     }

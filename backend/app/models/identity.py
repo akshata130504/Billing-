@@ -99,6 +99,9 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     last_login_at = Column(DateTime(timezone=True), nullable=True)
     failed_login_attempts = Column(Integer, nullable=False, default=0)
     locked_until = Column(DateTime(timezone=True), nullable=True)
+    # Revocation cutoff: access tokens with iat issued before this timestamp are rejected.
+    tokens_valid_after = Column(DateTime(timezone=True), nullable=True)
+    avatar_url = Column(String(500), nullable=True)
 
     memberships = relationship(
         "Membership", back_populates="user", foreign_keys="Membership.user_id", cascade="all, delete-orphan"

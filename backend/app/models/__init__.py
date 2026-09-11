@@ -138,6 +138,7 @@ from backend.app.models.dunning import (
     DunningFinalAction,
     DunningPolicy,
 )
+from backend.app.models.integrations import OrganizationIntegration
 from backend.app.models.customization import (
     AutomationAction,
     AutomationActionType,
@@ -329,4 +330,5 @@ __all__ = [
     "MANUAL_COLLECTION_STATUSES",
     "PromiseToPay",
     "PromiseToPayStatus",
+    "OrganizationIntegration",
 ]

@@ -121,6 +121,7 @@ export interface Invoice {
   items: InvoiceLineItemOut[];
   payments?: any[];
   public_url?: string;
+  public_token?: string;
   pdf_url?: string;
   created_at: string;
   updated_at: string;

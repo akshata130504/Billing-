@@ -3,23 +3,39 @@
 @tailwind utilities;
 
 :root {
-  /* Default Rooman Royal Blue primary theme - fully configurable */
-  --brand-50: #eff6ff;
-  --brand-100: #dbeafe;
-  --brand-200: #bfdbfe;
-  --brand-300: #93c5fd;
-  --brand-400: #60a5fa;
-  --brand-500: #3b82f6;
-  --brand-600: #2563eb;
-  --brand-700: #1d4ed8;
-  --brand-800: #1e40af;
-  --brand-900: #1e3a8a;
-  --brand-950: #172554;
+  /* Reference Palette: Deep Navy, Indigo & Primary Blue with Pink & Soft Pastels */
+  --brand-50: #e8ebfc;
+  --brand-100: #e9e8fa;
+  --brand-200: #d0d7f9;
+  --brand-300: #a7b5f2;
+  --brand-400: #6b7ee3;
+  --brand-500: #3f51c9;
+  --brand-600: #25247a;
+  --brand-700: #1f1e6b;
+  --brand-800: #171b63;
+  --brand-900: #11194f;
+  --brand-950: #0b0f33;
+
+  --accent-pink: #e83e8c;
+  --accent-soft-pink: #f9d9e8;
+  --accent-lavender: #e9e8fa;
+  --accent-soft-blue: #e8ebfc;
+  --accent-mint: #ddf4ea;
+  --accent-peach: #fcebd9;
+
+  --page-bg: #f7f8fc;
+  --card-bg: #ffffff;
+  --text-primary: #11194f;
+  --text-secondary: #59617d;
+  --text-muted: #7b829a;
+  --border-color: #e7e9f2;
 }
 
 @layer base {
   body {
-    @apply bg-slate-50 text-slate-900 font-sans;
+    background-color: var(--page-bg);
+    color: var(--text-primary);
+    font-family: inherit;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 

@@ -246,9 +246,8 @@ export function SubscriptionsListPage() {
             variant="outline"
             size="md"
             onClick={() => navigate('/trials')}
-            className="flex items-center gap-2"
+            leadingIcon={<Clock className="w-4 h-4 text-sky-600" />}
           >
-            <Clock className="w-4 h-4 text-sky-600" />
             Trial Center
           </Button>
           {canWrite && (
@@ -256,9 +255,9 @@ export function SubscriptionsListPage() {
               variant="primary"
               size="md"
               onClick={() => navigate('/subscriptions/new')}
-              className="flex items-center gap-2 shadow-sm"
+              leadingIcon={<Plus className="w-4 h-4" />}
+              className="shadow-sm"
             >
-              <Plus className="w-4 h-4" />
               New Subscription
             </Button>
           )}
@@ -371,8 +370,12 @@ export function SubscriptionsListPage() {
               }
               action={
                 canWrite && !searchQuery && activeTab === 'all' ? (
-                  <Button variant="primary" size="md" onClick={() => navigate('/subscriptions/new')}>
-                    <Plus className="w-4 h-4 mr-1.5" />
+                  <Button
+                    variant="primary"
+                    size="md"
+                    onClick={() => navigate('/subscriptions/new')}
+                    leadingIcon={<Plus className="w-4 h-4" />}
+                  >
                     Create Subscription
                   </Button>
                 ) : undefined

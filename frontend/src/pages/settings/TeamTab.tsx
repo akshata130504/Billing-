@@ -144,8 +144,19 @@ export function TeamTab({ canEdit }: { canEdit: boolean }) {
                     <tr key={m.id} className={isDeactivated ? 'opacity-60' : undefined}>
                       <td className="py-3 px-5">
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold flex items-center justify-center shrink-0">
-                            {initials(m.user.full_name, m.user.email[0]?.toUpperCase())}
+                          <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold flex items-center justify-center shrink-0 overflow-hidden">
+                            {m.user.avatar_url ? (
+                              <img
+                                src={m.user.avatar_url}
+                                alt={m.user.full_name || m.user.email}
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  (e.target as HTMLElement).style.display = 'none';
+                                }}
+                              />
+                            ) : (
+                              initials(m.user.full_name, m.user.email[0]?.toUpperCase())
+                            )}
                           </div>
                           <div className="min-w-0">
                             <p className="text-sm font-medium text-slate-900 truncate">

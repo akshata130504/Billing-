@@ -36,6 +36,7 @@ interface RazorpayCheckoutOptions {
     escape?: boolean;
     confirm_close?: boolean;
   };
+  config?: Record<string, any>;
 }
 
 interface RazorpayPaymentFailedEvent {

@@ -10,6 +10,10 @@ import {
   AlertCircle,
   HelpCircle,
   Clock,
+  Copy,
+  Check,
+  ExternalLink,
+  Globe,
 } from 'lucide-react';
 import { invoiceService } from '../../services/invoiceService';
 import type { Invoice, InvoiceStatus, PaymentRecordIn } from '../../types/invoices';
@@ -38,6 +42,15 @@ export const InvoiceDetailPage = () => {
   // Void Modal State
   const [showVoidModal, setShowVoidModal] = useState(false);
   const [voidReason, setVoidReason] = useState('');
+
+  // Hosted Payment Link State
+  const [copied, setCopied] = useState(false);
+  const handleCopyPaymentLink = (url: string) => {
+    if (!url) return;
+    navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+  };
 
   const fetchInvoiceData = async (invoiceId: string) => {
     try {
@@ -173,6 +186,9 @@ export const InvoiceDetailPage = () => {
   const isPaid = upperStatus === 'PAID';
   const isVoid = upperStatus === 'VOID';
   const balanceDue = Number(invoice.amount_due || invoice.balance_due || 0);
+  const paymentUrl =
+    invoice.public_url ||
+    (invoice.public_token ? `${window.location.origin}/pay/${invoice.public_token}` : null);
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-12">
@@ -203,6 +219,26 @@ export const InvoiceDetailPage = () => {
           <Button variant="secondary" onClick={handlePrint}>
             <Printer className="w-4 h-4 mr-1.5" /> Print
           </Button>
+
+          {paymentUrl && (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => handleCopyPaymentLink(paymentUrl)}
+                title="Copy secure customer payment link"
+              >
+                {copied ? <Check className="w-4 h-4 mr-1.5 text-emerald-600" /> : <Copy className="w-4 h-4 mr-1.5" />}
+                {copied ? 'Link Copied' : 'Copy Payment Link'}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => window.open(paymentUrl, '_blank')}
+                title="Open hosted invoice payment page in a new tab"
+              >
+                <ExternalLink className="w-4 h-4 mr-1.5" /> View Payment Page
+              </Button>
+            </>
+          )}
 
           {upperStatus === 'DRAFT' && (
             <>
@@ -525,6 +561,40 @@ export const InvoiceDetailPage = () => {
               </div>
             </div>
           </div>
+
+          {/* Hosted Payment Page Card */}
+          {paymentUrl && (
+            <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm space-y-3">
+              <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                <Globe className="w-4 h-4 text-emerald-600" /> Hosted Payment Page
+              </h3>
+              <p className="text-xs text-gray-500 leading-relaxed">
+                Share this secure self-service link with the customer to view this invoice and pay online via Razorpay.
+              </p>
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 text-xs text-gray-600 font-mono truncate select-all">
+                {paymentUrl}
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => handleCopyPaymentLink(paymentUrl)}
+                >
+                  {copied ? <Check className="w-3.5 h-3.5 mr-1 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 mr-1" />}
+                  {copied ? 'Copied!' : 'Copy Link'}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => window.open(paymentUrl, '_blank')}
+                >
+                  <ExternalLink className="w-3.5 h-3.5 mr-1" /> View Page
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

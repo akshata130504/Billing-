@@ -401,6 +401,7 @@ def logout(db: Session, ctx: CurrentContext, raw_token: str) -> None:
     token = db.scalars(select(RefreshToken).where(RefreshToken.token_hash == hash_token(raw_token))).first()
     if token is not None and token.user_id == ctx.user.id and token.revoked_at is None:
         token.revoked_at = utcnow()
+    ctx.user.tokens_valid_after = utcnow()
     audit.record(
         db,
         action="USER_LOGGED_OUT",
@@ -451,6 +452,7 @@ def change_password(
     ctx.user.hashed_password = hash_password(new_password)
     ctx.user.failed_login_attempts = 0
     ctx.user.locked_until = None
+    ctx.user.tokens_valid_after = utcnow()
     revoked = revoke_refresh_tokens(
         db, ctx.user.id, keep_token_hash=hash_token(keep_refresh_token) if keep_refresh_token else None
     )
@@ -536,6 +538,7 @@ def reset_password(db: Session, raw_token: str, new_password: str, ip: Optional[
     user.locked_until = None
     if user.email_verified_at is None:
         user.email_verified_at = utcnow()
+    user.tokens_valid_after = utcnow()
     token.used_at = utcnow()
     revoked = revoke_refresh_tokens(db, user.id)
 

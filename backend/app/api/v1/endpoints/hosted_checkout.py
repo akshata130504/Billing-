@@ -1,6 +1,4 @@
 """Hosted Payment Pages & Checkout Sessions API endpoints."""
-from __future__ import annotations
-
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, Request, status

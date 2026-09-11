@@ -195,6 +195,15 @@ def create_application() -> FastAPI:
     # Mount API routers
     app.include_router(api_router, prefix=settings.API_V1_STR)
 
+    # Static files for avatars / uploads
+    import os
+    from fastapi.staticfiles import StaticFiles
+
+    upload_dir = os.path.abspath(settings.UPLOAD_DIR)
+    os.makedirs(upload_dir, exist_ok=True)
+    app.mount("/api/v1/uploads", StaticFiles(directory=upload_dir), name="api_uploads")
+    app.mount("/uploads", StaticFiles(directory=upload_dir), name="uploads")
+
     @app.get("/", tags=["Root"])
     def root():
         return {

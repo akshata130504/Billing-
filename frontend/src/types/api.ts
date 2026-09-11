@@ -91,6 +91,7 @@ export interface UserRef {
   id: string;
   full_name: string;
   email: string;
+  avatar_url?: string | null;
 }
 
 export interface LineItemIn {
@@ -149,6 +150,7 @@ export interface MeUser {
   id: string;
   email: string;
   full_name: string;
+  avatar_url?: string | null;
   last_login_at: string | null;
   created_at: string;
 }

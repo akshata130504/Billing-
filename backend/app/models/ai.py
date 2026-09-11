@@ -38,6 +38,10 @@ class AIActionDraftStatus(str, enum.Enum):
     EXPIRED = "expired"
 
 
+def _enum_values(enum_cls):
+    return [e.value for e in enum_cls]
+
+
 class AIConversation(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "ai_conversations"
 
@@ -52,11 +56,16 @@ class AIRequest(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
 
     conversation_id = Column(String(36), ForeignKey("ai_conversations.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    mode = Column(Enum(AIRequestMode, name="ai_request_mode"), nullable=False, index=True)
+    mode = Column(Enum(AIRequestMode, name="ai_request_mode", values_callable=_enum_values), nullable=False, index=True)
     prompt = Column(Text, nullable=False)
     model_provider = Column(String(50), nullable=False, default="rooman-local")
     model_name = Column(String(50), nullable=False, default="deterministic-v1")
-    status = Column(Enum(AIRequestStatus, name="ai_request_status"), nullable=False, default=AIRequestStatus.QUEUED, index=True)
+    status = Column(
+        Enum(AIRequestStatus, name="ai_request_status", values_callable=_enum_values),
+        nullable=False,
+        default=AIRequestStatus.QUEUED,
+        index=True,
+    )
     answer = Column(Text, nullable=True)
     result_data = Column(JSON, nullable=True)
     error_message = Column(String(500), nullable=True)
@@ -96,10 +105,10 @@ class AIActionDraft(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
 
     request_id = Column(String(36), ForeignKey("ai_requests.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    action_type = Column(Enum(AIActionType, name="ai_action_type"), nullable=False, index=True)
+    action_type = Column(Enum(AIActionType, name="ai_action_type", values_callable=_enum_values), nullable=False, index=True)
     proposed_payload = Column(JSON, nullable=False)
     status = Column(
-        Enum(AIActionDraftStatus, name="ai_action_draft_status"),
+        Enum(AIActionDraftStatus, name="ai_action_draft_status", values_callable=_enum_values),
         nullable=False,
         default=AIActionDraftStatus.PROPOSED,
         index=True,

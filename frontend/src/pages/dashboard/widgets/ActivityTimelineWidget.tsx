@@ -17,28 +17,28 @@ export function ActivityTimelineWidget({ activity }: ActivityTimelineWidgetProps
   const getCategoryIcon = (category: ActivityItem['category']) => {
     switch (category) {
       case 'billing':
-        return <Receipt className="w-3.5 h-3.5 text-blue-600" />;
+        return <Receipt className="w-3.5 h-3.5 text-[#3F51C9]" />;
       case 'customers':
-        return <Users className="w-3.5 h-3.5 text-purple-600" />;
+        return <Users className="w-3.5 h-3.5 text-[#25247A]" />;
       case 'payments':
-        return <CreditCard className="w-3.5 h-3.5 text-emerald-600" />;
+        return <CreditCard className="w-3.5 h-3.5 text-[#107548]" />;
       case 'system':
       default:
-        return <Cpu className="w-3.5 h-3.5 text-amber-600" />;
+        return <Cpu className="w-3.5 h-3.5 text-[#C05621]" />;
     }
   };
 
   const getCategoryBg = (category: ActivityItem['category']) => {
     switch (category) {
       case 'billing':
-        return 'bg-blue-50 border-blue-100';
+        return 'bg-[#E8EBFC] border-[#D0D7F9]';
       case 'customers':
-        return 'bg-purple-50 border-purple-100';
+        return 'bg-[#E9E8FA] border-[#D0D7F9]';
       case 'payments':
-        return 'bg-emerald-50 border-emerald-100';
+        return 'bg-[#DDF4EA] border-[#BCEBD6]';
       case 'system':
       default:
-        return 'bg-amber-50 border-amber-100';
+        return 'bg-[#FCEBD9] border-[#F7D7B5]';
     }
   };
 
@@ -71,8 +71,8 @@ export function ActivityTimelineWidget({ activity }: ActivityTimelineWidgetProps
               onClick={() => setActiveCategory(tab.key)}
               className={`px-2.5 py-1 rounded-lg text-xs font-medium capitalize transition-colors ${
                 activeCategory === tab.key
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'text-slate-500 hover:bg-slate-100'
+                  ? 'bg-[#25247A] text-white shadow-xs'
+                  : 'text-slate-500 hover:bg-[#F7F8FC]'
               }`}
             >
               {tab.label}
