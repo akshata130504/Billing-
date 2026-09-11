@@ -1,13 +1,12 @@
 """Hosted Payment Pages & Checkout Sessions API endpoints."""
-from __future__ import annotations
-
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import CurrentContext, get_db, require_finance, require_viewer
+from backend.app.core.rate_limit import limiter, public_action_rate_limit, public_rate_limit
 from backend.app.models.checkout import (
     CheckoutSession,
     CheckoutSessionStatus,
@@ -150,7 +149,9 @@ def create_checkout_template(
 
 
 @router.get("/public/{token}", response_model=PublicCheckoutView, summary="Public checkout display view")
+@limiter.limit(public_rate_limit)
 def get_public_checkout(
+    request: Request,
     token: str,
     db: Session = Depends(get_db),
 ):
@@ -160,7 +161,9 @@ def get_public_checkout(
 
 
 @router.post("/public/{token}/confirm", response_model=CheckoutConfirmOut, summary="Public checkout payment confirmation")
+@limiter.limit(public_action_rate_limit)
 def confirm_public_checkout(
+    request: Request,
     token: str,
     body: CheckoutConfirmIn,
     db: Session = Depends(get_db),

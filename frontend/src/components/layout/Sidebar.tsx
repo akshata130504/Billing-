@@ -2,8 +2,6 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../../utils/cn';
 import { RoomanLogo } from '../common/RoomanLogo';
-import { useAuth } from '../../hooks/useAuth';
-import { ROLE_LABELS } from '../../utils/format';
 import {
   LayoutDashboard,
   Users,
@@ -163,65 +161,65 @@ interface SectionVisualConfig {
 
 const DEFAULT_SECTION_VISUAL: SectionVisualConfig = {
   icon: Layers,
-  headerBg: 'bg-slate-50 hover:bg-slate-100 border border-slate-200/60',
-  iconColor: 'text-slate-500',
-  labelColor: 'text-slate-800',
+  headerBg: 'bg-white/5 hover:bg-white/10 border border-white/5',
+  iconColor: 'text-slate-300',
+  labelColor: 'text-slate-200',
 };
 
 const SECTION_VISUALS: Record<string, SectionVisualConfig> = {
   WORKSPACE: {
     icon: Building2,
-    headerBg: 'bg-blue-50/70 hover:bg-blue-100/60 border border-blue-100/80',
-    iconColor: 'text-blue-600',
-    labelColor: 'text-blue-900',
+    headerBg: 'bg-white/5 hover:bg-white/10 border border-white/5',
+    iconColor: 'text-[#8EA5FF]',
+    labelColor: 'text-slate-200',
   },
   REVENUE: {
     icon: Receipt,
-    headerBg: 'bg-emerald-50/70 hover:bg-emerald-100/60 border border-emerald-100/80',
-    iconColor: 'text-emerald-600',
-    labelColor: 'text-emerald-900',
+    headerBg: 'bg-white/5 hover:bg-white/10 border border-white/5',
+    iconColor: 'text-[#48D597]',
+    labelColor: 'text-slate-200',
   },
   SUBSCRIPTIONS: {
     icon: Repeat,
-    headerBg: 'bg-amber-50/70 hover:bg-amber-100/60 border border-amber-100/80',
-    iconColor: 'text-amber-600',
-    labelColor: 'text-amber-900',
+    headerBg: 'bg-white/5 hover:bg-white/10 border border-white/5',
+    iconColor: 'text-[#FFB86C]',
+    labelColor: 'text-slate-200',
   },
   'CUSTOMER EXPERIENCE': {
     icon: UserCheck,
-    headerBg: 'bg-rose-50/70 hover:bg-rose-100/60 border border-rose-100/80',
-    iconColor: 'text-rose-600',
-    labelColor: 'text-rose-900',
+    headerBg: 'bg-white/5 hover:bg-white/10 border border-white/5',
+    iconColor: 'text-[#FF7BB0]',
+    labelColor: 'text-slate-200',
   },
   OPERATIONS: {
     icon: Briefcase,
-    headerBg: 'bg-sky-50/70 hover:bg-sky-100/60 border border-sky-100/80',
-    iconColor: 'text-sky-600',
-    labelColor: 'text-sky-900',
+    headerBg: 'bg-white/5 hover:bg-white/10 border border-white/5',
+    iconColor: 'text-[#70CFF8]',
+    labelColor: 'text-slate-200',
   },
   INSIGHTS: {
     icon: Sparkles,
-    headerBg: 'bg-purple-50/70 hover:bg-purple-100/60 border border-purple-100/80',
-    iconColor: 'text-purple-600',
-    labelColor: 'text-purple-900',
+    headerBg: 'bg-white/5 hover:bg-white/10 border border-white/5',
+    iconColor: 'text-[#C4B5FD]',
+    labelColor: 'text-slate-200',
   },
   PLATFORMS: {
     icon: Monitor,
-    headerBg: 'bg-indigo-50/60 hover:bg-indigo-100/50 border border-indigo-100/70',
-    iconColor: 'text-indigo-600',
-    labelColor: 'text-indigo-900',
+    headerBg: 'bg-white/5 hover:bg-white/10 border border-white/5',
+    iconColor: 'text-[#A5B4FC]',
+    labelColor: 'text-slate-200',
   },
   'CONTROL CENTER': {
     icon: ShieldCheck,
-    headerBg: 'bg-indigo-50/80 hover:bg-indigo-100/70 border border-indigo-200/70',
-    iconColor: 'text-indigo-600',
-    labelColor: 'text-indigo-900',
+    headerBg: 'bg-white/5 hover:bg-white/10 border border-white/5',
+    iconColor: 'text-[#818CF8]',
+    labelColor: 'text-slate-200',
   },
   SYSTEM: {
     icon: Settings,
-    headerBg: 'bg-slate-100/80 hover:bg-slate-200/60 border border-slate-200/80',
-    iconColor: 'text-slate-600',
-    labelColor: 'text-slate-800',
+    headerBg: 'bg-white/5 hover:bg-white/10 border border-white/5',
+    iconColor: 'text-slate-400',
+    labelColor: 'text-slate-200',
   },
 };
 
@@ -232,9 +230,6 @@ export function Sidebar({
   onToggleCollapse,
 }: SidebarProps) {
   const location = useLocation();
-  const { organization, membership } = useAuth();
-  const orgName = organization?.name ?? '';
-  const roleLabel = membership ? ROLE_LABELS[membership.role] ?? membership.role : '';
 
   // Initialize expanded sections from sessionStorage (defaulting to WORKSPACE)
   const [expandedSections, setExpandedSections] = useState<string[]>(() => {
@@ -318,8 +313,8 @@ export function Sidebar({
       'group flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 select-none',
       collapsed && 'lg:justify-center lg:px-2',
       isActive
-        ? 'bg-brand-50 text-brand-700 font-semibold shadow-2xs'
-        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50/90'
+        ? 'bg-[#25247A] text-white font-semibold shadow-xs border border-[#3F51C9]/40'
+        : 'text-slate-300 hover:text-white hover:bg-white/5'
     );
 
   const CollapseIcon = collapsed ? ChevronsRight : ChevronsLeft;
@@ -338,7 +333,7 @@ export function Sidebar({
       {/* Sidebar Aside */}
       <aside
         className={cn(
-          'fixed top-0 bottom-0 left-0 z-50 w-60 bg-white border-r border-slate-200/80 flex flex-col justify-between transition-[transform,width] duration-200 ease-in-out lg:translate-x-0 lg:static lg:z-auto',
+          'fixed top-0 bottom-0 left-0 z-50 w-60 bg-[#171B63] text-white border-r border-[#25247A] flex flex-col justify-between transition-[transform,width] duration-200 ease-in-out lg:translate-x-0 lg:static lg:z-auto',
           collapsed && 'lg:w-[72px]',
           isOpen ? 'translate-x-0' : '-translate-x-full'
         )}
@@ -346,15 +341,15 @@ export function Sidebar({
         {/* Brand Header */}
         <div
           className={cn(
-            'h-16 px-3.5 sm:px-4 flex items-center justify-between border-b border-slate-100 shrink-0',
+            'h-16 px-3.5 sm:px-4 flex items-center justify-between border-b border-white/10 shrink-0',
             collapsed && 'lg:flex-col lg:justify-center lg:gap-1 lg:px-2 lg:h-auto lg:py-2'
           )}
         >
           <NavLink to="/dashboard" className="flex items-center group py-1 min-w-0">
-            <span className={cn(collapsed && 'lg:hidden')}>
+            <span className={cn('bg-white/95 px-2 py-1 rounded-lg shadow-2xs', collapsed && 'lg:hidden')}>
               <RoomanLogo variant="brand" size="md" showBillingBadge={true} />
             </span>
-            <span className={cn('hidden', collapsed && 'lg:inline-flex')}>
+            <span className={cn('hidden bg-white/95 p-1 rounded-lg shadow-2xs', collapsed && 'lg:inline-flex')}>
               <RoomanLogo variant="shield" size="md" />
             </span>
           </NavLink>
@@ -363,7 +358,7 @@ export function Sidebar({
             <button
               type="button"
               onClick={onToggleCollapse}
-              className="hidden lg:flex p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              className="hidden lg:flex p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
               aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
               aria-expanded={!collapsed}
               title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -374,7 +369,7 @@ export function Sidebar({
 
           <button
             onClick={onClose}
-            className="lg:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+            className="lg:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10"
             aria-label="Close sidebar"
           >
             <X className="w-5 h-5" />
@@ -408,7 +403,7 @@ export function Sidebar({
                       {section.title}
                     </span>
                   </div>
-                  <span className={cn('shrink-0 text-slate-400 group-hover:text-slate-600 transition-transform', collapsed && 'lg:hidden')}>
+                  <span className={cn('shrink-0 text-slate-400 group-hover:text-slate-200 transition-transform', collapsed && 'lg:hidden')}>
                     {isExpanded ? (
                       <ChevronDown className="w-3.5 h-3.5" />
                     ) : (
@@ -437,7 +432,7 @@ export function Sidebar({
                 >
                   <div
                     className={cn(
-                      'ml-2.5 pl-2.5 border-l border-slate-200/60 space-y-0.5',
+                      'ml-2.5 pl-2.5 border-l border-white/10 space-y-0.5',
                       collapsed && 'lg:ml-0 lg:pl-0 lg:border-l-0'
                     )}
                   >
@@ -458,7 +453,7 @@ export function Sidebar({
                               <Icon
                                 className={cn(
                                   'w-4 h-4 shrink-0 transition-colors',
-                                  isActive ? 'text-brand-600' : 'text-slate-400 group-hover:text-slate-600'
+                                  isActive ? 'text-[#8EA5FF]' : 'text-slate-400 group-hover:text-white'
                                 )}
                               />
                               <span className={cn('truncate', collapsed && 'lg:sr-only')}>{item.title}</span>
@@ -474,25 +469,77 @@ export function Sidebar({
           })}
         </div>
 
-        {/* Footer Tenant Info */}
-        <div className={cn('p-3 border-t border-slate-100 shrink-0', collapsed && 'lg:p-2')}>
+        {/* Sidebar Promo Card — Smarter Billing for a Brighter Future */}
+        <div className={cn('p-3 border-t border-white/10 shrink-0', collapsed && 'lg:p-2')}>
+          {collapsed ? (
+            <div
+              className="hidden lg:flex items-center justify-center p-2 rounded-xl bg-gradient-to-b from-[#2A1E63] to-[#1A1245] border border-white/10 shadow-xs cursor-pointer group"
+              title="Smarter Billing for a Brighter Future — Manage. Track. Grow."
+            >
+              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#E83E8C] to-[#6C2BD9] flex items-center justify-center text-white shadow-xs">
+                <Sparkles className="w-4 h-4 text-white" />
+              </div>
+            </div>
+          ) : null}
+
           <div
             className={cn(
-              'flex items-center gap-2.5 px-2 py-1.5 rounded-xl bg-slate-50 border border-slate-200/60',
-              collapsed && 'lg:justify-center lg:px-1'
+              'relative overflow-hidden rounded-2xl bg-gradient-to-b from-[#281F62] via-[#201852] to-[#17113E] p-4 border border-white/10 shadow-md',
+              collapsed && 'lg:hidden'
             )}
-            title={collapsed ? `${orgName}${roleLabel ? ` · ${roleLabel}` : ''}` : undefined}
           >
-            <div className="w-7 h-7 rounded-lg bg-white p-0.5 border border-slate-200/80 flex items-center justify-center shrink-0 shadow-2xs overflow-hidden">
-              {organization?.logo_url ? (
-                <img src={organization.logo_url} alt="" className="w-full h-full object-contain" />
-              ) : (
-                <RoomanLogo variant="shield" size="sm" />
-              )}
+            {/* Ambient Wave Graphic at Bottom */}
+            <div className="absolute inset-x-0 bottom-0 h-16 pointer-events-none opacity-90 overflow-hidden">
+              <svg
+                viewBox="0 0 200 80"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                className="w-full h-full object-cover"
+                preserveAspectRatio="none"
+              >
+                <path
+                  d="M0 45 C 50 15, 110 65, 200 25 L 200 80 L 0 80 Z"
+                  fill="url(#sidebarWave1)"
+                  opacity="0.4"
+                />
+                <path
+                  d="M0 55 C 60 30, 130 65, 200 38 L 200 80 L 0 80 Z"
+                  fill="url(#sidebarWave2)"
+                  opacity="0.7"
+                />
+                <path
+                  d="M0 65 C 70 45, 140 70, 200 50 L 200 80 L 0 80 Z"
+                  fill="url(#sidebarWave3)"
+                  opacity="0.9"
+                />
+                <defs>
+                  <linearGradient id="sidebarWave1" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#7C3AED" />
+                    <stop offset="100%" stopColor="#E83E8C" />
+                  </linearGradient>
+                  <linearGradient id="sidebarWave2" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#E83E8C" />
+                    <stop offset="100%" stopColor="#D81B60" />
+                  </linearGradient>
+                  <linearGradient id="sidebarWave3" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#FF4081" />
+                    <stop offset="100%" stopColor="#8E24AA" />
+                  </linearGradient>
+                </defs>
+              </svg>
             </div>
-            <div className={cn('min-w-0 flex-1 leading-tight', collapsed && 'lg:hidden')}>
-              <p className="text-xs font-bold text-slate-900 truncate">{orgName}</p>
-              <p className="text-[10px] text-slate-400 font-medium truncate">{roleLabel}</p>
+
+            {/* Content */}
+            <div className="relative z-10 space-y-1">
+              <h4 className="text-[13px] font-bold text-white tracking-tight leading-snug">
+                Smarter Billing
+              </h4>
+              <h4 className="text-[13px] font-bold text-white tracking-tight leading-snug">
+                for a Brighter Future
+              </h4>
+              <p className="text-[11px] font-medium text-slate-300/90 pt-1">
+                Manage. Track. Grow.
+              </p>
             </div>
           </div>
         </div>

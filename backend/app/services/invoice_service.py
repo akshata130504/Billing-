@@ -29,6 +29,7 @@ from backend.app.models import (
     Payment,
     PaymentAllocation,
     PaymentStatus,
+    Product,
     Subscription,
     SubscriptionStatus,
     User,
@@ -39,6 +40,7 @@ from backend.app.schemas.invoices import InvoiceCreate, InvoiceUpdate
 from backend.app.services import audit
 from backend.app.services.email import frontend_url, send_email
 from backend.app.services.money import D, LineInput, compute_totals, q2
+from backend.app.services import gst
 from backend.app.services.numbering import next_number
 from backend.app.services.pagination import PageParams, apply_sort, paginate
 
@@ -105,6 +107,7 @@ def line_inputs(items: Iterable) -> List[LineInput]:
             product_id=getattr(i, "product_id", None),
             plan_id=getattr(i, "plan_id", None),
             pricing_explanation=getattr(i, "pricing_explanation", None),
+            hsn_sac_code=getattr(i, "hsn_sac_code", None),
         )
         for i in items
     ]
@@ -155,6 +158,14 @@ def serialize_invoice(invoice: Invoice, include_payments: bool = True) -> Dict[s
         "discount_pct": money_str(invoice.discount_pct),
         "discount_amount": money_str(invoice.discount_amount),
         "tax_amount": money_str(invoice.tax_amount),
+        "cgst_amount": money_str(invoice.cgst_amount),
+        "sgst_amount": money_str(invoice.sgst_amount),
+        "igst_amount": money_str(invoice.igst_amount),
+        "supply_type": invoice.supply_type,
+        "place_of_supply_code": invoice.place_of_supply_code,
+        "place_of_supply_name": invoice.place_of_supply_name,
+        "customer_gstin": invoice.customer_gstin,
+        "supplier_gstin": invoice.supplier_gstin,
         "total": money_str(invoice.total),
         "amount_paid": money_str(invoice.amount_paid),
         "amount_due": money_str(invoice.amount_due),
@@ -259,6 +270,28 @@ def list_invoices(
 # --- creation ----------------------------------------------------------------------------------------
 
 
+def attach_hsn_codes(db: Session, organization_id: str, lines: Sequence[LineInput]) -> None:
+    """Fill each line's HSN/SAC from its product.
+
+    HSN/SAC is a mandatory field on a GST tax invoice and belongs to the product,
+    so it is resolved server-side rather than trusted from the request. Lines that
+    already carry a code (e.g. copied from a quote) keep it.
+    """
+    missing = {l.product_id for l in lines if l.product_id and not l.hsn_sac_code}
+    if not missing:
+        return
+    codes = dict(
+        db.execute(
+            select(Product.id, Product.hsn_sac_code).where(
+                Product.organization_id == organization_id, Product.id.in_(missing)
+            )
+        ).all()
+    )
+    for line in lines:
+        if line.product_id and not line.hsn_sac_code:
+            line.hsn_sac_code = codes.get(line.product_id)
+
+
 def create_invoice_record(
     db: Session,
     *,
@@ -279,8 +312,14 @@ def create_invoice_record(
     status: InvoiceStatus = InvoiceStatus.DRAFT,
 ) -> Invoice:
     """Low-level: build and flush a numbered invoice. No audit, no commit (callers do both)."""
+    organization = db.get(Organization, organization_id)
+    # Place of supply and the CGST/SGST/IGST split are resolved once, here, and
+    # frozen onto the invoice: a later edit to the customer's address must not
+    # silently restate an issued tax invoice.
+    supply = gst.resolve_supply(organization, customer)
+    attach_hsn_codes(db, organization_id, list(lines))
     try:
-        totals = compute_totals(lines, discount_pct)
+        totals = compute_totals(lines, discount_pct, supply=supply)
     except ValueError as exc:
         raise ValidationAppError(str(exc), {"fields": {"items": str(exc)}})
     issue_date = issue_date or date.today()
@@ -288,7 +327,6 @@ def create_invoice_record(
         due_date = issue_date + timedelta(days=int(customer.payment_terms_days or 0))
     if due_date < issue_date:
         raise ValidationAppError("due_date cannot be before issue_date.", {"fields": {"due_date": "before issue_date"}})
-    organization = db.get(Organization, organization_id)
     invoice = Invoice(
         organization_id=organization_id,
         invoice_number=next_number(db, organization_id, "invoice"),
@@ -303,6 +341,14 @@ def create_invoice_record(
         discount_pct=totals.discount_pct,
         discount_amount=totals.discount_amount,
         tax_amount=totals.tax_amount,
+        cgst_amount=totals.cgst_amount,
+        sgst_amount=totals.sgst_amount,
+        igst_amount=totals.igst_amount,
+        supply_type=supply.supply_type,
+        place_of_supply_code=supply.place_of_supply_code,
+        place_of_supply_name=supply.place_of_supply_name,
+        customer_gstin=supply.customer_gstin,
+        supplier_gstin=(organization.gstin if organization else None),
         total=totals.total,
         amount_paid=Decimal("0.00"),
         amount_due=totals.total,
@@ -326,6 +372,13 @@ def create_invoice_record(
                 unit_price=line.unit_price,
                 tax_rate_pct=line.tax_rate_pct,
                 amount=line.amount,
+                cgst_amount=line.cgst_amount,
+                sgst_amount=line.sgst_amount,
+                igst_amount=line.igst_amount,
+                cgst_rate_pct=line.cgst_rate_pct,
+                sgst_rate_pct=line.sgst_rate_pct,
+                igst_rate_pct=line.igst_rate_pct,
+                hsn_sac_code=line.hsn_sac_code,
                 position=line.position,
                 pricing_explanation=line.pricing_explanation,
             )
@@ -394,8 +447,14 @@ def update_invoice(db: Session, ctx: CurrentContext, invoice: Invoice, data: Inv
     if data.items is not None or data.discount_pct is not None:
         lines = line_inputs(data.items) if data.items is not None else line_inputs(invoice.items)
         discount = data.discount_pct if data.discount_pct is not None else invoice.discount_pct
+        # A draft can change customer, so re-resolve the supply rather than reusing
+        # whatever was stored when the draft was first created.
+        organization = db.get(Organization, ctx.organization_id)
+        customer = get_customer(db, ctx.organization_id, invoice.customer_id)
+        supply = gst.resolve_supply(organization, customer)
+        attach_hsn_codes(db, ctx.organization_id, lines)
         try:
-            totals = compute_totals(lines, discount)
+            totals = compute_totals(lines, discount, supply=supply)
         except ValueError as exc:
             raise ValidationAppError(str(exc), {"fields": {"items": str(exc)}})
         if data.items is not None:
@@ -413,6 +472,13 @@ def update_invoice(db: Session, ctx: CurrentContext, invoice: Invoice, data: Inv
                         unit_price=line.unit_price,
                         tax_rate_pct=line.tax_rate_pct,
                         amount=line.amount,
+                        cgst_amount=line.cgst_amount,
+                        sgst_amount=line.sgst_amount,
+                        igst_amount=line.igst_amount,
+                        cgst_rate_pct=line.cgst_rate_pct,
+                        sgst_rate_pct=line.sgst_rate_pct,
+                        igst_rate_pct=line.igst_rate_pct,
+                        hsn_sac_code=line.hsn_sac_code,
                         position=line.position,
                     )
                 )
@@ -420,6 +486,13 @@ def update_invoice(db: Session, ctx: CurrentContext, invoice: Invoice, data: Inv
         invoice.discount_pct = totals.discount_pct
         invoice.discount_amount = totals.discount_amount
         invoice.tax_amount = totals.tax_amount
+        invoice.cgst_amount = totals.cgst_amount
+        invoice.sgst_amount = totals.sgst_amount
+        invoice.igst_amount = totals.igst_amount
+        invoice.supply_type = supply.supply_type
+        invoice.place_of_supply_code = supply.place_of_supply_code
+        invoice.place_of_supply_name = supply.place_of_supply_name
+        invoice.customer_gstin = supply.customer_gstin
         invoice.total = totals.total
         invoice.amount_due = q2(totals.total - D(invoice.amount_paid))
 
@@ -498,13 +571,29 @@ def email_invoice(db: Session, invoice: Invoice, *, reminder: bool = False, atta
     if not recipient or organization is None:
         return False
     subject, body = _invoice_email(invoice, organization, reminder=reminder)
+
+    smtp_cfg = None
+    try:
+        from backend.app.services.integrations_service import get_active_smtp_credentials
+        smtp_cfg = get_active_smtp_credentials(db, invoice.organization_id)
+    except Exception:
+        pass
+
+    email_active = bool(smtp_cfg.get("host")) if smtp_cfg else settings.email_enabled
     attachments = []
-    if attach_pdf and settings.email_enabled:
+    if attach_pdf and email_active:
         pdf = _render_pdf_safe(invoice, organization)
         if pdf:
             attachments.append((f"{invoice.invoice_number}.pdf", pdf, "application/pdf"))
     try:
-        return send_email(recipient, subject, body, attachments=attachments, reply_to=organization.email)
+        return send_email(
+            recipient,
+            subject,
+            body,
+            attachments=attachments,
+            reply_to=organization.email,
+            smtp_config=smtp_cfg,
+        )
     except Exception:  # SMTP trouble must not fail the state change
         logger.exception("Email delivery failed for invoice %s", invoice.invoice_number)
         return False

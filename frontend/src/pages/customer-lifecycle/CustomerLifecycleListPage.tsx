@@ -146,8 +146,12 @@ export function CustomerLifecycleListPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => loadData()}>
-            <RefreshCw className="w-4 h-4 mr-1.5" />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => loadData()}
+            leadingIcon={<RefreshCw className="w-4 h-4" />}
+          >
             Refresh
           </Button>
           <Button variant="primary" size="sm" onClick={() => navigate('/customers/new')}>
@@ -347,11 +351,11 @@ export function CustomerLifecycleListPage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            className="text-xs flex items-center gap-1"
+                            className="text-xs"
+                            trailingIcon={<ChevronRight className="w-3 h-3" />}
                             onClick={() => navigate(`/customer-lifecycle/${item.customer_id}`)}
                           >
-                            <span>360°</span>
-                            <ChevronRight className="w-3 h-3" />
+                            360°
                           </Button>
                         </div>
                       </td>

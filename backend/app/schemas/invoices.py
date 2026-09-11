@@ -87,6 +87,14 @@ class InvoiceOut(BaseModel):
     discount_pct: str
     discount_amount: str
     tax_amount: str
+    cgst_amount: str = "0.00"
+    sgst_amount: str = "0.00"
+    igst_amount: str = "0.00"
+    supply_type: Optional[str] = None
+    place_of_supply_code: Optional[str] = None
+    place_of_supply_name: Optional[str] = None
+    customer_gstin: Optional[str] = None
+    supplier_gstin: Optional[str] = None
     total: str
     amount_paid: str
     amount_due: str

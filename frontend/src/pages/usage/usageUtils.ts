@@ -42,7 +42,10 @@ export function formatQuantity(value: string | number | null | undefined): strin
 
 export interface ParsedBatch {
   events: UsageEventIn[];
+  /** Blocking problems: import stays disabled while any exist. */
   errors: string[];
+  /** Non-blocking notes (e.g. columns that were ignored). Import is still allowed. */
+  warnings: string[];
   format: 'json' | 'csv' | 'empty';
 }
 
@@ -145,8 +148,9 @@ function normaliseEvent(raw: Record<string, unknown>, rowLabel: string, errors: 
  */
 export function parseBatchInput(text: string): ParsedBatch {
   const trimmed = text.trim();
-  if (!trimmed) return { events: [], errors: [], format: 'empty' };
+  if (!trimmed) return { events: [], errors: [], warnings: [], format: 'empty' };
   const errors: string[] = [];
+  const warnings: string[] = [];
   const events: UsageEventIn[] = [];
 
   if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
@@ -154,7 +158,7 @@ export function parseBatchInput(text: string): ParsedBatch {
     try {
       parsed = JSON.parse(trimmed);
     } catch (err: any) {
-      return { events: [], errors: [`Invalid JSON: ${err?.message ?? 'parse error'}`], format: 'json' };
+      return { events: [], errors: [`Invalid JSON: ${err?.message ?? 'parse error'}`], warnings, format: 'json' };
     }
     const list: unknown = Array.isArray(parsed)
       ? parsed
@@ -162,7 +166,7 @@ export function parseBatchInput(text: string): ParsedBatch {
         ? (parsed as { events: unknown[] }).events
         : null;
     if (!list) {
-      return { events: [], errors: ['JSON must be an array of events or an object with an "events" array.'], format: 'json' };
+      return { events: [], errors: ['JSON must be an array of events or an object with an "events" array.'], warnings, format: 'json' };
     }
     (list as unknown[]).forEach((item, idx) => {
       if (!item || typeof item !== 'object' || Array.isArray(item)) {
@@ -172,12 +176,12 @@ export function parseBatchInput(text: string): ParsedBatch {
       const ev = normaliseEvent(item as Record<string, unknown>, `Event ${idx + 1}`, errors);
       if (ev) events.push(ev);
     });
-    return { events, errors, format: 'json' };
+    return { events, errors, warnings, format: 'json' };
   }
 
   const lines = trimmed.split(/\r?\n/).filter((l) => l.trim().length > 0);
   if (lines.length < 2) {
-    return { events: [], errors: ['CSV needs a header row and at least one data row.'], format: 'csv' };
+    return { events: [], errors: ['CSV needs a header row and at least one data row.'], warnings, format: 'csv' };
   }
   const header = splitCsvLine(lines[0]).map((h) => h.toLowerCase());
   const known = new Set<string>(BATCH_CSV_COLUMNS);
@@ -185,7 +189,7 @@ export function parseBatchInput(text: string): ParsedBatch {
   if (!header.includes('meter_code') || !header.includes('customer_id') || !header.includes('quantity')) {
     errors.push('CSV header must include meter_code, customer_id and quantity.');
   }
-  if (unknown.length) errors.push(`Ignoring unknown CSV column(s): ${unknown.join(', ')}`);
+  if (unknown.length) warnings.push(`Ignoring unknown CSV column(s): ${unknown.join(', ')}`);
 
   for (let i = 1; i < lines.length; i++) {
     const cells = splitCsvLine(lines[i]);
@@ -196,7 +200,7 @@ export function parseBatchInput(text: string): ParsedBatch {
     const ev = normaliseEvent(raw, `Row ${i + 1}`, errors);
     if (ev) events.push(ev);
   }
-  return { events, errors, format: 'csv' };
+  return { events, errors, warnings, format: 'csv' };
 }
 
 /**

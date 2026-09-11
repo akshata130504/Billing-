@@ -158,6 +158,16 @@ export function paymentOutToUi(p: PaymentOut): Payment {
 /**
  * Maps frontend RecordPaymentInput to backend PaymentIn payload.
  */
+/** Raised when the caller tries to allocate more than the payment is worth. */
+export class OverAllocationError extends Error {
+  constructor(public readonly allocated: number, public readonly amount: number) {
+    super(
+      `Allocations total ${allocated.toFixed(2)}, which is more than the payment amount ${amount.toFixed(2)}.`
+    );
+    this.name = 'OverAllocationError';
+  }
+}
+
 export function uiToPaymentIn(input: RecordPaymentInput): PaymentIn {
   const backendMethod = toBackendPaymentMethod(input.paymentMethod);
   const paidAt = input.paymentDate
@@ -173,6 +183,17 @@ export function uiToPaymentIn(input: RecordPaymentInput): PaymentIn {
             amount: a.appliedAmount.toFixed(2),
           }))
       : undefined;
+
+  // Refuse to build a payload that allocates more than the payment covers.
+  // The backend rejects this too, but only after a round trip, and the user is
+  // left decoding a 4xx instead of seeing which line is over.
+  if (allocations && allocations.length > 0) {
+    const allocated = allocations.reduce((sum, a) => sum + Number(a.amount), 0);
+    // Compare in paise to avoid a float artefact rejecting an exact match.
+    if (Math.round(allocated * 100) > Math.round(input.amount * 100)) {
+      throw new OverAllocationError(allocated, input.amount);
+    }
+  }
 
   return {
     customer_id: input.customerId,

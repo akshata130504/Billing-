@@ -500,3 +500,42 @@ def test_in_term_reactivation_of_cancelled_subscription(client, tenant, auth_hea
 
     db.refresh(sub)
     assert sub.status == SubscriptionStatus.ACTIVE
+
+
+def test_auto_created_default_policy_from_get_is_persisted(client, tenant, auth_headers, db):
+    """GET /dunning/policies must commit the default policy it lazily creates.
+
+    It previously only flushed it, so the request session rolled it back on close and
+    the id handed to the client referenced a phantom row that 404'd on PUT.
+    """
+    from backend.app.models.dunning import DunningPolicy
+
+    res = client.get("/api/v1/dunning/policies", headers=auth_headers)
+    assert res.status_code == 200
+    default_p = next(p for p in res.json() if p["is_default"])
+
+    # The row survives in a brand new session (i.e. it was committed, not just flushed).
+    persisted = (
+        db.query(DunningPolicy)
+        .filter(
+            DunningPolicy.id == default_p["id"],
+            DunningPolicy.organization_id == tenant.organization.id,
+        )
+        .first()
+    )
+    assert persisted is not None
+
+    # And the id returned to the client is usable for a follow-up update.
+    upd = client.put(
+        f"/api/v1/dunning/policies/{default_p['id']}",
+        headers=auth_headers,
+        json={"total_span_days": 25},
+    )
+    assert upd.status_code == 200, upd.text
+    assert upd.json()["total_span_days"] == 25
+
+    # A second GET does not create a duplicate default.
+    res2 = client.get("/api/v1/dunning/policies", headers=auth_headers)
+    defaults = [p for p in res2.json() if p["is_default"]]
+    assert len(defaults) == 1
+    assert defaults[0]["id"] == default_p["id"]

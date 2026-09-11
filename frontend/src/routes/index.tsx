@@ -34,7 +34,7 @@ import {
   CollectionsInvoiceListPage,
   CollectionsInvoiceDetailPage,
 } from '../pages/collections';
-import { PayInvoicePage, PublicQuotePage, LandingPage, PublicCheckoutPage } from '../pages/public';
+import { PayInvoicePage, PublicQuotePage, LandingPage, PublicCheckoutPage, CustomerLifecycleCinematicPage } from '../pages/public';
 import { ActivityPage } from '../pages/activity';
 import {
   ActionCenterPage,
@@ -65,6 +65,16 @@ import { HostedPaymentPagesPage } from '../pages/hosted-payment-pages';
 import { RevenueIntelligencePage } from '../pages/revenue-intelligence';
 import { AutomationPage } from '../pages/automation';
 import { CustomizationPage } from '../pages/customization';
+import {
+  PortalAuthProvider,
+  PortalLayout,
+  PortalLoginPage,
+  PortalDashboardPage,
+  PortalInvoicesPage,
+  PortalPaymentsPage,
+  PortalSubscriptionsPage,
+  PortalProfilePage,
+} from '../pages/portal-customer';
 
 // ---------------------------------------------------------------------------
 // Guards
@@ -179,6 +189,24 @@ export function AppRoutes() {
           <Route path="/pay/:token" element={<PayInvoicePage />} />
           <Route path="/quote/:token" element={<PublicQuotePage />} />
           <Route path="/checkout/:token" element={<PublicCheckoutPage />} />
+          <Route path="/lifecycle-cinematic" element={<CustomerLifecycleCinematicPage />} />
+
+          {/* Customer Self-Service Portal */}
+          <Route path="/portal/login" element={<PortalLoginPage />} />
+          <Route
+            path="/portal"
+            element={
+              <PortalAuthProvider>
+                <PortalLayout />
+              </PortalAuthProvider>
+            }
+          >
+            <Route index element={<PortalDashboardPage />} />
+            <Route path="invoices" element={<PortalInvoicesPage />} />
+            <Route path="payments" element={<PortalPaymentsPage />} />
+            <Route path="subscriptions" element={<PortalSubscriptionsPage />} />
+            <Route path="profile" element={<PortalProfilePage />} />
+          </Route>
 
           {/* Private */}
           <Route element={<ProtectedRoute />}>

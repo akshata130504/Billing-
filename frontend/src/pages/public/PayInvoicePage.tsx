@@ -195,6 +195,11 @@ export function PayInvoicePage() {
     try {
       const Razorpay = await loadRazorpayCheckout();
       const order = await publicService.createRazorpayOrder(token, amount);
+      const isMobileDevice =
+        typeof window !== 'undefined' &&
+        (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+          window.innerWidth < 768);
+
       const checkout = new Razorpay({
         key: order.key_id,
         amount: order.amount,
@@ -210,6 +215,33 @@ export function PayInvoicePage() {
         },
         notes: { invoice_number: invoice.invoice_number, payment_id: order.payment_id },
         theme: { color: '#2563eb' },
+        config: {
+          display: {
+            blocks: {
+              upi: {
+                name: 'Pay via UPI',
+                instruments: [
+                  {
+                    method: 'upi',
+                    flows: isMobileDevice ? ['intent'] : ['qr'],
+                  },
+                ],
+              },
+              other: {
+                name: 'Cards, Netbanking & Wallets',
+                instruments: [
+                  { method: 'card' },
+                  { method: 'netbanking' },
+                  { method: 'wallet' },
+                ],
+              },
+            },
+            sequence: ['block.upi', 'block.other'],
+            preferences: {
+              show_default_blocks: true,
+            },
+          },
+        },
         handler: (resp) => {
           void finalisePayment(resp);
         },
@@ -306,7 +338,15 @@ export function PayInvoicePage() {
           },
         ]
       : []),
-    { label: 'Tax', value: formatMoney(invoice.tax_amount, currency) },
+    // GST heads, so the customer's on-screen copy matches the tax invoice PDF.
+    ...(Number(invoice.cgst_amount || 0) > 0 || Number(invoice.sgst_amount || 0) > 0
+      ? [
+          { label: 'CGST', value: formatMoney(invoice.cgst_amount, currency) },
+          { label: 'SGST/UTGST', value: formatMoney(invoice.sgst_amount, currency) },
+        ]
+      : Number(invoice.igst_amount || 0) > 0
+        ? [{ label: 'IGST', value: formatMoney(invoice.igst_amount, currency) }]
+        : [{ label: 'Tax', value: formatMoney(invoice.tax_amount, currency) }]),
     { label: 'Total', value: formatMoney(invoice.total, currency), kind: 'total' },
     ...(paid > 0
       ? [{ label: 'Amount paid', value: `− ${formatMoney(invoice.amount_paid, currency)}`, kind: 'paid' as const }]

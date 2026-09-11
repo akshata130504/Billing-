@@ -1,0 +1,338 @@
+[
+  {
+    "workflow": "AUTH",
+    "step": "Signup & Org Provisioning",
+    "status": "PASS",
+    "details": "Org: AuditCorp_7e14d8fd, User: b1f6f395-0eae-4384-bcc7-5443a2617276",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow A (Customer)",
+    "step": "Create Customer",
+    "status": "PASS",
+    "details": "Customer ID: 2797e836-7333-4efe-8974-6310d48097a0",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow A (Customer)",
+    "step": "View Customer Detail",
+    "status": "PASS",
+    "details": "Verified customer details",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow A (Customer)",
+    "step": "Search & Filter Customers",
+    "status": "PASS",
+    "details": "Search by name returned result",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow A (Customer)",
+    "step": "Edit Customer",
+    "status": "PASS",
+    "details": "Updated phone number",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow B (Catalog)",
+    "step": "Create Offering",
+    "status": "PASS",
+    "details": "Offering ID: 0056d986-8943-44f8-86d5-99e0ae64abee",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow B (Catalog)",
+    "step": "Create Price Book with Entries",
+    "status": "PASS",
+    "details": "Price Book ID: 5c62f122-aa4c-4af2-adbb-0dffd3be1c76",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow B (Catalog)",
+    "step": "Pricing Engine Multi-Item Calculation",
+    "status": "PASS",
+    "details": "HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow C (CPQ)",
+    "step": "Create CPQ Deal & Calculate",
+    "status": "PASS",
+    "details": "Deal ID: 37d5452d-5f9e-44c8-80d5-91a8899a1b62",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow D (Quote)",
+    "step": "Create Draft Quote",
+    "status": "PASS",
+    "details": "Quote ID: f0ab9095-8d9d-4255-8dbf-2bd16aca3c2f",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow D (Quote)",
+    "step": "Submit Quote",
+    "status": "PASS",
+    "details": "Status: sent",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow D (Quote)",
+    "step": "Public Quote View",
+    "status": "PASS",
+    "details": "Public HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow D (Quote)",
+    "step": "Accept Quote via Public Page",
+    "status": "PASS",
+    "details": "Accepted HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow D (Quote)",
+    "step": "Convert Quote to Invoice",
+    "status": "PASS",
+    "details": "Invoice ID: 8a39ca92-efb5-4d3f-8600-ab872dab9efd",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow E (Quote -> Subscription)",
+    "step": "Direct Quote to Subscription Conversion",
+    "status": "PARTIAL",
+    "details": "Quote converts directly to Invoice (\u00a77). Quote-to-subscription is not a native direct transition in current architecture (Documented Production Gap).",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow F (Invoice)",
+    "step": "GST & Financial Calculation",
+    "status": "PASS",
+    "details": "Subtotal: 15000.00, Tax: 2700.00, Total: 17700.00",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow F (Invoice)",
+    "step": "Send Invoice & Token Generation",
+    "status": "PASS",
+    "details": "Sent: sent",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow G (Payment)",
+    "step": "Record Partial Payment & Allocation",
+    "status": "PASS",
+    "details": "Payment ID: e7018df6-53c8-437f-9e47-61eaacc7da8d",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow G (Payment)",
+    "step": "Invoice Status Transition",
+    "status": "PASS",
+    "details": "Status: partially_paid",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow G (Payment)",
+    "step": "Issue Refund & Adjust Balance",
+    "status": "PASS",
+    "details": "{\"id\":\"e7018df6-53c8-437f-9e47-61eaacc7da8d\",\"payment_number\":\"PAY-000001\",\"customer\":{\"id\":\"2797e836-7333-4efe-8974-6310d48097a0\",\"customer_number\":\"CUS-000001\",\"display_name\":\"Apex Global Ltd\",\"email\":\"apex_50ddab90@apexglobal.test\"},\"amount\":\"5000.00\",\"currency\":\"INR\",\"method\":\"bank_transfer\",\"gateway\":\"manual\",\"status\":\"partially_refunded\",\"reconciliation_status\":\"matched\",\"gateway_order_id\":null,\"gateway_payment_id\":null,\"gateway_signature_verified\":false,\"reference\":\"UTR9988776655\",\"paid_at\":\"2026-09-11T04:17:24.390957Z\",\"failure_reason\":null,\"notes\":\"Bank wire via NEFT\",\"amount_refunded\":\"1000.00\",\"amount_allocated\":\"4000.00\",\"amount_unallocated\":\"0.00\",\"allocations\":[{\"id\":\"41106e0c-6a1e-40b7-86a7-5b1317720486\",\"invoice_id\":\"8a39ca92-efb5-4d3f-8600-ab872dab9efd\",\"invoice_number\":\"INV-000001\",\"amount\":\"4000.00\"}],\"refunds\":[{\"id\":\"d3b2dea6-2828-4f8f-b2b1-923966f51bfd\",\"amount\":\"1000.00\",\"status\":\"processed\",\"gateway_refund_id\":null,\"reason\":\"Customer discount dispute\",\"created_at\":\"2026-09-11T04:17:24.496474Z\"}],\"recorded_by\":{\"id\":\"b1f6f395-0eae-4384-bcc7-5443a2617276\",\"full_name\":\"QA Auditor\",\"email\":\"auditor_0516c4b0@example.test\"},\"created_at\":\"2026-09-11T04:17:24.393964Z\",\"updated_at\":\"2026-09-11T04:17:24.491432Z\"}",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow H (Razorpay / Hosted Checkout)",
+    "step": "Create Checkout Session",
+    "status": "PASS",
+    "details": "Session: cc731950-cd90-4644-9726-dbfc539fdff4",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow H (Razorpay / Hosted Checkout)",
+    "step": "View Public Checkout Page",
+    "status": "PASS",
+    "details": "HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow L (Metered Billing)",
+    "step": "Create Usage Meter",
+    "status": "PASS",
+    "details": "Meter ID: 3e53c107-b067-4fb9-83e5-68412f1cd11c",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow L (Metered Billing)",
+    "step": "Record Meter Usage Event",
+    "status": "PASS",
+    "details": "{\"id\":\"73816fda-a0e4-4e95-bc71-01f3a515fcb9\",\"meter_id\":\"3e53c107-b067-4fb9-83e5-68412f1cd11c\",\"customer_id\":\"2797e836-7333-4efe-8974-6310d48097a0\",\"subscription_id\":null,\"quantity\":\"1250.0000\",\"timestamp\":\"2026-09-11T09:47:26.292337+05:30\",\"idempotency_key\":\"EVT_f0236821\",\"status\":\"accepted\",\"created_at\":\"2026-09-11T09:47:26.293379+05:30\"}",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow M (Dunning)",
+    "step": "List Dunning Cases",
+    "status": "PASS",
+    "details": "HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow M (Dunning)",
+    "step": "List Dunning Policies",
+    "status": "PASS",
+    "details": "HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow N (Customer Lifecycle)",
+    "step": "Get Customer Lifecycle Profile",
+    "status": "PASS",
+    "details": "HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow O (Timesheets)",
+    "step": "Create Time Entry",
+    "status": "PASS",
+    "details": "Entry ID: e4a880d9-a39e-47b9-bea8-9f7b52d30d08",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow O (Timesheets)",
+    "step": "Submit Time Entry",
+    "status": "PASS",
+    "details": "HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow O (Timesheets)",
+    "step": "Approve Time Entry",
+    "status": "PASS",
+    "details": "HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow P (Expenses)",
+    "step": "Client-Side Expense Ledger & Recurring Profiles",
+    "status": "PASS",
+    "details": "Documented Architecture: Purely client-side state managed via ExpensesContext and localStorage (rooman_expenses_list_v1). No backend API exists by design.",
+    "severity": "P3"
+  },
+  {
+    "workflow": "Workflow Q (Reports)",
+    "step": "Reports Dashboard KPIs",
+    "status": "PASS",
+    "details": "HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow Q (Reports)",
+    "step": "Revenue Analytics Report",
+    "status": "PASS",
+    "details": "HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow Q (Reports)",
+    "step": "Receivables Aging Report",
+    "status": "PASS",
+    "details": "HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow R (Reconciliation)",
+    "step": "Reconciliation Summary",
+    "status": "PASS",
+    "details": "HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow S (Approvals)",
+    "step": "Approval Center List",
+    "status": "PASS",
+    "details": "HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow T (Action Center)",
+    "step": "Action Center Inbox Events",
+    "status": "PASS",
+    "details": "HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow U (Audit Log)",
+    "step": "Audit Log Trail",
+    "status": "PASS",
+    "details": "Found 15 recorded audit items",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow V (Automation)",
+    "step": "Automation Rules List",
+    "status": "PASS",
+    "details": "HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow W (Customization)",
+    "step": "Number Series Configuration",
+    "status": "PASS",
+    "details": "HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow X (Customer Portal)",
+    "step": "Customer Portal Configuration",
+    "status": "PASS",
+    "details": "HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow Y (Integrations)",
+    "step": "List Integrations Status",
+    "status": "PASS",
+    "details": "HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow Z (Settings)",
+    "step": "Get Organization Profile",
+    "status": "PASS",
+    "details": "Org name: AuditCorp_7e14d8fd",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Workflow Z (Settings)",
+    "step": "Get User Profile & Avatar",
+    "status": "PASS",
+    "details": "User: auditor_0516c4b0@example.test, Avatar: None",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Credit Notes",
+    "step": "Create Credit Note",
+    "status": "PASS",
+    "details": "Credit Note ID: 9a09bea2-ab70-4609-9fe2-6115260ac646",
+    "severity": "P2"
+  },
+  {
+    "workflow": "Credit Notes",
+    "step": "Apply Credit Note to Invoice",
+    "status": "PASS",
+    "details": "HTTP 200",
+    "severity": "P2"
+  },
+  {
+    "workflow": "SECURITY",
+    "step": "Cross-Tenant Customer Isolation (IDOR)",
+    "status": "PASS",
+    "details": "HTTP 404 Not Found as expected",
+    "severity": "P2"
+  },
+  {
+    "workflow": "SECURITY",
+    "step": "Cross-Tenant Invoice Isolation (IDOR)",
+    "status": "PASS",
+    "details": "HTTP 404 Not Found as expected",
+    "severity": "P2"
+  }
+]

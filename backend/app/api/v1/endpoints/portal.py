@@ -1,6 +1,4 @@
 """Customer Portal endpoints: settings, customer authentication, self-service dashboard, and actions."""
-from __future__ import annotations
-
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -10,11 +8,14 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from backend.app.api.deps import CurrentContext, get_db, require_admin, require_viewer
 from backend.app.core.exceptions import UnauthorizedError, ValidationAppError
+from backend.app.core.rate_limit import auth_rate_limit, limiter, public_rate_limit
+from backend.app.models.customers import Customer
 from backend.app.models.invoices import Invoice
 from backend.app.models.identity import Organization
 from backend.app.models.payments import (
     CustomerPaymentMethod,
     CustomerPaymentMethodStatus,
+    Payment,
     PaymentGateway,
 )
 from backend.app.models.portal import (
@@ -90,7 +91,9 @@ def update_portal_settings(
 
 
 @router.post("/auth/signup", response_model=PortalUserOut, status_code=status.HTTP_201_CREATED, summary="Customer portal self sign-up")
+@limiter.limit(auth_rate_limit)
 def portal_signup(
+    request: Request,
     body: PortalSignupIn,
     db: Session = Depends(get_db),
 ):
@@ -100,7 +103,9 @@ def portal_signup(
 
 
 @router.post("/auth/login", response_model=PortalAuthOut, summary="Customer portal login")
+@limiter.limit(auth_rate_limit)
 def portal_login(
+    request: Request,
     body: PortalLoginIn,
     db: Session = Depends(get_db),
 ):
@@ -112,6 +117,21 @@ def portal_login(
         user=PortalUserOut.model_validate(user),
         customer_display_name=user.customer.display_name if user.customer else "",
     )
+
+
+@router.post("/auth/logout", summary="Customer portal logout")
+def portal_logout(
+    x_portal_token: Optional[str] = Header(None, alias="X-Portal-Token"),
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    token = x_portal_token
+    if not token and authorization and authorization.startswith("Bearer "):
+        token = authorization[7:].strip()
+    if token:
+        customer_portal_service.portal_logout(db, token)
+        db.commit()
+    return {"status": "success", "message": "Logged out successfully."}
 
 
 # --- Customer Self-Service Endpoints ---
@@ -154,6 +174,90 @@ def list_portal_invoices(
         }
         for inv in invoices
     ]
+
+
+@router.get("/invoices/signed-download", response_class=RawResponse, summary="Download invoice via signed token")
+@limiter.limit(public_rate_limit)
+def download_signed_invoice_pdf(
+    request: Request,
+    token: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Public signed download endpoint validating HMAC signature and expiry without session headers."""
+    try:
+        org_id, cust_id, inv_id = customer_portal_service.verify_signed_document_token(token)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    invoice = db.scalars(
+        select(Invoice)
+        .options(selectinload(Invoice.items), selectinload(Invoice.customer))
+        .where(
+            Invoice.id == inv_id,
+            Invoice.organization_id == org_id,
+            Invoice.customer_id == cust_id,
+        )
+    ).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found.")
+
+    org = db.get(Organization, org_id)
+    pdf = render_invoice_pdf(invoice, org)
+    return RawResponse(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{invoice.invoice_number}.pdf"'},
+    )
+
+
+@router.get("/invoices/{invoice_id}", response_model=Dict[str, Any], summary="Customer portal invoice detail")
+def get_portal_invoice(
+    invoice_id: str,
+    user: CustomerPortalUser = Depends(get_current_portal_user),
+    db: Session = Depends(get_db),
+):
+    invoice = db.scalars(
+        select(Invoice)
+        .options(selectinload(Invoice.items), selectinload(Invoice.customer))
+        .where(
+            Invoice.id == invoice_id,
+            Invoice.organization_id == user.organization_id,
+            Invoice.customer_id == user.customer_id,
+        )
+    ).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found.")
+
+    return {
+        "id": invoice.id,
+        "invoice_number": invoice.invoice_number,
+        "issue_date": str(invoice.issue_date),
+        "due_date": str(invoice.due_date),
+        "status": invoice.status.value,
+        "currency": invoice.currency,
+        "subtotal": str(invoice.subtotal),
+        "tax_amount": str(invoice.tax_amount),
+        "total": str(invoice.total),
+        "amount_paid": str(invoice.amount_paid),
+        "amount_due": str(invoice.amount_due),
+        "public_token": invoice.public_token,
+        "notes": invoice.notes,
+        "terms": invoice.terms,
+        "place_of_supply_name": invoice.place_of_supply_name,
+        "customer_gstin": invoice.customer_gstin,
+        "items": [
+            {
+                "id": item.id,
+                "description": item.description,
+                "quantity": float(item.quantity),
+                "unit_price": float(item.unit_price),
+                "amount": float(item.amount),
+                "tax_rate_pct": float(item.tax_rate_pct),
+                "hsn_sac_code": item.hsn_sac_code,
+            }
+            for item in (invoice.items or [])
+        ],
+    }
 
 
 @router.get("/invoices/{invoice_id}/pdf", response_class=RawResponse, summary="Download invoice PDF from customer portal")
@@ -208,38 +312,6 @@ def get_signed_invoice_download_url(
         expires_in_seconds=300,
     )
     return {"token": token, "expires_in_seconds": 300}
-
-
-@router.get("/invoices/signed-download", response_class=RawResponse, summary="Download invoice via signed token")
-def download_signed_invoice_pdf(
-    token: str = Query(...),
-    db: Session = Depends(get_db),
-):
-    """Public signed download endpoint validating HMAC signature and expiry without session headers."""
-    try:
-        org_id, cust_id, inv_id = customer_portal_service.verify_signed_document_token(token)
-    except Exception as exc:
-        raise HTTPException(status_code=401, detail=str(exc))
-
-    invoice = db.scalars(
-        select(Invoice)
-        .options(selectinload(Invoice.items), selectinload(Invoice.customer))
-        .where(
-            Invoice.id == inv_id,
-            Invoice.organization_id == org_id,
-            Invoice.customer_id == cust_id,
-        )
-    ).first()
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found.")
-
-    org = db.get(Organization, org_id)
-    pdf = render_invoice_pdf(invoice, org)
-    return RawResponse(
-        content=pdf,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{invoice.invoice_number}.pdf"'},
-    )
 
 
 @router.get("/subscriptions", response_model=List[Dict[str, Any]], summary="Customer portal subscription list")
@@ -297,6 +369,39 @@ def list_portal_payment_methods(
         }
         for m in methods
     ]
+
+
+@router.get("/payments", response_model=List[Dict[str, Any]], summary="Customer portal payment history")
+def list_portal_payments(
+    user: CustomerPortalUser = Depends(get_current_portal_user),
+    db: Session = Depends(get_db),
+):
+    payments = list(
+        db.scalars(
+            select(Payment)
+            .where(
+                Payment.organization_id == user.organization_id,
+                Payment.customer_id == user.customer_id,
+            )
+            .order_by(desc(Payment.created_at))
+        ).all()
+    )
+    return [
+        {
+            "id": p.id,
+            "payment_number": p.payment_number,
+            "amount": str(p.amount),
+            "currency": p.currency,
+            "method": p.method.value if hasattr(p.method, "value") else str(p.method),
+            "gateway": p.gateway.value if hasattr(p.gateway, "value") else str(p.gateway),
+            "status": p.status.value if hasattr(p.status, "value") else str(p.status),
+            "reconciliation_status": p.reconciliation_status.value if hasattr(p.reconciliation_status, "value") else str(p.reconciliation_status),
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "gateway_payment_id": p.gateway_payment_id,
+        }
+        for p in payments
+    ]
+
 
 
 @router.post("/subscriptions/{subscription_id}/trial/extend", summary="Customer portal trial self-service extension")
@@ -360,3 +465,58 @@ def customer_portal_convert_trial(
         "invoice_id": invoice.id if invoice else None,
         "payment_succeeded": succeeded,
     }
+
+
+@router.get("/profile", response_model=Dict[str, Any], summary="Customer portal profile details")
+def get_portal_profile(
+    user: CustomerPortalUser = Depends(get_current_portal_user),
+    db: Session = Depends(get_db),
+):
+    cust = db.scalars(
+        select(Customer)
+        .options(selectinload(Customer.contacts))
+        .where(
+            Customer.id == user.customer_id,
+            Customer.organization_id == user.organization_id,
+        )
+    ).first()
+    if not cust:
+        raise HTTPException(status_code=404, detail="Customer not found.")
+
+    return {
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "display_name": user.display_name,
+        },
+        "customer": {
+            "id": cust.id,
+            "customer_number": cust.customer_number,
+            "display_name": cust.display_name,
+            "company_name": cust.company_name,
+            "email": cust.email,
+            "phone": cust.phone,
+            "website": cust.website,
+            "gstin": cust.gstin,
+            "pan": cust.pan,
+            "currency": cust.currency,
+            "billing_address_line1": cust.billing_address_line1,
+            "billing_address_line2": cust.billing_address_line2,
+            "billing_city": cust.billing_city,
+            "billing_state": cust.billing_state,
+            "billing_postal_code": cust.billing_postal_code,
+            "billing_country": cust.billing_country,
+        },
+        "contacts": [
+            {
+                "id": c.id,
+                "name": c.name,
+                "email": c.email,
+                "phone": c.phone,
+                "designation": c.designation,
+                "is_primary": c.is_primary,
+            }
+            for c in (cust.contacts or [])
+        ],
+    }
+

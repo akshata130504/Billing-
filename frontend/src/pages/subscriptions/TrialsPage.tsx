@@ -157,9 +157,8 @@ export function TrialsPage() {
           variant="primary"
           size="md"
           onClick={() => navigate('/subscriptions/new')}
-          className="flex items-center gap-2"
+          leadingIcon={<Repeat className="w-4 h-4" />}
         >
-          <Repeat className="w-4 h-4" />
           New Trial / Subscription
         </Button>
       </div>
@@ -294,9 +293,9 @@ export function TrialsPage() {
                                 setSelectedTrial(sub);
                                 setConvertModalOpen(true);
                               }}
+                              leadingIcon={<CheckCircle2 className="w-3.5 h-3.5" />}
                               className="text-[11px] py-1 px-2.5 h-7 bg-emerald-600 hover:bg-emerald-700"
                             >
-                              <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
                               Convert
                             </Button>
                           )}

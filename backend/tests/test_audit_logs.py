@@ -42,7 +42,12 @@ def test_list_requires_admin_and_filters(client, tenant, auth_headers):
     assert client.get(BASE, headers=auth_headers, params={"entity_type": "quote"}).json()["total"] == 0
     assert client.get(BASE, headers=auth_headers, params={"search": "audit target"}).json()["total"] == 2
     assert client.get(BASE, headers=auth_headers, params={"actor_user_id": tenant.owner.id}).json()["total"] == 0
-    today = date.today()
+    # Date filters mean calendar dates in the organization's timezone, not the
+    # server's. On a UTC CI runner these differ from date.today() for 5.5 hours
+    # a day, which is exactly the bug the timezone handling fixes.
+    from backend.app.services import timezones
+
+    today = timezones.today_in(timezones.tz_for(tenant.organization))
     assert client.get(BASE, headers=auth_headers, params={"date_from": today.isoformat(), "date_to": today.isoformat()}).json()["total"] == 2
     assert client.get(BASE, headers=auth_headers, params={"date_to": (today - timedelta(days=1)).isoformat()}).json()["total"] == 0
 

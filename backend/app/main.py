@@ -25,6 +25,34 @@ SECURITY_HEADERS = {
 HSTS_HEADER = "max-age=31536000; includeSubDomains"
 
 
+def _init_error_tracking() -> bool:
+    """Sentry is optional; import lazily so a missing package cannot crash boot."""
+    if not settings.SENTRY_DSN:
+        return False
+    try:
+        from backend.app.core.sentry import init_sentry  # noqa: WPS433
+    except ImportError as exc:  # pragma: no cover - defensive
+        logger.warning("SENTRY_DSN is set but error tracking could not be loaded (%s); skipping", exc)
+        return False
+    return init_sentry()
+
+
+def _warn_if_scheduler_disabled() -> None:
+    """Renewals, overdue marking and dunning only run where SCHEDULER_ENABLED=true.
+
+    Exactly one process in the deployment should have it on (the `scheduler`
+    service in docker-compose.prod.yml). This runs in the API lifespan, so it
+    fires for API processes only - the scheduler process never starts the app.
+    """
+    if settings.is_production and not settings.SCHEDULER_ENABLED:
+        logger.warning(
+            "SCHEDULER_ENABLED is false on this API process. This is correct ONLY if a separate "
+            "scheduler process is running (docker-compose.prod.yml service 'scheduler'). If no such "
+            "process exists, subscription renewals, trial conversions, overdue invoice marking and "
+            "dunning reminders will NEVER run."
+        )
+
+
 def _load_scheduler():
     """The scheduler module is optional during the build; import lazily and tolerate its absence."""
     try:
@@ -38,6 +66,7 @@ def _load_scheduler():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Application %s started in %s mode (v%s)", settings.PROJECT_NAME, settings.ENVIRONMENT, __version__)
+    _warn_if_scheduler_disabled()
     stop_scheduler = None
     if settings.SCHEDULER_ENABLED:
         start_scheduler, stop_scheduler = _load_scheduler()
@@ -78,6 +107,9 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 
 def create_application() -> FastAPI:
+    # Before anything else, so failures during app construction are also captured.
+    _init_error_tracking()
+
     app = FastAPI(
         title=settings.PROJECT_NAME,
         version=__version__,
@@ -162,6 +194,15 @@ def create_application() -> FastAPI:
 
     # Mount API routers
     app.include_router(api_router, prefix=settings.API_V1_STR)
+
+    # Static files for avatars / uploads
+    import os
+    from fastapi.staticfiles import StaticFiles
+
+    upload_dir = os.path.abspath(settings.UPLOAD_DIR)
+    os.makedirs(upload_dir, exist_ok=True)
+    app.mount("/api/v1/uploads", StaticFiles(directory=upload_dir), name="api_uploads")
+    app.mount("/uploads", StaticFiles(directory=upload_dir), name="uploads")
 
     @app.get("/", tags=["Root"])
     def root():

@@ -169,9 +169,17 @@ def apply_subscription_change(
     if new_plan.id != old_plan.id:
         change_type = SubscriptionChangeType.UPGRADE if calc.is_upgrade else SubscriptionChangeType.DOWNGRADE
 
-    # If END_OF_TERM, schedule for period end
-    if effective_type == ProrationEffectiveType.END_OF_TERM:
-        change_date = period_end
+    # Deferred changes: END_OF_TERM always defers to the period end, and a SCHEDULED
+    # change with a future effective_date defers to that date. Previously only
+    # END_OF_TERM deferred, so a SCHEDULED change fell through to the immediate branch
+    # and was applied (and prorated) today instead of on the requested date.
+    # A SCHEDULED change dated today or in the past applies immediately.
+    is_deferred = effective_type == ProrationEffectiveType.END_OF_TERM or (
+        effective_type == ProrationEffectiveType.SCHEDULED and change_date > date.today()
+    )
+    if is_deferred:
+        if effective_type == ProrationEffectiveType.END_OF_TERM:
+            change_date = period_end
         sub_change = SubscriptionChange(
             organization_id=ctx.organization_id,
             subscription_id=subscription.id,

@@ -11,6 +11,7 @@ import { queryKeys } from '../../hooks/queries';
 import { useAuth } from '../../hooks/useAuth';
 import type { OrganizationOut, OrganizationUpdate } from '../../types/api';
 import { ReadOnlyNotice, SettingsSection, nullable, str, type FieldErrors } from './settingsShared';
+import { ProfilePhotoUpload } from './ProfilePhotoUpload';
 
 interface FormValues {
   name: string;
@@ -140,6 +141,8 @@ export function OrganizationTab({ organization, canEdit }: { organization: Organ
         title="Profile"
         description="Shown on invoices, quotes and the public payment page."
       >
+        <ProfilePhotoUpload />
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Input label="Organization name" required value={values.name} onChange={set('name')} error={errors.name} disabled={disabled} />
           <Input label="Legal name" value={values.legal_name} onChange={set('legal_name')} error={errors.legal_name} disabled={disabled} helperText="Registered entity name, if different." />

@@ -62,11 +62,11 @@ def export_audit_logs(
         raise ValidationAppError("format must be csv or json", {"fields": {"format": "csv|json"}})
     stamp = date.today().isoformat()
     if fmt == "csv":
-        generator = svc.export_csv(db, ctx.organization_id, filters)
+        generator = svc.export_csv(db, ctx.organization_id, filters, getattr(ctx.organization, 'timezone', None))
         media_type = "text/csv; charset=utf-8"
         filename = f"audit-log-{stamp}.csv"
     else:
-        generator = svc.export_json(db, ctx.organization_id, filters)
+        generator = svc.export_json(db, ctx.organization_id, filters, getattr(ctx.organization, 'timezone', None))
         media_type = "application/json"
         filename = f"audit-log-{stamp}.json"
     return StreamingResponse(

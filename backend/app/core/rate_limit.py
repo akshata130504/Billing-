@@ -23,6 +23,24 @@ def auth_rate_limit() -> str:
     return settings.AUTH_RATE_LIMIT
 
 
+def public_rate_limit() -> str:
+    """Limit for unauthenticated hosted-page reads (/public/invoices, /public/quotes, /checkout/public).
+
+    These are guarded only by an opaque token in the URL, so they are enumerable;
+    the limit caps how fast a scanner can walk the token space from one IP.
+    """
+    return settings.PUBLIC_RATE_LIMIT
+
+
+def public_action_rate_limit() -> str:
+    """Tighter limit for unauthenticated state-changing hosted-page calls.
+
+    Covers quote accept/decline, Razorpay order creation and signature
+    verification, and hosted checkout confirmation.
+    """
+    return settings.PUBLIC_ACTION_RATE_LIMIT
+
+
 limiter = Limiter(key_func=rate_limit_key, headers_enabled=False)
 
 
@@ -41,4 +59,12 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) 
     )
 
 
-__all__ = ["limiter", "auth_rate_limit", "rate_limit_key", "rate_limit_exceeded_handler", "RateLimitExceeded"]
+__all__ = [
+    "limiter",
+    "auth_rate_limit",
+    "public_rate_limit",
+    "public_action_rate_limit",
+    "rate_limit_key",
+    "rate_limit_exceeded_handler",
+    "RateLimitExceeded",
+]
