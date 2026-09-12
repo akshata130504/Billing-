@@ -28,13 +28,10 @@ import {
   Pause,
   Server,
   ArrowLeftRight,
-<<<<<<< HEAD
   Info,
-=======
   TrendingUp,
   Users,
   Workflow,
->>>>>>> origin/main
 } from 'lucide-react';
 import { RoomanLogo } from '../../components/common/RoomanLogo';
 import { Button } from '../../components/common/Button';
@@ -1085,24 +1082,6 @@ export function LandingPage() {
           {/* Auth CTA Buttons */}
           <div className="hidden sm:flex items-center gap-3">
             {isAuthenticated ? (
-<<<<<<< HEAD
-              <>
-                <Link to="/login">
-                  <Button variant="ghost" size="md" className="text-slate-700 hover:text-slate-900 font-medium">
-                    Sign In
-                  </Button>
-                </Link>
-                <Button
-                  variant="primary"
-                  size="md"
-                  onClick={() => navigate('/dashboard')}
-                  leadingIcon={<ArrowRight className="w-4 h-4" />}
-                  className="bg-[#25247A] hover:bg-[#1C1B63] text-white shadow-sm font-semibold active:scale-[0.98] transition-transform"
-                >
-                  Dashboard
-                </Button>
-              </>
-=======
               <Button
                 variant="primary"
                 size="md"
@@ -1112,7 +1091,6 @@ export function LandingPage() {
               >
                 Dashboard
               </Button>
->>>>>>> origin/main
             ) : (
               <>
                 <Link to="/login">
@@ -1259,11 +1237,7 @@ export function LandingPage() {
                 <Button
                   variant="primary"
                   size="lg"
-<<<<<<< HEAD
-                  leadingIcon={<ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />}
-=======
                   trailingIcon={<ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />}
->>>>>>> origin/main
                   className="w-full sm:w-auto font-semibold px-8 py-3.5 text-base bg-gradient-to-r from-[#25247A] via-[#3F51C9] to-[#E83E8C] text-white shadow-elevated group active:scale-[0.98] transition-all hover:brightness-110"
                 >
                   Get Started
