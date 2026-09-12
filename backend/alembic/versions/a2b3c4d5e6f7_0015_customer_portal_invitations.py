@@ -1,7 +1,7 @@
-"""0014_customer_portal_invitations
+"""0015_customer_portal_invitations
 
 Revision ID: a2b3c4d5e6f7
-Revises: f3a4b5c6d7e8
+Revises: a4b5c6d7e8f9
 Create Date: 2026-09-12 10:00:00.000000
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'a2b3c4d5e6f7'
-down_revision: Union[str, None] = 'f3a4b5c6d7e8'
+down_revision: Union[str, None] = 'a4b5c6d7e8f9'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

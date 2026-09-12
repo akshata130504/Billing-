@@ -300,6 +300,10 @@ export function ProrationPage() {
             plansLoading={plansLoading}
             canApply={canApply}
             onApplied={handleApplied}
+            onCancel={() => {
+              setSelected(null);
+              setSearchParams({}, { replace: true });
+            }}
           />
 
           <ChangeHistoryTable

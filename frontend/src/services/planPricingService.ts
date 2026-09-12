@@ -22,31 +22,27 @@ export const planPricingService = {
     if (params?.page) q.set('page', String(params.page));
     if (params?.page_size) q.set('page_size', String(params.page_size));
 
-    try {
-      const res = await apiClient.get<{ items: any[]; total: number }>(`/catalog/offerings?${q.toString()}`);
-      const items: PlanPricingItem[] = (res.data.items || []).map((o) => ({
-        id: o.id,
-        name: o.name,
-        code: o.sku || o.name.toLowerCase().replace(/\s+/g, '-'),
-        sku: o.sku,
-        description: o.description,
-        category: o.category || 'Subscriptions',
-        unit: o.unit || 'subscription',
-        currency: o.currency || 'INR',
-        pricing_model: o.pricing_model || 'per_unit',
-        base_price: o.base_price || 0,
-        tax_rate_pct: o.tax_rate_pct || 18,
-        billing_frequency: o.billing_frequency || 'monthly',
-        status: o.is_active ? 'active' : 'archived',
-        is_active: Boolean(o.is_active),
-        pricing_tiers: o.pricing_tiers || [],
-        created_at: o.created_at,
-        updated_at: o.updated_at,
-      }));
-      return { items, total: res.data.total || items.length };
-    } catch {
-      return { items: [], total: 0 };
-    }
+    const res = await apiClient.get<{ items: any[]; total: number }>(`/catalog/offerings?${q.toString()}`);
+    const items: PlanPricingItem[] = (res.data.items || []).map((o) => ({
+      id: o.id,
+      name: o.name,
+      code: o.sku || o.name.toLowerCase().replace(/\s+/g, '-'),
+      sku: o.sku,
+      description: o.description,
+      category: o.category || 'Subscriptions',
+      unit: o.unit || 'subscription',
+      currency: o.currency || 'INR',
+      pricing_model: o.pricing_model || 'per_unit',
+      base_price: o.base_price || 0,
+      tax_rate_pct: o.tax_rate_pct || 18,
+      billing_frequency: o.billing_frequency || 'monthly',
+      status: o.is_active ? 'active' : 'archived',
+      is_active: Boolean(o.is_active),
+      pricing_tiers: o.pricing_tiers || [],
+      created_at: o.created_at,
+      updated_at: o.updated_at,
+    }));
+    return { items, total: res.data.total || items.length };
   },
 
   async getPlans(params?: any) {

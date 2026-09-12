@@ -26,6 +26,7 @@ interface ExpensesContextType {
   summary: ExpensesSummary;
   recurringSummary: RecurringSummary;
   addExpense: (data: Omit<Expense, 'id' | 'createdAt'>) => Expense;
+  importExpenses: (items: Omit<Expense, 'id' | 'createdAt'>[]) => number;
   updateExpense: (id: string, updates: Partial<Expense>) => void;
   deleteExpense: (id: string) => void;
   duplicateExpense: (id: string) => Expense;
@@ -165,6 +166,31 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
       return newExpense;
     },
     [expenses.length, showToast]
+  );
+
+  const importExpenses = useCallback(
+    (items: Omit<Expense, 'id' | 'createdAt'>[]): number => {
+      if (!items.length) return 0;
+      const now = new Date().toISOString();
+      let maxNum = expenses.reduce((max, e) => {
+        const match = e.id.match(/EXP-\d{4}-(\d+)/);
+        return match ? Math.max(max, parseInt(match[1], 10)) : max;
+      }, 0);
+
+      const newEntries: Expense[] = items.map((item) => {
+        maxNum += 1;
+        return {
+          ...item,
+          id: `EXP-2026-${String(maxNum).padStart(3, '0')}`,
+          createdAt: now,
+        };
+      });
+
+      setExpenses((prev) => [...newEntries, ...prev]);
+      showToast('success', 'Import Successful', `Successfully imported ${newEntries.length} expense(s).`);
+      return newEntries.length;
+    },
+    [expenses, showToast]
   );
 
   const updateExpense = useCallback(
@@ -317,6 +343,7 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
         summary,
         recurringSummary,
         addExpense,
+        importExpenses,
         updateExpense,
         deleteExpense,
         duplicateExpense,

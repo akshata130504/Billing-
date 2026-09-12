@@ -9,6 +9,7 @@ import {
   DollarSign,
   CheckCircle2,
   AlertCircle,
+  Plus,
 } from 'lucide-react';
 import { subscriptionService } from '../../services/subscriptionService';
 import { customerService } from '../../services/customerService';
@@ -23,6 +24,7 @@ import { Button } from '../../components/common/Button';
 import { LoadingState } from '../../components/common/LoadingState';
 import { useToast } from '../../components/common/Toast';
 import { formatMoney, todayIso } from '../../utils/format';
+import { NewPlanModal } from './NewPlanModal';
 
 export function SubscriptionFormPage() {
   const navigate = useNavigate();
@@ -45,6 +47,7 @@ export function SubscriptionFormPage() {
   const [autoRenewal, setAutoRenewal] = useState(true);
   const [generateFirstInvoice, setGenerateFirstInvoice] = useState(true);
   const [notes, setNotes] = useState('');
+  const [newPlanOpen, setNewPlanOpen] = useState(false);
 
   useEffect(() => {
     async function loadData() {
@@ -100,6 +103,15 @@ export function SubscriptionFormPage() {
         setGenerateFirstInvoice(true);
       }
     }
+  };
+
+  const handlePlanCreated = (plan: PlanOut) => {
+    setPlans((prev) => [...prev, plan]);
+    setPlanId(plan.id);
+    setHasTrialOverride(false);
+    const pTrial = plan.trial_days || 0;
+    setTrialDays(pTrial);
+    setGenerateFirstInvoice(pTrial === 0);
   };
 
   // Real-time Commercial Calculations
@@ -274,27 +286,44 @@ export function SubscriptionFormPage() {
 
           {/* 2. Plan Selection */}
           <div className="bg-white rounded-xl border border-slate-200/90 shadow-sm p-5 space-y-4">
-            <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-              <Package className="w-4 h-4 text-brand-600" />
-              2. Select Plan
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                <Package className="w-4 h-4 text-brand-600" />
+                2. Select Plan
+              </h2>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setNewPlanOpen(true)}
+                leadingIcon={<Plus className="w-3.5 h-3.5" />}
+              >
+                New Plan
+              </Button>
+            </div>
 
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1.5">
                 Subscription Plan <span className="text-rose-500">*</span>
               </label>
-              <select
-                value={planId}
-                onChange={handlePlanChange}
-                required
-                className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 text-slate-900"
-              >
-                {plans.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.code}) - {formatMoney(p.unit_amount, p.currency)} / {p.billing_interval}
-                  </option>
-                ))}
-              </select>
+              {plans.length === 0 ? (
+                <p className="text-xs text-slate-500 italic">
+                  No plans yet — click "New Plan" above to create one.
+                </p>
+              ) : (
+                <select
+                  value={planId}
+                  onChange={handlePlanChange}
+                  required
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 text-slate-900"
+                >
+                  {plans.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.code}) - {formatMoney(p.unit_amount, p.currency)} / {p.billing_interval}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
             {selectedPlan && (
@@ -515,6 +544,12 @@ export function SubscriptionFormPage() {
           </Button>
         </div>
       </form>
+
+      <NewPlanModal
+        isOpen={newPlanOpen}
+        onClose={() => setNewPlanOpen(false)}
+        onCreated={handlePlanCreated}
+      />
     </div>
   );
 }

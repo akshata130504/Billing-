@@ -34,8 +34,10 @@ export interface PlatformPageProps {
 
 export function PlatformPage({ family, title, subtitle, icon }: PlatformPageProps) {
   const { showToast } = useToast();
-  const { hasRole, user } = useAuth();
-  const canWrite = hasRole('finance');
+  const { user } = useAuth();
+  // POST /devices and DELETE /devices/{id} require no particular role — any authenticated
+  // org member can register or revoke their own device.
+  const canWrite = true;
   const familyPlatforms = PLATFORM_FAMILIES[family];
 
   const [devices, setDevices] = useState<DeviceOut[]>([]);

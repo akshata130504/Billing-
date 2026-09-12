@@ -161,31 +161,66 @@ export function ProrationPreviewCard({ preview, loading, error, effectiveType, c
         ) : (
           <div className="mt-3 divide-y divide-slate-200">
             <Row
-              label="Unused credit on current plan"
+              label="Unused-plan credit"
               hint={`${formatMoney(oldRate, currency)} × ${preview.days_remaining} ÷ ${preview.total_days} days`}
               value={`− ${formatMoney(preview.unused_credit, currency)}`}
               tone="credit"
             />
             <Row
-              label="Prorated charge for new plan"
+              label="New-plan remaining-period charge"
               hint={`${formatMoney(newRate, currency)} × ${preview.days_remaining} ÷ ${preview.total_days} days`}
               value={`+ ${formatMoney(preview.remaining_charge, currency)}`}
               tone="charge"
             />
             <Row
-              label={netPositive ? 'Customer owes now' : netNegative ? 'Customer is credited' : 'Net adjustment'}
+              label="Net Prorated Charge"
               hint={
                 netPositive
-                  ? 'A prorated invoice is raised; the credit note is offset against it automatically.'
+                  ? 'Net amount charged to customer today (prorated invoice raised).'
                   : netNegative
-                  ? 'A credit note for the difference is issued to the customer.'
-                  : 'Credit and charge cancel out; no invoice or credit note is raised.'
+                  ? 'Net amount credited to customer account today (credit note issued).'
+                  : 'Credit and charge cancel out; zero balance adjustment.'
               }
               value={formatMoney(Math.abs(net), currency)}
               emphasis
             />
           </div>
         )}
+
+        {/* Prominent Billing Summary: Charged Today & Renewal Amount */}
+        <div className="mt-4 pt-3 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="p-3 rounded-lg bg-blue-50/80 border border-blue-200">
+            <div className="text-[11px] font-semibold text-blue-900 uppercase tracking-wider">Charged today</div>
+            <div className="mt-1 text-base font-bold text-blue-950 tabular-nums">
+              {isEndOfTerm
+                ? formatMoney(0, currency)
+                : netPositive
+                ? formatMoney(net, currency)
+                : netNegative
+                ? `− ${formatMoney(Math.abs(net), currency)} (Credit)`
+                : formatMoney(0, currency)}
+            </div>
+            <div className="text-[11px] text-blue-700 mt-0.5">
+              {isEndOfTerm
+                ? 'No charge today (bills at renewal)'
+                : netPositive
+                ? 'Billed now via prorated invoice'
+                : netNegative
+                ? 'Credited to customer balance'
+                : 'Zero net charge'}
+            </div>
+          </div>
+
+          <div className="p-3 rounded-lg bg-slate-100/90 border border-slate-200">
+            <div className="text-[11px] font-semibold text-slate-700 uppercase tracking-wider">New recurring at renewal</div>
+            <div className="mt-1 text-base font-bold text-slate-900 tabular-nums">
+              {formatMoney(newRate, currency)}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5">
+              Per cycle starting {formatDate(preview.period_end)}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
