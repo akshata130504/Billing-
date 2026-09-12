@@ -26,8 +26,10 @@ from backend.app.models.subscriptions import Subscription
 from backend.app.schemas.portal import (
     CustomerPortalSettingsOut,
     CustomerPortalSettingsUpdate,
+    PortalActivateIn,
     PortalAuthOut,
     PortalDashboardOut,
+    PortalInvitationValidateOut,
     PortalLoginIn,
     PortalSignupIn,
     PortalUserOut,
@@ -90,16 +92,49 @@ def update_portal_settings(
 # --- Customer Portal Auth Endpoints ---
 
 
-@router.post("/auth/signup", response_model=PortalUserOut, status_code=status.HTTP_201_CREATED, summary="Customer portal self sign-up")
+@router.post("/auth/signup", status_code=status.HTTP_403_FORBIDDEN, summary="Customer portal self sign-up (disabled)")
 @limiter.limit(auth_rate_limit)
 def portal_signup(
     request: Request,
     body: PortalSignupIn,
     db: Session = Depends(get_db),
 ):
-    user = customer_portal_service.portal_signup(db, body)
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Public customer sign-up is disabled. Access to the Customer Portal is by invitation only.",
+    )
+
+
+@router.get("/auth/invitation", response_model=PortalInvitationValidateOut, summary="Validate portal activation invitation token")
+@limiter.limit(public_rate_limit)
+def validate_portal_invitation(
+    request: Request,
+    token: str = Query(..., description="Activation invitation token"),
+    db: Session = Depends(get_db),
+):
+    return customer_portal_service.validate_portal_invitation_token(db, token)
+
+
+@router.post("/auth/activate", response_model=PortalAuthOut, summary="Activate customer portal account and set password")
+@limiter.limit(auth_rate_limit)
+def activate_portal_account(
+    request: Request,
+    body: PortalActivateIn,
+    db: Session = Depends(get_db),
+):
+    token, user = customer_portal_service.activate_portal_account(
+        db,
+        raw_token=body.token,
+        password=body.password,
+        display_name=body.display_name,
+    )
     db.commit()
-    return PortalUserOut.model_validate(user)
+    return PortalAuthOut(
+        token=token,
+        expires_at=user.sessions[-1].expires_at if user.sessions else None,
+        user=PortalUserOut.model_validate(user),
+        customer_display_name=user.customer.display_name if user.customer else "",
+    )
 
 
 @router.post("/auth/login", response_model=PortalAuthOut, summary="Customer portal login")

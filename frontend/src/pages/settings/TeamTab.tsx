@@ -234,15 +234,16 @@ export function TeamTab({ canEdit }: { canEdit: boolean }) {
         isOpen={inviteOpen}
         onClose={() => setInviteOpen(false)}
         canGrantOwner={isOwner}
+        onCopy={copy}
         onInvited={(result) => {
           setInviteOpen(false);
           setInviteResult(result.invite_url ? result : null);
           void invalidate();
           showToast(
-            'success',
-            'Invitation created',
+            result.invite_url ? 'warning' : 'success',
+            result.invite_url ? 'Invitation Created (Action Required)' : 'Invitation Sent',
             result.invite_url
-              ? 'Share the invitation link shown above.'
+              ? `Email could not be delivered to ${result.user.email}. Share the invitation link shown above.`
               : `An invitation email was sent to ${result.user.email}.`
           );
         }}
@@ -273,17 +274,20 @@ function InviteMemberModal({
   onClose,
   canGrantOwner,
   onInvited,
+  onCopy,
 }: {
   isOpen: boolean;
   onClose: () => void;
   canGrantOwner: boolean;
   onInvited: (result: InviteResponse) => void;
+  onCopy: (text: string) => void;
 }) {
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState<MemberRole>('finance');
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [pendingResult, setPendingResult] = useState<InviteResponse | null>(null);
 
   const mutation = useMutation({
     mutationFn: (body: InviteRequest) => organizationService.invite(body),
@@ -293,7 +297,11 @@ function InviteMemberModal({
       setRole('finance');
       setErrors({});
       setFormError(null);
-      onInvited(result);
+      if (result.invite_url) {
+        setPendingResult(result);
+      } else {
+        onInvited(result);
+      }
     },
     onError: (err) => {
       const fields = fieldErrors(err);
@@ -310,6 +318,60 @@ function InviteMemberModal({
     if (fullName.trim()) body.full_name = fullName.trim();
     mutation.mutate(body);
   };
+
+  const handleDone = () => {
+    const res = pendingResult;
+    setPendingResult(null);
+    if (res) onInvited(res);
+    else onClose();
+  };
+
+  if (pendingResult?.invite_url) {
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={handleDone}
+        title="Invitation Link Ready"
+        description="Outbound email delivery is not configured or reachable on this server. Share this link directly with the user so they can join."
+        size="sm"
+        footer={
+          <Button variant="primary" size="sm" onClick={handleDone}>
+            Done
+          </Button>
+        }
+      >
+        <div className="space-y-3">
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3.5 space-y-2.5">
+            <p className="text-xs text-amber-900 leading-relaxed font-medium">
+              Copy and send this link to <span className="font-bold">{pendingResult.user.email}</span> to accept their{' '}
+              <span className="font-bold">{ROLE_LABELS[pendingResult.role]}</span> invitation:
+            </p>
+            <div className="flex items-stretch gap-2">
+              <input
+                readOnly
+                value={pendingResult.invite_url}
+                onFocus={(e) => e.currentTarget.select()}
+                className="flex-1 min-w-0 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-mono text-slate-700 select-all"
+                aria-label="Invitation link"
+              />
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={() => void onCopy(pendingResult.invite_url ?? '')}
+                leadingIcon={<Copy className="w-3.5 h-3.5" />}
+              >
+                Copy
+              </Button>
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-500 leading-snug">
+            Tip: To send invitations automatically via email, configure your SMTP server in <strong>Settings &gt; Integrations &gt; Email (SMTP)</strong>.
+          </p>
+        </div>
+      </Modal>
+    );
+  }
 
   return (
     <Modal

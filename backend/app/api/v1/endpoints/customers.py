@@ -15,6 +15,12 @@ from backend.app.schemas.customers import (
     CustomerSubscriptionRow,
     CustomerUpdate,
 )
+from backend.app.schemas.portal import (
+    CustomerPortalAccessStatusOut,
+    CustomerPortalInviteIn,
+    CustomerPortalInvitationOut,
+)
+from backend.app.services import customer_portal_service
 from backend.app.services import customer_service as svc
 from backend.app.services.pagination import PageParams, page_params
 
@@ -121,3 +127,65 @@ def customer_subscriptions(
 ):
     page = svc.list_customer_subscriptions(db, ctx, customer_id, params)
     return page.to_response(svc.serialize_subscription_row)
+
+
+@router.get(
+    "/{customer_id}/portal-access",
+    response_model=CustomerPortalAccessStatusOut,
+    summary="Get customer portal access status",
+)
+def get_customer_portal_access(
+    customer_id: str,
+    ctx: CurrentContext = Depends(require_viewer),
+    db: Session = Depends(get_db),
+):
+    return customer_portal_service.get_customer_portal_access(db, ctx.organization_id, customer_id)
+
+
+@router.post(
+    "/{customer_id}/portal-invite",
+    response_model=CustomerPortalInvitationOut,
+    summary="Invite or re-invite customer to portal",
+)
+def invite_customer_to_portal(
+    customer_id: str,
+    body: Optional[CustomerPortalInviteIn] = None,
+    ctx: CurrentContext = Depends(require_finance),
+    db: Session = Depends(get_db),
+):
+    email = body.email if body else None
+    invitation = customer_portal_service.create_customer_portal_invitation(
+        db, ctx, customer_id, email=email
+    )
+    db.commit()
+    return invitation
+
+
+@router.post(
+    "/{customer_id}/portal-revoke",
+    response_model=CustomerPortalAccessStatusOut,
+    summary="Revoke customer portal access",
+)
+def revoke_customer_portal_access(
+    customer_id: str,
+    ctx: CurrentContext = Depends(require_finance),
+    db: Session = Depends(get_db),
+):
+    status_out = customer_portal_service.revoke_customer_portal_access(db, ctx, customer_id)
+    db.commit()
+    return status_out
+
+
+@router.post(
+    "/{customer_id}/portal-reactivate",
+    response_model=CustomerPortalAccessStatusOut,
+    summary="Reactivate customer portal access",
+)
+def reactivate_customer_portal_access(
+    customer_id: str,
+    ctx: CurrentContext = Depends(require_finance),
+    db: Session = Depends(get_db),
+):
+    status_out = customer_portal_service.reactivate_customer_portal_access(db, ctx, customer_id)
+    db.commit()
+    return status_out

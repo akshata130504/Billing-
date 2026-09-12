@@ -125,6 +125,7 @@ from backend.app.models.checkout import (
     CheckoutTemplateType,
 )
 from backend.app.models.portal import (
+    CustomerPortalInvitation,
     CustomerPortalSession,
     CustomerPortalSettings,
     CustomerPortalUser,
@@ -284,6 +285,7 @@ __all__ = [
     "CustomerPortalSettings",
     "CustomerPortalUser",
     "CustomerPortalSession",
+    "CustomerPortalInvitation",
     "DunningPolicy",
     "DunningFinalAction",
     "DunningCase",

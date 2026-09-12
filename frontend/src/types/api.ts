@@ -273,7 +273,7 @@ export interface InviteRequest {
   full_name?: string;
 }
 
-export type InviteResponse = TeamMember & { invite_url?: string };
+export type InviteResponse = TeamMember & { invite_url?: string; email_delivered?: boolean };
 
 // ---------------------------------------------------------------------------
 // §4 Customers

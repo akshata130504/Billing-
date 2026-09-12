@@ -390,8 +390,13 @@ export function CustomerPortalPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => load()} disabled={loading}>
-            <RefreshCw className={cn('w-4 h-4 mr-1.5', loading && 'animate-spin')} />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => load()}
+            disabled={loading}
+            leadingIcon={<RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />}
+          >
             Refresh
           </Button>
           {canEdit && (
@@ -551,11 +556,24 @@ export function CustomerPortalPage() {
                   {Object.keys(patch).length} unsaved change{Object.keys(patch).length === 1 ? '' : 's'}
                 </p>
                 <div className="flex items-center gap-2">
-                  <Button type="button" variant="ghost" size="sm" onClick={handleDiscard} disabled={saving}>
-                    <Undo2 className="w-3.5 h-3.5 mr-1.5" />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleDiscard}
+                    disabled={saving}
+                    leadingIcon={<Undo2 className="w-3.5 h-3.5" />}
+                  >
                     Discard
                   </Button>
-                  <Button type="submit" variant="primary" size="sm" disabled={saving} isLoading={saving}>
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    size="sm"
+                    disabled={saving}
+                    isLoading={saving}
+                    leadingIcon={<Save className="w-3.5 h-3.5" />}
+                  >
                     Save changes
                   </Button>
                 </div>

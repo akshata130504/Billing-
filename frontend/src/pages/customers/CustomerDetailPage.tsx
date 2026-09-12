@@ -19,9 +19,15 @@ import {
   UserX,
   Users,
   Wallet,
+  Check,
+  Copy,
+  Key,
+  RotateCcw,
+  Send,
 } from 'lucide-react';
 import { customerService } from '../../services/customerService';
 import { customerPaymentMethodService } from '../../services/customerPaymentMethodService';
+import type { CustomerPortalAccessStatusOut } from '../../types/portal';
 import type {
   ContactIn,
   CustomerOut,
@@ -35,6 +41,7 @@ import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/common/Card';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
+import { Modal } from '../../components/common/Modal';
 import { DataTable, type Column } from '../../components/common/DataTable';
 import { EmptyState } from '../../components/common/EmptyState';
 import { ErrorState } from '../../components/common/ErrorState';
@@ -336,7 +343,7 @@ export function CustomerDetailPage() {
         </nav>
       </div>
 
-      {activeTab === 'overview' && <OverviewTab customer={customer} />}
+      {activeTab === 'overview' && <OverviewTab customer={customer} canWrite={canWrite} />}
       {activeTab === 'contacts' && (
         <ContactsTab customer={customer} canWrite={canWrite} onUpdated={(c) => setCustomer({ ...c, stats: customer.stats })} />
       )}
@@ -380,7 +387,8 @@ export default CustomerDetailPage;
 // Overview
 // ---------------------------------------------------------------------------
 
-function OverviewTab({ customer }: { customer: CustomerOut }) {
+function OverviewTab({ customer, canWrite }: { customer: CustomerOut; canWrite: boolean }) {
+  const { showToast } = useToast();
   const addressLines = [
     customer.billing_address_line1,
     customer.billing_address_line2,
@@ -389,6 +397,96 @@ function OverviewTab({ customer }: { customer: CustomerOut }) {
   ].filter((line) => line && line.trim() !== '');
 
   const primaryContact = customer.contacts.find((c) => c.is_primary) ?? customer.contacts[0];
+
+  const [portalAccess, setPortalAccess] = useState<CustomerPortalAccessStatusOut | null>(null);
+  const [portalLoading, setPortalLoading] = useState<boolean>(true);
+  const [lastInviteUrl, setLastInviteUrl] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState<boolean>(false);
+
+  const [inviteDialogOpen, setInviteDialogOpen] = useState<boolean>(false);
+  const [inviteEmail, setInviteEmail] = useState<string>(customer.email || primaryContact?.email || '');
+  const [actionLoading, setActionLoading] = useState<boolean>(false);
+
+  const [revokeDialogOpen, setRevokeDialogOpen] = useState<boolean>(false);
+  const [reactivateDialogOpen, setReactivateDialogOpen] = useState<boolean>(false);
+
+  const loadPortalAccess = useCallback(async () => {
+    setPortalLoading(true);
+    try {
+      const data = await customerService.getPortalAccess(customer.id);
+      setPortalAccess(data);
+    } catch {
+      // ignore
+    } finally {
+      setPortalLoading(false);
+    }
+  }, [customer.id]);
+
+  useEffect(() => {
+    loadPortalAccess();
+  }, [loadPortalAccess]);
+
+  const openInviteDialog = () => {
+    setInviteEmail(customer.email || primaryContact?.email || '');
+    setInviteDialogOpen(true);
+  };
+
+  const handleSendInvite = async () => {
+    setActionLoading(true);
+    try {
+      const inv = await customerService.inviteToPortal(customer.id, inviteEmail.trim() || undefined);
+      showToast('success', 'Customer portal invitation sent successfully.');
+      if (inv.invite_url) {
+        setLastInviteUrl(inv.invite_url);
+      }
+      setInviteDialogOpen(false);
+      await loadPortalAccess();
+    } catch (err: any) {
+      showToast('error', err?.response?.data?.detail || err?.message || 'Failed to send invitation');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRevoke = async () => {
+    setActionLoading(true);
+    try {
+      const updated = await customerService.revokePortalAccess(customer.id);
+      setPortalAccess(updated);
+      setLastInviteUrl(null);
+      showToast('success', 'Customer portal access revoked.');
+      setRevokeDialogOpen(false);
+    } catch (err: any) {
+      showToast('error', err?.response?.data?.detail || err?.message || 'Failed to revoke portal access');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleReactivate = async () => {
+    setActionLoading(true);
+    try {
+      const updated = await customerService.reactivatePortalAccess(customer.id);
+      setPortalAccess(updated);
+      showToast('success', 'Customer portal access reactivated.');
+      setReactivateDialogOpen(false);
+    } catch (err: any) {
+      showToast('error', err?.response?.data?.detail || err?.message || 'Failed to reactivate portal access');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const copyActivationLink = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedLink(true);
+      showToast('success', 'Activation link copied to clipboard.');
+      setTimeout(() => setCopiedLink(false), 2500);
+    } catch {
+      showToast('error', 'Failed to copy link to clipboard');
+    }
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -506,6 +604,228 @@ function OverviewTab({ customer }: { customer: CustomerOut }) {
       </div>
 
       <div className="space-y-5">
+        {/* Customer Portal Access Card */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Key className="w-4 h-4 text-indigo-600" />
+                Customer Portal Access
+              </CardTitle>
+              <CardDescription>
+                Invitation-only self-service access.
+              </CardDescription>
+            </div>
+            {portalAccess && !portalLoading && (
+              <Badge
+                variant={
+                  portalAccess.status === 'active'
+                    ? 'success'
+                    : portalAccess.status === 'invitation_pending'
+                    ? 'warning'
+                    : portalAccess.status === 'revoked'
+                    ? 'danger'
+                    : 'neutral'
+                }
+                dot
+              >
+                {portalAccess.status === 'active'
+                  ? 'Active'
+                  : portalAccess.status === 'invitation_pending'
+                  ? 'Invitation Pending'
+                  : portalAccess.status === 'revoked'
+                  ? 'Revoked'
+                  : 'Not Invited'}
+              </Badge>
+            )}
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {portalLoading ? (
+              <div className="py-6 flex justify-center">
+                <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : (
+              <>
+                {/* State: Not Invited */}
+                {portalAccess?.status === 'not_invited' && (
+                  <div className="space-y-3">
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      This customer does not have access to the Customer Portal. Send a secure, time-limited activation link to invite them.
+                    </p>
+                    {canWrite && (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={openInviteDialog}
+                        leadingIcon={<Send className="w-3.5 h-3.5" />}
+                      >
+                        Send Invitation
+                      </Button>
+                    )}
+                  </div>
+                )}
+
+                {/* State: Invitation Pending */}
+                {portalAccess?.status === 'invitation_pending' && (
+                  <div className="space-y-3">
+                    <dl className="grid grid-cols-1 gap-2.5 text-xs">
+                      <div>
+                        <dt className="text-slate-400 uppercase tracking-wider font-semibold text-[10px]">Invited Email</dt>
+                        <dd className="mt-0.5 text-slate-800 font-medium">{portalAccess.invitation?.email}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-slate-400 uppercase tracking-wider font-semibold text-[10px]">Expires</dt>
+                        <dd className="mt-0.5 text-slate-800 font-medium">
+                          {portalAccess.invitation?.expires_at ? formatDateTime(portalAccess.invitation.expires_at) : '—'}
+                        </dd>
+                      </div>
+                      {portalAccess.invitation?.invited_by_name && (
+                        <div>
+                          <dt className="text-slate-400 uppercase tracking-wider font-semibold text-[10px]">Invited By</dt>
+                          <dd className="mt-0.5 text-slate-800 font-medium">{portalAccess.invitation.invited_by_name}</dd>
+                        </div>
+                      )}
+                    </dl>
+
+                    {lastInviteUrl && (
+                      <div className="p-2.5 bg-indigo-50/60 border border-indigo-100 rounded-lg space-y-1.5">
+                        <div className="flex items-center justify-between text-[11px] font-semibold text-indigo-900">
+                          <span>Activation Link</span>
+                          <button
+                            type="button"
+                            onClick={() => copyActivationLink(lastInviteUrl)}
+                            className="inline-flex items-center gap-1 text-indigo-700 hover:text-indigo-900 hover:underline"
+                          >
+                            {copiedLink ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                            {copiedLink ? 'Copied' : 'Copy'}
+                          </button>
+                        </div>
+                        <div className="text-[11px] font-mono text-indigo-800 truncate select-all">{lastInviteUrl}</div>
+                      </div>
+                    )}
+
+                    {canWrite && (
+                      <div className="flex items-center gap-2 pt-1 flex-wrap">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={openInviteDialog}
+                          leadingIcon={<RotateCcw className="w-3.5 h-3.5" />}
+                        >
+                          Resend Invitation
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-200"
+                          onClick={() => setRevokeDialogOpen(true)}
+                          leadingIcon={<UserX className="w-3.5 h-3.5" />}
+                        >
+                          Revoke Invitation
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* State: Active */}
+                {portalAccess?.status === 'active' && (
+                  <div className="space-y-3">
+                    <dl className="grid grid-cols-1 gap-2.5 text-xs">
+                      <div>
+                        <dt className="text-slate-400 uppercase tracking-wider font-semibold text-[10px]">Portal User</dt>
+                        <dd className="mt-0.5 text-slate-800 font-medium">{portalAccess.user?.display_name || 'Customer Contact'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-slate-400 uppercase tracking-wider font-semibold text-[10px]">Login Email</dt>
+                        <dd className="mt-0.5 text-slate-800 font-medium">{portalAccess.user?.email}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-slate-400 uppercase tracking-wider font-semibold text-[10px]">Last Login</dt>
+                        <dd className="mt-0.5 text-slate-800 font-medium">
+                          {portalAccess.user?.last_login_at ? formatDateTime(portalAccess.user.last_login_at) : 'Never logged in'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-slate-400 uppercase tracking-wider font-semibold text-[10px]">Portal Login</dt>
+                        <dd className="mt-0.5">
+                          <a
+                            href="/portal/login"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-brand-700 hover:underline"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            Open Customer Portal
+                          </a>
+                        </dd>
+                      </div>
+                    </dl>
+
+                    {lastInviteUrl && (
+                      <div className="p-2.5 bg-indigo-50/60 border border-indigo-100 rounded-lg space-y-1.5">
+                        <div className="flex items-center justify-between text-[11px] font-semibold text-indigo-900">
+                          <span>New Activation Link</span>
+                          <button
+                            type="button"
+                            onClick={() => copyActivationLink(lastInviteUrl)}
+                            className="inline-flex items-center gap-1 text-indigo-700 hover:text-indigo-900 hover:underline"
+                          >
+                            {copiedLink ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                            {copiedLink ? 'Copied' : 'Copy'}
+                          </button>
+                        </div>
+                        <div className="text-[11px] font-mono text-indigo-800 truncate select-all">{lastInviteUrl}</div>
+                      </div>
+                    )}
+
+                    {canWrite && (
+                      <div className="flex items-center gap-2 pt-1 flex-wrap">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={openInviteDialog}
+                          leadingIcon={<RotateCcw className="w-3.5 h-3.5" />}
+                        >
+                          Send New Link
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-200"
+                          onClick={() => setRevokeDialogOpen(true)}
+                          leadingIcon={<UserX className="w-3.5 h-3.5" />}
+                        >
+                          Revoke Access
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* State: Revoked */}
+                {portalAccess?.status === 'revoked' && (
+                  <div className="space-y-3">
+                    <p className="text-xs text-rose-600 leading-relaxed">
+                      Customer Portal access has been revoked. Customer credentials and active sessions are disabled.
+                    </p>
+                    {canWrite && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setReactivateDialogOpen(true)}
+                        leadingIcon={<UserCheck className="w-3.5 h-3.5" />}
+                      >
+                        Reactivate Portal Access
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle>Billing address</CardTitle>
@@ -552,6 +872,66 @@ function OverviewTab({ customer }: { customer: CustomerOut }) {
           </CardContent>
         </Card>
       </div>
+
+      {/* Send / Resend Invitation Modal */}
+      <Modal
+        isOpen={inviteDialogOpen}
+        onClose={() => setInviteDialogOpen(false)}
+        title={portalAccess?.status === 'active' ? 'Send New Activation Link' : portalAccess?.status === 'invitation_pending' ? 'Resend Portal Invitation' : 'Invite Customer to Portal'}
+        description={`Send a time-limited activation link to grant ${customer.display_name} access to the Customer Billing Portal.`}
+        footer={
+          <div className="flex items-center justify-end gap-3">
+            <Button variant="outline" size="sm" onClick={() => setInviteDialogOpen(false)} disabled={actionLoading}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" onClick={handleSendInvite} isLoading={actionLoading} leadingIcon={<Send className="w-3.5 h-3.5" />}>
+              Send Invitation
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
+              Recipient Email Address
+            </label>
+            <Input
+              type="email"
+              required
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              placeholder="customer@example.com"
+            />
+            <p className="mt-1.5 text-xs text-slate-500">
+              The customer will receive an email with their secure single-use activation link.
+            </p>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Revoke Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={revokeDialogOpen}
+        onClose={() => setRevokeDialogOpen(false)}
+        onConfirm={handleRevoke}
+        isLoading={actionLoading}
+        title="Revoke Customer Portal Access?"
+        description={`Are you sure you want to revoke portal access for ${customer.display_name}? Any pending invitations will be invalidated and existing customer sessions will be terminated.`}
+        confirmLabel="Revoke Access"
+        variant="danger"
+      />
+
+      {/* Reactivate Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={reactivateDialogOpen}
+        onClose={() => setReactivateDialogOpen(false)}
+        onConfirm={handleReactivate}
+        isLoading={actionLoading}
+        title="Reactivate Customer Portal Access?"
+        description={`This will restore portal access for ${customer.display_name}.`}
+        confirmLabel="Reactivate"
+        variant="default"
+      />
     </div>
   );
 }

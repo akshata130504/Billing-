@@ -60,10 +60,49 @@ class PortalSignupIn(BaseModel):
 
 
 class PortalLoginIn(BaseModel):
-    organization_id: str
+    organization_id: Optional[str] = None
     email: EmailStr
     password: str
     mfa_code: Optional[str] = None
+
+
+class PortalInvitationValidateOut(BaseModel):
+    valid: bool
+    email: str
+    customer_id: str
+    customer_name: str
+    organization_id: str
+    organization_name: str
+    portal_name: str
+    expires_at: datetime
+
+
+class PortalActivateIn(BaseModel):
+    token: str
+    password: str = Field(..., min_length=8)
+    display_name: Optional[str] = Field(None, max_length=200)
+
+
+class CustomerPortalInviteIn(BaseModel):
+    email: Optional[EmailStr] = None
+
+
+class CustomerPortalInvitationOut(BaseModel):
+    id: str
+    customer_id: str
+    email: str
+    expires_at: datetime
+    created_at: datetime
+    invited_by_name: Optional[str] = None
+    invite_url: Optional[str] = None
+    status: str
+
+
+class CustomerPortalAccessStatusOut(BaseModel):
+    status: str  # not_invited | invitation_pending | active | revoked
+    user: Optional[PortalUserOut] = None
+    invitation: Optional[CustomerPortalInvitationOut] = None
+    portal_url: Optional[str] = None
 
 
 class PortalUserOut(BaseModel):

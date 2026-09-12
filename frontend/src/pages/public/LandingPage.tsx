@@ -28,6 +28,7 @@ import {
   Pause,
   Server,
   ArrowLeftRight,
+  Info,
 } from 'lucide-react';
 import { RoomanLogo } from '../../components/common/RoomanLogo';
 import { Button } from '../../components/common/Button';
@@ -118,6 +119,375 @@ function FintechBackgroundCanvas() {
 }
 
 // ---------------------------------------------------------------------------
+// Living Revenue Pipeline & Micro-Interactions for Core Capabilities
+// ---------------------------------------------------------------------------
+
+function CatalogMicroAnimation({ isActive }: { isActive: boolean }) {
+  return (
+    <div className="w-5 h-5 grid grid-cols-2 gap-0.5 items-center justify-center pointer-events-none" aria-hidden="true">
+      <span
+        className={`w-2 h-2 rounded-[1.5px] bg-[#3F51C9] transition-all duration-500 ${
+          isActive ? 'scale-105 opacity-100 shadow-3xs' : 'opacity-60 scale-90'
+        }`}
+      />
+      <span
+        className={`w-2 h-2 rounded-[1.5px] bg-[#6C2BD9] transition-all duration-500 delay-75 ${
+          isActive ? 'scale-105 opacity-100 shadow-3xs' : 'opacity-40 scale-90'
+        }`}
+      />
+      <span
+        className={`w-2 h-2 rounded-[1.5px] bg-[#8EA5FF] transition-all duration-500 delay-100 ${
+          isActive ? 'scale-105 opacity-100 shadow-3xs' : 'opacity-40 scale-90'
+        }`}
+      />
+      <span
+        className={`w-2 h-2 rounded-[1.5px] bg-[#E83E8C] transition-all duration-500 delay-150 ${
+          isActive ? 'scale-105 opacity-100 shadow-3xs' : 'opacity-60 scale-90'
+        }`}
+      />
+    </div>
+  );
+}
+
+function PricingMicroAnimation({ isActive }: { isActive: boolean }) {
+  return (
+    <div className="w-5 h-5 flex items-end justify-center gap-1 pb-0.5 pointer-events-none" aria-hidden="true">
+      <span
+        className={`w-1 rounded-t-[1px] bg-[#6C2BD9] transition-all duration-500 ${
+          isActive ? 'h-2.5 opacity-100' : 'h-1.5 opacity-40'
+        }`}
+      />
+      <span
+        className={`w-1 rounded-t-[1px] bg-[#3F51C9] transition-all duration-500 delay-75 ${
+          isActive ? 'h-3.5 opacity-100' : 'h-2.5 opacity-60'
+        }`}
+      />
+      <span
+        className={`w-1 rounded-t-[1px] bg-[#E83E8C] transition-all duration-500 delay-150 ${
+          isActive ? 'h-4.5 opacity-100' : 'h-3.5 opacity-70'
+        }`}
+      />
+    </div>
+  );
+}
+
+function CpqMicroAnimation({ isActive }: { isActive: boolean }) {
+  return (
+    <div className="w-5 h-5 flex items-center justify-center gap-0.5 pointer-events-none" aria-hidden="true">
+      <span
+        className={`w-2 h-3.5 border-2 border-r-0 border-[#25247A] rounded-l-[2px] transition-all duration-500 ${
+          isActive ? 'translate-x-0.5 border-[#3F51C9]' : '-translate-x-0.5 opacity-50'
+        }`}
+      />
+      <span
+        className={`w-1 h-1 rounded-full bg-[#8EA5FF] transition-all duration-300 ${
+          isActive ? 'scale-125 opacity-100' : 'scale-75 opacity-30'
+        }`}
+      />
+      <span
+        className={`w-2 h-3.5 border-2 border-l-0 border-[#25247A] rounded-r-[2px] transition-all duration-500 ${
+          isActive ? '-translate-x-0.5 border-[#3F51C9]' : 'translate-x-0.5 opacity-50'
+        }`}
+      />
+    </div>
+  );
+}
+
+function QuotesMicroAnimation({ isActive }: { isActive: boolean }) {
+  return (
+    <div className="w-5 h-5 flex items-center justify-center pointer-events-none" aria-hidden="true">
+      <div className="w-3.5 h-4.5 rounded-[1.5px] border border-slate-300 bg-white p-0.5 flex flex-col justify-between shadow-3xs">
+        <span
+          className={`h-0.5 rounded-full bg-[#3F51C9] transition-all duration-500 ${
+            isActive ? 'w-full opacity-100' : 'w-2/3 opacity-40'
+          }`}
+        />
+        <span
+          className={`h-0.5 rounded-full bg-[#6C2BD9] transition-all duration-500 delay-75 ${
+            isActive ? 'w-3/4 opacity-100' : 'w-1/2 opacity-30'
+          }`}
+        />
+        <span
+          className={`h-0.5 rounded-full bg-[#E83E8C] transition-all duration-500 delay-150 ${
+            isActive ? 'w-full opacity-100' : 'w-1/3 opacity-30'
+          }`}
+        />
+      </div>
+    </div>
+  );
+}
+
+function InvoicesMicroAnimation({ isActive }: { isActive: boolean }) {
+  return (
+    <div className="w-5 h-5 flex items-center justify-center pointer-events-none" aria-hidden="true">
+      <div className="w-4 h-4.5 rounded-[1.5px] border border-slate-300 bg-white p-0.5 flex flex-col justify-between shadow-3xs relative">
+        <div className="flex justify-between items-center">
+          <span className="w-1.5 h-0.5 bg-[#3F51C9] rounded-full" />
+          <span
+            className={`w-1.5 h-1.5 rounded-full flex items-center justify-center text-[7px] font-bold text-white transition-all duration-500 ${
+              isActive ? 'bg-[#107548] scale-100' : 'bg-slate-200 scale-75'
+            }`}
+          >
+            ✓
+          </span>
+        </div>
+        <span className="w-full h-0.5 bg-slate-200 rounded-full" />
+        <span className="w-2/3 h-0.5 bg-slate-200 rounded-full" />
+      </div>
+    </div>
+  );
+}
+
+function PaymentsMicroAnimation({ isActive, isSuccess }: { isActive: boolean; isSuccess: boolean }) {
+  return (
+    <div className="w-5 h-5 flex items-center justify-center relative pointer-events-none" aria-hidden="true">
+      {isSuccess && (
+        <span className="absolute inset-0 rounded-full bg-emerald-400/30 animate-ping" />
+      )}
+      <div
+        className={`w-4.5 h-3.5 rounded-[1.5px] border flex items-center justify-between px-0.5 transition-all duration-500 ${
+          isSuccess
+            ? 'bg-[#DDF4EA] border-[#107548] text-[#107548] shadow-[0_0_8px_rgba(16,117,72,0.3)]'
+            : isActive
+            ? 'bg-emerald-50 border-emerald-300 text-emerald-600'
+            : 'bg-white border-slate-300 text-slate-400'
+        }`}
+      >
+        <span className="w-1 h-0.5 rounded-[0.5px] bg-current opacity-70" />
+        <span className="text-[7.5px] font-bold leading-none">{isSuccess ? '✓' : '₹'}</span>
+      </div>
+    </div>
+  );
+}
+
+const CORE_CAPABILITIES = [
+  {
+    to: '/catalog',
+    title: 'Product Catalog',
+    desc: 'SKUs & offerings',
+    icon: Layers,
+    accent: '#3F51C9',
+    badgeBg: '#E8EBFC',
+    renderMicro: (active: boolean, _success: boolean) => <CatalogMicroAnimation isActive={active} />,
+  },
+  {
+    to: '/plans-pricing',
+    title: 'Flexible Pricing',
+    desc: '5 fee structures',
+    icon: Sliders,
+    accent: '#6C2BD9',
+    badgeBg: '#EDE9FE',
+    renderMicro: (active: boolean, _success: boolean) => <PricingMicroAnimation isActive={active} />,
+  },
+  {
+    to: '/cpq',
+    title: 'CPQ Deals',
+    desc: 'Guided configuration',
+    icon: Cpu,
+    accent: '#25247A',
+    badgeBg: '#E0E7FF',
+    renderMicro: (active: boolean, _success: boolean) => <CpqMicroAnimation isActive={active} />,
+  },
+  {
+    to: '/quotes',
+    title: 'Quotes',
+    desc: 'Acceptance links',
+    icon: FileText,
+    accent: '#E83E8C',
+    badgeBg: '#FCE7F3',
+    renderMicro: (active: boolean, _success: boolean) => <QuotesMicroAnimation isActive={active} />,
+  },
+  {
+    to: '/invoices',
+    title: 'Invoices',
+    desc: 'GST tax compliant',
+    icon: Receipt,
+    accent: '#3F51C9',
+    badgeBg: '#E8EBFC',
+    renderMicro: (active: boolean, _success: boolean) => <InvoicesMicroAnimation isActive={active} />,
+  },
+  {
+    to: '/payments',
+    title: 'Payments',
+    desc: 'Allocations & refunds',
+    icon: CreditCard,
+    accent: '#107548',
+    badgeBg: '#DDF4EA',
+    renderMicro: (active: boolean, success: boolean) => <PaymentsMicroAnimation isActive={active} isSuccess={success} />,
+  },
+];
+
+function LivingRevenuePipeline() {
+  const [activeStage, setActiveStage] = useState<number>(0);
+  const [hoveredStage, setHoveredStage] = useState<number | null>(null);
+  const [paymentSuccess, setPaymentSuccess] = useState<boolean>(false);
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState<boolean>(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setPrefersReducedMotion(mediaQuery.matches);
+    const handler = (e: MediaQueryListEvent) => setPrefersReducedMotion(e.matches);
+    mediaQuery.addEventListener('change', handler);
+    return () => mediaQuery.removeEventListener('change', handler);
+  }, []);
+
+  useEffect(() => {
+    if (prefersReducedMotion) return;
+
+    let successTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const interval = setInterval(() => {
+      setActiveStage((prev) => {
+        if (prev === 4) {
+          successTimer = setTimeout(() => {
+            setPaymentSuccess(true);
+          }, 900);
+          return 5;
+        } else if (prev === 5) {
+          setPaymentSuccess(false);
+          return 0;
+        } else {
+          setPaymentSuccess(false);
+          return prev + 1;
+        }
+      });
+    }, 2000);
+
+    return () => {
+      clearInterval(interval);
+      if (successTimer) clearTimeout(successTimer);
+    };
+  }, [prefersReducedMotion]);
+
+  const effectiveStage = hoveredStage !== null ? hoveredStage : activeStage;
+
+  return (
+    <div className="relative">
+      {/* Living Revenue Pipeline Visual Connection Track (Desktop) */}
+      <div className="hidden lg:block mb-5 px-4" aria-hidden="true">
+        <div className="relative flex items-center justify-between">
+          <div className="absolute left-[7%] right-[7%] top-1/2 -translate-y-1/2 h-[2px] bg-slate-200/70 overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-[#3F51C9] via-[#6C2BD9] via-[#E83E8C] to-[#10B981] transition-all duration-700 ease-out"
+              style={{ width: `${(effectiveStage / 5) * 100}%` }}
+            />
+          </div>
+
+          {CORE_CAPABILITIES.map((cap, idx) => {
+            const isCurrent = effectiveStage === idx;
+            const isCompleted = effectiveStage > idx;
+            return (
+              <div key={cap.title} className="relative z-10 flex flex-col items-center">
+                <div
+                  className={`w-3 h-3 rounded-full border-2 transition-all duration-500 ${
+                    isCurrent
+                      ? 'border-[#3F51C9] bg-white scale-125 shadow-[0_0_8px_rgba(63,81,201,0.5)] ring-2 ring-[#3F51C9]/20'
+                      : isCompleted
+                      ? 'border-[#107548] bg-[#107548]'
+                      : 'border-slate-300 bg-white'
+                  }`}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Six-Card Horizontal Grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 relative">
+        {CORE_CAPABILITIES.map((card, idx) => {
+          const IconComponent = card.icon;
+          const isActive = effectiveStage === idx;
+          const isHovered = hoveredStage === idx;
+          const isPaymentCard = idx === 5;
+          const showSuccess = isPaymentCard && (paymentSuccess || (isHovered && activeStage === 5));
+
+          return (
+            <div key={card.title} className="relative group">
+              <Link
+                to={card.to}
+                onMouseEnter={() => setHoveredStage(idx)}
+                onMouseLeave={() => setHoveredStage(null)}
+                className={`flex flex-col justify-between p-4 rounded-2xl border transition-all duration-300 h-full select-none ${
+                  showSuccess
+                    ? 'bg-[#F0FBF6] border-[#107548] shadow-[0_8px_24px_rgba(16,117,72,0.14)] -translate-y-1'
+                    : isHovered
+                    ? 'bg-white border-[#3F51C9] shadow-[0_10px_25px_-5px_rgba(63,81,201,0.15)] -translate-y-1.5'
+                    : isActive
+                    ? 'bg-white border-[#3F51C9]/80 shadow-[0_6px_20px_rgba(63,81,201,0.10)] ring-1 ring-[#3F51C9]/20 -translate-y-0.5'
+                    : 'bg-slate-50/80 hover:bg-white border-[#E7E9F2] hover:border-[#3F51C9] hover:shadow-card hover:-translate-y-1'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-300 ${
+                      showSuccess
+                        ? 'bg-[#DDF4EA] text-[#107548] scale-105 shadow-[0_0_10px_rgba(16,117,72,0.25)]'
+                        : isHovered || isActive
+                        ? `${card.badgeBg} text-[${card.accent}] scale-105 shadow-3xs`
+                        : 'bg-[#E8EBFC] text-[#3F51C9]'
+                    }`}
+                    style={{
+                      backgroundColor: (isHovered || isActive) && !showSuccess ? card.badgeBg : undefined,
+                      color: (isHovered || isActive) && !showSuccess ? card.accent : undefined,
+                    }}
+                  >
+                    <IconComponent className="w-5 h-5 transition-transform duration-300" />
+                  </div>
+
+                  {card.renderMicro(isActive || isHovered, showSuccess)}
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span
+                      className={`text-xs font-bold transition-colors duration-200 ${
+                        showSuccess
+                          ? 'text-[#107548]'
+                          : isHovered || isActive
+                          ? 'text-[#25247A]'
+                          : 'text-slate-900 group-hover:text-[#25247A]'
+                      }`}
+                    >
+                      {card.title}
+                    </span>
+                    {showSuccess && (
+                      <span className="text-[10px] font-bold text-[#107548] bg-[#DDF4EA] px-1.5 py-0.2 rounded-full animate-pulse">
+                        ✓
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-0.5">{card.desc}</p>
+                </div>
+              </Link>
+
+              {idx < 5 && (
+                <div
+                  className="hidden lg:flex items-center justify-center absolute -right-2 sm:-right-2.5 top-1/2 -translate-y-1/2 z-20 pointer-events-none"
+                  aria-hidden="true"
+                >
+                  <div
+                    className={`w-4 h-4 rounded-full flex items-center justify-center transition-all duration-500 ${
+                      effectiveStage === idx
+                        ? 'bg-gradient-to-r from-[#3F51C9] to-[#6C2BD9] text-white scale-110 shadow-xs ring-2 ring-[#3F51C9]/20'
+                        : 'bg-white/90 border border-slate-200 text-slate-300'
+                    }`}
+                  >
+                    <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path d="M9 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Landing Page Component
 // ---------------------------------------------------------------------------
 export function LandingPage() {
@@ -126,16 +496,33 @@ export function LandingPage() {
 
   // Navigation & UI States
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [activeNavSection, setActiveNavSection] = useState<string>('');
   const [activeWorkflowTab, setActiveWorkflowTab] = useState<number>(0);
   const [isAutoPlayingWorkflow, setIsAutoPlayingWorkflow] = useState<boolean>(true);
   const [tourProgress, setTourProgress] = useState<number>(0);
   const [isHoveringTour, setIsHoveringTour] = useState<boolean>(false);
   const [selectedPricingModel, setSelectedPricingModel] = useState<number>(0);
   const [simulatorQuantity, setSimulatorQuantity] = useState<number>(150);
+  const pricingSectionRef = useRef<HTMLElement | null>(null);
+  const hasTriggeredPricingRef = useRef<boolean>(false);
+  const [displayPrice, setDisplayPrice] = useState<number>(0);
+  const [showPricingBreakdown, setShowPricingBreakdown] = useState<boolean>(false);
+  const [isPricingCounting, setIsPricingCounting] = useState<boolean>(false);
+  const activePricingAnimRef = useRef<number | null>(null);
+  const currentCalculatedPriceRef = useRef<number>(0);
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
   const [activeAudienceIndex, setActiveAudienceIndex] = useState<number>(0);
   const [videoLoaded, setVideoLoaded] = useState<boolean>(false);
   const [videoFailed, setVideoFailed] = useState<boolean>(false);
+
+  const navItems = [
+    { id: 'features', label: 'Product', mobileLabel: 'Product & Features' },
+    { id: 'how-it-works', label: 'How It Works', mobileLabel: 'How It Works' },
+    { id: 'workflow', label: 'Workflow', mobileLabel: 'End-to-End Workflow' },
+    { id: 'pricing-models', label: 'Pricing Models', mobileLabel: 'Pricing Models' },
+    { id: 'why-rooman', label: 'Why Rooman', mobileLabel: 'Why Rooman' },
+    { id: 'faq', label: 'FAQ', mobileLabel: 'FAQ' },
+  ];
 
   // Auto cycle workflow steps with fine-grained animated progress bar (4.2 seconds per step)
   const TOUR_DURATION = 4200;
@@ -165,6 +552,7 @@ export function LandingPage() {
   };
 
   const scrollToSection = (id: string) => {
+    setActiveNavSection(id);
     setMobileMenuOpen(false);
     const element = document.getElementById(id);
     if (element) {
@@ -280,33 +668,33 @@ export function LandingPage() {
     {
       title: 'Flat Fee',
       type: 'Fixed Rate',
-      desc: 'Predictable, static recurring billing on regular intervals (e.g. $299/month).',
+      desc: 'Predictable, static recurring billing on regular intervals (e.g. ₹299/month).',
       example: 'Enterprise Platform Access',
       calculate: () => 299,
-      calcDisplay: 'Fixed $299.00 / month regardless of seats',
+      calcDisplay: 'Fixed ₹299.00 / month regardless of seats',
       features: ['Fixed monthly or annual billing', 'Simple invoice generation', 'Ideal for base platform tiers'],
     },
     {
       title: 'Per Unit',
       type: 'Seat / License',
       desc: 'Linear pricing calculated by multiplying unit price by active user count or license seats.',
-      example: '$15 / active user / month',
+      example: '₹15 / active user / month',
       calculate: (qty: number) => qty * 15,
-      calcDisplay: (qty: number) => `${qty} units × $15.00 = $${(qty * 15).toLocaleString()}.00 / mo`,
+      calcDisplay: (qty: number) => `${qty} units × ₹15.00 = ₹${(qty * 15).toLocaleString('en-IN')}.00 / mo`,
       features: ['Dynamic quantity recalculation', 'Mid-cycle seat adjustments', 'Ideal for SaaS team plans'],
     },
     {
       title: 'Volume',
       type: 'All-Unit Discount',
       desc: 'Total volume purchased qualifies all units for a discounted tier price.',
-      example: '1-50 units: $20/ea | 51-200 units: $14/ea | 201+: $10/ea',
+      example: '1-50 units: ₹20/ea | 51-200 units: ₹14/ea | 201+: ₹10/ea',
       calculate: (qty: number) => {
         const rate = qty > 200 ? 10 : qty > 50 ? 14 : 20;
         return qty * rate;
       },
       calcDisplay: (qty: number) => {
         const rate = qty > 200 ? 10 : qty > 50 ? 14 : 20;
-        return `${qty} units @ Volume Tier ($${rate}/ea) = $${(qty * rate).toLocaleString()}.00 / mo`;
+        return `${qty} units @ Volume Tier (₹${rate}/ea) = ₹${(qty * rate).toLocaleString('en-IN')}.00 / mo`;
       },
       features: ['High-volume incentive structures', 'Automatic tier threshold triggers', 'B2B bulk order support'],
     },
@@ -314,7 +702,7 @@ export function LandingPage() {
       title: 'Tiered / Graduated',
       type: 'Bracketed',
       desc: 'Units are priced progressively within discrete range brackets as volume expands.',
-      example: 'First 50 @ $20, Next 100 @ $12, Beyond @ $8',
+      example: 'First 50 @ ₹20, Next 100 @ ₹12, Beyond @ ₹8',
       calculate: (qty: number) => {
         let total = 0;
         const t1 = Math.min(qty, 50);
@@ -339,7 +727,7 @@ export function LandingPage() {
         if (qty > 150) {
           total += (qty - 150) * 8;
         }
-        return `${qty} units split across 3 graduated brackets = $${total.toLocaleString()}.00 / mo`;
+        return `${qty} units split across 3 graduated brackets = ₹${total.toLocaleString('en-IN')}.00 / mo`;
       },
       features: ['Precise margin control', 'Transparent bracketed line items', 'Fair pricing for scaling usage'],
     },
@@ -347,18 +735,227 @@ export function LandingPage() {
       title: 'Package',
       type: 'Bundled Allotment',
       desc: 'Predefined blocks of units with fixed bundled pricing and overage support.',
-      example: 'Block of 50 units @ $450/bundle',
+      example: 'Block of 50 units @ ₹450/bundle',
       calculate: (qty: number) => {
         const bundles = Math.ceil(qty / 50);
         return bundles * 450;
       },
       calcDisplay: (qty: number) => {
         const bundles = Math.ceil(qty / 50);
-        return `${bundles} package bundle(s) required for ${qty} units = $${(bundles * 450).toLocaleString()}.00 / mo`;
+        return `${bundles} package bundle(s) required for ${qty} units = ₹${(bundles * 450).toLocaleString('en-IN')}.00 / mo`;
       },
       features: ['Base unit allotments', 'Predictable commitment billing', 'Overage addon compatibility'],
     },
   ];
+
+  // Scroll-triggered initial count-up for Pricing Models (0 -> actual calculated price once on enter)
+  useEffect(() => {
+    const el = pricingSectionRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && !hasTriggeredPricingRef.current) {
+            hasTriggeredPricingRef.current = true;
+            const target = pricingModels[selectedPricingModel].calculate(simulatorQuantity);
+            const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+            if (prefersReducedMotion) {
+              currentCalculatedPriceRef.current = target;
+              setDisplayPrice(target);
+              setShowPricingBreakdown(true);
+              return;
+            }
+
+            // Animate smoothly from 0 to target (e.g. 0 -> 75 -> 150 -> 225 -> 299)
+            setIsPricingCounting(true);
+            const duration = 1200;
+            const startTime = performance.now();
+            const startVal = 0;
+
+            const step = (now: number) => {
+              const elapsed = now - startTime;
+              const progress = Math.min(elapsed / duration, 1);
+              const ease = 1 - Math.pow(1 - progress, 3);
+              const current = Math.round(startVal + (target - startVal) * ease);
+              setDisplayPrice(current);
+              currentCalculatedPriceRef.current = current;
+
+              if (progress < 1) {
+                activePricingAnimRef.current = requestAnimationFrame(step);
+              } else {
+                setDisplayPrice(target);
+                currentCalculatedPriceRef.current = target;
+                setIsPricingCounting(false);
+                setShowPricingBreakdown(true);
+              }
+            };
+
+            activePricingAnimRef.current = requestAnimationFrame(step);
+          }
+        });
+      },
+      { threshold: 0.25 }
+    );
+
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      if (activePricingAnimRef.current) cancelAnimationFrame(activePricingAnimRef.current);
+    };
+  }, [selectedPricingModel, simulatorQuantity]);
+
+  // Subsequent transition when selecting other pricing models or changing quantity
+  useEffect(() => {
+    if (!hasTriggeredPricingRef.current) return;
+
+    const target = pricingModels[selectedPricingModel].calculate(simulatorQuantity);
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (prefersReducedMotion) {
+      currentCalculatedPriceRef.current = target;
+      setDisplayPrice(target);
+      return;
+    }
+
+    if (activePricingAnimRef.current) {
+      cancelAnimationFrame(activePricingAnimRef.current);
+    }
+
+    const startVal = currentCalculatedPriceRef.current;
+    if (startVal === target) return;
+
+    setIsPricingCounting(true);
+    const duration = 500;
+    const startTime = performance.now();
+
+    const step = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const ease = 1 - Math.pow(1 - progress, 3);
+      const current = Math.round(startVal + (target - startVal) * ease);
+      setDisplayPrice(current);
+      currentCalculatedPriceRef.current = current;
+
+      if (progress < 1) {
+        activePricingAnimRef.current = requestAnimationFrame(step);
+      } else {
+        setDisplayPrice(target);
+        currentCalculatedPriceRef.current = target;
+        setIsPricingCounting(false);
+      }
+    };
+
+    activePricingAnimRef.current = requestAnimationFrame(step);
+  }, [selectedPricingModel, simulatorQuantity]);
+
+  const currentBreakdown = (() => {
+    const qty = simulatorQuantity;
+    switch (selectedPricingModel) {
+      case 0: // Flat Fee
+        return {
+          basePrice: '₹299.00',
+          basePriceNote: 'Flat recurring fee',
+          quantity: 'Fixed',
+          quantityNote: 'Unlimited access',
+          discount: '₹0.00',
+          discountNote: 'Standard platform rate',
+          tax: '₹0.00',
+          taxNote: 'Net B2B / Excl.',
+          finalPrice: 299,
+          formula: 'Fixed Platform Rate = ₹299.00 / month',
+          explanation: 'Predictable, static recurring billing of ₹299.00/month regardless of usage spikes or seat count, providing stable overhead forecasting.',
+        };
+      case 1: // Per Unit
+        return {
+          basePrice: '₹15.00 / unit',
+          basePriceNote: 'Per active seat license',
+          quantity: `${qty} units`,
+          quantityNote: `${qty} active seats`,
+          discount: '₹0.00',
+          discountNote: 'Linear unit scale',
+          tax: '₹0.00',
+          taxNote: 'Net B2B / Excl.',
+          finalPrice: qty * 15,
+          formula: `${qty} units × ₹15.00/unit = ₹${(qty * 15).toLocaleString('en-IN')}.00`,
+          explanation: `Linear pricing calculates monthly billing directly by multiplying ${qty} active provisioned seats by ₹15.00/unit with automated mid-cycle proration.`,
+        };
+      case 2: { // Volume
+        const rate = qty > 200 ? 10 : qty > 50 ? 14 : 20;
+        const total = qty * rate;
+        const savings = (20 - rate) * qty;
+        const tierName = qty > 200 ? 'Tier 3 (201+ units @ ₹10)' : qty > 50 ? 'Tier 2 (51-200 units @ ₹14)' : 'Tier 1 (1-50 units @ ₹20)';
+        return {
+          basePrice: '₹20.00 / unit',
+          basePriceNote: 'Baseline Tier 1 rate',
+          quantity: `${qty} units`,
+          quantityNote: `Qualifies for ${tierName}`,
+          discount: rate < 20 ? `-₹${savings.toLocaleString('en-IN')}.00` : '₹0.00',
+          discountNote: rate < 20 ? `${Math.round(((20 - rate) / 20) * 100)}% volume savings` : 'Baseline rate (1-50)',
+          tax: '₹0.00',
+          taxNote: 'Net B2B / Excl.',
+          finalPrice: total,
+          formula: `${qty} units × ₹${rate}.00/unit (${tierName}) = ₹${total.toLocaleString('en-IN')}.00`,
+          explanation: `All ${qty} units qualify for the discounted ${tierName} threshold, generating ₹${savings.toLocaleString('en-IN')} in total volume savings over base rate.`,
+        };
+      }
+      case 3: { // Tiered / Graduated
+        let total = 0;
+        const t1 = Math.min(qty, 50);
+        total += t1 * 20;
+        const t2 = qty > 50 ? Math.min(qty - 50, 100) : 0;
+        total += t2 * 12;
+        const t3 = qty > 150 ? qty - 150 : 0;
+        total += t3 * 8;
+        const savings = (qty * 20) - total;
+        return {
+          basePrice: '₹20.00 / unit',
+          basePriceNote: 'Bracket 1 initial rate',
+          quantity: `${qty} units`,
+          quantityNote: 'Distributed in brackets',
+          discount: savings > 0 ? `-₹${savings.toLocaleString('en-IN')}.00` : '₹0.00',
+          discountNote: savings > 0 ? 'Bracket graduation savings' : 'First bracket only',
+          tax: '₹0.00',
+          taxNote: 'Net B2B / Excl.',
+          finalPrice: total,
+          formula: `${t1} @ ₹20${t2 > 0 ? ` + ${t2} @ ₹12` : ''}${t3 > 0 ? ` + ${t3} @ ₹8` : ''} = ₹${total.toLocaleString('en-IN')}.00`,
+          explanation: `Units are dynamically bucketed into progressive graduated brackets (first 50 @ ₹20, next 100 @ ₹12, beyond @ ₹8), guaranteeing margin control and transparent line items.`,
+        };
+      }
+      case 4: { // Package
+        const bundles = Math.ceil(qty / 50);
+        const total = bundles * 450;
+        return {
+          basePrice: '₹450.00 / bundle',
+          basePriceNote: 'Block of 50 units',
+          quantity: `${bundles} bundle${bundles > 1 ? 's' : ''}`,
+          quantityNote: `Covers ${qty} units (${bundles * 50} capacity)`,
+          discount: '₹0.00',
+          discountNote: 'Bundled wholesale rate',
+          tax: '₹0.00',
+          taxNote: 'Net B2B / Excl.',
+          finalPrice: total,
+          formula: `${bundles} bundle(s) × ₹450.00/bundle = ₹${total.toLocaleString('en-IN')}.00`,
+          explanation: `Predefined commitment allotments group units into blocks of 50 at ₹450.00 per bundle, providing predictable volume commitments with zero billing drift.`,
+        };
+      }
+      default:
+        return {
+          basePrice: '₹299.00',
+          basePriceNote: 'Flat monthly base',
+          quantity: 'Fixed',
+          quantityNote: 'Unlimited access',
+          discount: '₹0.00',
+          discountNote: 'Standard platform rate',
+          tax: '₹0.00',
+          taxNote: 'Net B2B / Excl.',
+          finalPrice: 299,
+          formula: 'Fixed Platform Rate = ₹299.00 / month',
+          explanation: 'Predictable recurring billing.',
+        };
+    }
+  })();
 
   // Target Audiences
   const targetAudiences = [
@@ -443,11 +1040,11 @@ export function LandingPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 selection:bg-[#E83E8C] selection:text-white font-sans">
+    <div className="min-h-screen bg-[#F8F9FD] text-slate-900 selection:bg-[#E83E8C] selection:text-white font-sans">
       {/* =========================================================================
           1. TOP NAVIGATION (STICKY WITH BACKDROP BLUR)
       ========================================================================== */}
-      <header className="sticky top-0 z-50 bg-white/85 backdrop-blur-md border-b border-slate-200/80 transition-all shadow-xs">
+      <header className="sticky top-0 z-50 bg-[#F8F9FD]/90 backdrop-blur-md border-b border-[#E2E5F5] transition-all shadow-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           {/* Brand Logo */}
           <Link to="/" className="flex items-center gap-3 group">
@@ -455,63 +1052,48 @@ export function LandingPage() {
           </Link>
 
           {/* Center Navigation Links */}
-          <nav className="hidden lg:flex items-center gap-7 text-sm font-medium text-slate-600">
-            <button
-              type="button"
-              onClick={() => scrollToSection('features')}
-              className="hover:text-[#25247A] transition-colors cursor-pointer"
-            >
-              Product
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollToSection('how-it-works')}
-              className="hover:text-[#25247A] transition-colors cursor-pointer"
-            >
-              How It Works
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollToSection('workflow')}
-              className="hover:text-[#25247A] transition-colors cursor-pointer"
-            >
-              Workflow
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollToSection('pricing-models')}
-              className="hover:text-[#25247A] transition-colors cursor-pointer"
-            >
-              Pricing Models
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollToSection('why-rooman')}
-              className="hover:text-[#25247A] transition-colors cursor-pointer"
-            >
-              Why Rooman
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollToSection('faq')}
-              className="hover:text-[#25247A] transition-colors cursor-pointer"
-            >
-              FAQ
-            </button>
+          <nav className="hidden lg:flex items-center gap-7 text-sm font-medium">
+            {navItems.map((item) => {
+              const isActive = activeNavSection === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => scrollToSection(item.id)}
+                  className={`relative py-1 transition-all cursor-pointer ${
+                    isActive
+                      ? 'text-[#E83E8C] font-semibold'
+                      : 'text-slate-600 hover:text-[#E83E8C]'
+                  }`}
+                >
+                  {item.label}
+                  {isActive && (
+                    <span className="absolute -bottom-1 left-0 right-0 h-0.5 bg-[#E83E8C] rounded-full transition-all" />
+                  )}
+                </button>
+              );
+            })}
           </nav>
 
           {/* Auth CTA Buttons */}
           <div className="hidden sm:flex items-center gap-3">
             {isAuthenticated ? (
-              <Button
-                variant="primary"
-                size="md"
-                onClick={() => navigate('/dashboard')}
-                className="bg-[#25247A] hover:bg-[#1C1B63] text-white shadow-sm font-semibold active:scale-[0.98] transition-transform"
-              >
-                Dashboard
-                <ArrowRight className="w-4 h-4 ml-1.5" />
-              </Button>
+              <>
+                <Link to="/login">
+                  <Button variant="ghost" size="md" className="text-slate-700 hover:text-slate-900 font-medium">
+                    Sign In
+                  </Button>
+                </Link>
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={() => navigate('/dashboard')}
+                  leadingIcon={<ArrowRight className="w-4 h-4" />}
+                  className="bg-[#25247A] hover:bg-[#1C1B63] text-white shadow-sm font-semibold active:scale-[0.98] transition-transform"
+                >
+                  Dashboard
+                </Button>
+              </>
             ) : (
               <>
                 <Link to="/login">
@@ -545,49 +1127,24 @@ export function LandingPage() {
 
         {/* Mobile Dropdown Menu Drawer */}
         {mobileMenuOpen && (
-          <div className="lg:hidden border-b border-slate-200 bg-white px-4 pt-3 pb-6 space-y-3 shadow-xl animate-in slide-in-from-top-2 duration-150">
-            <button
-              type="button"
-              onClick={() => scrollToSection('features')}
-              className="block w-full text-left py-2 text-sm font-medium text-slate-700 hover:text-[#25247A]"
-            >
-              Product & Features
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollToSection('how-it-works')}
-              className="block w-full text-left py-2 text-sm font-medium text-slate-700 hover:text-[#25247A]"
-            >
-              How It Works
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollToSection('workflow')}
-              className="block w-full text-left py-2 text-sm font-medium text-slate-700 hover:text-[#25247A]"
-            >
-              End-to-End Workflow
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollToSection('pricing-models')}
-              className="block w-full text-left py-2 text-sm font-medium text-slate-700 hover:text-[#25247A]"
-            >
-              Pricing Models
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollToSection('why-rooman')}
-              className="block w-full text-left py-2 text-sm font-medium text-slate-700 hover:text-[#25247A]"
-            >
-              Why Rooman
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollToSection('faq')}
-              className="block w-full text-left py-2 text-sm font-medium text-slate-700 hover:text-[#25247A]"
-            >
-              FAQ
-            </button>
+          <div className="lg:hidden border-b border-[#E2E5F5] bg-[#F8F9FD] px-4 pt-3 pb-6 space-y-3 shadow-xl animate-in slide-in-from-top-2 duration-150">
+            {navItems.map((item) => {
+              const isActive = activeNavSection === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => scrollToSection(item.id)}
+                  className={`block w-full text-left py-2 text-sm font-medium transition-colors ${
+                    isActive
+                      ? 'text-[#E83E8C] font-semibold'
+                      : 'text-slate-700 hover:text-[#E83E8C]'
+                  }`}
+                >
+                  {item.mobileLabel}
+                </button>
+              );
+            })}
 
             <div className="pt-3 border-t border-slate-100 flex flex-col gap-2.5">
               {isAuthenticated ? (
@@ -683,18 +1240,19 @@ export function LandingPage() {
                 <Button
                   variant="primary"
                   size="lg"
+                  leadingIcon={<ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />}
                   className="w-full sm:w-auto font-semibold px-8 py-3.5 text-base bg-gradient-to-r from-[#25247A] via-[#3F51C9] to-[#E83E8C] text-white shadow-elevated group active:scale-[0.98] transition-all hover:brightness-110"
                 >
                   Get Started
-                  <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
                 </Button>
               </Link>
               <button
                 type="button"
                 onClick={() => scrollToSection('workflow')}
-                className="w-full sm:w-auto inline-flex items-center justify-center px-7 py-3.5 rounded-lg border border-white/20 bg-white/10 text-white font-medium hover:bg-white/20 shadow-xs transition-all active:scale-[0.98] cursor-pointer text-sm sm:text-base backdrop-blur-sm"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-lg border border-white/20 bg-white/10 text-white font-medium hover:bg-white/20 shadow-xs transition-all active:scale-[0.98] cursor-pointer text-sm sm:text-base backdrop-blur-sm"
               >
-                Explore Platform
+                <Layers className="w-4 h-4 text-slate-300" />
+                <span>Explore Platform</span>
               </button>
             </div>
           </div>
@@ -704,7 +1262,7 @@ export function LandingPage() {
       {/* =========================================================================
           3. VALUE STRIP: CORE CAPABILITIES
       ========================================================================== */}
-      <section id="features" className="py-12 bg-white border-y border-slate-200">
+      <section id="features" className="py-12 bg-[#F2F3FB] border-y border-[#E2E5F5]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-8">
             <div className="shrink-0 text-center lg:text-left">
@@ -718,95 +1276,17 @@ export function LandingPage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
-            <Link
-              to="/catalog"
-              className="flex flex-col justify-between p-4 rounded-2xl bg-slate-50/80 hover:bg-white border border-[#E7E9F2] hover:border-[#3F51C9] hover:shadow-card hover:-translate-y-1 transition-all duration-200 group"
-            >
-              <div className="w-9 h-9 rounded-xl bg-[#E8EBFC] text-[#3F51C9] flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                <Layers className="w-5 h-5" />
-              </div>
-              <div>
-                <span className="text-xs font-bold text-slate-900 group-hover:text-[#25247A]">Product Catalog</span>
-                <p className="text-[10px] text-slate-400 mt-0.5">SKUs & offerings</p>
-              </div>
-            </Link>
-
-            <Link
-              to="/plans-pricing"
-              className="flex flex-col justify-between p-4 rounded-2xl bg-slate-50/80 hover:bg-white border border-[#E7E9F2] hover:border-[#3F51C9] hover:shadow-card hover:-translate-y-1 transition-all duration-200 group"
-            >
-              <div className="w-9 h-9 rounded-xl bg-[#E8EBFC] text-[#3F51C9] flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                <Sliders className="w-5 h-5" />
-              </div>
-              <div>
-                <span className="text-xs font-bold text-slate-900 group-hover:text-[#25247A]">Flexible Pricing</span>
-                <p className="text-[10px] text-slate-400 mt-0.5">5 fee structures</p>
-              </div>
-            </Link>
-
-            <Link
-              to="/cpq"
-              className="flex flex-col justify-between p-4 rounded-2xl bg-slate-50/80 hover:bg-white border border-[#E7E9F2] hover:border-[#3F51C9] hover:shadow-card hover:-translate-y-1 transition-all duration-200 group"
-            >
-              <div className="w-9 h-9 rounded-xl bg-[#E8EBFC] text-[#3F51C9] flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                <Cpu className="w-5 h-5" />
-              </div>
-              <div>
-                <span className="text-xs font-bold text-slate-900 group-hover:text-[#25247A]">CPQ Deals</span>
-                <p className="text-[10px] text-slate-400 mt-0.5">Guided configuration</p>
-              </div>
-            </Link>
-
-            <Link
-              to="/quotes"
-              className="flex flex-col justify-between p-4 rounded-2xl bg-slate-50/80 hover:bg-white border border-[#E7E9F2] hover:border-[#3F51C9] hover:shadow-card hover:-translate-y-1 transition-all duration-200 group"
-            >
-              <div className="w-9 h-9 rounded-xl bg-[#E8EBFC] text-[#3F51C9] flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                <FileText className="w-5 h-5" />
-              </div>
-              <div>
-                <span className="text-xs font-bold text-slate-900 group-hover:text-[#25247A]">Quotes</span>
-                <p className="text-[10px] text-slate-400 mt-0.5">Acceptance links</p>
-              </div>
-            </Link>
-
-            <Link
-              to="/invoices"
-              className="flex flex-col justify-between p-4 rounded-2xl bg-slate-50/80 hover:bg-white border border-[#E7E9F2] hover:border-[#3F51C9] hover:shadow-card hover:-translate-y-1 transition-all duration-200 group"
-            >
-              <div className="w-9 h-9 rounded-xl bg-[#E8EBFC] text-[#3F51C9] flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                <Receipt className="w-5 h-5" />
-              </div>
-              <div>
-                <span className="text-xs font-bold text-slate-900 group-hover:text-[#25247A]">Invoices</span>
-                <p className="text-[10px] text-slate-400 mt-0.5">GST tax compliant</p>
-              </div>
-            </Link>
-
-            <Link
-              to="/payments"
-              className="flex flex-col justify-between p-4 rounded-2xl bg-slate-50/80 hover:bg-white border border-[#E7E9F2] hover:border-[#3F51C9] hover:shadow-card hover:-translate-y-1 transition-all duration-200 group"
-            >
-              <div className="w-9 h-9 rounded-xl bg-[#E8EBFC] text-[#3F51C9] flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                <CreditCard className="w-5 h-5" />
-              </div>
-              <div>
-                <span className="text-xs font-bold text-slate-900 group-hover:text-[#25247A]">Payments</span>
-                <p className="text-[10px] text-slate-400 mt-0.5">Allocations & refunds</p>
-              </div>
-            </Link>
-          </div>
+          <LivingRevenuePipeline />
         </div>
       </section>
 
       {/* =========================================================================
           4. HOW IT WORKS
       ========================================================================== */}
-      <section id="how-it-works" className="py-20 bg-slate-50">
+      <section id="how-it-works" className="py-20 bg-[#F8F9FD]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-3xl mx-auto mb-14">
-            <span className="text-xs font-bold uppercase tracking-wider text-[#3F51C9] bg-[#E8EBFC] px-3 py-1 rounded-full border border-[#D0D7F9]">
+          <div className="text-center max-w-3xl mx-auto mb-10">
+            <span className="text-xs font-bold uppercase tracking-wider text-[#3F51C9] bg-[#E8EBFC] px-3.5 py-1 rounded-full border border-[#D0D7F9]">
               Simple 3-Step Flow
             </span>
             <h2 className="mt-3 text-3xl sm:text-4xl font-extrabold text-[#11194F] tracking-tight">
@@ -817,25 +1297,89 @@ export function LandingPage() {
             </p>
           </div>
 
+          {/* Payment Video Showcase (Fully Visible) */}
+          <div className="max-w-4xl mx-auto mb-12 rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl border border-[#E2E6FB] bg-slate-900 aspect-video relative group">
+            <video
+              autoPlay
+              loop
+              muted
+              playsInline
+              className="w-full h-full object-cover"
+            >
+              <source src="/videos/Payment.mp4" type="video/mp4" />
+              <source src="/videos/payment.mp4" type="video/mp4" />
+            </video>
+          </div>
+
+          {/* Three Cards Placed A Little After Video - Dynamic & Colourful */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8">
             {howItWorksSteps.map((stepItem, idx) => {
               const IconComp = stepItem.icon;
+              const cardThemes = [
+                {
+                  cardBg: 'bg-gradient-to-br from-indigo-50/90 via-white to-blue-50/60',
+                  border: 'border-indigo-100 hover:border-indigo-400',
+                  glowShadow: 'hover:shadow-xl hover:shadow-indigo-500/15',
+                  topBar: 'bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500',
+                  iconBg: 'bg-gradient-to-tr from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/30',
+                  stepColor: 'text-indigo-200 group-hover:text-indigo-600',
+                  titleHover: 'group-hover:text-indigo-700',
+                  accentBadge: 'bg-blue-100/90 text-blue-700 border-blue-200/80',
+                  stageLabel: 'Step 1 • Setup',
+                },
+                {
+                  cardBg: 'bg-gradient-to-br from-purple-50/90 via-white to-fuchsia-50/60',
+                  border: 'border-purple-100 hover:border-purple-400',
+                  glowShadow: 'hover:shadow-xl hover:shadow-purple-500/15',
+                  topBar: 'bg-gradient-to-r from-purple-600 via-fuchsia-600 to-pink-500',
+                  iconBg: 'bg-gradient-to-tr from-purple-600 to-pink-600 text-white shadow-md shadow-purple-500/30',
+                  stepColor: 'text-purple-200 group-hover:text-purple-600',
+                  titleHover: 'group-hover:text-purple-700',
+                  accentBadge: 'bg-purple-100/90 text-purple-700 border-purple-200/80',
+                  stageLabel: 'Step 2 • CPQ & Quotes',
+                },
+                {
+                  cardBg: 'bg-gradient-to-br from-emerald-50/90 via-white to-teal-50/60',
+                  border: 'border-emerald-100 hover:border-emerald-400',
+                  glowShadow: 'hover:shadow-xl hover:shadow-emerald-500/15',
+                  topBar: 'bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-500',
+                  iconBg: 'bg-gradient-to-tr from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-500/30',
+                  stepColor: 'text-emerald-200 group-hover:text-emerald-600',
+                  titleHover: 'group-hover:text-emerald-700',
+                  accentBadge: 'bg-emerald-100/90 text-emerald-700 border-emerald-200/80',
+                  stageLabel: 'Step 3 • Revenue',
+                },
+              ];
+              const theme = cardThemes[idx % cardThemes.length];
+
               return (
                 <div
                   key={idx}
-                  className="bg-white rounded-2xl p-7 border border-[#E7E9F2] shadow-card hover:shadow-elevated transition-all flex flex-col justify-between relative group"
+                  className={`rounded-2xl p-7 border ${theme.border} ${theme.cardBg} ${theme.glowShadow} shadow-md transition-all duration-300 flex flex-col justify-between relative group overflow-hidden hover:-translate-y-2`}
                 >
+                  {/* Top Dynamic Colorful Accent Bar */}
+                  <div className={`absolute top-0 left-0 right-0 h-1.5 ${theme.topBar} transition-all`} />
+
                   <div>
-                    <div className="flex items-center justify-between mb-5">
-                      <div className="w-12 h-12 rounded-2xl bg-[#E8EBFC] text-[#3F51C9] flex items-center justify-center font-bold text-lg group-hover:scale-110 transition-transform">
+                    <div className="flex items-center justify-between mb-5 pt-1">
+                      <div className={`w-12 h-12 rounded-2xl ${theme.iconBg} flex items-center justify-center font-bold text-lg group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300`}>
                         <IconComp className="w-6 h-6" />
                       </div>
-                      <span className="text-2xl font-black font-mono text-slate-200 group-hover:text-[#8EA5FF] transition-colors">
-                        {stepItem.step}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full border ${theme.accentBadge}`}>
+                          {theme.stageLabel}
+                        </span>
+                        <span className={`text-3xl font-black font-mono ${theme.stepColor} transition-colors select-none`}>
+                          {stepItem.step}
+                        </span>
+                      </div>
                     </div>
-                    <h3 className="text-lg font-bold text-[#11194F]">{stepItem.title}</h3>
-                    <p className="mt-2 text-sm text-slate-600 leading-relaxed">{stepItem.desc}</p>
+                    <h3 className={`text-lg font-bold text-[#11194F] ${theme.titleHover} transition-colors`}>
+                      {stepItem.title}
+                    </h3>
+                    <p className="mt-2.5 text-sm text-slate-600 leading-relaxed">
+                      {stepItem.desc}
+                    </p>
                   </div>
                 </div>
               );
@@ -847,7 +1391,7 @@ export function LandingPage() {
       {/* =========================================================================
           5. UPGRADED 9-STAGE QUOTE-TO-CASH AUTO-TOUR
       ========================================================================== */}
-      <section id="workflow" className="py-20 bg-white border-t border-slate-200">
+      <section id="workflow" className="py-20 bg-[#F2F3FB] border-t border-[#E2E5F5]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto mb-12">
             <span className="text-xs font-bold uppercase tracking-wider text-[#3F51C9] bg-[#E8EBFC] px-3 py-1 rounded-full border border-[#D0D7F9]">
@@ -952,10 +1496,10 @@ export function LandingPage() {
                     <Button
                       variant="primary"
                       size="md"
+                      leadingIcon={<ArrowRight className="w-4 h-4" />}
                       className="bg-gradient-to-r from-[#3F51C9] to-[#E83E8C] text-white font-semibold shadow-sm active:scale-[0.98]"
                     >
                       Open {workflowSteps[activeWorkflowTab].label} in App
-                      <ArrowRight className="w-4 h-4 ml-1.5" />
                     </Button>
                   </Link>
                   <span className="text-xs text-slate-400">
@@ -1002,111 +1546,274 @@ export function LandingPage() {
       {/* =========================================================================
           6. PRICING MODELS (INTERACTIVE SIMULATOR)
       ========================================================================== */}
-      <section id="pricing-models" className="py-20 bg-slate-50 border-t border-slate-200">
+      <section id="pricing-models" ref={pricingSectionRef} className="py-24 sm:py-32 bg-[#F8F9FD] border-t border-[#E2E5F5]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          {/* Header */}
           <div className="text-center max-w-3xl mx-auto mb-14">
-            <span className="text-xs font-bold uppercase tracking-wider text-[#3F51C9] bg-[#E8EBFC] px-3 py-1 rounded-full border border-[#D0D7F9]">
+            <span className="text-xs font-bold uppercase tracking-wider text-[#3F51C9] bg-[#E8EBFC] px-3.5 py-1 rounded-full border border-[#D0D7F9] inline-flex items-center gap-1.5">
               Monetization Flexibility
             </span>
-            <h2 className="mt-3 text-3xl sm:text-4xl font-extrabold text-[#11194F] tracking-tight">
+            <h2 className="mt-4 text-3xl sm:text-5xl font-extrabold text-[#11194F] tracking-tight">
               Pricing that adapts to your business
             </h2>
-            <p className="mt-3 text-base text-slate-600">
-              Rooman Billing natively accommodates five distinct monetization models with zero custom coding.
+            <p className="mt-4 text-base sm:text-lg text-slate-600 leading-relaxed">
+              Rooman Billing natively accommodates five distinct monetization models with zero custom coding and deterministic calculation accuracy.
             </p>
           </div>
 
-          {/* 5 Model Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-5">
-            {pricingModels.map((model, idx) => (
-              <div
-                key={model.title}
-                onClick={() => setSelectedPricingModel(idx)}
-                className={`rounded-2xl p-5 border transition-all cursor-pointer flex flex-col justify-between ${
-                  selectedPricingModel === idx
-                    ? 'bg-white border-[#3F51C9] ring-2 ring-[#3F51C9]/20 shadow-elevated scale-[1.02]'
-                    : 'bg-white border-[#E7E9F2] shadow-xs hover:border-slate-300 hover:shadow-subtle'
-                }`}
-              >
-                <div>
-                  <div className="inline-block px-2 py-0.5 rounded text-[11px] font-bold bg-[#E8EBFC] text-[#3F51C9] mb-3">
-                    {model.type}
+          {/* 5 Model Selection Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            {pricingModels.map((model, idx) => {
+              const isSelected = selectedPricingModel === idx;
+              return (
+                <div
+                  key={model.title}
+                  onClick={() => setSelectedPricingModel(idx)}
+                  className={`rounded-2xl p-5 border transition-all cursor-pointer flex flex-col justify-between ${
+                    isSelected
+                      ? 'bg-white border-[#3F51C9] ring-2 ring-[#3F51C9]/20 shadow-md scale-[1.01]'
+                      : 'bg-slate-50/70 hover:bg-white border-slate-200 hover:border-slate-300 shadow-2xs hover:shadow-xs'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <span
+                        className={`inline-block px-2 py-0.5 rounded text-[11px] font-bold ${
+                          isSelected ? 'bg-[#3F51C9] text-white' : 'bg-[#E8EBFC] text-[#3F51C9]'
+                        }`}
+                      >
+                        {model.type}
+                      </span>
+                      {isSelected && (
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="Active Model" />
+                      )}
+                    </div>
+                    <h3 className="text-base font-bold text-[#11194F]">{model.title}</h3>
+                    <p className="mt-2 text-xs text-slate-600 leading-relaxed min-h-[48px]">{model.desc}</p>
+
+                    <div className="mt-3 p-2.5 rounded-xl bg-slate-100/70 border border-slate-200/70 text-[11px] font-mono text-slate-700">
+                      <span className="text-slate-400 block text-[10px]">Structure:</span>
+                      {model.example}
+                    </div>
+
+                    <ul className="mt-4 space-y-1.5 text-[11px] text-slate-500">
+                      {model.features.map((feat, fIdx) => (
+                        <li key={fIdx} className="flex items-center gap-1.5">
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>{feat}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
-                  <h3 className="text-lg font-bold text-slate-900">{model.title}</h3>
-                  <p className="mt-2 text-xs text-slate-600 leading-relaxed min-h-[48px]">{model.desc}</p>
 
-                  <div className="mt-4 p-2.5 rounded-xl bg-slate-50 border border-slate-200/70 text-[11px] font-mono text-slate-700">
-                    <span className="text-slate-400 block text-[10px]">Structure:</span>
-                    {model.example}
+                  <div className="mt-5 pt-3 border-t border-slate-100 text-center">
+                    <span className={`text-xs font-semibold ${isSelected ? 'text-[#3F51C9]' : 'text-slate-400'}`}>
+                      {isSelected ? '✓ Active Model' : 'Select Model'}
+                    </span>
                   </div>
-
-                  <ul className="mt-4 space-y-1.5 text-[11px] text-slate-500">
-                    {model.features.map((feat, fIdx) => (
-                      <li key={fIdx} className="flex items-center gap-1.5">
-                        <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                        <span>{feat}</span>
-                      </li>
-                    ))}
-                  </ul>
                 </div>
-
-                <div className="mt-5 pt-3 border-t border-slate-100 text-center">
-                  <span className={`text-xs font-semibold ${selectedPricingModel === idx ? 'text-[#3F51C9]' : 'text-slate-400'}`}>
-                    {selectedPricingModel === idx ? 'Active Simulation' : 'Click to Simulate'}
-                  </span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
-          {/* Interactive Pricing Range Slider */}
-          <div className="mt-10 bg-white rounded-2xl p-6 sm:p-7 border border-[#E7E9F2] shadow-sm max-w-4xl mx-auto">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
-              <div className="w-full sm:w-1/2">
-                <div className="flex justify-between items-center text-xs font-medium text-slate-700 mb-2">
-                  <span>Simulate Units / Seats:</span>
-                  <span className="font-bold font-mono text-[#3F51C9] text-base">{simulatorQuantity} units</span>
+          {/* Live Price Calculation Display (The Main Visual Feature) */}
+          <div className="mt-12 bg-white rounded-3xl p-6 sm:p-10 border border-[#E2E5F5] shadow-lg shadow-indigo-500/5 max-w-5xl mx-auto">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-slate-100">
+              {/* Live Badge */}
+              <div className="space-y-1.5">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/80 text-[11px] font-bold tracking-wider uppercase">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  LIVE PRICE CALCULATION
                 </div>
-                <input
-                  type="range"
-                  min="1"
-                  max="500"
-                  value={simulatorQuantity}
-                  onChange={(e) => setSimulatorQuantity(Number(e.target.value))}
-                  className="w-full accent-[#3F51C9] h-2 bg-slate-200 rounded-lg cursor-pointer"
-                />
-                <div className="flex justify-between text-[10px] text-slate-400 mt-1.5">
-                  <span>1 unit</span>
-                  <span>250 units</span>
-                  <span>500 units</span>
+                <div className="text-xs text-slate-500">
+                  Real-time billing engine output for <span className="font-semibold text-[#11194F]">{pricingModels[selectedPricingModel].title}</span>
                 </div>
               </div>
 
-              <div className="w-full sm:w-1/2 bg-[#F7F8FC] p-4 rounded-xl border border-[#E7E9F2]">
-                <div className="text-xs text-slate-500 font-medium">
-                  {pricingModels[selectedPricingModel].title} Calculation:
+              {/* Slider for models with unit quantity */}
+              {selectedPricingModel > 0 ? (
+                <div className="flex-1 max-w-sm bg-slate-50 p-3.5 rounded-xl border border-slate-200/80">
+                  <div className="flex justify-between items-center text-xs font-medium text-slate-700 mb-1.5">
+                    <span>Simulate Units / Seats:</span>
+                    <span className="font-bold font-mono text-[#3F51C9] text-sm bg-white px-2 py-0.5 rounded border border-[#3F51C9]/20 shadow-2xs">
+                      {simulatorQuantity} units
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="500"
+                    value={simulatorQuantity}
+                    onChange={(e) => setSimulatorQuantity(Number(e.target.value))}
+                    className="w-full accent-[#3F51C9] h-2 bg-slate-200 rounded-lg cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[10px] text-slate-400 mt-1">
+                    <span>1</span>
+                    <span>250</span>
+                    <span>500 units</span>
+                  </div>
                 </div>
-                <div className="text-sm font-mono font-bold text-[#11194F] mt-1.5">
-                  {typeof pricingModels[selectedPricingModel].calcDisplay === 'function'
-                    ? pricingModels[selectedPricingModel].calcDisplay(simulatorQuantity)
-                    : pricingModels[selectedPricingModel].calcDisplay}
+              ) : (
+                <div className="px-4 py-2 rounded-xl bg-slate-50 border border-slate-200/80 text-xs text-slate-500 flex items-center gap-2">
+                  <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>Flat platform rate covers all included usage & seats</span>
+                </div>
+              )}
+            </div>
+
+            {/* Big Final Price Display */}
+            <div className="py-8 text-center sm:text-left flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-4">
+              <div>
+                <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                  Calculated Monthly Price
+                </div>
+                <div className="flex items-baseline justify-center sm:justify-start gap-1">
+                  <span className="text-3xl sm:text-5xl font-semibold text-slate-500">₹</span>
+                  <span className="text-5xl sm:text-7xl font-extrabold text-[#11194F] tracking-tight font-mono tabular-nums">
+                    {displayPrice.toLocaleString('en-IN')}
+                  </span>
+                  <span className="text-lg sm:text-xl font-medium text-slate-500 ml-1">/ month</span>
+                  {isPricingCounting && (
+                    <span className="ml-2 inline-flex items-center text-xs font-semibold text-[#3F51C9] animate-pulse">
+                      calculating...
+                    </span>
+                  )}
+                </div>
+                <div className="mt-2 flex items-center justify-center sm:justify-start gap-2">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium border border-emerald-200">
+                    <Check className="w-3 h-3 text-emerald-600" />
+                    Verified Deterministic Result
+                  </span>
+                  <span className="text-xs text-slate-400">•</span>
+                  <span className="text-xs text-slate-500">B2B Audit Ready</span>
                 </div>
               </div>
+
+              <div className="sm:text-right text-xs text-slate-500">
+                <div className="font-mono text-[#3F51C9] font-bold text-sm">
+                  {pricingModels[selectedPricingModel].type}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  Tenant Isolation Verified
+                </div>
+              </div>
+            </div>
+
+            {/* Step-by-Step Calculation: Base Price → Quantity → Discount → Tax → Final Price */}
+            <div
+              className={`mt-2 pt-6 border-t border-slate-100 transition-all duration-700 ${
+                showPricingBreakdown ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                  <span>Calculation Steps</span>
+                  <span className="text-slate-300">•</span>
+                  <span className="text-slate-400 font-normal">Base Price &rarr; Quantity &rarr; Discount &rarr; Tax &rarr; Final Price</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+                {/* Step 1: Base Price */}
+                <div className="p-4 rounded-xl bg-slate-50/80 border border-slate-200/70 flex flex-col justify-between">
+                  <div>
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Step 1</div>
+                    <div className="text-xs font-semibold text-[#11194F] mt-0.5">Base Price</div>
+                  </div>
+                  <div className="my-2 text-base font-bold text-[#11194F] font-mono">{currentBreakdown.basePrice}</div>
+                  <div className="text-[11px] text-slate-500">{currentBreakdown.basePriceNote}</div>
+                </div>
+
+                {/* Step 2: Quantity */}
+                <div className="p-4 rounded-xl bg-slate-50/80 border border-slate-200/70 flex flex-col justify-between">
+                  <div>
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Step 2</div>
+                    <div className="text-xs font-semibold text-[#11194F] mt-0.5">Quantity</div>
+                  </div>
+                  <div className="my-2 text-base font-bold text-[#3F51C9] font-mono">{currentBreakdown.quantity}</div>
+                  <div className="text-[11px] text-slate-500">{currentBreakdown.quantityNote}</div>
+                </div>
+
+                {/* Step 3: Discount */}
+                <div className="p-4 rounded-xl bg-slate-50/80 border border-slate-200/70 flex flex-col justify-between">
+                  <div>
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Step 3</div>
+                    <div className="text-xs font-semibold text-[#11194F] mt-0.5">Discount</div>
+                  </div>
+                  <div
+                    className={`my-2 text-base font-bold font-mono ${
+                      currentBreakdown.discount.startsWith('-') ? 'text-emerald-600' : 'text-slate-700'
+                    }`}
+                  >
+                    {currentBreakdown.discount}
+                  </div>
+                  <div className="text-[11px] text-slate-500">{currentBreakdown.discountNote}</div>
+                </div>
+
+                {/* Step 4: Tax */}
+                <div className="p-4 rounded-xl bg-slate-50/80 border border-slate-200/70 flex flex-col justify-between">
+                  <div>
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Step 4</div>
+                    <div className="text-xs font-semibold text-[#11194F] mt-0.5">Tax (GST)</div>
+                  </div>
+                  <div className="my-2 text-base font-bold text-slate-700 font-mono">{currentBreakdown.tax}</div>
+                  <div className="text-[11px] text-slate-500">{currentBreakdown.taxNote}</div>
+                </div>
+
+                {/* Step 5: Final Price */}
+                <div className="p-4 rounded-xl bg-gradient-to-br from-[#E8EBFC] to-white border border-[#3F51C9]/30 ring-1 ring-[#3F51C9]/20 flex flex-col justify-between">
+                  <div>
+                    <div className="text-[10px] font-bold text-[#3F51C9] uppercase tracking-wider">Step 5</div>
+                    <div className="text-xs font-bold text-[#11194F] mt-0.5">Final Price</div>
+                  </div>
+                  <div className="my-2 text-lg font-extrabold text-[#11194F] font-mono">
+                    ₹{displayPrice.toLocaleString('en-IN')}
+                  </div>
+                  <div className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1">
+                    <Check className="w-3 h-3 text-emerald-500" />
+                    <span>Calculated Total</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* "Why this price?" */}
+            <div className="mt-6 p-4 rounded-2xl bg-[#F7F8FC] border border-[#E7E9F2] text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2 pb-2 border-b border-slate-200/60">
+                <div className="flex items-center gap-2">
+                  <Info className="w-4 h-4 text-[#3F51C9]" />
+                  <span className="font-bold text-[#11194F] text-sm">Why this price?</span>
+                </div>
+                <span className="text-xs font-mono text-[#3F51C9] bg-[#E8EBFC] px-2.5 py-0.5 rounded-md font-semibold border border-[#D0D7F9]">
+                  {currentBreakdown.formula}
+                </span>
+              </div>
+              <p className="text-slate-600 leading-relaxed">
+                {currentBreakdown.explanation}
+              </p>
             </div>
           </div>
 
           {/* CTAs */}
-          <div className="mt-10 text-center flex flex-col sm:flex-row items-center justify-center gap-4">
+          <div className="mt-12 text-center flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link to="/plans-pricing">
-              <Button variant="primary" size="lg" className="bg-[#25247A] text-white font-semibold shadow-sm">
+              <Button
+                variant="primary"
+                size="lg"
+                leadingIcon={<ArrowRight className="w-4 h-4" />}
+                className="bg-[#25247A] hover:bg-[#1E1D68] text-white font-semibold shadow-sm"
+              >
                 Explore Plans & Pricing
-                <ArrowRight className="w-4 h-4 ml-2" />
               </Button>
             </Link>
             <Link to="/plans-pricing/simulator">
-              <Button variant="outline" size="lg" className="font-medium text-[#25247A]">
+              <Button
+                variant="outline"
+                size="lg"
+                leadingIcon={<ArrowUpRight className="w-4 h-4" />}
+                className="font-medium text-[#25247A] hover:bg-slate-50 border-slate-300"
+              >
                 Open Full Pricing Simulator
-                <ArrowUpRight className="w-4 h-4 ml-1.5" />
               </Button>
             </Link>
           </div>
@@ -1116,7 +1823,7 @@ export function LandingPage() {
       {/* =========================================================================
           7. WHY ROOMAN: CONNECTED REVENUE ENGINE
       ========================================================================== */}
-      <section id="why-rooman" className="py-20 bg-white border-t border-slate-200">
+      <section id="why-rooman" className="py-20 bg-[#F2F3FB] border-t border-[#E2E5F5]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto mb-16">
             <span className="text-xs font-bold uppercase tracking-wider text-[#3F51C9] bg-[#E8EBFC] px-3 py-1 rounded-full border border-[#D0D7F9]">
@@ -1212,7 +1919,7 @@ export function LandingPage() {
       {/* =========================================================================
           8. WHO ROOMAN IS FOR
       ========================================================================== */}
-      <section className="py-20 bg-slate-50 border-t border-slate-200">
+      <section className="py-20 bg-[#F8F9FD] border-t border-[#E2E5F5]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto mb-16">
             <span className="text-xs font-bold uppercase tracking-wider text-[#3F51C9] bg-[#E8EBFC] px-3 py-1 rounded-full border border-[#D0D7F9]">
@@ -1261,7 +1968,7 @@ export function LandingPage() {
       {/* =========================================================================
           9. CUSTOMER EXPERIENCE (TRUTHFUL ARCHITECTURE)
       ========================================================================== */}
-      <section className="py-20 bg-white border-t border-slate-200">
+      <section className="py-20 bg-[#F2F3FB] border-t border-[#E2E5F5]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto mb-14">
             <span className="text-xs font-bold uppercase tracking-wider text-[#3F51C9] bg-[#E8EBFC] px-3 py-1 rounded-full border border-[#D0D7F9]">
@@ -1348,7 +2055,7 @@ export function LandingPage() {
       {/* =========================================================================
           10. OPERATIONS & GOVERNANCE
       ========================================================================== */}
-      <section className="py-20 bg-slate-50 border-t border-slate-200">
+      <section className="py-20 bg-[#F8F9FD] border-t border-[#E2E5F5]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto mb-14">
             <span className="text-xs font-bold uppercase tracking-wider text-[#3F51C9] bg-[#E8EBFC] px-3 py-1 rounded-full border border-[#D0D7F9]">
@@ -1447,7 +2154,7 @@ export function LandingPage() {
       {/* =========================================================================
           11. FREQUENTLY ASKED QUESTIONS
       ========================================================================== */}
-      <section id="faq" className="py-20 bg-white border-t border-slate-200">
+      <section id="faq" className="py-20 bg-[#F2F3FB] border-t border-[#E2E5F5]">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-14">
             <span className="text-xs font-bold uppercase tracking-wider text-[#3F51C9] bg-[#E8EBFC] px-3 py-1 rounded-full border border-[#D0D7F9]">
@@ -1515,18 +2222,19 @@ export function LandingPage() {
               <Button
                 variant="primary"
                 size="lg"
+                leadingIcon={<ArrowRight className="w-4 h-4" />}
                 className="w-full sm:w-auto font-semibold px-8 py-3.5 text-base bg-gradient-to-r from-[#3F51C9] to-[#E83E8C] text-white hover:opacity-95 shadow-elevated active:scale-[0.98]"
               >
                 Get Started
-                <ArrowRight className="w-4 h-4 ml-2" />
               </Button>
             </Link>
             <button
               type="button"
               onClick={() => scrollToSection('workflow')}
-              className="w-full sm:w-auto inline-flex items-center justify-center px-7 py-3.5 rounded-lg border border-white/20 bg-white/10 text-white font-medium hover:bg-white/20 transition-all cursor-pointer text-base backdrop-blur-sm active:scale-[0.98]"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-lg border border-white/20 bg-white/10 text-white font-medium hover:bg-white/20 transition-all cursor-pointer text-base backdrop-blur-sm active:scale-[0.98]"
             >
-              Explore Platform
+              <Layers className="w-4 h-4 text-slate-300" />
+              <span>Explore Platform</span>
             </button>
           </div>
         </div>
@@ -1535,7 +2243,7 @@ export function LandingPage() {
       {/* =========================================================================
           13. FOOTER
       ========================================================================== */}
-      <footer className="bg-white border-t border-slate-200 pt-14 pb-10">
+      <footer className="bg-[#EDEFF8] border-t border-[#DCE0F0] pt-14 pb-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-8 mb-12">
             {/* Brand column */}

@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { QuickCreateModal } from '../common/QuickCreateModal';
 import { GlobalSearchModal } from '../common/GlobalSearchModal';
+import { RoomiChatbot } from '../chat/RoomiChatbot';
 
 export function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -60,6 +61,9 @@ export function AppLayout() {
         isOpen={searchOpen}
         onClose={() => setSearchOpen(false)}
       />
+
+      {/* Authenticated Roomi AI Assistant */}
+      <RoomiChatbot />
     </div>
   );
 }

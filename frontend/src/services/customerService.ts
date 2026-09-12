@@ -10,6 +10,7 @@ import type {
   PaymentOut,
   SubscriptionOut,
 } from '../types/api';
+import type { CustomerPortalAccessStatusOut, CustomerPortalInvitationOut } from '../types/portal';
 
 export const customerService = {
   list: async (params?: CustomerListParams): Promise<Paginated<CustomerOut>> => {
@@ -62,6 +63,28 @@ export const customerService = {
       `/customers/${id}/subscriptions`,
       { params: cleanParams(params) }
     );
+    return data;
+  },
+
+  getPortalAccess: async (id: string): Promise<CustomerPortalAccessStatusOut> => {
+    const { data } = await apiClient.get<CustomerPortalAccessStatusOut>(`/customers/${id}/portal-access`);
+    return data;
+  },
+
+  inviteToPortal: async (id: string, email?: string): Promise<CustomerPortalInvitationOut> => {
+    const { data } = await apiClient.post<CustomerPortalInvitationOut>(`/customers/${id}/portal-invite`, {
+      email: email || undefined,
+    });
+    return data;
+  },
+
+  revokePortalAccess: async (id: string): Promise<CustomerPortalAccessStatusOut> => {
+    const { data } = await apiClient.post<CustomerPortalAccessStatusOut>(`/customers/${id}/portal-revoke`);
+    return data;
+  },
+
+  reactivatePortalAccess: async (id: string): Promise<CustomerPortalAccessStatusOut> => {
+    const { data } = await apiClient.post<CustomerPortalAccessStatusOut>(`/customers/${id}/portal-reactivate`);
     return data;
   },
 };

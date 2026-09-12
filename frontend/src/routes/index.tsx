@@ -74,6 +74,7 @@ import {
   PortalPaymentsPage,
   PortalSubscriptionsPage,
   PortalProfilePage,
+  PortalActivationPage,
 } from '../pages/portal-customer';
 
 // ---------------------------------------------------------------------------
@@ -193,6 +194,7 @@ export function AppRoutes() {
 
           {/* Customer Self-Service Portal */}
           <Route path="/portal/login" element={<PortalLoginPage />} />
+          <Route path="/portal/activate" element={<PortalActivationPage />} />
           <Route
             path="/portal"
             element={

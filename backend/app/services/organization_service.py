@@ -316,6 +316,14 @@ def invite_member(
 
     link = frontend_url(f"accept-invitation?token={raw}")
     org_name = ctx.organization.name
+
+    smtp_cfg = None
+    try:
+        from backend.app.services.integrations_service import get_active_smtp_credentials
+        smtp_cfg = get_active_smtp_credentials(db, ctx.organization_id)
+    except Exception as exc:
+        logger.debug("Could not get organization SMTP credentials: %s", exc)
+
     delivered = False
     try:
         delivered = send_email(
@@ -332,6 +340,7 @@ def invite_member(
                 f"on Rooman Billing as <strong>{role.value}</strong>.</p>"
                 f'<p><a href="{link}">Accept the invitation</a> (valid for {settings.INVITE_TOKEN_EXPIRE_HOURS} hours)</p>'
             ),
+            smtp_config=smtp_cfg,
         )
     except Exception as exc:  # delivery problems must not lose the invitation
         logger.error("Invitation email to %s failed: %s", user.email, exc)
@@ -351,8 +360,9 @@ def invite_member(
     db.refresh(membership)
 
     data = serialize_member(membership, user, ctx.user)
-    if not settings.email_enabled:
+    if not delivered:
         data["invite_url"] = link
+    data["email_delivered"] = delivered
     return TeamMemberInvited.model_validate(data)
 
 

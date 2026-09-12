@@ -64,7 +64,7 @@ export interface PortalSignupIn {
 
 /** POST /portal/auth/login body. */
 export interface PortalLoginIn {
-  organization_id: string;
+  organization_id?: string;
   email: string;
   password: string;
   mfa_code?: string | null;
@@ -87,4 +87,39 @@ export interface PortalAuthOut {
   expires_at: string;
   user: PortalUserOut;
   customer_display_name: string;
+}
+
+export interface PortalInvitationValidateOut {
+  valid: boolean;
+  email: string;
+  customer_id: string;
+  customer_name: string;
+  organization_id: string;
+  organization_name: string;
+  portal_name: string;
+  expires_at: string;
+}
+
+export interface PortalActivateIn {
+  token: string;
+  password: string;
+  display_name?: string;
+}
+
+export interface CustomerPortalInvitationOut {
+  id: string;
+  customer_id: string;
+  email: string;
+  expires_at: string;
+  created_at: string;
+  invited_by_name?: string | null;
+  invite_url?: string | null;
+  status: 'pending' | 'accepted' | 'revoked' | 'expired';
+}
+
+export interface CustomerPortalAccessStatusOut {
+  status: 'not_invited' | 'invitation_pending' | 'active' | 'revoked';
+  user?: PortalUserOut | null;
+  invitation?: CustomerPortalInvitationOut | null;
+  portal_url?: string | null;
 }

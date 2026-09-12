@@ -11,26 +11,43 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, joinedload
 
+from backend.app.api.deps import CurrentContext
 from backend.app.core.config import settings
 from backend.app.core.exceptions import ConflictAppError, NotFoundAppError, UnauthorizedError, ValidationAppError
-from backend.app.core.security import hash_password, verify_password
+from backend.app.core.security import hash_password, validate_password_strength, verify_password
 from backend.app.models.base import utcnow
 from backend.app.models.customers import Customer, CustomerContact
+from backend.app.models.identity import Organization, User
 from backend.app.models.invoices import Invoice, InvoiceStatus
 from backend.app.models.payments import CustomerPaymentMethod, CustomerPaymentMethodStatus
 from backend.app.models.portal import (
+    CustomerPortalInvitation,
     CustomerPortalSession,
     CustomerPortalSettings,
     CustomerPortalUser,
 )
 from backend.app.models.subscriptions import Subscription, SubscriptionStatus
 from backend.app.schemas.portal import (
+    CustomerPortalAccessStatusOut,
+    CustomerPortalInvitationOut,
     CustomerPortalSettingsOut,
     CustomerPortalSettingsUpdate,
+    PortalActivateIn,
     PortalDashboardOut,
+    PortalInvitationValidateOut,
     PortalLoginIn,
     PortalSignupIn,
+    PortalUserOut,
 )
+from backend.app.services import audit
+from backend.app.services.email import send_email
+
+
+def aware(dt: Optional[datetime]) -> Optional[datetime]:
+    """SQLite returns naive datetimes for DateTime(timezone=True); treat them as UTC."""
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def _hash_token(token: str) -> str:
@@ -86,7 +103,7 @@ def get_or_create_portal_settings(db: Session, organization_id: str) -> Customer
         auto_invite_enabled=False,
         mfa_enabled=False,
         prevent_duplicate_payments=True,
-        allow_self_signup=True,
+        allow_self_signup=False,
         allow_document_upload=True,
         allow_document_forwarding=True,
         allow_save_payment_methods=True,
@@ -118,88 +135,35 @@ def update_portal_settings(
 
 
 def portal_signup(db: Session, data: PortalSignupIn) -> CustomerPortalUser:
-    """Registers a new customer portal user with verified customer link."""
-    settings = get_or_create_portal_settings(db, data.organization_id)
-    if not settings.allow_self_signup:
-        raise ValidationAppError("Self sign-up is currently disabled for this customer portal.")
-
-    existing = db.scalars(
-        select(CustomerPortalUser).where(
-            CustomerPortalUser.organization_id == data.organization_id,
-            CustomerPortalUser.email == data.email.lower(),
-        )
-    ).first()
-    if existing:
-        raise ConflictAppError("An account with this email already exists in this portal.")
-
-    customer: Optional[Customer] = None
-    if data.customer_id:
-        customer = db.scalars(
-            select(Customer)
-            .options(joinedload(Customer.contacts))
-            .where(
-                Customer.id == data.customer_id,
-                Customer.organization_id == data.organization_id,
-            )
-        ).first()
-        if not customer:
-            raise NotFoundAppError("Customer account not found in this organization.")
-
-        # Prevent arbitrary customer account takeover:
-        # The signup email must match either the customer's email or one of their verified contacts
-        contact_emails = {c.email.lower() for c in (customer.contacts or []) if c.email}
-        customer_email = customer.email.lower() if customer.email else None
-        if data.email.lower() != customer_email and data.email.lower() not in contact_emails:
-            raise ValidationAppError(
-                "Provided email does not match any registered email or contact for this customer."
-            )
-    else:
-        # Match customer by verified primary email
-        customer = db.scalars(
-            select(Customer).where(
-                Customer.organization_id == data.organization_id,
-                Customer.email == data.email.lower(),
-            )
-        ).first()
-        if not customer:
-            # Check customer contacts in this organization
-            contact = db.scalars(
-                select(CustomerContact)
-                .options(joinedload(CustomerContact.customer))
-                .where(
-                    CustomerContact.organization_id == data.organization_id,
-                    CustomerContact.email == data.email.lower(),
-                )
-            ).first()
-            if contact and contact.customer:
-                customer = contact.customer
-            else:
-                raise ValidationAppError(
-                    "No customer account matches this email in this organization. Please contact support."
-                )
-
-    user = CustomerPortalUser(
-        organization_id=data.organization_id,
-        customer_id=customer.id,
-        email=data.email.lower(),
-        password_hash=hash_password(data.password),
-        display_name=data.display_name,
-        is_active=True,
-        mfa_enabled=False,
-    )
-    db.add(user)
-    db.flush()
-    return user
+    """Customer portal open/self sign-up is disabled. Access is by invitation only."""
+    raise ValidationAppError("Self sign-up is disabled. Access to the Customer Portal is by invitation only.")
 
 
 def portal_login(db: Session, data: PortalLoginIn) -> Tuple[str, CustomerPortalUser]:
     """Authenticates a customer portal user and creates an active session."""
-    user = db.scalars(
-        select(CustomerPortalUser).where(
-            CustomerPortalUser.organization_id == data.organization_id,
-            CustomerPortalUser.email == data.email.lower(),
+    email_clean = data.email.strip().lower()
+    if data.organization_id and data.organization_id.strip():
+        user = db.scalars(
+            select(CustomerPortalUser)
+            .options(joinedload(CustomerPortalUser.customer))
+            .where(
+                CustomerPortalUser.organization_id == data.organization_id.strip(),
+                CustomerPortalUser.email == email_clean,
+            )
+        ).first()
+    else:
+        users = list(
+            db.scalars(
+                select(CustomerPortalUser)
+                .options(joinedload(CustomerPortalUser.customer))
+                .where(
+                    CustomerPortalUser.email == email_clean,
+                )
+            ).all()
         )
-    ).first()
+        if len(users) > 1:
+            raise ValidationAppError("Multiple accounts found for this email. Please specify Organization ID.")
+        user = users[0] if users else None
 
     if not user or not verify_password(data.password, user.password_hash):
         raise UnauthorizedError("Invalid email or password.")
@@ -220,6 +184,432 @@ def portal_login(db: Session, data: PortalLoginIn) -> Tuple[str, CustomerPortalU
     user.last_login_at = utcnow()
     db.flush()
     return raw_token, user
+
+
+def serialize_portal_invitation(
+    inv: CustomerPortalInvitation,
+    raw_token: Optional[str] = None,
+) -> CustomerPortalInvitationOut:
+    status_str = "pending"
+    now = utcnow()
+    if inv.revoked_at:
+        status_str = "revoked"
+    elif inv.accepted_at:
+        status_str = "accepted"
+    elif inv.expires_at and aware(inv.expires_at) <= now:
+        status_str = "expired"
+
+    invite_url = None
+    if raw_token:
+        invite_url = f"{settings.FRONTEND_URL.rstrip('/')}/portal/activate?token={raw_token}"
+
+    invited_by_name = inv.invited_by.full_name if inv.invited_by else None
+
+    return CustomerPortalInvitationOut(
+        id=inv.id,
+        customer_id=inv.customer_id,
+        email=inv.email,
+        expires_at=inv.expires_at,
+        created_at=inv.created_at,
+        invited_by_name=invited_by_name,
+        invite_url=invite_url,
+        status=status_str,
+    )
+
+
+def get_customer_portal_access(
+    db: Session,
+    organization_id: str,
+    customer_id: str,
+) -> CustomerPortalAccessStatusOut:
+    customer = db.scalars(
+        select(Customer).where(
+            Customer.id == customer_id,
+            Customer.organization_id == organization_id,
+        )
+    ).first()
+    if not customer:
+        raise NotFoundAppError("Customer not found.")
+
+    user = db.scalars(
+        select(CustomerPortalUser).where(
+            CustomerPortalUser.organization_id == organization_id,
+            CustomerPortalUser.customer_id == customer_id,
+        )
+    ).first()
+
+    latest_invitation = db.scalars(
+        select(CustomerPortalInvitation)
+        .options(joinedload(CustomerPortalInvitation.invited_by))
+        .where(
+            CustomerPortalInvitation.organization_id == organization_id,
+            CustomerPortalInvitation.customer_id == customer_id,
+        )
+        .order_by(desc(CustomerPortalInvitation.created_at))
+    ).first()
+
+    portal_base_url = f"{settings.FRONTEND_URL.rstrip('/')}/portal"
+
+    user_out = PortalUserOut.model_validate(user) if user else None
+    inv_out = serialize_portal_invitation(latest_invitation) if latest_invitation else None
+
+    now = utcnow()
+    if user:
+        status = "active" if user.is_active else "revoked"
+    elif latest_invitation:
+        if latest_invitation.revoked_at:
+            status = "revoked"
+        elif latest_invitation.accepted_at:
+            status = "active"
+        elif latest_invitation.expires_at and aware(latest_invitation.expires_at) > now:
+            status = "invitation_pending"
+        else:
+            status = "not_invited"
+    else:
+        status = "not_invited"
+
+    return CustomerPortalAccessStatusOut(
+        status=status,
+        user=user_out,
+        invitation=inv_out,
+        portal_url=portal_base_url,
+    )
+
+
+def create_customer_portal_invitation(
+    db: Session,
+    ctx: CurrentContext,
+    customer_id: str,
+    email: Optional[str] = None,
+) -> CustomerPortalInvitationOut:
+    customer = db.scalars(
+        select(Customer)
+        .options(joinedload(Customer.contacts))
+        .where(
+            Customer.id == customer_id,
+            Customer.organization_id == ctx.organization_id,
+        )
+    ).first()
+    if not customer:
+        raise NotFoundAppError("Customer not found.")
+
+    target_email = email.strip().lower() if email and email.strip() else None
+    if not target_email:
+        if customer.email:
+            target_email = customer.email.strip().lower()
+        elif customer.contacts:
+            primary_contact = next((c for c in customer.contacts if c.is_primary and c.email), None)
+            if primary_contact and primary_contact.email:
+                target_email = primary_contact.email.strip().lower()
+            else:
+                first_contact = next((c for c in customer.contacts if c.email), None)
+                if first_contact and first_contact.email:
+                    target_email = first_contact.email.strip().lower()
+
+    if not target_email:
+        raise ValidationAppError("Customer does not have an email address configured. Please add an email to the customer or contacts before inviting.")
+
+    # Invalidate existing active invitations for this customer
+    pending_invites = list(
+        db.scalars(
+            select(CustomerPortalInvitation).where(
+                CustomerPortalInvitation.organization_id == ctx.organization_id,
+                CustomerPortalInvitation.customer_id == customer_id,
+                CustomerPortalInvitation.accepted_at.is_(None),
+                CustomerPortalInvitation.revoked_at.is_(None),
+            )
+        ).all()
+    )
+    for old_inv in pending_invites:
+        old_inv.revoked_at = utcnow()
+
+    # Generate secure random token
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    expires_at = utcnow() + timedelta(hours=48)
+
+    invitation = CustomerPortalInvitation(
+        organization_id=ctx.organization_id,
+        customer_id=customer_id,
+        email=target_email,
+        token_hash=token_hash,
+        expires_at=expires_at,
+        invited_by_id=ctx.user.id,
+    )
+    db.add(invitation)
+    db.flush()
+
+    invite_url = f"{settings.FRONTEND_URL.rstrip('/')}/portal/activate?token={raw_token}"
+    org_name = ctx.organization.name if ctx.organization else "our organization"
+
+    # Send invitation email
+    send_email(
+        to=target_email,
+        subject=f"Access your Customer Billing Portal at {org_name}",
+        text_body=(
+            f"Hello,\n\n"
+            f"You have been invited by {ctx.user.full_name} ({org_name}) to access your Customer Billing Portal.\n\n"
+            f"Set up your password and access your portal here:\n{invite_url}\n\n"
+            f"This link is secure and will expire in 48 hours.\n"
+        ),
+        html_body=(
+            f"<p>Hello,</p>"
+            f"<p>You have been invited by <strong>{ctx.user.full_name}</strong> ({org_name}) to access your Customer Billing Portal.</p>"
+            f"<p><a href=\"{invite_url}\" style=\"display:inline-block;background:#4f46e5;color:#ffffff;padding:10px 20px;text-decoration:none;border-radius:6px;\">Activate Portal Account</a></p>"
+            f"<p>Or copy this link: <br><code>{invite_url}</code></p>"
+            f"<p>This link is secure and will expire in 48 hours.</p>"
+        ),
+    )
+
+    audit.record(
+        db,
+        ctx=ctx,
+        action="CUSTOMER_PORTAL_INVITED",
+        entity_type="customer",
+        entity_id=customer_id,
+        entity_label=customer.display_name,
+        after={
+            "email": target_email,
+            "expires_at": expires_at.isoformat(),
+        },
+    )
+
+    return serialize_portal_invitation(invitation, raw_token=raw_token)
+
+
+def revoke_customer_portal_access(
+    db: Session,
+    ctx: CurrentContext,
+    customer_id: str,
+) -> CustomerPortalAccessStatusOut:
+    customer = db.scalars(
+        select(Customer).where(
+            Customer.id == customer_id,
+            Customer.organization_id == ctx.organization_id,
+        )
+    ).first()
+    if not customer:
+        raise NotFoundAppError("Customer not found.")
+
+    # 1. Revoke pending invitations
+    pending_invites = list(
+        db.scalars(
+            select(CustomerPortalInvitation).where(
+                CustomerPortalInvitation.organization_id == ctx.organization_id,
+                CustomerPortalInvitation.customer_id == customer_id,
+                CustomerPortalInvitation.accepted_at.is_(None),
+                CustomerPortalInvitation.revoked_at.is_(None),
+            )
+        ).all()
+    )
+    for inv in pending_invites:
+        inv.revoked_at = utcnow()
+
+    # 2. Deactivate customer portal user and revoke sessions
+    users = list(
+        db.scalars(
+            select(CustomerPortalUser).where(
+                CustomerPortalUser.organization_id == ctx.organization_id,
+                CustomerPortalUser.customer_id == customer_id,
+            )
+        ).all()
+    )
+    for user in users:
+        user.is_active = False
+        db.query(CustomerPortalSession).filter(
+            CustomerPortalSession.portal_user_id == user.id
+        ).update({"is_revoked": True}, synchronize_session=False)
+
+    audit.record(
+        db,
+        ctx=ctx,
+        action="CUSTOMER_PORTAL_REVOKED",
+        entity_type="customer",
+        entity_id=customer_id,
+        entity_label=customer.display_name,
+    )
+
+    return get_customer_portal_access(db, ctx.organization_id, customer_id)
+
+
+def reactivate_customer_portal_access(
+    db: Session,
+    ctx: CurrentContext,
+    customer_id: str,
+) -> CustomerPortalAccessStatusOut:
+    customer = db.scalars(
+        select(Customer).where(
+            Customer.id == customer_id,
+            Customer.organization_id == ctx.organization_id,
+        )
+    ).first()
+    if not customer:
+        raise NotFoundAppError("Customer not found.")
+
+    users = list(
+        db.scalars(
+            select(CustomerPortalUser).where(
+                CustomerPortalUser.organization_id == ctx.organization_id,
+                CustomerPortalUser.customer_id == customer_id,
+            )
+        ).all()
+    )
+    if users:
+        for user in users:
+            user.is_active = True
+    else:
+        create_customer_portal_invitation(db, ctx, customer_id)
+
+    audit.record(
+        db,
+        ctx=ctx,
+        action="CUSTOMER_PORTAL_REACTIVATED",
+        entity_type="customer",
+        entity_id=customer_id,
+        entity_label=customer.display_name,
+    )
+
+    return get_customer_portal_access(db, ctx.organization_id, customer_id)
+
+
+def validate_portal_invitation_token(
+    db: Session,
+    raw_token: str,
+) -> PortalInvitationValidateOut:
+    if not raw_token or not raw_token.strip():
+        raise ValidationAppError("Activation token is required.")
+
+    token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+    inv = db.scalars(
+        select(CustomerPortalInvitation)
+        .options(joinedload(CustomerPortalInvitation.customer))
+        .where(
+            CustomerPortalInvitation.token_hash == token_hash,
+        )
+    ).first()
+
+    if not inv:
+        raise NotFoundAppError("Invalid or unknown activation link.")
+
+    if inv.revoked_at:
+        raise ValidationAppError("This invitation link has been revoked. Please contact your account administrator for a new link.")
+
+    if inv.accepted_at:
+        raise ValidationAppError("This invitation has already been used. Please log in with your credentials.")
+
+    now = utcnow()
+    if inv.expires_at and aware(inv.expires_at) <= now:
+        raise ValidationAppError("This activation link has expired. Please contact your account administrator for a new link.")
+
+    org = db.get(Organization, inv.organization_id)
+    portal_settings = get_or_create_portal_settings(db, inv.organization_id)
+
+    return PortalInvitationValidateOut(
+        valid=True,
+        email=inv.email,
+        customer_id=inv.customer_id,
+        customer_name=inv.customer.display_name if inv.customer else "",
+        organization_id=inv.organization_id,
+        organization_name=org.name if org else "",
+        portal_name=portal_settings.portal_name,
+        expires_at=inv.expires_at,
+    )
+
+
+def activate_portal_account(
+    db: Session,
+    raw_token: str,
+    password: str,
+    display_name: Optional[str] = None,
+) -> Tuple[str, CustomerPortalUser]:
+    password_problem = validate_password_strength(password)
+    if password_problem:
+        raise ValidationAppError(password_problem)
+
+    if not raw_token or not raw_token.strip():
+        raise ValidationAppError("Activation token is required.")
+
+    token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+    inv = db.scalars(
+        select(CustomerPortalInvitation)
+        .options(joinedload(CustomerPortalInvitation.customer))
+        .where(
+            CustomerPortalInvitation.token_hash == token_hash,
+        )
+    ).first()
+
+    if not inv:
+        raise NotFoundAppError("Invalid or unknown activation link.")
+
+    if inv.revoked_at:
+        raise ValidationAppError("This invitation link has been revoked.")
+
+    if inv.accepted_at:
+        raise ValidationAppError("This invitation has already been used. Please log in.")
+
+    now = utcnow()
+    if inv.expires_at and aware(inv.expires_at) <= now:
+        raise ValidationAppError("This activation link has expired.")
+
+    user = db.scalars(
+        select(CustomerPortalUser).where(
+            CustomerPortalUser.organization_id == inv.organization_id,
+            CustomerPortalUser.email == inv.email.lower(),
+        )
+    ).first()
+
+    chosen_display_name = (
+        display_name.strip() if display_name and display_name.strip()
+        else (user.display_name if user else (inv.customer.display_name if inv.customer else inv.email))
+    )
+
+    if user:
+        user.password_hash = hash_password(password)
+        user.is_active = True
+        user.display_name = chosen_display_name
+        user.customer_id = inv.customer_id
+    else:
+        user = CustomerPortalUser(
+            organization_id=inv.organization_id,
+            customer_id=inv.customer_id,
+            email=inv.email.lower(),
+            password_hash=hash_password(password),
+            display_name=chosen_display_name,
+            is_active=True,
+            mfa_enabled=False,
+        )
+        db.add(user)
+        db.flush()
+
+    inv.accepted_at = now
+
+    other_pending = list(
+        db.scalars(
+            select(CustomerPortalInvitation).where(
+                CustomerPortalInvitation.organization_id == inv.organization_id,
+                CustomerPortalInvitation.customer_id == inv.customer_id,
+                CustomerPortalInvitation.email == inv.email.lower(),
+                CustomerPortalInvitation.accepted_at.is_(None),
+                CustomerPortalInvitation.revoked_at.is_(None),
+                CustomerPortalInvitation.id != inv.id,
+            )
+        ).all()
+    )
+    for other in other_pending:
+        other.revoked_at = now
+
+    raw_session_token = secrets.token_urlsafe(32)
+    session = CustomerPortalSession(
+        portal_user_id=user.id,
+        token=_hash_token(raw_session_token),
+        expires_at=now + timedelta(days=7),
+        is_revoked=False,
+    )
+    db.add(session)
+    user.last_login_at = now
+    db.flush()
+
+    return raw_session_token, user
 
 
 def authenticate_portal_session(db: Session, token: str) -> CustomerPortalUser:

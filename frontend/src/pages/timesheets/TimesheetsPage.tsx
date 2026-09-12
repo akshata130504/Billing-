@@ -171,8 +171,12 @@ export function TimesheetsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2.5">
-          <Button variant="outline" size="sm" onClick={() => loadData()}>
-            <RefreshCw className="w-4 h-4 mr-1.5" />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => loadData()}
+            leadingIcon={<RefreshCw className="w-4 h-4" />}
+          >
             Refresh
           </Button>
           {canApprove && (
@@ -181,8 +185,8 @@ export function TimesheetsPage() {
               size="sm"
               onClick={() => setInvoiceModalOpen(true)}
               className="text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+              leadingIcon={<Receipt className="w-4 h-4 text-emerald-600" />}
             >
-              <Receipt className="w-4 h-4 mr-1.5 text-emerald-600" />
               Generate Invoice
             </Button>
           )}
@@ -193,8 +197,8 @@ export function TimesheetsPage() {
               setSelectedEntry(null);
               setEntryModalOpen(true);
             }}
+            leadingIcon={<Plus className="w-4 h-4" />}
           >
-            <Plus className="w-4 h-4 mr-1.5" />
             Log Time
           </Button>
         </div>

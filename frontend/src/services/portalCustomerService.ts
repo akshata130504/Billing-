@@ -6,6 +6,8 @@ import type {
   PortalSignupIn,
   PortalAuthOut,
   PortalUserOut,
+  PortalActivateIn,
+  PortalInvitationValidateOut,
 } from '../types/portal';
 
 export interface PortalDashboardData {
@@ -198,6 +200,19 @@ portalClient.interceptors.request.use((config) => {
 export const portalCustomerService = {
   login: async (credentials: PortalLoginIn): Promise<PortalAuthOut> => {
     const { data } = await portalClient.post<PortalAuthOut>('/auth/login', credentials);
+    portalTokenStorage.setSession(data);
+    return data;
+  },
+
+  validateInvitation: async (token: string): Promise<PortalInvitationValidateOut> => {
+    const { data } = await portalClient.get<PortalInvitationValidateOut>('/auth/invitation', {
+      params: { token },
+    });
+    return data;
+  },
+
+  activate: async (payload: PortalActivateIn): Promise<PortalAuthOut> => {
+    const { data } = await portalClient.post<PortalAuthOut>('/auth/activate', payload);
     portalTokenStorage.setSession(data);
     return data;
   },

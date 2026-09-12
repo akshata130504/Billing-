@@ -48,6 +48,7 @@ ROUTERS = [
     ("customization", "", ["Customization & Automation"]),
     ("devices", "", ["Client Platforms"]),
     ("ai", "", ["AI in Billing"]),
+    ("chat", "/chat", ["Roomi AI Assistant"]),
     ("reports", "/reports", ["Reports"]),
     ("lifecycle", "/lifecycle", ["Customer Lifecycle"]),
     ("timesheets", "/timesheets", ["Timesheets"]),

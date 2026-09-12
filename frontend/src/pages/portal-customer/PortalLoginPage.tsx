@@ -22,11 +22,11 @@ export const PortalLoginPage: React.FC = () => {
     setLoading(true);
 
     try {
-      if (organizationId) {
-        localStorage.setItem('rooman.portal_org_id', organizationId);
+      if (organizationId.trim()) {
+        localStorage.setItem('rooman.portal_org_id', organizationId.trim());
       }
       await portalCustomerService.login({
-        organization_id: organizationId.trim(),
+        organization_id: organizationId.trim() || undefined,
         email: email.trim(),
         password,
       });
@@ -67,19 +67,20 @@ export const PortalLoginPage: React.FC = () => {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                Organization ID
-              </label>
+              <div className="flex justify-between items-center mb-1">
+                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                  Organization ID <span className="text-slate-400 normal-case font-normal">(optional)</span>
+                </label>
+              </div>
               <div className="relative rounded-lg shadow-2xs">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                   <Building2 className="w-4 h-4" />
                 </div>
                 <input
                   type="text"
-                  required
                   value={organizationId}
                   onChange={(e) => setOrganizationId(e.target.value)}
-                  placeholder="e.g. org_xxx or UUID"
+                  placeholder="Pre-filled or optional if unambiguous"
                   className="block w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-hidden"
                 />
               </div>

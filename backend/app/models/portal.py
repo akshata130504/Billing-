@@ -33,7 +33,7 @@ class CustomerPortalSettings(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, B
     auto_invite_enabled = Column(Boolean, nullable=False, default=False)
     mfa_enabled = Column(Boolean, nullable=False, default=False)
     prevent_duplicate_payments = Column(Boolean, nullable=False, default=True)
-    allow_self_signup = Column(Boolean, nullable=False, default=True)
+    allow_self_signup = Column(Boolean, nullable=False, default=False)
     allow_document_upload = Column(Boolean, nullable=False, default=True)
     allow_document_forwarding = Column(Boolean, nullable=False, default=True)
     allow_save_payment_methods = Column(Boolean, nullable=False, default=True)
@@ -75,3 +75,19 @@ class CustomerPortalSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_revoked = Column(Boolean, nullable=False, default=False)
 
     user = relationship("CustomerPortalUser", back_populates="sessions")
+
+
+class CustomerPortalInvitation(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
+    """Secure, single-use, time-limited invitation for customer portal activation."""
+    __tablename__ = "customer_portal_invitations"
+
+    customer_id = Column(String(36), ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True)
+    email = Column(String(255), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    invited_by_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+    customer = relationship("Customer")
+    invited_by = relationship("User")

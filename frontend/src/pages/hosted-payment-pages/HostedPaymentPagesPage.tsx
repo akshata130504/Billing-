@@ -366,8 +366,12 @@ export function HostedPaymentPagesPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={refreshAll}>
-            <RefreshCw className="w-4 h-4 mr-1.5" />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={refreshAll}
+            leadingIcon={<RefreshCw className="w-4 h-4" />}
+          >
             Refresh
           </Button>
           {canWrite && tab === 'sessions' && (

@@ -160,17 +160,17 @@ export function UsageMeteringPage() {
     <div className="space-y-6 pb-12">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">
             <Repeat className="w-4 h-4" />
             Subscriptions
           </div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Usage / Metering</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <p className="text-sm text-slate-500 mt-1 max-w-xl">
             Define billable meters, ingest usage events idempotently, and rate consumption into subscription billing cycles.
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 shrink-0 flex-nowrap overflow-x-auto pb-1 sm:pb-0">
           <Button variant="outline" size="sm" onClick={() => loadMeters()} leadingIcon={<RefreshCw className="w-4 h-4" />}>
             Refresh
           </Button>

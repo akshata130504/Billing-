@@ -6,3 +6,4 @@ export * from './PortalInvoicesPage';
 export * from './PortalPaymentsPage';
 export * from './PortalSubscriptionsPage';
 export * from './PortalProfilePage';
+export * from './PortalActivationPage';

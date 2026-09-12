@@ -19,6 +19,23 @@ from backend.app.models.checkout import (
     CheckoutSessionStatus,
     CheckoutTemplate,
 )
+from backend.app.core.security import hash_password
+from backend.app.models.portal import CustomerPortalUser
+
+
+def _setup_portal_user(db, org_id, customer, email, password="SecurePassword123!", display_name="Portal User"):
+    user = CustomerPortalUser(
+        organization_id=org_id,
+        customer_id=customer.id,
+        email=email,
+        password_hash=hash_password(password),
+        display_name=display_name,
+        is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 def test_hosted_checkout_invoice_flow(client, tenant, auth_headers, db):
@@ -178,7 +195,7 @@ def test_customer_portal_signup_login_and_dashboard(client, tenant, auth_headers
     product, plan = tenant.product_with_plan(unit_amount="1000.00")
     inv = tenant.invoice(customer, amount="1000.00")
 
-    # 1. Customer signs up to the portal
+    # 1. Customer open signup is disabled (Requirement 1)
     signup_res = client.post(
         "/api/v1/portal/auth/signup",
         json={
@@ -189,9 +206,17 @@ def test_customer_portal_signup_login_and_dashboard(client, tenant, auth_headers
             "customer_id": customer.id,
         },
     )
-    assert signup_res.status_code == 201
-    user_data = signup_res.json()
-    assert user_data["email"] == "customer_contact@example.com"
+    assert signup_res.status_code == 403
+
+    # Set up user account as if activated via invitation
+    _setup_portal_user(
+        db,
+        tenant.organization.id,
+        customer,
+        email="customer_contact@example.com",
+        password="SecurePassword123!",
+        display_name="Alice Customer",
+    )
 
     # 2. Customer logs in
     login_res = client.post(
@@ -239,16 +264,14 @@ def test_customer_portal_trial_self_service(client, tenant, auth_headers, db):
     )
     sub_id = res.json()["id"]
 
-    # Customer signs up and logs in to portal
-    client.post(
-        "/api/v1/portal/auth/signup",
-        json={
-            "organization_id": tenant.organization.id,
-            "email": "trial_user@example.com",
-            "password": "SecurePassword123!",
-            "display_name": "Bob Trialer",
-            "customer_id": customer.id,
-        },
+    # Customer activated via invitation and logs in to portal
+    _setup_portal_user(
+        db,
+        tenant.organization.id,
+        customer,
+        email="trial_user@example.com",
+        password="SecurePassword123!",
+        display_name="Bob Trialer",
     )
     login_res = client.post(
         "/api/v1/portal/auth/login",
@@ -401,8 +424,7 @@ def test_hosted_checkout_revalidates_paid_invoice_and_is_idempotent(client, tena
 
 
 def test_customer_portal_signup_rejects_arbitrary_customer_id_with_mismatched_email(client, tenant, auth_headers, db):
-    """Vulnerability test: an attacker must NOT be able to take over an arbitrary customer account
-    by providing a victim's customer_id with the attacker's foreign email."""
+    """Vulnerability test: public signup is blocked completely (Requirement 1)."""
     victim = tenant.customer(email="victim_company@example.com")
 
     # Attacker tries to register using victim's customer_id
@@ -416,7 +438,7 @@ def test_customer_portal_signup_rejects_arbitrary_customer_id_with_mismatched_em
             "customer_id": victim.id,
         },
     )
-    assert attacker_res.status_code in (400, 422)
+    assert attacker_res.status_code == 403
 
 
 def test_customer_portal_session_token_hashed_in_database(client, tenant, auth_headers, db):
@@ -425,15 +447,13 @@ def test_customer_portal_session_token_hashed_in_database(client, tenant, auth_h
     from backend.app.models.portal import CustomerPortalSession
 
     customer = tenant.customer(email="session_test@example.com")
-    client.post(
-        "/api/v1/portal/auth/signup",
-        json={
-            "organization_id": tenant.organization.id,
-            "email": "session_test@example.com",
-            "password": "SecurePassword123!",
-            "display_name": "Session Tester",
-            "customer_id": customer.id,
-        },
+    _setup_portal_user(
+        db,
+        tenant.organization.id,
+        customer,
+        email="session_test@example.com",
+        password="SecurePassword123!",
+        display_name="Session Tester",
     )
 
     login_res = client.post(
@@ -463,15 +483,13 @@ def test_customer_portal_signed_document_download(client, tenant, auth_headers, 
     customer = tenant.customer(email="pdf_user@example.com")
     inv = tenant.invoice(customer, amount="1500.00")
 
-    client.post(
-        "/api/v1/portal/auth/signup",
-        json={
-            "organization_id": tenant.organization.id,
-            "email": "pdf_user@example.com",
-            "password": "SecurePassword123!",
-            "display_name": "PDF User",
-            "customer_id": customer.id,
-        },
+    _setup_portal_user(
+        db,
+        tenant.organization.id,
+        customer,
+        email="pdf_user@example.com",
+        password="SecurePassword123!",
+        display_name="PDF User",
     )
     login_res = client.post(
         "/api/v1/portal/auth/login",
@@ -531,16 +549,14 @@ def test_customer_portal_invoices_payments_profile_and_isolation(client, tenant,
     db.add(pay_a)
     db.commit()
 
-    # Signup & Login Customer A
-    client.post(
-        "/api/v1/portal/auth/signup",
-        json={
-            "organization_id": tenant.organization.id,
-            "email": "portal_a@example.com",
-            "password": "SecurePassword123!",
-            "display_name": "Portal User A",
-            "customer_id": cust_a.id,
-        },
+    # Setup Portal User A
+    _setup_portal_user(
+        db,
+        tenant.organization.id,
+        cust_a,
+        email="portal_a@example.com",
+        password="SecurePassword123!",
+        display_name="Portal User A",
     )
     login_a = client.post(
         "/api/v1/portal/auth/login",
