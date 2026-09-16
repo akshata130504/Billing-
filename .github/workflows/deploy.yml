@@ -1,0 +1,52 @@
+name: Deploy to Production
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to billing.futureacad.ae
+    runs-on: self-hosted
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync application code
+        # .env.production and postgres_data live only on the server and are never
+        # touched by this sync.
+        run: |
+          rsync -a --delete \
+            --exclude '.git' \
+            --exclude '.env.production' \
+            ./ /opt/rooman-billing/
+
+      - name: Rebuild and restart services
+        working-directory: /opt/rooman-billing
+        run: |
+          docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+
+      - name: Wait for readiness
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" https://billing.futureacad.ae/api/v1/health/ready || true)
+            if [ "$code" = "200" ]; then
+              echo "Service is ready"
+              exit 0
+            fi
+            echo "Waiting for readiness (attempt $i, got $code)..."
+            sleep 5
+          done
+          echo "::error::Service did not become ready in time"
+          exit 1

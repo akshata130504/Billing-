@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X, Plus, Trash2, Layers, AlertCircle } from 'lucide-react';
 import { Button } from '../../../components/common/Button';
+import { validateSensibleName, validateSku, validatePercentage, validateNonNegativeMoney, parseStrictNumber } from '../../../utils/validation';
 import type { OfferingIn, OfferingOut, OfferingType, OfferingPricingModel, PricingTier, BundleComponent } from '../../../types/catalog_cpq';
 
 interface OfferingModalProps {
@@ -60,8 +61,25 @@ export const OfferingModal: React.FC<OfferingModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) {
-      setError('Offering name is required.');
+
+    const nameError = validateSensibleName(name, 'Offering name');
+    if (nameError) {
+      setError(nameError);
+      return;
+    }
+    const skuError = validateSku(sku, { required: false });
+    if (skuError) {
+      setError(skuError);
+      return;
+    }
+    const basePriceError = validateNonNegativeMoney(basePrice, 'Catalog base price', { required: true });
+    if (basePriceError) {
+      setError(basePriceError);
+      return;
+    }
+    const taxRateError = validatePercentage(taxRatePct, 'Tax rate', { required: false });
+    if (taxRateError) {
+      setError(taxRateError);
       return;
     }
 
@@ -76,8 +94,8 @@ export const OfferingModal: React.FC<OfferingModalProps> = ({
         category,
         unit,
         pricing_model: pricingModel,
-        base_price: Number(basePrice),
-        tax_rate_pct: Number(taxRatePct),
+        base_price: parseStrictNumber(basePrice) ?? 0,
+        tax_rate_pct: parseStrictNumber(taxRatePct) ?? 0,
         billing_frequency: billingFrequency,
         description,
         pricing_tiers: (pricingModel === 'volume' || pricingModel === 'tiered' || pricingModel === 'package') ? pricingTiers : undefined,

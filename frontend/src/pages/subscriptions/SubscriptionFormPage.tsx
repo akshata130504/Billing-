@@ -24,6 +24,7 @@ import { Button } from '../../components/common/Button';
 import { LoadingState } from '../../components/common/LoadingState';
 import { useToast } from '../../components/common/Toast';
 import { formatMoney, todayIso } from '../../utils/format';
+import { validatePositiveInteger } from '../../utils/validation';
 import { NewPlanModal } from './NewPlanModal';
 
 export function SubscriptionFormPage() {
@@ -164,6 +165,12 @@ export function SubscriptionFormPage() {
     }
     if (!planId) {
       showToast('error', 'Validation Error', 'Please select a plan.');
+      return;
+    }
+    const quantityError = validatePositiveInteger(quantity, 'Quantity', { required: true });
+    if (quantityError) {
+      setError(quantityError);
+      showToast('error', 'Validation Error', quantityError);
       return;
     }
 

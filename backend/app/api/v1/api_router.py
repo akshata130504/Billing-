@@ -52,6 +52,8 @@ ROUTERS = [
     ("reports", "/reports", ["Reports"]),
     ("lifecycle", "/lifecycle", ["Customer Lifecycle"]),
     ("timesheets", "/timesheets", ["Timesheets"]),
+    ("projects", "/projects", ["Projects"]),
+    ("expenses", "/expenses", ["Expenses"]),
     ("webhooks", "/webhooks", ["Webhooks"]),
     ("integrations", "", ["Settings - Integrations"]),
 ]

@@ -171,6 +171,14 @@ from backend.app.models.ai import (
 )
 from backend.app.models.lifecycle import CustomerLifecycle, CustomerLifecycleStage, HealthStatus
 from backend.app.models.timesheets import TimeEntry, TimeEntryStatus
+from backend.app.models.projects import BillingMethod, Project, ProjectStatus
+from backend.app.models.expenses import (
+    Expense,
+    ExpenseStatus,
+    RecurringExpense,
+    RecurringExpenseFrequency,
+    RecurringExpenseStatus,
+)
 
 __all__ = [
     "TenantMixin",
@@ -333,4 +341,12 @@ __all__ = [
     "PromiseToPay",
     "PromiseToPayStatus",
     "OrganizationIntegration",
+    "Project",
+    "ProjectStatus",
+    "BillingMethod",
+    "Expense",
+    "ExpenseStatus",
+    "RecurringExpense",
+    "RecurringExpenseFrequency",
+    "RecurringExpenseStatus",
 ]

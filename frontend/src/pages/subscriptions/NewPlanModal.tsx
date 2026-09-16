@@ -6,6 +6,13 @@ import { Modal } from '../../components/common/Modal';
 import { useToast } from '../../components/common/Toast';
 import { fieldErrors } from '../../services/apiClient';
 import { catalogService } from '../../services/catalogService';
+import {
+  validateSensibleName,
+  validateSku,
+  validateNonNegativeMoney,
+  validateNonNegativeInteger,
+  parseStrictNumber,
+} from '../../utils/validation';
 import type { BillingInterval, PlanOut, PricingModel, ProductOut } from '../../types/api';
 
 interface NewPlanModalProps {
@@ -95,15 +102,18 @@ export function NewPlanModal({ isOpen, onClose, onCreated }: NewPlanModalProps) 
 
   const validate = (): boolean => {
     const next: Record<string, string> = {};
-    if (productId === NEW_PRODUCT_VALUE && !newProductName.trim()) {
-      next.product_id = 'A product name is required.';
+    if (productId === NEW_PRODUCT_VALUE) {
+      const productNameError = validateSensibleName(newProductName, 'Product name');
+      if (productNameError) next.product_id = productNameError;
     }
-    if (!name.trim()) next.name = 'Name is required.';
-    if (!code.trim()) next.code = 'Code is required.';
-    const amount = Number(unitAmount);
-    if (unitAmount.trim() === '' || Number.isNaN(amount) || amount < 0) {
-      next.unit_amount = 'Enter a valid non-negative amount.';
-    }
+    const nameError = validateSensibleName(name, 'Plan name');
+    if (nameError) next.name = nameError;
+    const codeError = validateSku(code, { required: true });
+    if (codeError) next.code = codeError;
+    const amountError = validateNonNegativeMoney(unitAmount, 'Unit amount', { required: true });
+    if (amountError) next.unit_amount = amountError;
+    const trialDaysError = validateNonNegativeInteger(trialDays, 'Trial days');
+    if (trialDaysError) next.trial_days = trialDaysError;
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -225,7 +235,11 @@ export function NewPlanModal({ isOpen, onClose, onCreated }: NewPlanModalProps) 
             type="number"
             min="0"
             value={trialDays}
-            onChange={(e) => setTrialDays(Math.max(0, parseInt(e.target.value) || 0))}
+            onChange={(e) => {
+              const parsed = parseStrictNumber(e.target.value);
+              setTrialDays(parsed !== null ? Math.max(0, Math.trunc(parsed)) : 0);
+            }}
+            error={errors.trial_days}
           />
         </div>
 

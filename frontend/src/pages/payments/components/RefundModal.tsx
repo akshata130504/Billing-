@@ -4,6 +4,7 @@ import { usePayments, RefundPaymentInput } from '../PaymentsContext';
 import { useAuth } from '../../../hooks/useAuth';
 import { X, RotateCcw, AlertTriangle } from 'lucide-react';
 import { formatMoney } from '../../../utils/format';
+import { validatePositiveMoney, parseStrictNumber } from '../../../utils/validation';
 
 interface RefundModalProps {
   isOpen: boolean;
@@ -63,15 +64,16 @@ export function RefundModal({ isOpen, onClose, payment }: RefundModalProps) {
       return;
     }
 
-    const numRefund = parseFloat(refundAmount);
-
-    if (isNaN(numRefund) || numRefund <= 0) {
-      setError('Refund amount must be greater than 0');
+    const amountError = validatePositiveMoney(refundAmount, 'Refund amount', { required: true });
+    if (amountError) {
+      setError(amountError);
       return;
     }
 
+    const numRefund = parseStrictNumber(refundAmount) ?? 0;
+
     if (numRefund - maxRefundable > 0.005) {
-      setError(`Refund amount cannot exceed remaining refundable balance of ${formatMoney(maxRefundable)}`);
+      setError(`Refund amount cannot exceed the refundable amount (${formatMoney(maxRefundable)})`);
       return;
     }
 

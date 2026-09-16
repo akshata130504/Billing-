@@ -6,6 +6,7 @@ from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.app.models import BillingInterval, PricingModel, ProductType
+from backend.app.schemas.validators import validate_hsn_sac, validate_sku_format
 
 
 class PlanCreate(BaseModel):
@@ -29,6 +30,11 @@ class PlanCreate(BaseModel):
     def _upper(cls, v):
         return v.upper() if isinstance(v, str) else v
 
+    @field_validator("code")
+    @classmethod
+    def _code(cls, v):
+        return validate_sku_format(v)
+
 
 class PlanUpdate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
@@ -49,6 +55,11 @@ class PlanUpdate(BaseModel):
     @classmethod
     def _upper(cls, v):
         return v.upper() if isinstance(v, str) else v
+
+    @field_validator("code")
+    @classmethod
+    def _code(cls, v):
+        return validate_sku_format(v)
 
 
 class PlanOut(BaseModel):
@@ -84,6 +95,16 @@ class ProductCreate(BaseModel):
     tax_rate_pct: Optional[Decimal] = Field(None, ge=0, le=100)
     is_active: bool = True
 
+    @field_validator("sku")
+    @classmethod
+    def _sku(cls, v):
+        return validate_sku_format(v)
+
+    @field_validator("hsn_sac_code")
+    @classmethod
+    def _hsn_sac(cls, v):
+        return validate_hsn_sac(v)
+
 
 class ProductUpdate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
@@ -96,6 +117,16 @@ class ProductUpdate(BaseModel):
     hsn_sac_code: Optional[str] = Field(None, max_length=16)
     tax_rate_pct: Optional[Decimal] = Field(None, ge=0, le=100)
     is_active: Optional[bool] = None
+
+    @field_validator("sku")
+    @classmethod
+    def _sku(cls, v):
+        return validate_sku_format(v)
+
+    @field_validator("hsn_sac_code")
+    @classmethod
+    def _hsn_sac(cls, v):
+        return validate_hsn_sac(v)
 
 
 class ProductOut(BaseModel):

@@ -34,6 +34,7 @@ import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { formatDateTime } from '../../utils/format';
 import { cn } from '../../utils/cn';
+import { validateSlug } from '../../utils/validation';
 
 // ---------------------------------------------------------------------------
 // Form model
@@ -323,8 +324,10 @@ export function CustomerPortalPage() {
     if (!form.portal_name.trim()) errs.portal_name = 'Portal name is required.';
     else if (form.portal_name.length > 100) errs.portal_name = 'Maximum 100 characters.';
     if (form.portal_url_slug && form.portal_url_slug.length > 64) errs.portal_url_slug = 'Maximum 64 characters.';
-    if (form.portal_url_slug && !/^[a-z0-9-]+$/i.test(form.portal_url_slug))
-      errs.portal_url_slug = 'Use letters, numbers and hyphens only.';
+    else {
+      const slugError = validateSlug(form.portal_url_slug, 'URL slug');
+      if (slugError) errs.portal_url_slug = slugError;
+    }
     if (!Number.isInteger(form.trials_max_extensions) || form.trials_max_extensions < 0 || form.trials_max_extensions > 10)
       errs.trials_max_extensions = 'Must be a whole number between 0 and 10.';
     setFieldErrors(errs);

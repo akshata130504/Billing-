@@ -7,8 +7,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.app.models import CustomerStatus
 from backend.app.schemas.common_refs import CustomerRef
+from backend.app.schemas.validators import (
+    validate_gstin_format,
+    validate_pan_format,
+    validate_phone_number,
+    validate_sensible_name,
+    validate_website_url,
+)
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_COUNTRY_CODE_RE = re.compile(r"^[A-Z]{2}$")
+_POSTAL_CODE_RE = re.compile(r"^[A-Za-z0-9\s\-]{3,12}$")
 
 
 def validate_email_format(value: Optional[str]) -> Optional[str]:
@@ -23,6 +32,28 @@ def validate_email_format(value: Optional[str]) -> Optional[str]:
     return value.lower()
 
 
+def validate_country_code(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    val = value.strip().upper()
+    if not val:
+        return None
+    if not _COUNTRY_CODE_RE.match(val):
+        raise ValueError("Country must be a valid 2-letter ISO code (e.g. IN, US).")
+    return val
+
+
+def validate_postal_code(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    val = value.strip()
+    if not val:
+        return None
+    if not _POSTAL_CODE_RE.match(val):
+        raise ValueError("Invalid postal code.")
+    return val
+
+
 class ContactIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -32,10 +63,20 @@ class ContactIn(BaseModel):
     designation: Optional[str] = Field(None, max_length=120)
     is_primary: bool = False
 
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v):
+        return validate_sensible_name(v, "Contact name")
+
     @field_validator("email")
     @classmethod
     def _email(cls, v):
         return validate_email_format(v)
+
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, v):
+        return validate_phone_number(v)
 
 
 class ContactOut(BaseModel):
@@ -73,19 +114,68 @@ class _CustomerFields(BaseModel):
     def _email(cls, v):
         return validate_email_format(v)
 
-    @field_validator("currency", "billing_country")
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, v):
+        return validate_phone_number(v)
+
+    @field_validator("website")
+    @classmethod
+    def _website(cls, v):
+        return validate_website_url(v)
+
+    @field_validator("gstin")
+    @classmethod
+    def _gstin(cls, v):
+        return validate_gstin_format(v)
+
+    @field_validator("pan")
+    @classmethod
+    def _pan(cls, v):
+        return validate_pan_format(v)
+
+    @field_validator("company_name")
+    @classmethod
+    def _company_name(cls, v):
+        if v is None or v == "":
+            return v
+        return validate_sensible_name(v, "Company name")
+
+    @field_validator("currency")
     @classmethod
     def _upper(cls, v):
         return v.upper() if isinstance(v, str) else v
+
+    @field_validator("billing_country")
+    @classmethod
+    def _country(cls, v):
+        return validate_country_code(v)
+
+    @field_validator("billing_postal_code")
+    @classmethod
+    def _postal_code(cls, v):
+        return validate_postal_code(v)
 
 
 class CustomerCreate(_CustomerFields):
     display_name: str = Field(..., min_length=1, max_length=200)
     contacts: List[ContactIn] = Field(default_factory=list)
 
+    @field_validator("display_name")
+    @classmethod
+    def _display_name(cls, v):
+        return validate_sensible_name(v, "Customer name")
+
 
 class CustomerUpdate(_CustomerFields):
     display_name: Optional[str] = Field(None, min_length=1, max_length=200)
+
+    @field_validator("display_name")
+    @classmethod
+    def _display_name(cls, v):
+        if v is None:
+            return v
+        return validate_sensible_name(v, "Customer name")
 
 
 class CustomerStats(BaseModel):

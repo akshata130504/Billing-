@@ -4,6 +4,7 @@ import { Modal } from '../../../components/common/Modal';
 import { Button } from '../../../components/common/Button';
 import { Input } from '../../../components/common/Input';
 import { Select } from '../../../components/common/Select';
+import { validatePositiveMoney, parseStrictNumber } from '../../../utils/validation';
 
 interface AddExpenseModalProps {
   isOpen: boolean;
@@ -25,11 +26,12 @@ export function AddExpenseModal({ isOpen, onClose, onAddExpense }: AddExpenseMod
       setError('Expense title is required');
       return;
     }
-    const numAmount = parseFloat(amount);
-    if (isNaN(numAmount) || numAmount <= 0) {
-      setError('Amount must be greater than 0');
+    const amountError = validatePositiveMoney(amount, 'Amount');
+    if (amountError) {
+      setError(amountError);
       return;
     }
+    const numAmount = parseStrictNumber(amount) as number;
 
     onAddExpense({
       title: title.trim(),

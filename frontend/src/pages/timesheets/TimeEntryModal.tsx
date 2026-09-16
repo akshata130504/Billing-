@@ -3,6 +3,7 @@ import type { TimeEntryCreate, TimeEntryRead, TimeEntryUpdate } from '../../type
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
 import { customerService } from '../../services/customerService';
+import { validateDescription, validateNonNegativeMoney, parseStrictNumber } from '../../utils/validation';
 
 interface TimeEntryModalProps {
   isOpen: boolean;
@@ -29,6 +30,7 @@ export function TimeEntryModal({
   const [description, setDescription] = useState('');
   const [billable, setBillable] = useState(true);
   const [billingRate, setBillingRate] = useState<number | string>(100);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     customerService.list({ page_size: 100 }).then((res) => {
@@ -58,6 +60,7 @@ export function TimeEntryModal({
       setBillable(true);
       setBillingRate(100);
     }
+    setError(null);
   }, [initialEntry, isOpen]);
 
   // Auto calculate duration from start and end time if entered
@@ -76,12 +79,40 @@ export function TimeEntryModal({
     }
   }, [startTime, endTime]);
 
-  const numDuration = typeof durationHours === 'number' ? durationHours : parseFloat(durationHours) || 0;
-  const numRate = typeof billingRate === 'number' ? billingRate : parseFloat(billingRate) || 0;
+  const numDuration = typeof durationHours === 'number' ? durationHours : (parseStrictNumber(durationHours) ?? 0);
+  const numRate = typeof billingRate === 'number' ? billingRate : (parseStrictNumber(billingRate) ?? 0);
   const estimatedAmount = billable ? (numDuration * numRate).toFixed(2) : '0.00';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (numDuration <= 0 || numDuration > 24) {
+      setError('Duration must be greater than 0 and at most 24 hours.');
+      return;
+    }
+    const descriptionError = validateDescription(description, 500, 'Work description');
+    if (descriptionError) {
+      setError(descriptionError);
+      return;
+    }
+    if (billable) {
+      const rateError = validateNonNegativeMoney(billingRate, 'Hourly billing rate');
+      if (rateError) {
+        setError(rateError);
+        return;
+      }
+    }
+    if (dateStr) {
+      const entryDate = new Date(dateStr);
+      const maxAllowed = new Date();
+      maxAllowed.setDate(maxAllowed.getDate() + 1);
+      if (!Number.isNaN(entryDate.getTime()) && entryDate.getTime() > maxAllowed.getTime()) {
+        setError('Work date cannot be more than 1 day in the future.');
+        return;
+      }
+    }
+    setError(null);
+
     const payload: TimeEntryCreate = {
       customer_id: customerId || null,
       project_name: projectTitle.trim() || null,
@@ -103,6 +134,12 @@ export function TimeEntryModal({
       title={initialEntry ? 'Edit Time Entry' : 'Log Time Entry'}
     >
       <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700">
+            {error}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">

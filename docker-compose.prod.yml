@@ -41,6 +41,19 @@ services:
         max-size: "20m"
         max-file: "5"
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Deliberately no published ports: only internal containers on the compose network reach Redis.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    logging: *default-logging
+
   backend:
     build:
       context: .
@@ -55,8 +68,13 @@ services:
       RUN_MIGRATIONS: "true"
       POSTGRES_SERVER: db
       POSTGRES_PORT: "5432"
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    volumes:
+      - uploads_data:/app/backend/uploads
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     # Not published: the frontend container proxies /api/. Uncomment for local debugging only.
     # ports:
@@ -84,6 +102,9 @@ services:
       RUN_MIGRATIONS: "false"      # backend already migrated; avoid two migrators racing
       POSTGRES_SERVER: db
       POSTGRES_PORT: "5432"
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    volumes:
+      - uploads_data:/app/backend/uploads
     # Exactly ONE instance of this service may run. `run_forever` is provided by
     # backend/app/services/scheduler.py and blocks while APScheduler runs the jobs.
     command: ["python", "-c", "from backend.app.services.scheduler import run_forever; run_forever()"]
@@ -92,10 +113,57 @@ services:
         condition: service_healthy
       backend:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     deploy:
       replicas: 1
     healthcheck:
       disable: true
+    logging: *default-logging
+
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      POSTGRES_SERVER: db
+      POSTGRES_PORT: "5432"
+      BACKUP_DIR: /var/backups/rooman
+      BACKUP_RETENTION_DAYS: 30
+    volumes:
+      - backup_data:/var/backups/rooman
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mkdir -p /var/backups/rooman
+        cat << 'EOF' > /usr/local/bin/backup-job.sh
+        #!/bin/sh
+        set -e
+        DATE=$$(date +%Y%m%d_%H%M%S)
+        FILENAME=/var/backups/rooman/rooman_$${DATE}.dump
+        echo "[$$(date -Iseconds)] [backup] Starting scheduled database backup to $${FILENAME}..."
+        export PGPASSWORD="$$POSTGRES_PASSWORD"
+        if pg_dump -h "$$POSTGRES_SERVER" -p "$$POSTGRES_PORT" -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" --no-owner --format=custom -f "$$FILENAME"; then
+            echo "[$$(date -Iseconds)] [backup] Database backup completed successfully: $$(ls -lh "$$FILENAME")"
+            echo "[$$(date -Iseconds)] [backup] Cleaning up dumps older than $${BACKUP_RETENTION_DAYS:-30} days..."
+            find /var/backups/rooman -name 'rooman_*.dump' -mtime +$${BACKUP_RETENTION_DAYS:-30} -delete
+            echo "[$$(date -Iseconds)] [backup] Cleanup complete. Retention policy maintained."
+            if [ -n "$$OFFSITE_BACKUP_COMMAND" ]; then
+                echo "[$$(date -Iseconds)] [backup] Running offsite backup command..."
+                eval "$$OFFSITE_BACKUP_COMMAND" || echo "[$$(date -Iseconds)] [backup] WARNING: Offsite backup command failed." >&2
+            fi
+        else
+            echo "[$$(date -Iseconds)] [backup] ERROR: pg_dump failed!" >&2
+            exit 1
+        fi
+        EOF
+        chmod +x /usr/local/bin/backup-job.sh
+        /usr/local/bin/backup-job.sh || echo "[backup] Initial backup attempt encountered error, will retry on schedule."
+        echo "15 1 * * * /usr/local/bin/backup-job.sh" > /etc/crontabs/root
+        exec crond -f -l 2
     logging: *default-logging
 
   frontend:
@@ -119,4 +187,8 @@ services:
 
 volumes:
   postgres_data:
+    driver: local
+  uploads_data:
+    driver: local
+  backup_data:
     driver: local

@@ -4,6 +4,7 @@ import { Modal } from '../../../components/common/Modal';
 import { Button } from '../../../components/common/Button';
 import { Input } from '../../../components/common/Input';
 import { Select } from '../../../components/common/Select';
+import { validateSensibleName, validateNonNegativeMoney, validateDateNotBefore, parseStrictNumber } from '../../../utils/validation';
 
 interface ProjectFormModalProps {
   isOpen: boolean;
@@ -76,21 +77,24 @@ export function ProjectFormModal({
     e.preventDefault();
     const newErrors: Record<string, string> = {};
 
-    if (!name.trim()) {
-      newErrors.name = 'Project name is required';
+    const nameError = validateSensibleName(name, 'Project name');
+    if (nameError) {
+      newErrors.name = nameError;
     }
 
     if (!customer.trim()) {
       newErrors.customer = 'Customer name is required';
     }
 
-    const numBudget = parseFloat(budget);
-    if (isNaN(numBudget) || numBudget < 0) {
-      newErrors.budget = 'Please enter a valid non-negative budget';
+    const budgetError = validateNonNegativeMoney(budget, 'Budget');
+    if (budgetError) {
+      newErrors.budget = budgetError;
     }
+    const numBudget = parseStrictNumber(budget) ?? 0;
 
-    if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
-      newErrors.endDate = 'End date cannot be earlier than start date';
+    const dateError = validateDateNotBefore(endDate, startDate, 'End date', 'start date');
+    if (dateError) {
+      newErrors.endDate = dateError;
     }
 
     if (Object.keys(newErrors).length > 0) {

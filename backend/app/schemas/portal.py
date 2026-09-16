@@ -4,7 +4,9 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+from backend.app.schemas.validators import validate_slug_format
 
 
 class CustomerPortalSettingsOut(BaseModel):
@@ -35,6 +37,11 @@ class CustomerPortalSettingsOut(BaseModel):
 class CustomerPortalSettingsUpdate(BaseModel):
     portal_name: Optional[str] = Field(None, max_length=100)
     portal_url_slug: Optional[str] = Field(None, max_length=64)
+
+    @field_validator("portal_url_slug")
+    @classmethod
+    def _slug(cls, v):
+        return validate_slug_format(v, "Portal URL slug")
     banner_message: Optional[str] = None
     auto_invite_enabled: Optional[bool] = None
     mfa_enabled: Optional[bool] = None
