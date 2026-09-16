@@ -5,10 +5,16 @@
 
 {
 	email {$ACME_EMAIL}
+	debug
 }
 
 {$DOMAIN} {
 	encode zstd gzip
+
+	log {
+		output stdout
+		format json
+	}
 
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"

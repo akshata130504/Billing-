@@ -54,10 +54,18 @@ class LineItemIn(BaseModel):
     product_id: Optional[str] = None
     plan_id: Optional[str] = None
     description: str = Field(..., min_length=1, max_length=500)
-    quantity: Decimal = Field(default=Decimal("1"))
-    unit_price: Decimal = Field(default=Decimal("0"))
-    tax_rate_pct: Decimal = Field(default=Decimal("0"))
+    quantity: Decimal = Field(default=Decimal("1"), gt=Decimal("0"))
+    unit_price: Decimal = Field(default=Decimal("0"), ge=Decimal("0"))
+    tax_rate_pct: Decimal = Field(default=Decimal("0"), ge=Decimal("0"), le=Decimal("100"))
     pricing_explanation: Optional[str] = None
+
+    @field_validator("description")
+    @classmethod
+    def _validate_description(cls, value: str) -> str:
+        val = value.strip()
+        if not val:
+            raise ValueError("Line item description cannot be empty or whitespace-only.")
+        return val
 
     @field_validator("offering_id", "product_id", "plan_id", mode="before")
     @classmethod

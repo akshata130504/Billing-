@@ -2,6 +2,7 @@ import { useState, useEffect, ChangeEvent, FormEvent } from 'react';
 import { Expense, ExpenseCategory, PaymentMethod, InvoiceTreatment, ExpenseReceipt } from '../types';
 import { mockCustomers, mockProjectsByCustomer } from '../mockExpenses';
 import { X, UploadCloud, Trash2, FileText, CheckCircle } from 'lucide-react';
+import { validateSensibleName, validatePositiveMoney, validateNonNegativeMoney, parseStrictNumber } from '../../../utils/validation';
 
 interface ExpenseFormModalProps {
   isOpen: boolean;
@@ -128,13 +129,12 @@ export function ExpenseFormModal({
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
-    if (!name.trim()) newErrors.name = 'Expense name is required';
+    const nameError = validateSensibleName(name, 'Expense name');
+    if (nameError) newErrors.name = nameError;
     if (!date) newErrors.date = 'Expense date is required';
     if (!category) newErrors.category = 'Category is required';
-    const numAmount = parseFloat(amount);
-    if (isNaN(numAmount) || numAmount <= 0) {
-      newErrors.amount = 'Amount must be greater than 0';
-    }
+    const amountError = validatePositiveMoney(amount, 'Amount');
+    if (amountError) newErrors.amount = amountError;
     if (!currency) newErrors.currency = 'Currency is required';
 
     if (billable) {
@@ -144,10 +144,8 @@ export function ExpenseFormModal({
       if (!project || project === '—') {
         newErrors.project = 'Please select a project to associate billing';
       }
-      const numBillable = parseFloat(billableAmount);
-      if (isNaN(numBillable) || numBillable <= 0) {
-        newErrors.billableAmount = 'Billable amount must be greater than 0';
-      }
+      const billableAmountError = validateNonNegativeMoney(billableAmount, 'Billable amount', { required: true });
+      if (billableAmountError) newErrors.billableAmount = billableAmountError;
     }
 
     setErrors(newErrors);
@@ -158,8 +156,8 @@ export function ExpenseFormModal({
     e.preventDefault();
     if (!validate()) return;
 
-    const numAmount = parseFloat(amount);
-    const numBillable = billable ? parseFloat(billableAmount) : undefined;
+    const numAmount = parseStrictNumber(amount) as number;
+    const numBillable = billable ? (parseStrictNumber(billableAmount) as number) : undefined;
 
     onSave({
       name: name.trim(),

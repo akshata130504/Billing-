@@ -17,6 +17,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { formatDate, formatDateTime, initials, ROLE_LABELS, statusVariant } from '../../utils/format';
 import type { InviteRequest, InviteResponse, MemberRole, TeamMember } from '../../types/api';
 import { ReadOnlyNotice, SettingsSection, type FieldErrors } from './settingsShared';
+import { validateEmail } from '../../utils/validation';
 
 const ROLES: MemberRole[] = ['viewer', 'finance', 'admin', 'owner'];
 
@@ -314,6 +315,11 @@ function InviteMemberModal({
     e.preventDefault();
     setErrors({});
     setFormError(null);
+    const emailError = validateEmail(email, { required: true });
+    if (emailError) {
+      setErrors({ email: emailError });
+      return;
+    }
     const body: InviteRequest = { email: email.trim(), role };
     if (fullName.trim()) body.full_name = fullName.trim();
     mutation.mutate(body);

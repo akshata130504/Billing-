@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2, Calculator, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Button } from '../../../components/common/Button';
+import { validateSensibleName, validateSku, validatePercentage, validateNonNegativeMoney } from '../../../utils/validation';
 import type {
   PlanPricingItem,
   CreatePlanPricingInput,
@@ -173,8 +174,25 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) {
-      setError('Plan Name is required');
+
+    const nameError = validateSensibleName(name, 'Plan name');
+    if (nameError) {
+      setError(nameError);
+      return;
+    }
+    const codeError = validateSku(code, { required: false });
+    if (codeError) {
+      setError(codeError);
+      return;
+    }
+    const basePriceError = validateNonNegativeMoney(basePrice, 'Base price', { required: true });
+    if (basePriceError) {
+      setError(basePriceError);
+      return;
+    }
+    const taxRateError = validatePercentage(taxRatePct, 'Tax rate', { required: false });
+    if (taxRateError) {
+      setError(taxRateError);
       return;
     }
 

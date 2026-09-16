@@ -5,12 +5,24 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.app.models.timesheets import TimeEntryStatus
 
+# A day of slack so a user logging time from a different timezone than the
+# server isn't blocked from entering "today".
+_MAX_FUTURE_DAYS = 1
+
+
+def _reject_far_future(value: Optional[date]) -> Optional[date]:
+    if value is not None and (value - date.today()).days > _MAX_FUTURE_DAYS:
+        raise ValueError("Time entry date cannot be in the future.")
+    return value
+
 
 class TimeEntryBase(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     customer_id: Optional[str] = None
     project_id: Optional[str] = None
     project_name: Optional[str] = None
@@ -22,12 +34,19 @@ class TimeEntryBase(BaseModel):
     billable: bool = True
     billing_rate: Decimal = Field(default=Decimal("0.00"), ge=Decimal("0.00"))
 
+    @field_validator("date")
+    @classmethod
+    def _date(cls, v):
+        return _reject_far_future(v)
+
 
 class TimeEntryCreate(TimeEntryBase):
     pass
 
 
 class TimeEntryUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     customer_id: Optional[str] = None
     project_id: Optional[str] = None
     project_name: Optional[str] = None
@@ -38,6 +57,11 @@ class TimeEntryUpdate(BaseModel):
     description: Optional[str] = Field(default=None, min_length=1)
     billable: Optional[bool] = None
     billing_rate: Optional[Decimal] = Field(default=None, ge=Decimal("0.00"))
+
+    @field_validator("date")
+    @classmethod
+    def _date(cls, v):
+        return _reject_far_future(v)
 
 
 class TimeEntryRead(BaseModel):

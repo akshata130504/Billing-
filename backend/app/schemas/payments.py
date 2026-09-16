@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.app.models import PaymentGateway, PaymentMethod, PaymentStatus, ReconciliationStatus, RefundStatus
 from backend.app.schemas.common_refs import CustomerRef, UserRef
+from backend.app.schemas.validators import reject_future_datetime
 
 
 class AllocationIn(BaseModel):
@@ -31,6 +32,11 @@ class PaymentCreate(BaseModel):
         if v == PaymentMethod.RAZORPAY:
             raise ValueError("Online (razorpay) payments are captured through the hosted page, not recorded manually.")
         return v
+
+    @field_validator("paid_at")
+    @classmethod
+    def _paid_at(cls, v):
+        return reject_future_datetime(v, "Payment date")
 
 
 class PaymentUpdate(BaseModel):

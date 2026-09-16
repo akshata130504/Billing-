@@ -14,6 +14,7 @@ import {
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
 import { LoadingState } from '../../components/common/LoadingState';
+import { validateDateNotBefore, validateNonNegativeMoney, validatePercentage, validatePositiveQuantity } from '../../utils/validation';
 import { quoteService } from '../../services/quoteService';
 import { customerService } from '../../services/customerService';
 import { catalogCpqService } from '../../services/catalogCpqService';
@@ -326,6 +327,36 @@ export function QuoteFormPage() {
     if (items.length === 0) {
       setError('At least one line item is required.');
       return;
+    }
+
+    const dateError = validateDateNotBefore(expiryDate, issueDate, 'Expiry date', 'issue date');
+    if (dateError) {
+      setError(dateError);
+      return;
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const label = `Line ${i + 1} (${it.description?.trim() || 'item'})`;
+      if (!it.description || !it.description.trim()) {
+        setError(`Line ${i + 1} must have a description.`);
+        return;
+      }
+      const qtyError = validatePositiveQuantity(it.quantity, `${label} quantity`);
+      if (qtyError) {
+        setError(qtyError);
+        return;
+      }
+      const priceError = validateNonNegativeMoney(it.unit_price, `${label} unit price`);
+      if (priceError) {
+        setError(priceError);
+        return;
+      }
+      const taxError = validatePercentage(it.tax_rate_pct, `${label} tax rate`);
+      if (taxError) {
+        setError(taxError);
+        return;
+      }
     }
 
     setIsSubmitting(true);

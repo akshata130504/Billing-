@@ -4,9 +4,12 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from backend.app.schemas.common_refs import CustomerRef, LineItemIn, LineItemOut, UserRef
+
+# Technical ceiling only (abuse/overflow prevention) — the business rules define no cap.
+_MAX_TEXT_LENGTH = 10000
 
 
 class QuoteCreate(BaseModel):
@@ -18,14 +21,20 @@ class QuoteCreate(BaseModel):
     expiry_date: Optional[date] = None
     currency: Optional[str] = Field(None, min_length=3, max_length=3)
     discount_pct: Decimal = Field(Decimal("0"), ge=0, le=100)
-    notes: Optional[str] = None
-    terms: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=_MAX_TEXT_LENGTH)
+    terms: Optional[str] = Field(None, max_length=_MAX_TEXT_LENGTH)
     items: List[LineItemIn] = Field(..., min_length=1)
 
     @field_validator("currency")
     @classmethod
     def _upper(cls, v):
         return v.upper() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def _expiry_after_issue(self):
+        if self.issue_date and self.expiry_date and self.expiry_date < self.issue_date:
+            raise ValueError("Expiry date cannot be before the issue date.")
+        return self
 
 
 class QuoteUpdate(BaseModel):
@@ -37,14 +46,20 @@ class QuoteUpdate(BaseModel):
     expiry_date: Optional[date] = None
     currency: Optional[str] = Field(None, min_length=3, max_length=3)
     discount_pct: Optional[Decimal] = Field(None, ge=0, le=100)
-    notes: Optional[str] = None
-    terms: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=_MAX_TEXT_LENGTH)
+    terms: Optional[str] = Field(None, max_length=_MAX_TEXT_LENGTH)
     items: Optional[List[LineItemIn]] = Field(None, min_length=1)
 
     @field_validator("currency")
     @classmethod
     def _upper(cls, v):
         return v.upper() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def _expiry_after_issue(self):
+        if self.issue_date and self.expiry_date and self.expiry_date < self.issue_date:
+            raise ValueError("Expiry date cannot be before the issue date.")
+        return self
 
 
 class QuoteDeclineIn(BaseModel):

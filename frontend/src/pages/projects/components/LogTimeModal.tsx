@@ -3,6 +3,7 @@ import { TimesheetEntry } from '../types';
 import { Modal } from '../../../components/common/Modal';
 import { Button } from '../../../components/common/Button';
 import { Input } from '../../../components/common/Input';
+import { validateDescription, validateNonNegativeMoney, parseStrictNumber } from '../../../utils/validation';
 
 interface LogTimeModalProps {
   isOpen: boolean;
@@ -25,18 +26,38 @@ export function LogTimeModal({ isOpen, onClose, onLogTime }: LogTimeModalProps) 
       setError('Employee name is required');
       return;
     }
-    if (!description.trim()) {
-      setError('Work description is required');
+    const descriptionError = validateDescription(description, 500, 'Work description');
+    if (descriptionError) {
+      setError(descriptionError);
       return;
     }
-    const numHours = parseFloat(hours);
-    const numRate = parseFloat(hourlyRate);
-    if (isNaN(numHours) || numHours <= 0) {
+    const numHours = parseStrictNumber(hours);
+    if (numHours === null || numHours <= 0) {
       setError('Hours must be greater than 0');
       return;
     }
+    if (numHours > 24) {
+      setError('Hours cannot exceed 24 in a single entry');
+      return;
+    }
+    const rateError = validateNonNegativeMoney(hourlyRate, 'Hourly rate');
+    if (rateError) {
+      setError(rateError);
+      return;
+    }
+    const numRate = parseStrictNumber(hourlyRate) ?? 0;
 
-    const calculatedAmount = billable ? Math.round(numHours * (isNaN(numRate) ? 0 : numRate)) : 0;
+    if (date) {
+      const entryDate = new Date(date);
+      const maxAllowed = new Date();
+      maxAllowed.setDate(maxAllowed.getDate() + 1);
+      if (!Number.isNaN(entryDate.getTime()) && entryDate.getTime() > maxAllowed.getTime()) {
+        setError('Date cannot be more than 1 day in the future');
+        return;
+      }
+    }
+
+    const calculatedAmount = billable ? Math.round(numHours * numRate) : 0;
 
     onLogTime({
       employee: employee.trim(),

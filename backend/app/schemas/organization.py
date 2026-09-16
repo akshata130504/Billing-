@@ -8,6 +8,12 @@ from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Fie
 
 from backend.app.models import MemberRole, MembershipStatus
 from backend.app.schemas.common_refs import UserRef, money_str
+from backend.app.schemas.validators import (
+    validate_gstin_format,
+    validate_pan_format,
+    validate_phone_number,
+    validate_website_url,
+)
 
 
 # --- shared scalar types -----------------------------------------------------------
@@ -120,6 +126,33 @@ class OrganizationUpdate(BaseModel):
     invoice_notes: Optional[str] = Field(default=None, max_length=5000)
     invoice_terms: Optional[str] = Field(default=None, max_length=5000)
     logo_url: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, v):
+        return validate_phone_number(v)
+
+    @field_validator("website")
+    @classmethod
+    def _website(cls, v):
+        return validate_website_url(v)
+
+    @field_validator("gstin")
+    @classmethod
+    def _gstin(cls, v):
+        return validate_gstin_format(v)
+
+    @field_validator("pan")
+    @classmethod
+    def _pan(cls, v):
+        return validate_pan_format(v)
+
+    @field_validator("email")
+    @classmethod
+    def _email(cls, v):
+        if v is None or v == "":
+            return v
+        return normalize_email(v)
 
 
 # --- Team --------------------------------------------------------------------------

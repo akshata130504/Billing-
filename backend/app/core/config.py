@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     # keep reads generous enough for a real customer refreshing a page, and writes tight.
     PUBLIC_RATE_LIMIT: str = "60/minute"
     PUBLIC_ACTION_RATE_LIMIT: str = "10/minute"
+    # Distributed rate limiting storage URI (e.g. redis://redis:6379/0).
+    # When empty or omitted, SlowAPI gracefully falls back to in-memory storage.
+    REDIS_URL: str | None = None
     # Set to true once the app is served over HTTPS so cookies/links assume TLS.
     SECURE_COOKIES: bool = False
 
@@ -141,6 +144,13 @@ class Settings(BaseSettings):
     DUNNING_REMINDER_INTERVAL_DAYS: int = 3
     DUNNING_MAX_REMINDERS: int = 3
 
+    # --- AI / Roomi Assistant -----------------------------------------------------------
+    # Optional external LLM integration (Google Gemini). When omitted, Roomi operates
+    # purely in deterministic in-house knowledge mode.
+    GEMINI_API_KEY: str | None = None
+    GEMINI_MODEL: str = "gemini-1.5-flash"
+    GEMINI_TIMEOUT_SECONDS: float = 10.0
+
     # --- Observability ------------------------------------------------------------------
     LOG_JSON: bool = False
     # Error tracking. Entirely optional: leave SENTRY_DSN empty and no Sentry code
@@ -205,6 +215,8 @@ class Settings(BaseSettings):
             "RAZORPAY_KEY_SECRET",
             "RAZORPAY_WEBHOOK_SECRET",
             "SMTP_PASSWORD",
+            "GEMINI_API_KEY",
+            "REDIS_URL",
         }
         parts = []
         for key, value in self.__dict__.items():

@@ -8,6 +8,7 @@ import {
 } from '../types';
 import { mockCustomers, mockProjectsByCustomer } from '../mockExpenses';
 import { X, CheckCircle, Repeat } from 'lucide-react';
+import { validateSensibleName, validatePositiveMoney, validateNonNegativeMoney, validateDateNotBefore, parseStrictNumber } from '../../../utils/validation';
 
 interface RecurringExpenseFormModalProps {
   isOpen: boolean;
@@ -121,14 +122,17 @@ export function RecurringExpenseFormModal({
 
   const validate = () => {
     const errs: Record<string, string> = {};
-    if (!name.trim()) errs.name = 'Profile name is required';
-    const numAmount = parseFloat(amount);
-    if (isNaN(numAmount) || numAmount <= 0) {
-      errs.amount = 'Amount must be greater than 0';
-    }
+    const nameError = validateSensibleName(name, 'Profile name');
+    if (nameError) errs.name = nameError;
+    const amountError = validatePositiveMoney(amount, 'Amount');
+    if (amountError) errs.amount = amountError;
     if (!startDate) errs.startDate = 'Start date is required';
     if (!neverEnds && !endDate) {
       errs.endDate = 'Please specify end date or choose Never Ends';
+    }
+    if (!neverEnds && startDate && endDate) {
+      const dateError = validateDateNotBefore(endDate, startDate, 'End date', 'start date');
+      if (dateError) errs.endDate = dateError;
     }
     if (billable) {
       if (!customer || customer === 'Internal') {
@@ -136,6 +140,10 @@ export function RecurringExpenseFormModal({
       }
       if (!project || project === '—') {
         errs.project = 'Please select a project';
+      }
+      if (billableAmount.trim() !== '') {
+        const billableAmountError = validateNonNegativeMoney(billableAmount, 'Billable amount');
+        if (billableAmountError) errs.billableAmount = billableAmountError;
       }
     }
     setErrors(errs);
@@ -146,8 +154,10 @@ export function RecurringExpenseFormModal({
     e.preventDefault();
     if (!validate()) return;
 
-    const numAmount = parseFloat(amount);
-    const numBillable = billable ? parseFloat(billableAmount || amount) : undefined;
+    const numAmount = parseStrictNumber(amount) as number;
+    const numBillable = billable
+      ? ((parseStrictNumber(billableAmount) ?? parseStrictNumber(amount)) as number)
+      : undefined;
     const nextRun = calculateNextRun(startDate, frequency);
 
     onSave({

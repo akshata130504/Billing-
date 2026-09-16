@@ -12,6 +12,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { formatMoney } from '../../../utils/format';
+import { validatePositiveMoney } from '../../../utils/validation';
 
 interface RecordPaymentModalProps {
   isOpen: boolean;
@@ -265,10 +266,20 @@ export function RecordPaymentModal({
     if (!customerId || !customers.some((c) => c.id === customerId)) {
       errs.customerId = 'Please select a valid customer from the list';
     }
-    if (isNaN(numReceived) || numReceived <= 0) {
-      errs.amountReceived = 'Amount received must be greater than 0';
+    const amountError = validatePositiveMoney(amountReceived, 'Amount received', { required: true });
+    if (amountError) {
+      errs.amountReceived = amountError;
     }
-    if (!paymentDate) errs.paymentDate = 'Payment date is required';
+    if (!paymentDate) {
+      errs.paymentDate = 'Payment date is required';
+    } else {
+      const enteredDate = new Date(paymentDate);
+      const maxAllowedDate = new Date();
+      maxAllowedDate.setDate(maxAllowedDate.getDate() + 1);
+      if (!isNaN(enteredDate.getTime()) && enteredDate.getTime() > maxAllowedDate.getTime()) {
+        errs.paymentDate = 'Payment date cannot be in the future.';
+      }
+    }
     if (!paymentMethod) errs.paymentMethod = 'Payment method is required';
 
     if (paymentType === 'invoice_payment') {

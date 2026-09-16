@@ -13,6 +13,16 @@ import { Select } from '../../components/common/Select';
 import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { cn } from '../../utils/cn';
+import {
+  validateSensibleName,
+  validateEmail,
+  validatePhone,
+  validateUrl,
+  validateGstin,
+  validatePan,
+  validateCountryCode,
+  validatePostalCode,
+} from '../../utils/validation';
 
 // ---------------------------------------------------------------------------
 // Form model
@@ -53,9 +63,6 @@ type FieldErrors = Record<string, string>;
 
 const CURRENCIES = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD', 'AUD', 'CAD'];
 const PAYMENT_TERM_PRESETS = [0, 7, 15, 30, 45, 60, 90];
-const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
-const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 
 let contactSeq = 0;
 function nextKey(): string {
@@ -161,27 +168,57 @@ function toPayload(values: FormValues): CustomerIn {
 
 function validate(values: FormValues): FieldErrors {
   const errors: FieldErrors = {};
-  if (values.display_name.trim() === '') errors.display_name = 'Display name is required';
-  if (values.email.trim() === '') errors.email = 'Email is required';
-  else if (!EMAIL_RE.test(values.email.trim())) errors.email = 'Enter a valid email address';
-  if (values.gstin.trim() !== '' && !GSTIN_RE.test(values.gstin.trim().toUpperCase())) {
-    errors.gstin = 'GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5';
+
+  const displayNameError = validateSensibleName(values.display_name, 'Display name');
+  if (displayNameError) errors.display_name = displayNameError;
+
+  if (values.company_name.trim() !== '') {
+    const companyNameError = validateSensibleName(values.company_name, 'Legal / company name');
+    if (companyNameError) errors.company_name = companyNameError;
   }
-  if (values.pan.trim() !== '' && !PAN_RE.test(values.pan.trim().toUpperCase())) {
-    errors.pan = 'PAN must be 10 characters, e.g. ABCDE1234F';
-  }
+
+  const emailError = validateEmail(values.email, { required: true });
+  if (emailError) errors.email = emailError;
+
+  const phoneError = validatePhone(values.phone);
+  if (phoneError) errors.phone = phoneError;
+
+  const websiteError = validateUrl(values.website);
+  if (websiteError) errors.website = websiteError;
+
+  const gstinError = validateGstin(values.gstin);
+  if (gstinError) errors.gstin = gstinError;
+
+  const panError = validatePan(values.pan);
+  if (panError) errors.pan = panError;
+
   if (!/^[A-Za-z]{3}$/.test(values.currency.trim())) errors.currency = 'Use a 3-letter currency code';
   const terms = Number(values.payment_terms_days);
   if (values.payment_terms_days.trim() === '' || !Number.isInteger(terms) || terms < 0 || terms > 365) {
     errors.payment_terms_days = 'Enter a whole number of days between 0 and 365';
   }
-  if (values.billing_country.trim() !== '' && !/^[A-Za-z]{2}$/.test(values.billing_country.trim())) {
-    errors.billing_country = 'Use a 2-letter country code, e.g. IN';
+
+  if (values.billing_country.trim() !== '') {
+    const countryError = validateCountryCode(values.billing_country);
+    if (countryError) errors.billing_country = countryError;
   }
+
+  if (values.billing_postal_code.trim() !== '') {
+    const postalCodeError = validatePostalCode(values.billing_postal_code);
+    if (postalCodeError) errors.billing_postal_code = postalCodeError;
+  }
+
   values.contacts.forEach((c, i) => {
-    if (c.name.trim() === '') errors[`contacts.${i}.name`] = 'Contact name is required';
-    if (c.email.trim() !== '' && !EMAIL_RE.test(c.email.trim())) errors[`contacts.${i}.email`] = 'Enter a valid email address';
+    const contactNameError = validateSensibleName(c.name, 'Contact name');
+    if (contactNameError) errors[`contacts.${i}.name`] = contactNameError;
+
+    const contactEmailError = validateEmail(c.email);
+    if (contactEmailError) errors[`contacts.${i}.email`] = contactEmailError;
+
+    const contactPhoneError = validatePhone(c.phone);
+    if (contactPhoneError) errors[`contacts.${i}.phone`] = contactPhoneError;
   });
+
   return errors;
 }
 

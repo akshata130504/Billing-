@@ -41,7 +41,17 @@ def public_action_rate_limit() -> str:
     return settings.PUBLIC_ACTION_RATE_LIMIT
 
 
-limiter = Limiter(key_func=rate_limit_key, headers_enabled=False)
+def _get_storage_uri() -> str:
+    """Returns Redis storage URI if configured, otherwise falls back to in-memory storage."""
+    return settings.REDIS_URL or "memory://"
+
+
+limiter = Limiter(
+    key_func=rate_limit_key,
+    storage_uri=_get_storage_uri(),
+    in_memory_fallback_enabled=True,
+    headers_enabled=False,
+)
 
 
 async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:

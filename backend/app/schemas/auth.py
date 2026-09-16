@@ -1,10 +1,11 @@
 """Authentication request/response models (contract §2)."""
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.app.models import MemberRole, MembershipStatus
 from backend.app.schemas.organization import EmailAddress, OrganizationOut, UTCDateTime
+from backend.app.schemas.validators import validate_phone_number, validate_sensible_name
 
 
 # --- requests ------------------------------------------------------------------------
@@ -88,6 +89,18 @@ class UserProfileUpdate(BaseModel):
 
     full_name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     phone: Optional[str] = Field(default=None, max_length=40)
+
+    @field_validator("full_name")
+    @classmethod
+    def _full_name(cls, v):
+        if v is None:
+            return v
+        return validate_sensible_name(v, "Full name")
+
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, v):
+        return validate_phone_number(v)
 
 
 class MembershipOut(BaseModel):

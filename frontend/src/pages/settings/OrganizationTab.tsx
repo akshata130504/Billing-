@@ -12,6 +12,7 @@ import { useAuth } from '../../hooks/useAuth';
 import type { OrganizationOut, OrganizationUpdate } from '../../types/api';
 import { ReadOnlyNotice, SettingsSection, nullable, str, type FieldErrors } from './settingsShared';
 import { ProfilePhotoUpload } from './ProfilePhotoUpload';
+import { validateSensibleName, validateEmail, validatePhone, validateUrl, validateGstin, validatePan } from '../../utils/validation';
 
 interface FormValues {
   name: string;
@@ -74,6 +75,30 @@ function toPayload(values: FormValues): OrganizationUpdate {
   };
 }
 
+function validate(values: FormValues): FieldErrors {
+  const errors: FieldErrors = {};
+
+  const nameError = validateSensibleName(values.name, 'Organization name');
+  if (nameError) errors.name = nameError;
+
+  const emailError = validateEmail(values.email);
+  if (emailError) errors.email = emailError;
+
+  const phoneError = validatePhone(values.phone);
+  if (phoneError) errors.phone = phoneError;
+
+  const websiteError = validateUrl(values.website);
+  if (websiteError) errors.website = websiteError;
+
+  const gstinError = validateGstin(values.gstin);
+  if (gstinError) errors.gstin = gstinError;
+
+  const panError = validatePan(values.pan);
+  if (panError) errors.pan = panError;
+
+  return errors;
+}
+
 const CURRENCIES = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD', 'AUD', 'CAD'];
 
 const TIMEZONES = [
@@ -122,6 +147,13 @@ export function OrganizationTab({ organization, canEdit }: { organization: Organ
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!canEdit) return;
+    const clientErrors = validate(values);
+    if (Object.keys(clientErrors).length > 0) {
+      setErrors(clientErrors);
+      showToast('error', 'Please fix the highlighted fields');
+      return;
+    }
+    setErrors({});
     mutation.mutate(toPayload(values));
   };
 

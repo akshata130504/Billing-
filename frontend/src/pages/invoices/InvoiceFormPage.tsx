@@ -19,6 +19,7 @@ import type { InvoiceLineItemIn } from '../../types/invoices';
 import type { PlanPricingItem } from '../../types/plans_pricing';
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
+import { validateDateNotBefore, validateNonNegativeMoney, validatePercentage, validatePositiveQuantity } from '../../utils/validation';
 
 export const InvoiceFormPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -293,6 +294,32 @@ export const InvoiceFormPage: React.FC = () => {
     if (items.some((it) => !it.name.trim())) {
       setError('All line items must have a name');
       return;
+    }
+
+    const dateError = validateDateNotBefore(dueDate, invoiceDate, 'Due date', 'invoice date');
+    if (dateError) {
+      setError(dateError);
+      return;
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const label = `Line ${i + 1} (${it.name.trim() || 'item'})`;
+      const qtyError = validatePositiveQuantity(it.quantity, `${label} quantity`);
+      if (qtyError) {
+        setError(qtyError);
+        return;
+      }
+      const rateError = validateNonNegativeMoney(it.rate, `${label} rate`);
+      if (rateError) {
+        setError(rateError);
+        return;
+      }
+      const taxError = validatePercentage(it.tax_rate, `${label} tax rate`);
+      if (taxError) {
+        setError(taxError);
+        return;
+      }
     }
 
     try {
@@ -598,6 +625,7 @@ export const InvoiceFormPage: React.FC = () => {
                     </label>
                     <input
                       type="number"
+                      min="0"
                       step="0.01"
                       value={item.rate}
                       onChange={(e) => handleItemChange(index, 'rate', Number(e.target.value))}

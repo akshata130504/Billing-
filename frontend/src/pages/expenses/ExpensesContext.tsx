@@ -1,10 +1,7 @@
 import { createContext, useContext, useState, useEffect, useMemo, useCallback, ReactNode } from 'react';
 import { Expense, RecurringExpense } from './types';
-import { initialExpenses, initialRecurringExpenses } from './mockExpenses';
+import { expenseService } from '../../services/expenseService';
 import { useToast } from '../../components/common/Toast';
-
-const STORAGE_EXPENSES_KEY = 'rooman_expenses_list_v1';
-const STORAGE_RECURRING_KEY = 'rooman_expenses_recurring_v1';
 
 export interface ExpensesSummary {
   total: number;
@@ -25,6 +22,8 @@ interface ExpensesContextType {
   recurringExpenses: RecurringExpense[];
   summary: ExpensesSummary;
   recurringSummary: RecurringSummary;
+  loading: boolean;
+  refreshExpenses: () => Promise<void>;
   addExpense: (data: Omit<Expense, 'id' | 'createdAt'>) => Expense;
   importExpenses: (items: Omit<Expense, 'id' | 'createdAt'>[]) => number;
   updateExpense: (id: string, updates: Partial<Expense>) => void;
@@ -45,48 +44,30 @@ const ExpensesContext = createContext<ExpensesContextType | undefined>(undefined
 export function ExpensesProvider({ children }: { children: ReactNode }) {
   const { showToast } = useToast();
 
-  const [expenses, setExpenses] = useState<Expense[]>(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_EXPENSES_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {
-      console.error('Failed to load expenses from localStorage:', e);
-    }
-    return initialExpenses;
-  });
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
 
-  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>(() => {
+  const fetchAll = useCallback(async () => {
     try {
-      const stored = localStorage.getItem(STORAGE_RECURRING_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
+      setLoading(true);
+      const [expList, recList] = await Promise.all([
+        expenseService.list(),
+        expenseService.listRecurring(),
+      ]);
+      setExpenses(expList);
+      setRecurringExpenses(recList);
     } catch (e) {
-      console.error('Failed to load recurring expenses from localStorage:', e);
+      console.error('Failed to load expenses from server:', e);
+      showToast('error', 'Failed to load expenses from server.');
+    } finally {
+      setLoading(false);
     }
-    return initialRecurringExpenses;
-  });
-
-  // Sync with localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_EXPENSES_KEY, JSON.stringify(expenses));
-    } catch (e) {
-      console.error('Failed to save expenses to localStorage:', e);
-    }
-  }, [expenses]);
+  }, [showToast]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_RECURRING_KEY, JSON.stringify(recurringExpenses));
-    } catch (e) {
-      console.error('Failed to save recurring expenses to localStorage:', e);
-    }
-  }, [recurringExpenses]);
+    fetchAll();
+  }, [fetchAll]);
 
   // Compute horizontal summary metrics
   const summary: ExpensesSummary = useMemo(() => {
@@ -103,7 +84,6 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
         nonBillable += exp.amount;
       }
 
-      // conceptual pending is billable but not yet invoiced/reimbursed, or status is draft/recorded
       if (exp.billable && exp.status !== 'invoiced' && exp.status !== 'cancelled') {
         pending += exp.amount;
       }
@@ -136,7 +116,6 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Find earliest upcoming next run
     const upcomingRuns = recurringExpenses
       .filter((r) => r.status === 'active' && r.nextRun)
       .map((r) => r.nextRun)
@@ -155,42 +134,50 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
   // CRUD for Expenses
   const addExpense = useCallback(
     (data: Omit<Expense, 'id' | 'createdAt'>): Expense => {
-      const id = `EXP-2026-${String(expenses.length + 1).padStart(3, '0')}`;
+      const tempId = `EXP-TEMP-${Date.now()}`;
       const newExpense: Expense = {
         ...data,
-        id,
+        id: tempId,
         createdAt: new Date().toISOString(),
       };
       setExpenses((prev) => [newExpense, ...prev]);
-      showToast('success', 'Expense Recorded', `${newExpense.name} recorded successfully.`);
+
+      expenseService
+        .create(data)
+        .then((created) => {
+          setExpenses((prev) =>
+            prev.map((e) => (e.id === tempId ? created : e))
+          );
+          showToast('success', 'Expense Recorded', `${created.name} recorded successfully.`);
+        })
+        .catch((err) => {
+          console.error('Failed to create expense on backend:', err);
+          setExpenses((prev) => prev.filter((e) => e.id !== tempId));
+          showToast('error', 'Failed to save expense to server.');
+        });
+
       return newExpense;
     },
-    [expenses.length, showToast]
+    [showToast]
   );
 
   const importExpenses = useCallback(
     (items: Omit<Expense, 'id' | 'createdAt'>[]): number => {
       if (!items.length) return 0;
-      const now = new Date().toISOString();
-      let maxNum = expenses.reduce((max, e) => {
-        const match = e.id.match(/EXP-\d{4}-(\d+)/);
-        return match ? Math.max(max, parseInt(match[1], 10)) : max;
-      }, 0);
+      expenseService
+        .batchImport(items)
+        .then((count) => {
+          showToast('success', 'Import Successful', `Successfully imported ${count} expense(s).`);
+          fetchAll();
+        })
+        .catch((err) => {
+          console.error('Failed to import expenses on backend:', err);
+          showToast('error', 'Failed to import expenses to server.');
+        });
 
-      const newEntries: Expense[] = items.map((item) => {
-        maxNum += 1;
-        return {
-          ...item,
-          id: `EXP-2026-${String(maxNum).padStart(3, '0')}`,
-          createdAt: now,
-        };
-      });
-
-      setExpenses((prev) => [...newEntries, ...prev]);
-      showToast('success', 'Import Successful', `Successfully imported ${newEntries.length} expense(s).`);
-      return newEntries.length;
+      return items.length;
     },
-    [expenses, showToast]
+    [fetchAll, showToast]
   );
 
   const updateExpense = useCallback(
@@ -198,17 +185,37 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
       setExpenses((prev) =>
         prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
       );
-      showToast('success', 'Expense Updated', 'Changes saved successfully.');
+
+      expenseService
+        .update(id, updates)
+        .then(() => {
+          showToast('success', 'Expense Updated', 'Changes saved successfully.');
+        })
+        .catch((err) => {
+          console.error('Failed to update expense on backend:', err);
+          showToast('error', 'Failed to update expense on server.');
+        });
     },
     [showToast]
   );
 
   const deleteExpense = useCallback(
     (id: string) => {
+      const backup = expenses;
       setExpenses((prev) => prev.filter((item) => item.id !== id));
-      showToast('info', 'Expense Removed', 'Expense item has been deleted.');
+
+      expenseService
+        .delete(id)
+        .then(() => {
+          showToast('info', 'Expense Removed', 'Expense item has been deleted.');
+        })
+        .catch((err) => {
+          console.error('Failed to delete expense on backend:', err);
+          setExpenses(backup);
+          showToast('error', 'Failed to delete expense on server.');
+        });
     },
-    [showToast]
+    [expenses, showToast]
   );
 
   const duplicateExpense = useCallback(
@@ -217,39 +224,31 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
       if (!original) {
         throw new Error('Expense not found');
       }
-      const newId = `EXP-2026-${String(expenses.length + 1).padStart(3, '0')}`;
-      const duplicated: Expense = {
+      return addExpense({
         ...original,
-        id: newId,
         name: `${original.name} (Copy)`,
         date: new Date().toISOString().split('T')[0],
         status: 'draft',
         invoiceId: undefined,
-        createdAt: new Date().toISOString(),
-      };
-      setExpenses((prev) => [duplicated, ...prev]);
-      showToast('success', 'Expense Duplicated', `Created duplicate as ${newId}.`);
-      return duplicated;
+      });
     },
-    [expenses, showToast]
+    [expenses, addExpense]
   );
 
   const addToInvoice = useCallback(
     (id: string) => {
-      setExpenses((prev) =>
-        prev.map((item) => {
-          if (item.id === id) {
-            const mockInvoiceNum = `INV-2026-00${Math.floor(Math.random() * 80) + 10}`;
-            return {
-              ...item,
-              status: 'invoiced',
-              invoiceId: mockInvoiceNum,
-            };
-          }
-          return item;
+      expenseService
+        .addToInvoice(id)
+        .then((updated) => {
+          setExpenses((prev) =>
+            prev.map((item) => (item.id === id ? updated : item))
+          );
+          showToast('success', 'Associated with Invoice', 'Expense converted to invoice billing line.');
         })
-      );
-      showToast('success', 'Associated with Invoice', 'Expense converted to invoice billing line.');
+        .catch((err) => {
+          console.error('Failed to associate expense with invoice on backend:', err);
+          showToast('error', 'Failed to add expense to invoice.');
+        });
     },
     [showToast]
   );
@@ -257,17 +256,31 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
   // CRUD for Recurring Expenses
   const addRecurringExpense = useCallback(
     (data: Omit<RecurringExpense, 'id' | 'createdAt'>): RecurringExpense => {
-      const id = `REC-EXP-${String(recurringExpenses.length + 1).padStart(3, '0')}`;
+      const tempId = `REC-TEMP-${Date.now()}`;
       const newRec: RecurringExpense = {
         ...data,
-        id,
+        id: tempId,
         createdAt: new Date().toISOString(),
       };
       setRecurringExpenses((prev) => [newRec, ...prev]);
-      showToast('success', 'Recurring Profile Created', `${newRec.name} schedule configured.`);
+
+      expenseService
+        .createRecurring(data)
+        .then((created) => {
+          setRecurringExpenses((prev) =>
+            prev.map((r) => (r.id === tempId ? created : r))
+          );
+          showToast('success', 'Recurring Profile Created', `${created.name} schedule configured.`);
+        })
+        .catch((err) => {
+          console.error('Failed to create recurring expense on backend:', err);
+          setRecurringExpenses((prev) => prev.filter((r) => r.id !== tempId));
+          showToast('error', 'Failed to save recurring profile to server.');
+        });
+
       return newRec;
     },
-    [recurringExpenses.length, showToast]
+    [showToast]
   );
 
   const updateRecurringExpense = useCallback(
@@ -275,31 +288,53 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
       setRecurringExpenses((prev) =>
         prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
       );
-      showToast('success', 'Recurring Profile Updated', 'Schedule settings saved.');
+
+      expenseService
+        .updateRecurring(id, updates)
+        .then(() => {
+          showToast('success', 'Recurring Profile Updated', 'Schedule settings saved.');
+        })
+        .catch((err) => {
+          console.error('Failed to update recurring profile on backend:', err);
+          showToast('error', 'Failed to update recurring profile on server.');
+        });
     },
     [showToast]
   );
 
   const deleteRecurringExpense = useCallback(
     (id: string) => {
+      const backup = recurringExpenses;
       setRecurringExpenses((prev) => prev.filter((item) => item.id !== id));
-      showToast('info', 'Recurring Profile Removed', 'Recurring profile has been deleted.');
+
+      expenseService
+        .deleteRecurring(id)
+        .then(() => {
+          showToast('info', 'Recurring Profile Removed', 'Recurring profile has been deleted.');
+        })
+        .catch((err) => {
+          console.error('Failed to delete recurring profile on backend:', err);
+          setRecurringExpenses(backup);
+          showToast('error', 'Failed to delete recurring profile from server.');
+        });
     },
-    [showToast]
+    [recurringExpenses, showToast]
   );
 
   const toggleRecurringStatus = useCallback(
     (id: string) => {
-      setRecurringExpenses((prev) =>
-        prev.map((item) => {
-          if (item.id === id) {
-            const nextStatus = item.status === 'active' ? 'paused' : 'active';
-            return { ...item, status: nextStatus };
-          }
-          return item;
+      expenseService
+        .toggleRecurringStatus(id)
+        .then((updated) => {
+          setRecurringExpenses((prev) =>
+            prev.map((item) => (item.id === id ? updated : item))
+          );
+          showToast('info', 'Status Toggled', 'Recurring profile state updated.');
         })
-      );
-      showToast('info', 'Status Toggled', 'Recurring profile state updated.');
+        .catch((err) => {
+          console.error('Failed to toggle recurring status on backend:', err);
+          showToast('error', 'Failed to update recurring status.');
+        });
     },
     [showToast]
   );
@@ -310,19 +345,13 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
       if (!original) {
         throw new Error('Recurring expense not found');
       }
-      const newId = `REC-EXP-${String(recurringExpenses.length + 1).padStart(3, '0')}`;
-      const duplicated: RecurringExpense = {
+      return addRecurringExpense({
         ...original,
-        id: newId,
         name: `${original.name} (Copy)`,
         status: 'paused',
-        createdAt: new Date().toISOString(),
-      };
-      setRecurringExpenses((prev) => [duplicated, ...prev]);
-      showToast('success', 'Recurring Profile Duplicated', `Created copy as ${newId}.`);
-      return duplicated;
+      });
     },
-    [recurringExpenses, showToast]
+    [recurringExpenses, addRecurringExpense]
   );
 
   const getExpenseById = useCallback(
@@ -342,6 +371,8 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
         recurringExpenses,
         summary,
         recurringSummary,
+        loading,
+        refreshExpenses: fetchAll,
         addExpense,
         importExpenses,
         updateExpense,

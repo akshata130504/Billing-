@@ -9,6 +9,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { formatDateTime, initials, ROLE_LABELS } from '../../utils/format';
 import { SettingsSection } from './settingsShared';
 import { userService } from '../../services/userService';
+import { validateSensibleName, validatePhone } from '../../utils/validation';
 
 export function ProfileTab() {
   const { user, organization, membership, refreshMe } = useAuth();
@@ -30,8 +31,14 @@ export function ProfileTab() {
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     const name = fullName.trim();
-    if (!name) {
-      showToast('error', 'Name required', 'Your full name cannot be empty.');
+    const nameError = validateSensibleName(name, 'Full name');
+    if (nameError) {
+      showToast('error', 'Invalid name', nameError);
+      return;
+    }
+    const phoneError = validatePhone(phone);
+    if (phoneError) {
+      showToast('error', 'Invalid phone number', phoneError);
       return;
     }
     setIsSaving(true);

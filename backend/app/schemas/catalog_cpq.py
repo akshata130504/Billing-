@@ -11,6 +11,7 @@ from backend.app.models.catalog_cpq import (
     PriceBookStatus,
     RuleType,
 )
+from backend.app.schemas.validators import validate_hsn_sac, validate_sku_format
 
 
 # --- Pricing Tiers ---
@@ -71,6 +72,16 @@ class OfferingCreate(BaseModel):
     def _upper_currency(cls, v):
         return v.upper() if isinstance(v, str) else v
 
+    @field_validator("sku")
+    @classmethod
+    def _sku(cls, v):
+        return validate_sku_format(v)
+
+    @field_validator("hsn_sac_code")
+    @classmethod
+    def _hsn_sac(cls, v):
+        return validate_hsn_sac(v)
+
 
 class OfferingUpdate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
@@ -95,6 +106,16 @@ class OfferingUpdate(BaseModel):
     @classmethod
     def _upper_currency(cls, v):
         return v.upper() if isinstance(v, str) else v
+
+    @field_validator("sku")
+    @classmethod
+    def _sku(cls, v):
+        return validate_sku_format(v)
+
+    @field_validator("hsn_sac_code")
+    @classmethod
+    def _hsn_sac(cls, v):
+        return validate_hsn_sac(v)
 
 
 class OfferingOut(BaseModel):
