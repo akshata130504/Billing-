@@ -1,0 +1,11 @@
+[Unit]
+Description=Rooman Billing - pull & roll out latest production images
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Adjust this path if the repo checkout on this server lives somewhere else.
+WorkingDirectory=/opt/rooman-billing
+ExecStart=/opt/rooman-billing/deploy/deploy-poll.sh
