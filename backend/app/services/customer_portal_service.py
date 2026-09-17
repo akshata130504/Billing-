@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -343,23 +346,26 @@ def create_customer_portal_invitation(
     org_name = ctx.organization.name if ctx.organization else "our organization"
 
     # Send invitation email
-    send_email(
-        to=target_email,
-        subject=f"Access your Customer Billing Portal at {org_name}",
-        text_body=(
-            f"Hello,\n\n"
-            f"You have been invited by {ctx.user.full_name} ({org_name}) to access your Customer Billing Portal.\n\n"
-            f"Set up your password and access your portal here:\n{invite_url}\n\n"
-            f"This link is secure and will expire in 48 hours.\n"
-        ),
-        html_body=(
-            f"<p>Hello,</p>"
-            f"<p>You have been invited by <strong>{ctx.user.full_name}</strong> ({org_name}) to access your Customer Billing Portal.</p>"
-            f"<p><a href=\"{invite_url}\" style=\"display:inline-block;background:#4f46e5;color:#ffffff;padding:10px 20px;text-decoration:none;border-radius:6px;\">Activate Portal Account</a></p>"
-            f"<p>Or copy this link: <br><code>{invite_url}</code></p>"
-            f"<p>This link is secure and will expire in 48 hours.</p>"
-        ),
-    )
+    try:
+        send_email(
+            to=target_email,
+            subject=f"Access your Customer Billing Portal at {org_name}",
+            text_body=(
+                f"Hello,\n\n"
+                f"You have been invited by {ctx.user.full_name} ({org_name}) to access your Customer Billing Portal.\n\n"
+                f"Set up your password and access your portal here:\n{invite_url}\n\n"
+                f"This link is secure and will expire in 48 hours.\n"
+            ),
+            html_body=(
+                f"<p>Hello,</p>"
+                f"<p>You have been invited by <strong>{ctx.user.full_name}</strong> ({org_name}) to access your Customer Billing Portal.</p>"
+                f"<p><a href=\"{invite_url}\" style=\"display:inline-block;background:#4f46e5;color:#ffffff;padding:10px 20px;text-decoration:none;border-radius:6px;\">Activate Portal Account</a></p>"
+                f"<p>Or copy this link: <br><code>{invite_url}</code></p>"
+                f"<p>This link is secure and will expire in 48 hours.</p>"
+            ),
+        )
+    except Exception as exc:  # delivery problems must not lose the invitation
+        logger.error("Portal invitation email to %s failed: %s", target_email, exc)
 
     audit.record(
         db,

@@ -148,7 +148,7 @@ class Settings(BaseSettings):
     # Optional external LLM integration (Google Gemini). When omitted, Roomi operates
     # purely in deterministic in-house knowledge mode.
     GEMINI_API_KEY: str | None = None
-    GEMINI_MODEL: str = "gemini-1.5-flash"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
     GEMINI_TIMEOUT_SECONDS: float = 10.0
 
     # --- Observability ------------------------------------------------------------------
