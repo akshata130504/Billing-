@@ -5,7 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from backend.app.models.timesheets import TimeEntryStatus
 
@@ -39,6 +39,19 @@ class TimeEntryBase(BaseModel):
     def _date(cls, v):
         return _reject_far_future(v)
 
+    @model_validator(mode="after")
+    def _validate_time_range(self):
+        if self.start_time and self.end_time:
+            try:
+                sh, sm = map(int, self.start_time.split(":")[:2])
+                eh, em = map(int, self.end_time.split(":")[:2])
+                if (eh * 60 + em) <= (sh * 60 + sm):
+                    raise ValueError("End time must be later than start time.")
+            except ValueError as e:
+                if "End time must be later" in str(e):
+                    raise
+        return self
+
 
 class TimeEntryCreate(TimeEntryBase):
     pass
@@ -62,6 +75,19 @@ class TimeEntryUpdate(BaseModel):
     @classmethod
     def _date(cls, v):
         return _reject_far_future(v)
+
+    @model_validator(mode="after")
+    def _validate_time_range(self):
+        if self.start_time and self.end_time:
+            try:
+                sh, sm = map(int, self.start_time.split(":")[:2])
+                eh, em = map(int, self.end_time.split(":")[:2])
+                if (eh * 60 + em) <= (sh * 60 + sm):
+                    raise ValueError("End time must be later than start time.")
+            except ValueError as e:
+                if "End time must be later" in str(e):
+                    raise
+        return self
 
 
 class TimeEntryRead(BaseModel):

@@ -95,7 +95,7 @@ export function RecurringExpenseTable({
   }
 
   return (
-    <div className="bg-white border border-slate-200/80 rounded-xl overflow-hidden shadow-2xs">
+    <div className="bg-white border border-slate-200/80 rounded-xl overflow-hidden shadow-2xs min-h-[260px]">
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs border-collapse">
           <thead>
@@ -112,8 +112,9 @@ export function RecurringExpenseTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {recurringExpenses.map((expense) => {
+            {recurringExpenses.map((expense, idx) => {
               const isMenuOpen = activeMenuId === expense.id;
+              const isNearBottom = idx >= Math.max(1, recurringExpenses.length - 2);
 
               return (
                 <tr
@@ -222,7 +223,12 @@ export function RecurringExpenseTable({
                               className="fixed inset-0 z-20"
                               onClick={() => setActiveMenuId(null)}
                             />
-                            <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1 text-xs">
+                            <div
+                              className={`absolute right-0 w-44 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1 text-xs ${
+                                isNearBottom ? 'bottom-full mb-1' : 'top-full mt-1'
+                              }`}
+                              style={isNearBottom ? { top: 'auto', bottom: '100%', marginBottom: '4px' } : undefined}
+                            >
                               <button
                                 type="button"
                                 onClick={() => {

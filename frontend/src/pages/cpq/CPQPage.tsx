@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../../components/common/Button';
+import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { LoadingState } from '../../components/common/LoadingState';
 import { catalogCpqService } from '../../services/catalogCpqService';
 import { customerService } from '../../services/customerService';
@@ -45,6 +46,8 @@ export function CPQPage() {
   const [simulation, setSimulation] = useState<PriceSimulationResponse | null>(null);
   const [expandedExplanation, setExpandedExplanation] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [dealToConvert, setDealToConvert] = useState<string | null>(null);
+  const [isConverting, setIsConverting] = useState(false);
 
   // Load existing deals and prerequisites
   const loadData = async () => {
@@ -176,14 +179,21 @@ export function CPQPage() {
     setSimulation(null);
   };
 
-  const handleConvertToQuote = async (dealId: string) => {
-    if (confirm('Convert this configured deal into a formal customer Quote?')) {
-      try {
-        const quote = await catalogCpqService.convertToQuote(dealId);
-        navigate(`/quotes/${quote.id}`);
-      } catch (err: any) {
-        alert(err?.response?.data?.error?.message || err?.message || 'Conversion failed.');
-      }
+  const handleConvertToQuote = (dealId: string) => {
+    setDealToConvert(dealId);
+  };
+
+  const handleConfirmConvert = async () => {
+    if (!dealToConvert) return;
+    try {
+      setIsConverting(true);
+      const quote = await catalogCpqService.convertToQuote(dealToConvert);
+      setDealToConvert(null);
+      navigate(`/quotes/${quote.id}`);
+    } catch (err: any) {
+      console.error('Failed to convert deal to quote:', err);
+    } finally {
+      setIsConverting(false);
     }
   };
 
@@ -349,7 +359,7 @@ export function CPQPage() {
 
       {/* Guided Deal Builder Wizard Modal */}
       {isWizardOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs overflow-y-auto">
+        <div className="fixed inset-0 z-50 !m-0 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden my-8 flex flex-col max-h-[90vh]">
             {/* Wizard Header & Stepper */}
             <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
@@ -796,6 +806,17 @@ export function CPQPage() {
           </div>
         </div>
       )}
+
+      {/* Styled Convert to Quote Confirmation Modal */}
+      <ConfirmDialog
+        isOpen={!!dealToConvert}
+        onClose={() => !isConverting && setDealToConvert(null)}
+        onConfirm={handleConfirmConvert}
+        title="Convert Deal to Quote"
+        description="Convert this configured deal into a formal customer Quote? You will be redirected to the generated quote document."
+        confirmLabel="Convert to Quote"
+        isLoading={isConverting}
+      />
     </div>
   );
 }

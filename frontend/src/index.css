@@ -150,3 +150,47 @@ html.dark .shadow-xl {
   box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.45) !important;
 }
 
+/* ==========================================================================
+   Print Styles (Ensures clean document-only output without application shell)
+   ========================================================================== */
+@media print {
+  /* Hide application shell navigation, header, action buttons, search, and floating widgets */
+  header,
+  aside,
+  nav,
+  .no-print,
+  button,
+  [role="banner"],
+  [role="navigation"],
+  [aria-label*="chat"],
+  [aria-label*="Chat"] {
+    display: none !important;
+  }
+
+  /* Reset document viewport to standard paper printing */
+  html,
+  body,
+  #root,
+  .h-screen,
+  div.overflow-hidden,
+  main.overflow-y-auto {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #ffffff !important;
+  }
+
+  /* Clean print typography and borders */
+  * {
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+}
+
