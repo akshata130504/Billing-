@@ -26,6 +26,7 @@ from backend.app.models.customization import (
     TransactionNumberSeries,
     WebTab,
 )
+from backend.app.models.identity import Organization
 from backend.app.models.notifications import NotificationChannel
 from backend.app.schemas.customization import (
     AutomationRuleCreate,
@@ -267,6 +268,19 @@ def render_template_preview(db: Session, template_id: str, organization_id: str)
     template = get_template(db, template_id, organization_id)
     ctx = _SAMPLE_DOCUMENT_CONTEXT
 
+    # Fetch configured logo from template, falling back to organization logo
+    logo_url = template.logo_url
+    if not logo_url:
+        org = db.scalar(select(Organization).where(Organization.id == organization_id))
+        if org and org.logo_url:
+            logo_url = org.logo_url
+
+    logo_html = (
+        f'<div class="logo-container" style="margin-bottom: 16px;"><img src="{logo_url}" alt="Organization Logo" style="max-height: 50px; max-width: 200px; object-fit: contain;" /></div>'
+        if logo_url
+        else ""
+    )
+
     rows_html = "".join(
         f"<tr><td>{item['description']}</td><td>{item['quantity']}</td>"
         f"<td>{item['unit_amount']}</td><td>{item['amount']}</td></tr>"
@@ -282,6 +296,7 @@ td, th {{ border: 1px solid #ddd; padding: 6px; }}
 {template.custom_css or ""}
 </style></head>
 <body>
+{logo_html}
 {f"<div class='header'>{template.header_text}</div>" if template.header_text else ""}
 <h1>{template.document_type.value.replace('_', ' ').title()} {ctx['document_number']}</h1>
 {f"<p>{ctx['customer_name']}</p>" if template.show_company_address else ""}
@@ -299,6 +314,7 @@ td, th {{ border: 1px solid #ddd; padding: 6px; }}
 </html>"""
 
     text_lines = [
+        f"[Logo: {logo_url}]" if logo_url else "",
         f"{template.document_type.value.replace('_', ' ').title()} {ctx['document_number']}",
         ctx["customer_name"] if template.show_company_address else "",
         f"Issue Date: {ctx['issue_date']} | Due Date: {ctx['due_date']}",

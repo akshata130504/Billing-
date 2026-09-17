@@ -74,6 +74,9 @@ export function TimeEntryModal({
         if (endMin > startMin) {
           const diffHours = (endMin - startMin) / 60;
           setDurationHours(parseFloat(diffHours.toFixed(2)));
+          setError((prev) => (prev === 'End time must be later than start time.' ? null : prev));
+        } else {
+          setError('End time must be later than start time.');
         }
       }
     }
@@ -85,6 +88,17 @@ export function TimeEntryModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (startTime && endTime) {
+      const [sh, sm] = startTime.split(':').map(Number);
+      const [eh, em] = endTime.split(':').map(Number);
+      if (!isNaN(sh) && !isNaN(sm) && !isNaN(eh) && !isNaN(em)) {
+        if (eh * 60 + em <= sh * 60 + sm) {
+          setError('End time must be later than start time.');
+          return;
+        }
+      }
+    }
 
     if (numDuration <= 0 || numDuration > 24) {
       setError('Duration must be greater than 0 and at most 24 hours.');

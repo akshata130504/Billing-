@@ -82,7 +82,9 @@ export function PreferencesTab() {
   }, [prefs.theme]);
 
   const handleThemeSelect = (theme: 'light' | 'dark' | 'system') => {
-    setPrefs((p) => ({ ...p, theme }));
+    const next = { ...prefs, theme };
+    setPrefs(next);
+    savePreferences(next);
     applyTheme(theme);
   };
 

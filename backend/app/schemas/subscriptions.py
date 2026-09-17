@@ -92,4 +92,5 @@ class SubscriptionSummaryOut(BaseModel):
     paused_count: int
     renewing_soon_count: int
     cancelled_count: int
+    draft_count: int = 0
     total_mrr: str

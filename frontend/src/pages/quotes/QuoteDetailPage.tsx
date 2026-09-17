@@ -198,7 +198,7 @@ export const QuoteDetailPage = () => {
   return (
     <div className="space-y-6">
       {/* Top Header & Breadcrumb */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 no-print">
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate('/quotes')}
@@ -301,10 +301,10 @@ export const QuoteDetailPage = () => {
       </div>
 
       {/* Main Content Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 print:block">
         {/* Left 2 Columns: Quote Document Details */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden p-6 sm:p-8">
+        <div className="lg:col-span-2 space-y-6 print:w-full">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden p-6 sm:p-8 print:border-none print:shadow-none print:p-0">
             {/* Document Header */}
             <div className="flex flex-col sm:flex-row justify-between items-start border-b border-gray-100 pb-6 gap-4">
               <div>
@@ -457,8 +457,8 @@ export const QuoteDetailPage = () => {
           </div>
         </div>
 
-        {/* Right 1 Column: Meta, Timeline & Status History */}
-        <div className="space-y-6">
+        {/* Right Column: Status & Timeline Actions */}
+        <div className="space-y-6 no-print">
           <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
             <h3 className="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
               <Clock className="w-4 h-4 text-gray-500" /> Lifecycle Status

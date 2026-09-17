@@ -287,6 +287,7 @@ def get_subscriptions_summary(db: Session, organization_id: str) -> Dict[str, An
     paused_count = 0
     renewing_soon_count = 0
     cancelled_count = 0
+    draft_count = 0
     total_mrr = Decimal("0.00")
 
     for s in subs:
@@ -303,6 +304,8 @@ def get_subscriptions_summary(db: Session, organization_id: str) -> Dict[str, An
             paused_count += 1
         elif s.status == SubscriptionStatus.CANCELLED:
             cancelled_count += 1
+        elif s.status == SubscriptionStatus.DRAFT:
+            draft_count += 1
 
     return {
         "total_subscriptions": total_count,
@@ -311,6 +314,7 @@ def get_subscriptions_summary(db: Session, organization_id: str) -> Dict[str, An
         "paused_count": paused_count,
         "renewing_soon_count": renewing_soon_count,
         "cancelled_count": cancelled_count,
+        "draft_count": draft_count,
         "total_mrr": money_str(q2(total_mrr)),
     }
 
