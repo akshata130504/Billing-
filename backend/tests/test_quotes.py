@@ -96,11 +96,16 @@ def test_update_replaces_items_and_recomputes(client, tenant, auth_headers):
     assert len(resp.json()["items"]) == 1
 
 
-def test_list_quotes_filters(client, tenant, auth_headers):
+def test_list_quotes_filters(client, tenant, auth_headers, db):
     c1 = tenant.customer()
     c2 = tenant.customer()
     _create(client, auth_headers, c1)
-    _create(client, auth_headers, c2, issue_date="2020-01-15")
+    backdated = _create(client, auth_headers, c2)
+    # The create API now rejects a past issue_date (quotes can't be created in the past);
+    # backdate this one directly in the DB to test date-range filtering on historical data.
+    quote_row = db.get(Quote, backdated["id"])
+    quote_row.issue_date = date(2020, 1, 15)
+    db.commit()
     _sent_quote(client, auth_headers, c2)
 
     body = client.get(BASE, headers=auth_headers).json()
