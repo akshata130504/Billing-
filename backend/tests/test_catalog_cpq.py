@@ -60,6 +60,51 @@ def test_offering_crud_and_sku_uniqueness(client, auth_headers):
     assert del_resp.status_code == 204
 
 
+def test_update_offering_with_pricing_brackets(client, auth_headers):
+    # Create offering without pricing brackets
+    resp = client.post(CATALOG_OFFERINGS, json=_offering(name="Bandwidth Tiered"), headers=auth_headers)
+    assert resp.status_code == 201, resp.text
+    offering_id = resp.json()["id"]
+
+    # Update offering to add pricing brackets (verifies JSON serialization fix)
+    brackets = [
+        {"min_qty": 0, "max_qty": 100, "unit_price": 50.0},
+        {"min_qty": 101, "max_qty": 500, "unit_price": 40.0},
+        {"min_qty": 501, "max_qty": None, "unit_price": 30.0},
+    ]
+    up_resp = client.patch(
+        f"{CATALOG_OFFERINGS}/{offering_id}",
+        json={"pricing_model": "volume", "pricing_tiers": brackets},
+        headers=auth_headers,
+    )
+    assert up_resp.status_code == 200, up_resp.text
+    updated = up_resp.json()
+    assert len(updated["pricing_tiers"]) == 3
+    assert updated["pricing_tiers"][0]["unit_price"] == 50.0
+
+    # Update again to modify brackets
+    modified_brackets = [
+        {"min_qty": 0, "max_qty": 200, "unit_price": 45.0},
+    ]
+    up_resp2 = client.patch(
+        f"{CATALOG_OFFERINGS}/{offering_id}",
+        json={"pricing_tiers": modified_brackets},
+        headers=auth_headers,
+    )
+    assert up_resp2.status_code == 200
+    assert len(up_resp2.json()["pricing_tiers"]) == 1
+    assert up_resp2.json()["pricing_tiers"][0]["unit_price"] == 45.0
+
+    # Update to clear brackets
+    up_resp3 = client.patch(
+        f"{CATALOG_OFFERINGS}/{offering_id}",
+        json={"pricing_model": "per_unit", "pricing_tiers": []},
+        headers=auth_headers,
+    )
+    assert up_resp3.status_code == 200
+    assert up_resp3.json()["pricing_tiers"] is None
+
+
 def test_pricing_engine_all_models_and_boundaries(client, auth_headers):
     # 1. Flat Model
     flat_resp = client.post(

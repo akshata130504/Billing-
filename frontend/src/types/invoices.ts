@@ -21,6 +21,7 @@ export interface InvoiceKPIs {
   overdue_count: number;
   total_outstanding: number;
   total_revenue: number;
+  void_count?: number;
 }
 
 export interface InvoiceCustomerRef {

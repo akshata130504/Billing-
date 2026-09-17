@@ -49,10 +49,23 @@ export const InvoicesListPage: React.FC = () => {
       if (searchTerm) {
         params.search = searchTerm;
       }
-      const data = await invoiceService.getInvoices(params);
+      const [data, summaryData] = await Promise.all([
+        invoiceService.getInvoices(params),
+        invoiceService.getSummary(),
+      ]);
       setInvoices(data.items);
-      if (data.kpis) {
-        setKpis(data.kpis);
+      if (summaryData) {
+        setKpis({
+          total_invoices: summaryData.total_invoices ?? 0,
+          draft_count: summaryData.draft_count ?? 0,
+          sent_count: summaryData.sent_count ?? 0,
+          partially_paid_count: summaryData.partially_paid_count ?? 0,
+          paid_count: summaryData.paid_count ?? 0,
+          overdue_count: summaryData.overdue_count ?? 0,
+          void_count: summaryData.void_count ?? 0,
+          total_outstanding: Number(summaryData.total_outstanding ?? 0),
+          total_revenue: Number(summaryData.total_revenue ?? 0),
+        });
       }
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Failed to load invoices');
@@ -97,7 +110,7 @@ export const InvoicesListPage: React.FC = () => {
     { id: 'partially_paid', label: 'Partially Paid', count: kpis.partially_paid_count },
     { id: 'paid', label: 'Paid', count: kpis.paid_count },
     { id: 'overdue', label: 'Overdue', count: kpis.overdue_count },
-    { id: 'void', label: 'Void' },
+    { id: 'void', label: 'Void', count: kpis.void_count ?? 0 },
   ];
 
   return (

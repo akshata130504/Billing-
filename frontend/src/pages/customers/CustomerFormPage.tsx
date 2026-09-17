@@ -204,7 +204,7 @@ function validate(values: FormValues): FieldErrors {
   }
 
   if (values.billing_postal_code.trim() !== '') {
-    const postalCodeError = validatePostalCode(values.billing_postal_code);
+    const postalCodeError = validatePostalCode(values.billing_postal_code, { country: values.billing_country });
     if (postalCodeError) errors.billing_postal_code = postalCodeError;
   }
 

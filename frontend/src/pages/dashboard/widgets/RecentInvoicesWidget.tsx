@@ -1,80 +1,46 @@
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
-
-interface RecentInvoiceItem {
-  id: string;
-  invoiceNumber: string;
-  customerName: string;
-  amount: string;
-  status: 'Paid' | 'Pending' | 'Overdue';
-  date: string;
-}
-
-const DEFAULT_RECENT_INVOICES: RecentInvoiceItem[] = [
-  {
-    id: '1',
-    invoiceNumber: 'INV-2025-001',
-    customerName: 'Acme Corp',
-    amount: '₹ 48,000',
-    status: 'Paid',
-    date: 'Sep 6, 2025',
-  },
-  {
-    id: '2',
-    invoiceNumber: 'INV-2025-002',
-    customerName: 'Bright Studio',
-    amount: '₹ 32,000',
-    status: 'Pending',
-    date: 'Sep 5, 2025',
-  },
-  {
-    id: '3',
-    invoiceNumber: 'INV-2025-003',
-    customerName: 'CloudTech',
-    amount: '₹ 1,20,000',
-    status: 'Overdue',
-    date: 'Sep 3, 2025',
-  },
-  {
-    id: '4',
-    invoiceNumber: 'INV-2025-004',
-    customerName: 'Nova Systems',
-    amount: '₹ 56,000',
-    status: 'Paid',
-    date: 'Sep 1, 2025',
-  },
-  {
-    id: '5',
-    invoiceNumber: 'INV-2025-005',
-    customerName: 'Zenith Media',
-    amount: '₹ 28,000',
-    status: 'Pending',
-    date: 'Aug 30, 2025',
-  },
-];
-
-const statusStyles: Record<RecentInvoiceItem['status'], { bg: string; text: string }> = {
-  Paid: {
-    bg: 'bg-[#DDF4EA]',
-    text: 'text-[#107548]',
-  },
-  Pending: {
-    bg: 'bg-[#F9D9E8]',
-    text: 'text-[#E83E8C]',
-  },
-  Overdue: {
-    bg: 'bg-[#FCEBD9]',
-    text: 'text-[#C05621]',
-  },
-};
-
+import { invoiceService } from '../../../services/invoiceService';
+import { formatMoney, formatDate } from '../../../utils/format';
+import type { Invoice } from '../../../types/invoices';
 import type { PaymentOut } from '../../../types';
 
 export interface RecentInvoicesWidgetProps {
   transactions?: PaymentOut[];
 }
 
+const statusBadgeStyles: Record<string, { bg: string; text: string; label: string }> = {
+  PAID: { bg: 'bg-[#DDF4EA]', text: 'text-[#107548]', label: 'Paid' },
+  SENT: { bg: 'bg-[#E8EBFC]', text: 'text-[#25247A]', label: 'Sent' },
+  PARTIALLY_PAID: { bg: 'bg-[#F9D9E8]', text: 'text-[#E83E8C]', label: 'Partially Paid' },
+  OVERDUE: { bg: 'bg-[#FCEBD9]', text: 'text-[#C05621]', label: 'Overdue' },
+  DRAFT: { bg: 'bg-slate-100', text: 'text-slate-600', label: 'Draft' },
+  VOID: { bg: 'bg-slate-100', text: 'text-slate-400', label: 'Void' },
+};
+
 export function RecentInvoicesWidget({ transactions: _transactions }: RecentInvoicesWidgetProps = {}) {
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    invoiceService
+      .listInvoices({ page_size: 5 })
+      .then((res) => {
+        if (mounted) setInvoices(res.items || []);
+      })
+      .catch((err) => {
+        console.error('Failed to load recent invoices:', err);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   return (
     <div className="bg-white p-5 rounded-2xl border border-[#E7E9F2] shadow-sm space-y-4">
       {/* Header */}
@@ -104,40 +70,59 @@ export function RecentInvoicesWidget({ transactions: _transactions }: RecentInvo
             </tr>
           </thead>
           <tbody className="divide-y divide-[#F0F2FA] text-xs">
-            {DEFAULT_RECENT_INVOICES.map((inv) => {
-              const badgeStyle = statusStyles[inv.status];
-              return (
-                <tr
-                  key={inv.id}
-                  className="hover:bg-[#F7F8FC]/70 transition-colors"
-                >
-                  <td className="py-3 px-3">
-                    <Link
-                      to="/invoices"
-                      className="font-medium text-[#3F51C9] hover:underline font-mono text-xs"
-                    >
-                      {inv.invoiceNumber}
-                    </Link>
-                  </td>
-                  <td className="py-3 px-3 font-semibold text-[#11194F]">
-                    {inv.customerName}
-                  </td>
-                  <td className="py-3 px-3 font-semibold text-[#11194F] tabular-nums">
-                    {inv.amount}
-                  </td>
-                  <td className="py-3 px-3">
-                    <span
-                      className={`inline-block px-2.5 py-0.5 rounded-md text-[11px] font-semibold ${badgeStyle.bg} ${badgeStyle.text}`}
-                    >
-                      {inv.status}
-                    </span>
-                  </td>
-                  <td className="py-3 px-3 text-[#7B829A] text-[11px]">
-                    {inv.date}
-                  </td>
-                </tr>
-              );
-            })}
+            {invoices.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="py-8 px-3 text-center text-slate-400 italic text-xs">
+                  {loading ? 'Loading recent invoices...' : 'No invoices recorded yet.'}
+                </td>
+              </tr>
+            ) : (
+              invoices.map((inv) => {
+                const sKey = (inv.status || 'DRAFT').toUpperCase();
+                const badge = statusBadgeStyles[sKey] || {
+                  bg: 'bg-slate-100',
+                  text: 'text-slate-600',
+                  label: inv.status,
+                };
+                const custName =
+                  inv.customer?.display_name ||
+                  inv.customer?.displayName ||
+                  inv.customer?.name ||
+                  'Customer';
+
+                return (
+                  <tr
+                    key={inv.id}
+                    className="hover:bg-[#F7F8FC]/70 transition-colors"
+                  >
+                    <td className="py-3 px-3">
+                      <Link
+                        to={`/invoices/${inv.id}`}
+                        className="font-medium text-[#3F51C9] hover:underline font-mono text-xs"
+                      >
+                        {inv.invoice_number}
+                      </Link>
+                    </td>
+                    <td className="py-3 px-3 font-semibold text-[#11194F]">
+                      {custName}
+                    </td>
+                    <td className="py-3 px-3 font-semibold text-[#11194F] tabular-nums">
+                      {formatMoney(inv.total ?? 0, inv.currency || 'INR')}
+                    </td>
+                    <td className="py-3 px-3">
+                      <span
+                        className={`inline-block px-2.5 py-0.5 rounded-md text-[11px] font-semibold ${badge.bg} ${badge.text}`}
+                      >
+                        {badge.label}
+                      </span>
+                    </td>
+                    <td className="py-3 px-3 text-[#7B829A] text-[11px]">
+                      {inv.issue_date || inv.invoice_date ? formatDate(inv.issue_date || inv.invoice_date!) : '—'}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>

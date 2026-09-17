@@ -125,3 +125,15 @@ class InvoiceOut(BaseModel):
     created_by: Optional[UserRef] = None
     created_at: datetime
     updated_at: datetime
+
+
+class InvoiceSummaryKPIs(BaseModel):
+    total_invoices: int
+    draft_count: int
+    sent_count: int
+    partially_paid_count: int
+    paid_count: int
+    overdue_count: int
+    void_count: int
+    total_outstanding: str
+    total_revenue: str

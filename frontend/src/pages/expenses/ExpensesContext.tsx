@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useMemo, useCallback, ReactNode } from 'react';
 import { Expense, RecurringExpense } from './types';
 import { expenseService } from '../../services/expenseService';
+import { tokenStorage } from '../../services/apiClient';
 import { useToast } from '../../components/common/Toast';
 
 export interface ExpensesSummary {
@@ -49,6 +50,12 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState<boolean>(true);
 
   const fetchAll = useCallback(async () => {
+    if (!tokenStorage.hasSession()) {
+      setExpenses([]);
+      setRecurringExpenses([]);
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       const [expList, recList] = await Promise.all([
@@ -66,6 +73,10 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
   }, [showToast]);
 
   useEffect(() => {
+    if (!tokenStorage.hasSession()) {
+      setLoading(false);
+      return;
+    }
     fetchAll();
   }, [fetchAll]);
 

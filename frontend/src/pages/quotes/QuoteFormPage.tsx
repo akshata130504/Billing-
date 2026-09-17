@@ -14,7 +14,7 @@ import {
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
 import { LoadingState } from '../../components/common/LoadingState';
-import { validateDateNotBefore, validateNonNegativeMoney, validatePercentage, validatePositiveQuantity } from '../../utils/validation';
+import { validateDateAfter, validateDateNotPast, validateNonNegativeMoney, validatePercentage, validatePositiveQuantity } from '../../utils/validation';
 import { quoteService } from '../../services/quoteService';
 import { customerService } from '../../services/customerService';
 import { catalogCpqService } from '../../services/catalogCpqService';
@@ -60,6 +60,33 @@ export function QuoteFormPage() {
   const [expiryDate, setExpiryDate] = useState(
     new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   );
+  const [issueDateError, setIssueDateError] = useState<string | null>(null);
+  const [expiryDateError, setExpiryDateError] = useState<string | null>(null);
+
+  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const minExpiryDate = useMemo(() => {
+    if (!issueDate) return todayStr;
+    const d = new Date(issueDate);
+    if (Number.isNaN(d.getTime())) return todayStr;
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split('T')[0];
+  }, [issueDate, todayStr]);
+
+  const handleIssueDateChange = (newVal: string) => {
+    setIssueDate(newVal);
+    const pastErr = !isEditing ? validateDateNotPast(newVal, 'Issue date') : null;
+    setIssueDateError(pastErr);
+    if (expiryDate) {
+      const expErr = validateDateAfter(expiryDate, newVal, 'Expiry date', 'issue date');
+      setExpiryDateError(expErr);
+    }
+  };
+
+  const handleExpiryDateChange = (newVal: string) => {
+    setExpiryDate(newVal);
+    const expErr = validateDateAfter(newVal, issueDate, 'Expiry date', 'issue date');
+    setExpiryDateError(expErr);
+  };
   const [currency, setCurrency] = useState('INR');
   const [discountPct, setDiscountPct] = useState<number>(0);
   const [notes, setNotes] = useState('');
@@ -329,8 +356,18 @@ export function QuoteFormPage() {
       return;
     }
 
-    const dateError = validateDateNotBefore(expiryDate, issueDate, 'Expiry date', 'issue date');
+    if (!isEditing) {
+      const issuePastErr = validateDateNotPast(issueDate, 'Issue date');
+      if (issuePastErr) {
+        setIssueDateError(issuePastErr);
+        setError(issuePastErr);
+        return;
+      }
+    }
+
+    const dateError = validateDateAfter(expiryDate, issueDate, 'Expiry date', 'issue date');
     if (dateError) {
+      setExpiryDateError(dateError);
       setError(dateError);
       return;
     }
@@ -521,20 +558,32 @@ export function QuoteFormPage() {
             <input
               type="date"
               required
+              min={!isEditing ? todayStr : undefined}
               value={issueDate}
-              onChange={(e) => setIssueDate(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 font-medium text-slate-800"
+              onChange={(e) => handleIssueDateChange(e.target.value)}
+              className={`w-full px-3 py-2 text-xs rounded-lg border font-medium text-slate-800 ${
+                issueDateError ? 'border-red-300 bg-red-50/30' : 'border-slate-200'
+              }`}
             />
+            {issueDateError && (
+              <p className="mt-1 text-[11px] text-red-600 font-medium">{issueDateError}</p>
+            )}
           </div>
 
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">Expiry Date (Valid Until)</label>
             <input
               type="date"
+              min={minExpiryDate}
               value={expiryDate}
-              onChange={(e) => setExpiryDate(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 font-medium text-slate-800"
+              onChange={(e) => handleExpiryDateChange(e.target.value)}
+              className={`w-full px-3 py-2 text-xs rounded-lg border font-medium text-slate-800 ${
+                expiryDateError ? 'border-red-300 bg-red-50/30' : 'border-slate-200'
+              }`}
             />
+            {expiryDateError && (
+              <p className="mt-1 text-[11px] text-red-600 font-medium">{expiryDateError}</p>
+            )}
           </div>
         </div>
 

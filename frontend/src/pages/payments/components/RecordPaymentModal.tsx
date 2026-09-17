@@ -12,7 +12,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { formatMoney } from '../../../utils/format';
-import { validatePositiveMoney } from '../../../utils/validation';
+import { validateDateNotFuture, validatePositiveMoney } from '../../../utils/validation';
 
 interface RecordPaymentModalProps {
   isOpen: boolean;
@@ -273,11 +273,9 @@ export function RecordPaymentModal({
     if (!paymentDate) {
       errs.paymentDate = 'Payment date is required';
     } else {
-      const enteredDate = new Date(paymentDate);
-      const maxAllowedDate = new Date();
-      maxAllowedDate.setDate(maxAllowedDate.getDate() + 1);
-      if (!isNaN(enteredDate.getTime()) && enteredDate.getTime() > maxAllowedDate.getTime()) {
-        errs.paymentDate = 'Payment date cannot be in the future.';
+      const dateErr = validateDateNotFuture(paymentDate, 'Payment date');
+      if (dateErr) {
+        errs.paymentDate = dateErr;
       }
     }
     if (!paymentMethod) errs.paymentMethod = 'Payment method is required';
@@ -579,6 +577,7 @@ export function RecordPaymentModal({
               <input
                 type="date"
                 value={paymentDate}
+                max={new Date().toISOString().split('T')[0]}
                 onChange={(e) => setPaymentDate(e.target.value)}
                 className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand-500"
               />

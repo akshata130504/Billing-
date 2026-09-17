@@ -174,46 +174,52 @@ function PublicOnly({ children }: { children: ReactNode }) {
 
 export function AppRoutes() {
   return (
-    <ProjectsProvider>
-      <ExpensesProvider>
-        <Routes>
-          {/* Public: auth */}
-          <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
-          <Route path="/signup" element={<PublicOnly><SignupPage /></PublicOnly>} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/reset-password" element={<ResetPasswordPage />} />
-          <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
+    <Routes>
+      {/* Public: auth */}
+      <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
+      <Route path="/signup" element={<PublicOnly><SignupPage /></PublicOnly>} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
 
-          {/* Public: landing & hosted pages */}
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/landing" element={<LandingPage />} />
-          <Route path="/pay/:token" element={<PayInvoicePage />} />
-          <Route path="/quote/:token" element={<PublicQuotePage />} />
-          <Route path="/checkout/:token" element={<PublicCheckoutPage />} />
-          <Route path="/lifecycle-cinematic" element={<CustomerLifecycleCinematicPage />} />
+      {/* Public: landing & hosted pages */}
+      <Route path="/" element={<LandingPage />} />
+      <Route path="/landing" element={<LandingPage />} />
+      <Route path="/pay/:token" element={<PayInvoicePage />} />
+      <Route path="/quote/:token" element={<PublicQuotePage />} />
+      <Route path="/checkout/:token" element={<PublicCheckoutPage />} />
+      <Route path="/lifecycle-cinematic" element={<CustomerLifecycleCinematicPage />} />
 
-          {/* Customer Self-Service Portal */}
-          <Route path="/portal/login" element={<PortalLoginPage />} />
-          <Route path="/portal/activate" element={<PortalActivationPage />} />
-          <Route
-            path="/portal"
-            element={
-              <PortalAuthProvider>
-                <PortalLayout />
-              </PortalAuthProvider>
-            }
-          >
-            <Route index element={<PortalDashboardPage />} />
-            <Route path="invoices" element={<PortalInvoicesPage />} />
-            <Route path="payments" element={<PortalPaymentsPage />} />
-            <Route path="subscriptions" element={<PortalSubscriptionsPage />} />
-            <Route path="profile" element={<PortalProfilePage />} />
-          </Route>
+      {/* Customer Self-Service Portal */}
+      <Route path="/portal/login" element={<PortalLoginPage />} />
+      <Route path="/portal/activate" element={<PortalActivationPage />} />
+      <Route
+        path="/portal"
+        element={
+          <PortalAuthProvider>
+            <PortalLayout />
+          </PortalAuthProvider>
+        }
+      >
+        <Route index element={<PortalDashboardPage />} />
+        <Route path="invoices" element={<PortalInvoicesPage />} />
+        <Route path="payments" element={<PortalPaymentsPage />} />
+        <Route path="subscriptions" element={<PortalSubscriptionsPage />} />
+        <Route path="profile" element={<PortalProfilePage />} />
+      </Route>
 
-          {/* Private */}
-          <Route element={<ProtectedRoute />}>
-            <Route element={<AppLayout />}>
-              <Route path="dashboard" element={<DashboardPage />} />
+      {/* Private */}
+      <Route element={<ProtectedRoute />}>
+        <Route
+          element={
+            <ProjectsProvider>
+              <ExpensesProvider>
+                <AppLayout />
+              </ExpensesProvider>
+            </ProjectsProvider>
+          }
+        >
+          <Route path="dashboard" element={<DashboardPage />} />
 
               {/* Workspace */}
               <Route path="customers" element={<CustomersListPage />} />
@@ -330,7 +336,5 @@ export function AppRoutes() {
             </Route>
           </Route>
         </Routes>
-      </ExpensesProvider>
-    </ProjectsProvider>
   );
 }

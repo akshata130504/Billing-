@@ -150,3 +150,5 @@ class JobsRunResult(BaseModel):
     trials_converted: int
     marked_overdue: int
     reminders_sent: int
+    recurring_expenses_processed: Optional[int] = 0
+

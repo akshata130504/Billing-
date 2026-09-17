@@ -17,6 +17,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../components/common/Toast';
 import { LoadingState } from '../../components/common/LoadingState';
 import { ErrorState } from '../../components/common/ErrorState';
+import { formatMoney, parseMoney } from '../../utils/format';
 import { RevenueOverviewWidget } from './widgets/RevenueOverviewWidget';
 import { ActionCenterWidget } from './widgets/ActionCenterWidget';
 import { BillingPipelineWidget } from './widgets/BillingPipelineWidget';
@@ -104,12 +105,28 @@ export function DashboardPage() {
   const { metrics, revenue, pipeline, customer_health, recovery, recent_transactions, activity, currency } =
     summary.data;
 
+  const totalInvoices =
+    (pipeline?.draft?.count || 0) +
+    (pipeline?.sent?.count || 0) +
+    (pipeline?.partially_paid?.count || 0) +
+    (pipeline?.overdue?.count || 0) +
+    (pipeline?.paid_this_period?.count || 0);
+
+  const totalRevNum = parseMoney(metrics?.total_revenue) || 0;
+  const paymentsRecvNum = parseMoney(pipeline?.paid_this_period?.amount) || 0;
+  const outstandingNum = parseMoney(metrics?.outstanding_amount) || 0;
+
+  const revChangePct = metrics?.revenue_change_pct
+    ? `${metrics.revenue_change_pct}% from last period`
+    : 'No prior period data';
+  const isRevPositive = !metrics?.revenue_change_pct || !metrics.revenue_change_pct.startsWith('-');
+
   const kpiCards = [
     {
       title: 'Total Invoices',
-      value: '128',
-      change: '12% from last month',
-      changeColor: 'text-[#10B981]',
+      value: String(totalInvoices),
+      change: `${pipeline?.overdue?.count || 0} overdue`,
+      changeColor: (pipeline?.overdue?.count || 0) > 0 ? 'text-[#E83E8C]' : 'text-[#10B981]',
       icon: (
         <div className="w-12 h-12 rounded-2xl bg-[#E8EBFC] text-[#3F51C9] flex items-center justify-center shrink-0">
           <FileText className="w-5 h-5 stroke-[2]" />
@@ -118,9 +135,9 @@ export function DashboardPage() {
     },
     {
       title: 'Total Revenue',
-      value: '₹ 12,48,000',
-      change: '18% from last month',
-      changeColor: 'text-[#10B981]',
+      value: formatMoney(totalRevNum, currency),
+      change: revChangePct,
+      changeColor: isRevPositive ? 'text-[#10B981]' : 'text-[#E83E8C]',
       icon: (
         <div className="w-12 h-12 rounded-full bg-[#DDF4EA] text-[#10B981] flex items-center justify-center shrink-0">
           <IndianRupee className="w-5 h-5 stroke-[2.5]" />
@@ -129,8 +146,8 @@ export function DashboardPage() {
     },
     {
       title: 'Payments Received',
-      value: '₹ 10,32,000',
-      change: '16% from last month',
+      value: formatMoney(paymentsRecvNum, currency),
+      change: `${pipeline?.paid_this_period?.count || 0} paid this period`,
       changeColor: 'text-[#10B981]',
       icon: (
         <div className="w-12 h-12 rounded-2xl bg-[#F9D9E8] text-[#E83E8C] flex items-center justify-center shrink-0">
@@ -140,9 +157,9 @@ export function DashboardPage() {
     },
     {
       title: 'Outstanding',
-      value: '₹ 2,16,000',
-      change: '5% from last month',
-      changeColor: 'text-[#E83E8C]',
+      value: formatMoney(outstandingNum, currency),
+      change: `${metrics?.outstanding_count || 0} unpaid invoices`,
+      changeColor: outstandingNum > 0 ? 'text-[#E83E8C]' : 'text-[#10B981]',
       icon: (
         <div className="w-12 h-12 rounded-full bg-[#FCEBD9] text-[#E07A28] flex items-center justify-center shrink-0">
           <Clock className="w-5 h-5 stroke-[2]" />
