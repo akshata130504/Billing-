@@ -179,8 +179,12 @@ services:
     ports:
       - "${FRONTEND_BIND:-80}:80"
     depends_on:
+      # Wait for backend's healthcheck to actually pass, not just for the container to
+      # start - gunicorn/uvicorn take a few seconds to boot, and nginx would otherwise
+      # start proxying to a backend that isn't accepting connections yet (seen in
+      # practice as a handful of 502s right after a rollout).
       backend:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
       interval: 30s

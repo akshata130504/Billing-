@@ -44,4 +44,25 @@ fi
 echo "$LOG_PREFIX All pulls succeeded. Rolling out..."
 $COMPOSE up -d --remove-orphans --no-build
 
+# Confirm the rollout actually came up healthy rather than assuming `up -d` succeeding
+# means the app is serving traffic - `docker compose up` only waits for depends_on
+# conditions on (re)started containers, it doesn't itself verify the public endpoint.
+echo "$LOG_PREFIX Waiting for the service to report ready..."
+ready=0
+for i in $(seq 1 30); do
+    code=$(curl -s -o /dev/null -w "%{http_code}" https://billing.futureacad.ae/api/v1/health/ready || true)
+    if [ "$code" = "200" ]; then
+        echo "$LOG_PREFIX Service is ready."
+        ready=1
+        break
+    fi
+    echo "$LOG_PREFIX Waiting for readiness (attempt $i, got $code)..."
+    sleep 5
+done
+
+if [ "$ready" -ne 1 ]; then
+    echo "$LOG_PREFIX ERROR: service did not become ready in time after rollout." >&2
+    exit 1
+fi
+
 echo "$LOG_PREFIX Done."
