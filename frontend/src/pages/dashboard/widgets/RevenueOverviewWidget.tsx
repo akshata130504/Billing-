@@ -41,53 +41,21 @@ export function RevenueOverviewWidget({ revenue, currency = 'INR' }: RevenueOver
   const chartData: MonthBarData[] = useMemo(() => {
     const trend = revenue?.trend || [];
     if (trend.length === 0) {
-      // Fallback baseline if trend is empty
-      const allDefault = [
-        { month: 'Oct', fullLabel: 'Oct 2025', invoiced: 680000, received: 520000 },
-        { month: 'Nov', fullLabel: 'Nov 2025', invoiced: 740000, received: 590000 },
-        { month: 'Dec', fullLabel: 'Dec 2025', invoiced: 810000, received: 660000 },
-        { month: 'Jan', fullLabel: 'Jan 2026', invoiced: 890000, received: 720000 },
-        { month: 'Feb', fullLabel: 'Feb 2026', invoiced: 950000, received: 780000 },
-        { month: 'Mar', fullLabel: 'Mar 2026', invoiced: 1020000, received: 840000 },
-        { month: 'Apr', fullLabel: 'Apr 2026', invoiced: 1080000, received: 890000 },
-        { month: 'May', fullLabel: 'May 2026', invoiced: 1120000, received: 930000 },
-        { month: 'Jun', fullLabel: 'Jun 2026', invoiced: 1160000, received: 970000 },
-        { month: 'Jul', fullLabel: 'Jul 2026', invoiced: 1200000, received: 1000000 },
-        { month: 'Aug', fullLabel: 'Aug 2026', invoiced: 1220000, received: 1015000 },
-        { month: 'Sep', fullLabel: 'Sep 2026', invoiced: 1248000, received: 1032000 },
-      ];
-      return allDefault.slice(-monthsCount);
+      return [];
     }
 
     const sliced = trend.slice(-monthsCount);
 
-    // Find latest actual recorded peak for organic scaling
-    let peakInv = 0;
-    let peakRev = 0;
-    for (const t of sliced) {
-      const inv = parseMoney(t.invoiced) || 0;
-      const rev = parseMoney(t.revenue) || 0;
-      if (inv > peakInv) peakInv = inv;
-      if (rev > peakRev) peakRev = rev;
-    }
-    if (peakInv === 0) peakInv = 1248000;
-    if (peakRev === 0) peakRev = 1032000;
-
-    return sliced.map((t, idx) => {
+    return sliced.map((t) => {
       const inv = parseMoney(t.invoiced) || 0;
       const rev = parseMoney(t.revenue) || 0;
       const monthLabel = t.label.split(' ')[0] || t.label;
 
-      // If month has real transactions, use them directly; otherwise ramp smoothly to current peak
-      const growthFactor = 0.58 + 0.42 * (idx / Math.max(1, sliced.length - 1));
-      const finalInvoiced = inv > 0 ? inv : Math.round(peakInv * growthFactor);
-      const finalReceived = rev > 0 ? rev : Math.round(peakRev * growthFactor);
-
       return {
         month: monthLabel,
         fullLabel: t.label,
-        invoiced: finalInvoiced,
-        received: finalReceived,
+        invoiced: inv,
+        received: rev,
       };
     });
   }, [revenue?.trend, monthsCount]);
@@ -96,7 +64,7 @@ export function RevenueOverviewWidget({ revenue, currency = 'INR' }: RevenueOver
   const { maxValue, yTicks } = useMemo(() => {
     const rawPeak = Math.max(
       ...chartData.map((d) => Math.max(d.invoiced, d.received)),
-      100000
+      10000
     );
 
     // Dynamic scale in Lakhs (1L = 100,000)
@@ -205,51 +173,57 @@ export function RevenueOverviewWidget({ revenue, currency = 'INR' }: RevenueOver
         </div>
       </div>
 
-      {/* Dual Bar Chart SVG */}
-      <div className="w-full relative">
-        <svg
-          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          className="w-full h-48 overflow-visible"
-        >
-          {/* Y-axis gridlines & labels */}
-          {yTicks.map((tick) => {
-            const y = paddingTop + plotHeight - (tick.val / maxValue) * plotHeight;
-            return (
-              <g key={tick.label}>
-                <line
-                  x1={paddingLeft}
-                  y1={y}
-                  x2={svgWidth - paddingRight}
-                  y2={y}
-                  stroke="#F1F5F9"
-                  strokeWidth="1"
-                  strokeDasharray="3 3"
-                />
-                <text
-                  x={paddingLeft - 10}
-                  y={y + 3.5}
-                  textAnchor="end"
-                  className="text-[10px] fill-[#7B829A] font-medium font-mono"
-                >
-                  {tick.label}
-                </text>
-              </g>
-            );
-          })}
+      {chartData.length === 0 ? (
+        <div className="w-full h-48 flex flex-col items-center justify-center text-slate-400 text-xs">
+          <p className="font-medium text-slate-500">No revenue data available for this period.</p>
+          <p className="text-[11px] text-slate-400 mt-1">Invoiced and collected amounts will appear here automatically.</p>
+        </div>
+      ) : (
+        /* Dual Bar Chart SVG */
+        <div className="w-full relative">
+          <svg
+            viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+            className="w-full h-48 overflow-visible"
+          >
+            {/* Y-axis gridlines & labels */}
+            {yTicks.map((tick) => {
+              const y = paddingTop + plotHeight - (tick.val / maxValue) * plotHeight;
+              return (
+                <g key={tick.label}>
+                  <line
+                    x1={paddingLeft}
+                    y1={y}
+                    x2={svgWidth - paddingRight}
+                    y2={y}
+                    stroke="#F1F5F9"
+                    strokeWidth="1"
+                    strokeDasharray="3 3"
+                  />
+                  <text
+                    x={paddingLeft - 10}
+                    y={y + 3.5}
+                    textAnchor="end"
+                    className="text-[10px] fill-[#7B829A] font-medium font-mono"
+                  >
+                    {tick.label}
+                  </text>
+                </g>
+              );
+            })}
 
-          {/* Grouped Dual Bars with Dynamic Transitions */}
-          {chartData.map((d, idx) => {
-            const groupCenterX = paddingLeft + idx * groupWidth + groupWidth / 2;
+            {/* Grouped Dual Bars with Dynamic Transitions */}
+            {chartData.map((d, idx) => {
+              const groupCenterX = paddingLeft + idx * groupWidth + groupWidth / 2;
 
-            // Invoiced bar (Left, Indigo)
-            const invoicedH = Math.max(3, Math.min(plotHeight, (d.invoiced / maxValue) * plotHeight));
-            const invoicedX = groupCenterX - barWidth - barGap / 2;
-            const invoicedY = paddingTop + plotHeight - invoicedH;
+              // Invoiced bar (Left, Indigo)
+              const invoicedH = d.invoiced > 0 ? Math.max(3, Math.min(plotHeight, (d.invoiced / maxValue) * plotHeight)) : 0;
+              const invoicedX = groupCenterX - barWidth - barGap / 2;
+              const invoicedY = paddingTop + plotHeight - invoicedH;
 
-            // Received bar (Right, Pink)
-            const receivedH = Math.max(3, Math.min(plotHeight, (d.received / maxValue) * plotHeight));
-            const receivedX = groupCenterX + barGap / 2;
-            const receivedY = paddingTop + plotHeight - receivedH;
+              // Received bar (Right, Pink)
+              const receivedH = d.received > 0 ? Math.max(3, Math.min(plotHeight, (d.received / maxValue) * plotHeight)) : 0;
+              const receivedX = groupCenterX + barGap / 2;
+              const receivedY = paddingTop + plotHeight - receivedH;
 
             const isHovered = hoveredIdx === idx;
 
@@ -331,6 +305,7 @@ export function RevenueOverviewWidget({ revenue, currency = 'INR' }: RevenueOver
           </div>
         )}
       </div>
+      )}
 
       {/* Dynamic Legend with Period Totals */}
       <div className="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-slate-100 text-xs">

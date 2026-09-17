@@ -10,7 +10,14 @@ from sqlalchemy.orm import Session
 from backend.app.api.deps import CurrentContext, get_db, require_finance, require_viewer
 from backend.app.models import Payment, PaymentAllocation
 from backend.app.schemas.common import PaginatedResponse
-from backend.app.schemas.invoices import InvoiceCreate, InvoiceOut, InvoiceUpdate, InvoiceVoidIn, RecordPaymentIn
+from backend.app.schemas.invoices import (
+    InvoiceCreate,
+    InvoiceOut,
+    InvoiceSummaryKPIs,
+    InvoiceUpdate,
+    InvoiceVoidIn,
+    RecordPaymentIn,
+)
 from backend.app.schemas.payments import PaymentOut
 from backend.app.services import invoice_service, payment_service
 from backend.app.services.invoice_pdf import render_invoice_pdf
@@ -53,6 +60,14 @@ def create_invoice(
 ):
     invoice = invoice_service.create_invoice(db, ctx, body)
     return invoice_service.serialize_invoice(invoice)
+
+
+@router.get("/summary", response_model=InvoiceSummaryKPIs, summary="Get invoice summary KPIs and status counts")
+def get_invoices_summary(
+    ctx: CurrentContext = Depends(require_viewer),
+    db: Session = Depends(get_db),
+):
+    return invoice_service.get_invoices_summary(db, ctx.organization_id)
 
 
 @router.get("/{invoice_id}", response_model=InvoiceOut, summary="Get an invoice")

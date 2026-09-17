@@ -6,19 +6,18 @@ export interface PaymentStatusWidgetProps {
   customerHealth?: DashboardCustomerHealth;
 }
 
-export function PaymentStatusWidget(_props: PaymentStatusWidgetProps = {}) {
-  // Values matched to reference design: 128 Invoices (86 Paid, 28 Pending, 10 Overdue, 4 Cancelled)
-  const paidCount = 86;
-  const pendingCount = 28;
-  const overdueCount = 10;
-  const cancelledCount = 4;
+export function PaymentStatusWidget({ pipeline }: PaymentStatusWidgetProps = {}) {
+  const paidCount = pipeline?.paid_this_period?.count ?? 0;
+  const pendingCount = (pipeline?.sent?.count ?? 0) + (pipeline?.partially_paid?.count ?? 0);
+  const overdueCount = pipeline?.overdue?.count ?? 0;
+  const cancelledCount = pipeline?.draft?.count ?? 0;
 
-  const safeTotal = 128;
+  const safeTotal = paidCount + pendingCount + overdueCount + cancelledCount;
 
-  const paidPct = 67;
-  const pendingPct = 22;
-  const overduePct = 8;
-  const cancelledPct = 3;
+  const paidPct = safeTotal > 0 ? Math.round((paidCount / safeTotal) * 100) : 0;
+  const pendingPct = safeTotal > 0 ? Math.round((pendingCount / safeTotal) * 100) : 0;
+  const overduePct = safeTotal > 0 ? Math.round((overdueCount / safeTotal) * 100) : 0;
+  const cancelledPct = safeTotal > 0 ? Math.max(0, 100 - paidPct - pendingPct - overduePct) : 0;
 
   // Donut chart geometry
   const radius = 52;

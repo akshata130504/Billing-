@@ -49,6 +49,11 @@ export const invoiceService = {
     return this.listInvoices(params);
   },
 
+  async getSummary(): Promise<any> {
+    const res = await apiClient.get<any>('/invoices/summary');
+    return res.data;
+  },
+
   async getInvoicePayments(id: string) {
     return this.listPayments(id);
   },

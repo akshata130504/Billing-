@@ -132,6 +132,7 @@ export const InvoiceFormPage: React.FC = () => {
 
   const calculateLineItemPrice = async (index: number, planId?: string, qty?: number) => {
     const targetItem = items[index];
+    if (!targetItem) return;
     const pid = planId || targetItem.plan_id || targetItem.offering_id;
     const quantity = qty !== undefined ? qty : targetItem.quantity;
 
@@ -144,11 +145,15 @@ export const InvoiceFormPage: React.FC = () => {
       });
 
       const updated = [...items];
+      if (!updated[index]) return;
+      const returnedRate = Number(calc.unit_rate);
+      // Preserve existing rate unless pricing engine returned a positive rate
+      const effectiveRate = returnedRate > 0 ? returnedRate : (updated[index].rate ?? 0);
       updated[index] = {
         ...updated[index],
-        rate: Number(calc.unit_rate),
-        pricing_model: calc.pricing_model,
-        pricing_explanation: calc.pricing_explanation,
+        rate: effectiveRate,
+        pricing_model: calc.pricing_model || updated[index].pricing_model,
+        pricing_explanation: calc.pricing_explanation || updated[index].pricing_explanation,
       };
       setItems(updated);
     } catch (err) {
@@ -158,11 +163,20 @@ export const InvoiceFormPage: React.FC = () => {
 
   const handleItemChange = (index: number, field: keyof InvoiceLineItemIn, value: any) => {
     const updated = [...items];
+    const prevRate = updated[index]?.rate;
     updated[index] = { ...updated[index], [field]: value };
+    // Never allow editing quantity or other non-rate fields to wipe out existing rate
+    if (field === 'quantity' && (updated[index].rate === undefined || Number.isNaN(updated[index].rate))) {
+      updated[index].rate = prevRate ?? 0;
+    }
     setItems(updated);
 
     if (field === 'quantity' && (updated[index].plan_id || updated[index].offering_id)) {
-      calculateLineItemPrice(index, updated[index].plan_id || updated[index].offering_id, value);
+      const itemModel = updated[index].pricing_model;
+      // Only recalculate for dynamic pricing models where rate varies by volume/tier
+      if (itemModel && itemModel !== 'FLAT' && itemModel !== 'per_unit') {
+        calculateLineItemPrice(index, updated[index].plan_id || updated[index].offering_id, value);
+      }
     }
   };
 

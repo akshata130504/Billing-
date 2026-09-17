@@ -30,10 +30,17 @@ class QuoteCreate(BaseModel):
     def _upper(cls, v):
         return v.upper() if isinstance(v, str) else v
 
+    @field_validator("issue_date")
+    @classmethod
+    def _issue_date_not_past(cls, v):
+        if v and v < date.today():
+            raise ValueError("Issue date cannot be in the past.")
+        return v
+
     @model_validator(mode="after")
     def _expiry_after_issue(self):
-        if self.issue_date and self.expiry_date and self.expiry_date < self.issue_date:
-            raise ValueError("Expiry date cannot be before the issue date.")
+        if self.issue_date and self.expiry_date and self.expiry_date <= self.issue_date:
+            raise ValueError("Expiry date must be after the issue date.")
         return self
 
 
@@ -57,8 +64,8 @@ class QuoteUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _expiry_after_issue(self):
-        if self.issue_date and self.expiry_date and self.expiry_date < self.issue_date:
-            raise ValueError("Expiry date cannot be before the issue date.")
+        if self.issue_date and self.expiry_date and self.expiry_date <= self.issue_date:
+            raise ValueError("Expiry date must be after the issue date.")
         return self
 
 

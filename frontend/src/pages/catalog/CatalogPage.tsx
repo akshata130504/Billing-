@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Package,
   BookOpen,
@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { Button } from '../../components/common/Button';
 import { LoadingState } from '../../components/common/LoadingState';
+import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { catalogCpqService } from '../../services/catalogCpqService';
 import type { OfferingOut, PriceBookOut, OfferingIn, PriceBookIn } from '../../types/catalog_cpq';
 import { OfferingModal } from './components/OfferingModal';
@@ -30,12 +31,17 @@ export function CatalogPage() {
   const [isPriceBookModalOpen, setIsPriceBookModalOpen] = useState(false);
   const [editingPriceBook, setEditingPriceBook] = useState<PriceBookOut | null>(null);
 
+  // Archive confirmation state
+  const [offeringToArchive, setOfferingToArchive] = useState<OfferingOut | null>(null);
+  const [isArchiving, setIsArchiving] = useState(false);
+
   const loadData = async () => {
     try {
       setLoading(true);
+      const trimmedSearch = searchQuery.trim() || undefined;
       const [offeringData, pbData] = await Promise.all([
-        catalogCpqService.listOfferings({ search: searchQuery.trim() || undefined }),
-        catalogCpqService.listPriceBooks(),
+        catalogCpqService.listOfferings({ search: trimmedSearch }),
+        catalogCpqService.listPriceBooks({ search: trimmedSearch }),
       ]);
       setOfferings(offeringData.items || []);
       setPriceBooks(pbData.items || []);
@@ -59,10 +65,17 @@ export function CatalogPage() {
     await loadData();
   };
 
-  const handleArchiveOffering = async (id: string) => {
-    if (confirm('Are you sure you want to archive this commercial offering?')) {
-      await catalogCpqService.archiveOffering(id);
+  const handleConfirmArchive = async () => {
+    if (!offeringToArchive) return;
+    try {
+      setIsArchiving(true);
+      await catalogCpqService.archiveOffering(offeringToArchive.id);
+      setOfferingToArchive(null);
       await loadData();
+    } catch (err) {
+      console.error('Failed to archive offering:', err);
+    } finally {
+      setIsArchiving(false);
     }
   };
 
@@ -84,6 +97,17 @@ export function CatalogPage() {
     if (activeTab === 'bundles') return item.type === 'bundle';
     return true;
   });
+
+  // Filter price books based on search query
+  const filteredPriceBooks = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return priceBooks;
+    return priceBooks.filter(
+      (pb) =>
+        pb.name?.toLowerCase().includes(q) ||
+        pb.customer_segment?.toLowerCase().includes(q)
+    );
+  }, [priceBooks, searchQuery]);
 
   // KPI stats
   const activeCount = offerings.filter((o) => o.is_active).length;
@@ -223,14 +247,16 @@ export function CatalogPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {priceBooks.length === 0 ? (
+              {filteredPriceBooks.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-4 py-8 text-center text-slate-400 italic">
-                    No Price Books configured yet. Click "New Price Book" to define a customer tier.
+                    {searchQuery.trim()
+                      ? `No Price Books match "${searchQuery.trim()}".`
+                      : 'No Price Books configured yet. Click "New Price Book" to define a customer tier.'}
                   </td>
                 </tr>
               ) : (
-                priceBooks.map((pb) => (
+                filteredPriceBooks.map((pb) => (
                   <tr key={pb.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="px-4 py-3 font-semibold text-slate-900">
                       {pb.name}
@@ -339,7 +365,7 @@ export function CatalogPage() {
                         </button>
                         {item.is_active && (
                           <button
-                            onClick={() => handleArchiveOffering(item.id)}
+                            onClick={() => setOfferingToArchive(item)}
                             className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50"
                             title="Archive Offering"
                           >
@@ -372,6 +398,23 @@ export function CatalogPage() {
         onSave={handleSavePriceBook}
         initialData={editingPriceBook}
         offerings={offerings}
+      />
+
+      {/* Archive Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={Boolean(offeringToArchive)}
+        onClose={() => setOfferingToArchive(null)}
+        onConfirm={handleConfirmArchive}
+        title="Archive Commercial Offering"
+        description={
+          offeringToArchive
+            ? `Are you sure you want to archive "${offeringToArchive.name}" (${offeringToArchive.sku})? This offering will be deactivated and cannot be added to new quotes or subscriptions.`
+            : ''
+        }
+        confirmLabel="Archive"
+        cancelLabel="Cancel"
+        variant="danger"
+        isLoading={isArchiving}
       />
     </div>
   );

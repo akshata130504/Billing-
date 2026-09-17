@@ -20,6 +20,7 @@ import type { Invoice, InvoiceStatus, PaymentRecordIn } from '../../types/invoic
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
 import { Modal } from '../../components/common/Modal';
+import { validateDateNotFuture } from '../../utils/validation';
 
 export const InvoiceDetailPage = () => {
   const { id } = useParams<{ id: string }>();
@@ -95,6 +96,12 @@ export const InvoiceDetailPage = () => {
 
     if (Number(paymentAmount) <= 0) {
       alert('Payment amount must be greater than zero');
+      return;
+    }
+
+    const dateErr = validateDateNotFuture(paymentDate, 'Payment date', { required: true });
+    if (dateErr) {
+      alert(dateErr);
       return;
     }
 
@@ -629,6 +636,7 @@ export const InvoiceDetailPage = () => {
               <input
                 type="date"
                 value={paymentDate}
+                max={new Date().toISOString().split('T')[0]}
                 onChange={(e) => setPaymentDate(e.target.value)}
                 required
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"

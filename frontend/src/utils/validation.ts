@@ -11,7 +11,7 @@ const NAME_CHARS_RE = /^[A-Za-z0-9\s.,'&\-()/]{1,200}$/;
 const HAS_LETTER_RE = /[A-Za-zÀ-ɏ]/;
 const PHONE_RE = /^\+?[0-9\s\-().]{7,20}$/;
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-const URL_RE = /^https?:\/\/[a-zA-Z0-9\-._~:/?#[\]@!$&'()*+,;=]+$/;
+const URL_RE = /^https?:\/\/([a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(:\d+)?([/?#].*)?$/;
 const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const HSN_SAC_RE = /^[0-9]{2,8}$/;
@@ -124,11 +124,19 @@ export function validateCountryCode(value: string | null | undefined, options: {
   return null;
 }
 
-export function validatePostalCode(value: string | null | undefined, options: { required?: boolean } = {}): ValidationResult {
+export function validatePostalCode(value: string | null | undefined, options: { required?: boolean; country?: string } = {}): ValidationResult {
   const val = (value ?? '').trim();
   if (val === '') return options.required ? 'Postal code is required.' : null;
-  // Kept permissive for international addresses: alphanumeric, spaces, hyphens, 3-12 chars.
-  if (!/^[A-Za-z0-9\s-]{3,12}$/.test(val)) return 'Enter a valid postal code.';
+  const country = options.country ? options.country.trim().toUpperCase() : null;
+  if (country === 'IN') {
+    if (!/^[1-9][0-9]{5}$/.test(val)) {
+      return 'Enter a valid 6-digit Indian PIN code (e.g. 560001).';
+    }
+    return null;
+  }
+  if (!/^[A-Za-z0-9\s-]{3,12}$/.test(val) || !/\d/.test(val)) {
+    return 'Enter a valid postal code.';
+  }
   return null;
 }
 
@@ -199,5 +207,56 @@ export function validateDateNotBefore(
   const earlier = new Date(earlierValue);
   if (Number.isNaN(later.getTime()) || Number.isNaN(earlier.getTime())) return null;
   if (later.getTime() < earlier.getTime()) return `${laterLabel} cannot be before ${earlierLabel}.`;
+  return null;
+}
+
+/** later date must be strictly after earlier date (rejects equal or before). */
+export function validateDateAfter(
+  laterValue: string | Date | null | undefined,
+  earlierValue: string | Date | null | undefined,
+  laterLabel: string,
+  earlierLabel: string
+): ValidationResult {
+  if (!laterValue || !earlierValue) return null;
+  const later = new Date(laterValue);
+  const earlier = new Date(earlierValue);
+  if (Number.isNaN(later.getTime()) || Number.isNaN(earlier.getTime())) return null;
+  if (later.getTime() <= earlier.getTime()) return `${laterLabel} must be after the ${earlierLabel}.`;
+  return null;
+}
+
+/** date must not be before today (rejects past dates). */
+export function validateDateNotPast(
+  value: string | Date | null | undefined,
+  fieldLabel = 'Date',
+  options: { required?: boolean } = {}
+): ValidationResult {
+  if (!value) return options.required ? `${fieldLabel} is required.` : null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return `${fieldLabel} is invalid.`;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(d);
+  target.setHours(0, 0, 0, 0);
+  if (target.getTime() < today.getTime()) {
+    return `${fieldLabel} cannot be in the past.`;
+  }
+  return null;
+}
+
+/** date must not be in the future (rejects later than today). */
+export function validateDateNotFuture(
+  value: string | Date | null | undefined,
+  fieldLabel = 'Date',
+  options: { required?: boolean } = {}
+): ValidationResult {
+  if (!value) return options.required ? `${fieldLabel} is required.` : null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return `${fieldLabel} is invalid.`;
+  const today = new Date();
+  today.setHours(23, 59, 59, 999);
+  if (d.getTime() > today.getTime()) {
+    return `${fieldLabel} cannot be later than today.`;
+  }
   return null;
 }

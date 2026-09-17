@@ -3,6 +3,7 @@ import { Project, TimesheetEntry, ProjectExpense, ProjectInvoice, ProjectTransac
 import { projectService } from '../../services/projectService';
 import { expenseService } from '../../services/expenseService';
 import { timesheetService } from '../../services/timesheetService';
+import { tokenStorage } from '../../services/apiClient';
 import { useToast } from '../../components/common/Toast';
 
 interface ProjectsContextType {
@@ -38,6 +39,11 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState<boolean>(true);
 
   const fetchProjects = useCallback(async () => {
+    if (!tokenStorage.hasSession()) {
+      setProjects([]);
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       const data = await projectService.list();
@@ -61,6 +67,10 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
   }, [showToast]);
 
   useEffect(() => {
+    if (!tokenStorage.hasSession()) {
+      setLoading(false);
+      return;
+    }
     fetchProjects();
   }, [fetchProjects]);
 

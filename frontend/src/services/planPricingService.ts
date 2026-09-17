@@ -211,13 +211,13 @@ export const planPricingService = {
       quantity: req.quantity,
     };
     const res = await apiClient.post<any>('/pricing/calculate', { items: [item] });
-    const line = res.data?.lines && res.data.lines[0];
+    const itemData = res.data?.items?.[0] ?? res.data?.lines?.[0];
     return {
-      unit_rate: line ? Number(line.unit_price || 0) : 0,
-      pricing_model: line ? line.pricing_model : 'FLAT',
-      pricing_explanation: line ? line.pricing_explanation : '',
-      subtotal: line ? Number(line.subtotal || 0) : 0,
-      total_amount: line ? Number(line.total || 0) : 0,
+      unit_rate: itemData ? Number(itemData.effective_unit_price ?? itemData.unit_price ?? 0) : 0,
+      pricing_model: itemData ? itemData.pricing_model : 'FLAT',
+      pricing_explanation: itemData?.explanation ? JSON.stringify(itemData.explanation) : (itemData?.pricing_explanation || ''),
+      subtotal: itemData ? Number(itemData.subtotal || 0) : 0,
+      total_amount: itemData ? Number(itemData.total_amount ?? itemData.total ?? 0) : 0,
     };
   },
 };

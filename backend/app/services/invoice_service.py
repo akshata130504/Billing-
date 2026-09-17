@@ -837,6 +837,65 @@ def _reactivate_subscription_if_clear(
     )
 
 
+def get_invoices_summary(db: Session, organization_id: str) -> Dict[str, Any]:
+    """Calculate summary KPIs and status counts for invoices."""
+    rows = db.execute(
+        select(
+            Invoice.status,
+            func.count(Invoice.id),
+            func.coalesce(func.sum(Invoice.total), Decimal("0")),
+            func.coalesce(func.sum(Invoice.amount_paid), Decimal("0")),
+            func.coalesce(func.sum(Invoice.amount_due), Decimal("0")),
+        )
+        .where(Invoice.organization_id == organization_id)
+        .group_by(Invoice.status)
+    ).all()
+
+    total_invoices = 0
+    draft_count = 0
+    sent_count = 0
+    partially_paid_count = 0
+    paid_count = 0
+    overdue_count = 0
+    void_count = 0
+    total_revenue = Decimal("0")
+    total_outstanding = Decimal("0")
+
+    for status_val, count, total, amount_paid, amount_due in rows:
+        total_invoices += count
+        s = status_val.value if hasattr(status_val, "value") else str(status_val)
+        if s == "draft":
+            draft_count = count
+        elif s == "sent":
+            sent_count = count
+            total_outstanding += amount_due
+        elif s == "partially_paid":
+            partially_paid_count = count
+            total_revenue += amount_paid
+            total_outstanding += amount_due
+        elif s == "paid":
+            paid_count = count
+            total_revenue += amount_paid
+        elif s == "overdue":
+            overdue_count = count
+            total_revenue += amount_paid
+            total_outstanding += amount_due
+        elif s == "void":
+            void_count = count
+
+    return {
+        "total_invoices": total_invoices,
+        "draft_count": draft_count,
+        "sent_count": sent_count,
+        "partially_paid_count": partially_paid_count,
+        "paid_count": paid_count,
+        "overdue_count": overdue_count,
+        "void_count": void_count,
+        "total_outstanding": str(q2(total_outstanding)),
+        "total_revenue": str(q2(total_revenue)),
+    }
+
+
 __all__ = [
     "serialize_invoice",
     "recompute_invoice",
@@ -851,6 +910,7 @@ __all__ = [
     "get_invoice",
     "get_invoice_by_token",
     "list_invoices",
+    "get_invoices_summary",
     "line_inputs",
     "days_overdue",
     "as_utc",

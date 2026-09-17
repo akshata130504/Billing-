@@ -177,14 +177,27 @@ def run_billing_jobs(db: Session, *, today: Optional[date] = None) -> Dict[str, 
         db.rollback()
     counts["scheduled_changes_applied"] = scheduled_changes_applied
 
+    # (g) recurring expenses due today
+    recurring_expenses_processed = 0
+    try:
+        from backend.app.services.expense_service import process_due_recurring_expenses
+        recurring_expenses_processed = process_due_recurring_expenses(db, today=today)
+        db.commit()
+    except Exception:
+        errors += 1
+        logger.exception("Scheduler: processing due recurring expenses failed")
+        db.rollback()
+    counts["recurring_expenses_processed"] = recurring_expenses_processed
+
     logger.info(
-        "Billing jobs: renewals=%s trials_converted=%s marked_overdue=%s reminders_sent=%s dunning_recovered=%s scheduled_changes=%s ended=%s errors=%s",
+        "Billing jobs: renewals=%s trials_converted=%s marked_overdue=%s reminders_sent=%s dunning_recovered=%s scheduled_changes=%s recurring_expenses=%s ended=%s errors=%s",
         counts["renewals"],
         counts["trials_converted"],
         counts["marked_overdue"],
         counts["reminders_sent"],
         counts.get("dunning_recovered", 0),
         counts.get("scheduled_changes_applied", 0),
+        counts.get("recurring_expenses_processed", 0),
         ended,
         errors,
     )

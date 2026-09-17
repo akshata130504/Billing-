@@ -3,7 +3,7 @@ import re
 from datetime import date, datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from backend.app.models import CustomerStatus
 from backend.app.schemas.common_refs import CustomerRef
@@ -17,7 +17,9 @@ from backend.app.schemas.validators import (
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _COUNTRY_CODE_RE = re.compile(r"^[A-Z]{2}$")
+_INDIA_PIN_RE = re.compile(r"^[1-9][0-9]{5}$")
 _POSTAL_CODE_RE = re.compile(r"^[A-Za-z0-9\s\-]{3,12}$")
+_HAS_DIGIT_RE = re.compile(r"\d")
 
 
 def validate_email_format(value: Optional[str]) -> Optional[str]:
@@ -43,14 +45,19 @@ def validate_country_code(value: Optional[str]) -> Optional[str]:
     return val
 
 
-def validate_postal_code(value: Optional[str]) -> Optional[str]:
+def validate_postal_code(value: Optional[str], country: Optional[str] = None) -> Optional[str]:
     if value is None:
         return None
     val = value.strip()
     if not val:
         return None
-    if not _POSTAL_CODE_RE.match(val):
-        raise ValueError("Invalid postal code.")
+    c = country.strip().upper() if country else None
+    if c == "IN":
+        if not _INDIA_PIN_RE.match(val):
+            raise ValueError("Invalid postal code. For India, enter a valid 6-digit PIN code (e.g. 560001).")
+    else:
+        if not _POSTAL_CODE_RE.match(val) or not _HAS_DIGIT_RE.search(val):
+            raise ValueError("Invalid postal code.")
     return val
 
 
@@ -151,10 +158,11 @@ class _CustomerFields(BaseModel):
     def _country(cls, v):
         return validate_country_code(v)
 
-    @field_validator("billing_postal_code")
-    @classmethod
-    def _postal_code(cls, v):
-        return validate_postal_code(v)
+    @model_validator(mode="after")
+    def _validate_postal(self):
+        if self.billing_postal_code:
+            validate_postal_code(self.billing_postal_code, self.billing_country)
+        return self
 
 
 class CustomerCreate(_CustomerFields):

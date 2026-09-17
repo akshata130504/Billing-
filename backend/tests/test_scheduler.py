@@ -2,6 +2,7 @@
 from datetime import date, timedelta
 from decimal import Decimal
 import pytest
+from sqlalchemy import select
 
 from backend.app.models import (
     Invoice,
@@ -98,3 +99,38 @@ def test_admin_run_jobs_endpoint(client, tenant, auth_headers):
     assert "trials_converted" in data
     assert "marked_overdue" in data
     assert "reminders_sent" in data
+    assert "recurring_expenses_processed" in data
+
+
+def test_scheduler_processes_due_recurring_expenses(client, tenant, auth_headers, db):
+    """Ensure run_billing_jobs executes due recurring expenses."""
+    from backend.app.models.expenses import Expense, RecurringExpense, RecurringExpenseFrequency, RecurringExpenseStatus
+
+    today = date.today()
+    rec = RecurringExpense(
+        organization_id=tenant.organization.id,
+        name="Scheduled Server Backup",
+        category="Infrastructure",
+        amount=Decimal("80.00"),
+        currency="USD",
+        frequency=RecurringExpenseFrequency.MONTHLY,
+        start_date=today,
+        next_run=today,
+        never_ends=True,
+        status=RecurringExpenseStatus.ACTIVE,
+    )
+    db.add(rec)
+    db.commit()
+
+    counts = run_billing_jobs(db, today=today)
+    assert counts.get("recurring_expenses_processed", 0) >= 1
+
+    exp = db.scalars(
+        select(Expense).where(
+            Expense.organization_id == tenant.organization.id,
+            Expense.name == "Scheduled Server Backup",
+        )
+    ).first()
+    assert exp is not None
+    assert exp.amount == Decimal("80.00")
+

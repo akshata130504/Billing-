@@ -147,3 +147,19 @@ def test_invoice_validation_errors(client, tenant, auth_headers):
         headers=auth_headers,
     )
     assert resp.status_code == 404
+
+
+def test_invoices_summary_kpis(client, tenant, auth_headers):
+    customer = tenant.customer()
+    sum_resp = client.get(f"{BASE}/summary", headers=auth_headers)
+    assert sum_resp.status_code == 200
+    initial_summary = sum_resp.json()
+    initial_total = initial_summary["total_invoices"]
+
+    # Create a draft invoice
+    inv = _create_draft_invoice(client, auth_headers, customer)
+    sum_resp2 = client.get(f"{BASE}/summary", headers=auth_headers)
+    assert sum_resp2.status_code == 200
+    data = sum_resp2.json()
+    assert data["total_invoices"] == initial_total + 1
+    assert data["draft_count"] >= 1

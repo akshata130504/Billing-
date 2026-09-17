@@ -85,6 +85,22 @@ def list_offerings(
     return paginate(db, stmt, params)
 
 
+def _sanitize_tier(t: Any) -> Dict[str, Any]:
+    d = t if isinstance(t, dict) else t.model_dump(exclude_none=True)
+    res = {}
+    if "min_qty" in d and d["min_qty"] is not None:
+        res["min_qty"] = float(d["min_qty"])
+    if "max_qty" in d and d["max_qty"] is not None:
+        res["max_qty"] = float(d["max_qty"])
+    if "unit_price" in d and d["unit_price"] is not None:
+        res["unit_price"] = float(d["unit_price"])
+    if "package_qty" in d and d["package_qty"] is not None:
+        res["package_qty"] = float(d["package_qty"])
+    if "package_price" in d and d["package_price"] is not None:
+        res["package_price"] = float(d["package_price"])
+    return res
+
+
 def create_offering(db: Session, ctx: CurrentContext, data: OfferingCreate) -> Offering:
     payload = data.model_dump(exclude_none=True)
     sku = payload.pop("sku", None)
@@ -102,21 +118,6 @@ def create_offering(db: Session, ctx: CurrentContext, data: OfferingCreate) -> O
 
     bundle_components = payload.pop("bundle_components", None) or []
     tiers = payload.pop("pricing_tiers", None)
-
-    def _sanitize_tier(t):
-        d = t if isinstance(t, dict) else t.model_dump(exclude_none=True)
-        res = {}
-        if "min_qty" in d and d["min_qty"] is not None:
-            res["min_qty"] = float(d["min_qty"])
-        if "max_qty" in d and d["max_qty"] is not None:
-            res["max_qty"] = float(d["max_qty"])
-        if "unit_price" in d and d["unit_price"] is not None:
-            res["unit_price"] = float(d["unit_price"])
-        if "package_qty" in d and d["package_qty"] is not None:
-            res["package_qty"] = float(d["package_qty"])
-        if "package_price" in d and d["package_price"] is not None:
-            res["package_price"] = float(d["package_price"])
-        return res
 
     offering = Offering(
         organization_id=ctx.organization_id,
@@ -169,7 +170,7 @@ def update_offering(db: Session, ctx: CurrentContext, offering_id: str, data: Of
     bundle_components = changes.pop("bundle_components", None)
     tiers = changes.pop("pricing_tiers", None)
     if tiers is not None:
-        offering.pricing_tiers = [t if isinstance(t, dict) else t.model_dump() for t in tiers]
+        offering.pricing_tiers = [_sanitize_tier(t) for t in tiers] if tiers else None
 
     for f, val in changes.items():
         setattr(offering, f, val)

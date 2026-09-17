@@ -22,6 +22,7 @@ import {
   validateNonNegativeInteger,
   validateDescription,
   validateDateNotBefore,
+  validateDateAfter,
 } from './validation';
 
 describe('parseStrictNumber', () => {
@@ -123,6 +124,7 @@ describe('validatePhone', () => {
 describe('validateUrl', () => {
   it('rejects arbitrary text', () => {
     expect(validateUrl('hello world')).not.toBeNull();
+    expect(validateUrl('dfsdg')).not.toBeNull();
   });
 
   it('accepts http(s) URLs, adding a scheme when missing', () => {
@@ -312,5 +314,19 @@ describe('validateDateNotBefore', () => {
   it('is a no-op when either date is missing', () => {
     expect(validateDateNotBefore(null, '2026-09-16', 'Due date', 'issue date')).toBeNull();
     expect(validateDateNotBefore('2026-09-16', null, 'Due date', 'issue date')).toBeNull();
+  });
+});
+
+describe('validateDateAfter', () => {
+  it('rejects an expiry date equal to issue date', () => {
+    expect(validateDateAfter('2026-09-16', '2026-09-16', 'Expiry date', 'issue date')).not.toBeNull();
+  });
+
+  it('rejects an expiry date before issue date', () => {
+    expect(validateDateAfter('2026-09-15', '2026-09-16', 'Expiry date', 'issue date')).not.toBeNull();
+  });
+
+  it('accepts an expiry date strictly after issue date', () => {
+    expect(validateDateAfter('2026-09-17', '2026-09-16', 'Expiry date', 'issue date')).toBeNull();
   });
 });

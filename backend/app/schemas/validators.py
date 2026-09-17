@@ -10,7 +10,7 @@ from typing import Optional
 _NAME_CHARS_RE = re.compile(r"^[A-Za-z0-9\s.,'&\-\(\)\/]{1,200}$")
 _HAS_LETTER_RE = re.compile(r"[A-Za-z\u00C0-\u024F]")
 _PHONE_RE = re.compile(r"^\+?[0-9\s\-().]{7,20}$")
-_URL_RE = re.compile(r"^https?://[a-zA-Z0-9\-._~:/?#\[\]@!$&'()*+,;=]+$")
+_URL_RE = re.compile(r"^https?://([a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(:\d+)?([/?#].*)?$")
 _GSTIN_RE = re.compile(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$")
 _PAN_RE = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
 _HSN_SAC_RE = re.compile(r"^[0-9]{2,8}$")
@@ -115,15 +115,12 @@ def validate_slug_format(value: Optional[str], field_label: str = "Code") -> Opt
     return val
 
 
-_MAX_FUTURE_SKEW = timedelta(days=1)
-
-
 def reject_future_datetime(value: Optional[datetime], field_label: str = "Date") -> Optional[datetime]:
-    """Rejects a datetime more than a day ahead of "now" (a day of slack absorbs client/server timezone skew)."""
+    """Rejects a datetime later than today."""
     if value is None:
         return None
-    now = datetime.now(value.tzinfo) if value.tzinfo else datetime.now(timezone.utc).replace(tzinfo=None)
-    if value - now > _MAX_FUTURE_SKEW:
+    now = datetime.now(value.tzinfo) if value.tzinfo else max(datetime.now(), datetime.now(timezone.utc).replace(tzinfo=None))
+    if value.date() > now.date():
         raise ValueError(f"{field_label} cannot be in the future.")
     return value
 

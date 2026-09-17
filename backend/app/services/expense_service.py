@@ -1,7 +1,7 @@
 """Expense domain service: CRUD, batch import, recurring profiles, and KPI summaries."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
@@ -9,6 +9,7 @@ from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.app.core.exceptions import EntityNotFoundError, ValidationAppError
+from backend.app.core.logging import logger
 from backend.app.models.customers import Customer
 from backend.app.models.expenses import (
     Expense,
@@ -461,3 +462,128 @@ def get_recurring_summary_kpis(db: Session, organization_id: str) -> RecurringEx
         billable_recurring=billable_recurring,
         next_run=str(next_date) if next_date else None,
     )
+
+
+def calculate_next_run(
+    current_run: date,
+    frequency: RecurringExpenseFrequency,
+    anchor_day: Optional[int] = None,
+) -> date:
+    """Advance a recurring expense run date by one recurrence period."""
+    from backend.app.services.subscription_service import add_months
+
+    if frequency == RecurringExpenseFrequency.WEEKLY:
+        return current_run + timedelta(days=7)
+    elif frequency == RecurringExpenseFrequency.MONTHLY:
+        return add_months(current_run, 1, anchor_day=anchor_day)
+    elif frequency == RecurringExpenseFrequency.QUARTERLY:
+        return add_months(current_run, 3, anchor_day=anchor_day)
+    elif frequency == RecurringExpenseFrequency.YEARLY:
+        return add_months(current_run, 12, anchor_day=anchor_day)
+    return add_months(current_run, 1, anchor_day=anchor_day)
+
+
+def execute_recurring_expense(
+    db: Session,
+    rec: RecurringExpense,
+    *,
+    today: Optional[date] = None,
+) -> Optional[Expense]:
+    """Execute a single due recurring expense.
+
+    Creates exactly one Expense record for the due occurrence, updates last_run and next_run,
+    and handles end_date / status. Fully idempotent: if already executed for this occurrence date,
+    does not create duplicate Expense records.
+    """
+    today = today or date.today()
+    if rec.status != RecurringExpenseStatus.ACTIVE:
+        return None
+    if not rec.next_run or rec.next_run > today:
+        return None
+
+    due_date = rec.next_run
+    anchor_day = rec.start_date.day if rec.start_date else due_date.day
+
+    # Check for existing expense for this recurring profile on this due occurrence date (idempotency)
+    marker = f"[recurring_expense_id:{rec.id}]"
+    existing = db.scalars(
+        select(Expense).where(
+            Expense.organization_id == rec.organization_id,
+            Expense.date == due_date,
+            Expense.notes.contains(marker),
+        )
+    ).first()
+
+    next_date = calculate_next_run(due_date, rec.frequency, anchor_day=anchor_day)
+
+    if existing or (rec.last_run and rec.last_run >= due_date):
+        # Already executed for this occurrence; advance pointers safely
+        rec.last_run = due_date
+        if not rec.never_ends and rec.end_date and next_date > rec.end_date:
+            rec.status = RecurringExpenseStatus.ENDED
+            rec.next_run = None
+        else:
+            rec.next_run = next_date
+        return None
+
+    notes_content = f"{rec.description}\n{marker}".strip() if rec.description else marker
+
+    expense = Expense(
+        organization_id=rec.organization_id,
+        name=rec.name,
+        description=rec.description,
+        date=due_date,
+        category=rec.category,
+        amount=rec.amount,
+        currency=rec.currency,
+        billable=rec.billable,
+        customer_id=rec.customer_id,
+        customer_name=rec.customer_name,
+        project_id=rec.project_id,
+        project_name=rec.project_name,
+        billable_amount=rec.billable_amount if rec.billable else None,
+        tax_rate=getattr(rec, "tax_rate", None),
+        invoice_treatment=rec.invoice_treatment,
+        payment_method=rec.payment_method or "Cash",
+        paid_by=rec.paid_by or "Self",
+        status=ExpenseStatus.RECORDED,
+        notes=notes_content,
+    )
+    db.add(expense)
+
+    rec.last_run = due_date
+    if not rec.never_ends and rec.end_date and next_date > rec.end_date:
+        rec.status = RecurringExpenseStatus.ENDED
+        rec.next_run = None
+    else:
+        rec.next_run = next_date
+
+    return expense
+
+
+def process_due_recurring_expenses(db: Session, *, today: Optional[date] = None) -> int:
+    """Process all active recurring expenses due on or before `today`."""
+    today = today or date.today()
+    due_recs = list(
+        db.scalars(
+            select(RecurringExpense).where(
+                RecurringExpense.status == RecurringExpenseStatus.ACTIVE,
+                RecurringExpense.next_run.is_not(None),
+                RecurringExpense.next_run <= today,
+            )
+        ).all()
+    )
+
+    processed = 0
+    for rec in due_recs:
+        try:
+            exp = execute_recurring_expense(db, rec, today=today)
+            db.commit()
+            if exp is not None:
+                processed += 1
+        except Exception:
+            logger.exception("Scheduler: recurring expense execution failed for %s", rec.id)
+            db.rollback()
+
+    return processed
+
