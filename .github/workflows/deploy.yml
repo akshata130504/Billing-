@@ -9,7 +9,10 @@ on:
 
 concurrency:
   group: deploy-production
-  cancel-in-progress: false
+  # A newer deploy for a newer commit should always supersede an older, still-queued
+  # one — otherwise a single stuck run (e.g. no runner available) permanently blocks
+  # every deploy after it, as happened in practice.
+  cancel-in-progress: true
 
 jobs:
   deploy:
