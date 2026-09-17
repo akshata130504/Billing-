@@ -394,3 +394,98 @@ def test_roomi_confirmation_before_mutation(client, tenant, auth_headers, db):
     notes_after = db.query(CreditNote).filter(CreditNote.organization_id == tenant.organization.id).all()
     assert len(notes_after) == 1
     assert notes_after[0].total == Decimal("100.00")
+
+
+# ---------------------------------------------------------------------------
+# 11. Different questions get different, specific answers (no LLM configured)
+# ---------------------------------------------------------------------------
+def test_roomi_different_questions_get_different_specific_answers(client, tenant, auth_headers, monkeypatch):
+    """Regression test: without an LLM configured, distinct questions must not all
+    collapse into the same generic reply — each should hit its own specific handler."""
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", None)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    questions = [
+        "How do I create an invoice?",
+        "Explain subscriptions",
+        "How does proration work?",
+        "How does GST work?",
+        "What is dunning?",
+    ]
+    replies = []
+    for q in questions:
+        res = client.post("/api/v1/chat/roomi", headers=auth_headers, json={"message": q})
+        assert res.status_code == 200
+        replies.append(res.json()["reply"])
+
+    # Every question must produce a distinct answer, not the same boilerplate for all.
+    assert len(set(replies)) == len(questions)
+
+
+# ---------------------------------------------------------------------------
+# 12. Genuinely unrelated questions get a professional decline, not a random answer
+# ---------------------------------------------------------------------------
+def test_roomi_offtopic_question_gets_professional_decline(client, tenant, auth_headers, monkeypatch):
+    """A question with no billing relevance at all must be declined professionally,
+    not answered with the same generic billing feature list used for on-topic misses."""
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", None)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    res = client.post(
+        "/api/v1/chat/roomi",
+        headers=auth_headers,
+        json={"message": "What is the best recipe for chocolate chip cookies?"},
+    )
+    assert res.status_code == 200
+    reply = res.json()["reply"]
+    assert "Roomi" in reply
+    # Must not be the identical "on-topic, please clarify" wording used for unmatched
+    # but plausibly billing-related questions.
+    assert "exact information you need" not in reply
+
+
+# ---------------------------------------------------------------------------
+# 13. Ordinary phrasing with "why"/"breakdown" still reaches live grounded data
+# ---------------------------------------------------------------------------
+def test_roomi_why_question_uses_live_overdue_data_not_generic_fallback(client, tenant, auth_headers, db, monkeypatch):
+    """'why is X overdue' is an everyday, perfectly answerable question — it must not be
+    discarded into the generic clarification just because it contains the word 'why'."""
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", None)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    customer = tenant.customer()
+    tenant.invoice(customer, amount="4500.00", status=InvoiceStatus.OVERDUE)
+
+    res = client.post(
+        "/api/v1/chat/roomi",
+        headers=auth_headers,
+        json={"message": "why do I have overdue invoices?"},
+    )
+    assert res.status_code == 200
+    reply = res.json()["reply"]
+    assert "4,500.00" in reply or "4500.00" in reply
+    assert "exact information you need" not in reply
+
+
+# ---------------------------------------------------------------------------
+# 14. "What's in the X tab" is answered from the real sidebar, never guessed
+# ---------------------------------------------------------------------------
+def test_roomi_sidebar_section_question_is_grounded_not_guessed(client, tenant, auth_headers, monkeypatch):
+    """Regression test: Roomi previously guessed that 'Operations' contained
+    Subscription Management (it doesn't — Operations is Expenses/Projects/Timesheets;
+    Subscriptions is its own separate sidebar section). This must reflect the real
+    frontend/src/components/layout/Sidebar.tsx structure, not an LLM's generic guess."""
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", None)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    res = client.post(
+        "/api/v1/chat/roomi",
+        headers=auth_headers,
+        json={"message": "I want info on operations tab"},
+    )
+    assert res.status_code == 200
+    reply = res.json()["reply"]
+    assert "Expenses" in reply
+    assert "Projects" in reply
+    assert "Timesheets" in reply
+    assert "Subscription" not in reply
