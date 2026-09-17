@@ -12,13 +12,61 @@
 #   (password: a GitHub PAT with the `read:packages` scope - any collaborator can
 #   create one for themselves, no repo Admin access needed)
 #
+# Optional but recommended - keep this script and docker-compose.prod.yml in sync
+# with the repo automatically (not just the images): add a line
+#   GITHUB_PAT=<a token with read access to this repo's contents>
+# to .env.production. A fine-grained PAT scoped to just this one repo with
+# "Contents: Read-only" is the safest choice; a classic PAT needs the `repo` scope.
+# Without this set, the sync step below is skipped and only images are updated.
+#
 # Expected to run with its working directory set to the same directory that holds
 # docker-compose.prod.yml and .env.production (normally /opt/rooman-billing).
 set -eu
 
+REPO_RAW_BASE="https://raw.githubusercontent.com/rooman-itsd/Rooman-Billing/main"
 COMPOSE="docker compose --env-file .env.production -f docker-compose.prod.yml"
 LOG_PREFIX="[deploy-poll $(date -Iseconds)]"
 
+# --- Keep orchestration files in sync with the repo, not just the images ------------
+# Without this, a fix to docker-compose.prod.yml or this script itself would silently
+# require someone to manually re-paste it on the server forever.
+GITHUB_PAT="$(grep -E '^GITHUB_PAT=' .env.production 2>/dev/null | head -n1 | cut -d '=' -f2-)"
+
+sync_from_repo() {
+    # $1 = path in the repo, $2 = local file to update if it changed
+    repo_path="$1"
+    local_path="$2"
+    # Same directory as the destination, so the `mv` below is always an atomic
+    # same-filesystem rename - a temp dir like /tmp could be a different filesystem,
+    # which would silently degrade `mv` to a non-atomic copy+unlink.
+    tmp="$(mktemp "${local_path}.XXXXXX")"
+    if curl -fsSL -H "Authorization: token $GITHUB_PAT" "$REPO_RAW_BASE/$repo_path" -o "$tmp" 2>/dev/null; then
+        if [ ! -f "$local_path" ] || ! cmp -s "$tmp" "$local_path"; then
+            mv "$tmp" "$local_path"
+            echo "$LOG_PREFIX Updated $local_path from repo."
+        else
+            rm -f "$tmp"
+        fi
+    else
+        echo "$LOG_PREFIX WARNING: could not fetch $repo_path from repo, keeping existing $local_path" >&2
+        rm -f "$tmp"
+    fi
+}
+
+if [ -n "$GITHUB_PAT" ]; then
+    echo "$LOG_PREFIX Syncing orchestration files from repo..."
+    sync_from_repo "docker-compose.prod.yml" "docker-compose.prod.yml"
+    # Self-update: replacing this file via `mv` (atomic rename) is safe even while it's
+    # running - this process already holds the old file's data open. The new version
+    # only takes effect on the *next* scheduled run, which keeps this simple and avoids
+    # any self-modifying-script hazards.
+    sync_from_repo "deploy/deploy-poll.sh" "$0"
+    chmod +x "$0" 2>/dev/null || true
+else
+    echo "$LOG_PREFIX GITHUB_PAT not set in .env.production - skipping repo file sync (images only)."
+fi
+
+# --- Pull and roll out any new images -------------------------------------------------
 echo "$LOG_PREFIX Checking for new images..."
 
 # Pull one service at a time and prune (never -a, that would also remove images other
