@@ -177,10 +177,11 @@ def test_subscription_cancellation_immediate_and_period_end(client: TestClient, 
     assert cancel1_res.json()["cancellation_reason"] == "Customer switching provider"
 
     # 2. Cancel immediately
+    customer2 = tenant.customer()
     res2 = client.post(
         "/api/v1/subscriptions",
         headers=auth_headers,
-        json={"customer_id": customer.id, "plan_id": plan.id, "quantity": 1},
+        json={"customer_id": customer2.id, "plan_id": plan.id, "quantity": 1},
     )
     sub2_id = res2.json()["id"]
 
@@ -228,27 +229,50 @@ def test_subscription_manual_renewal_and_invoicing(client: TestClient, tenant, a
     assert len(invoices) >= 2
 
 
+def test_duplicate_active_subscription_prevented(client: TestClient, tenant, auth_headers):
+    customer = tenant.customer()
+    product, plan = tenant.product_with_plan(unit_amount="500.00")
+
+    res1 = client.post(
+        "/api/v1/subscriptions",
+        headers=auth_headers,
+        json={"customer_id": customer.id, "plan_id": plan.id, "quantity": 1},
+    )
+    assert res1.status_code == 201
+
+    # Attempting duplicate active subscription for same customer and plan
+    res2 = client.post(
+        "/api/v1/subscriptions",
+        headers=auth_headers,
+        json={"customer_id": customer.id, "plan_id": plan.id, "quantity": 1},
+    )
+    assert res2.status_code == 422
+    assert "already has an active subscription" in res2.json()["error"]["message"]
+
+
 def test_subscription_summary_kpi_metrics(client: TestClient, tenant, auth_headers):
     customer = tenant.customer()
-    product, plan = tenant.product_with_plan(unit_amount="1000.00")
+    product1, plan1 = tenant.product_with_plan(unit_amount="1000.00")
+    product2, plan2 = tenant.product_with_plan(unit_amount="1000.00")
+    product3, plan3 = tenant.product_with_plan(unit_amount="1000.00")
 
     # Create 1 Active, 1 Paused, 1 Trialing
     client.post(
         "/api/v1/subscriptions",
         headers=auth_headers,
-        json={"customer_id": customer.id, "plan_id": plan.id, "quantity": 1},
+        json={"customer_id": customer.id, "plan_id": plan1.id, "quantity": 1},
     )
     res_pause = client.post(
         "/api/v1/subscriptions",
         headers=auth_headers,
-        json={"customer_id": customer.id, "plan_id": plan.id, "quantity": 1},
+        json={"customer_id": customer.id, "plan_id": plan2.id, "quantity": 1},
     )
     client.post(f"/api/v1/subscriptions/{res_pause.json()['id']}/pause", headers=auth_headers)
 
     client.post(
         "/api/v1/subscriptions",
         headers=auth_headers,
-        json={"customer_id": customer.id, "plan_id": plan.id, "quantity": 1, "trial_days": 7},
+        json={"customer_id": customer.id, "plan_id": plan3.id, "quantity": 1, "trial_days": 7},
     )
 
     summary_res = client.get("/api/v1/subscriptions/summary", headers=auth_headers)

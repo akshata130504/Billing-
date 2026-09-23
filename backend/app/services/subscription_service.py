@@ -532,6 +532,21 @@ def create_subscription(db: Session, ctx: CurrentContext, data: SubscriptionCrea
     if status == SubscriptionStatus.ACTIVE and next_billing is None:
         next_billing = period_end
 
+    if status in (SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING):
+        existing_active = db.scalar(
+            select(Subscription).where(
+                Subscription.organization_id == ctx.organization_id,
+                Subscription.customer_id == customer.id,
+                Subscription.plan_id == plan.id,
+                Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]),
+            )
+        )
+        if existing_active:
+            raise ValidationAppError(
+                f"Customer already has an active subscription ({existing_active.subscription_number}) for this plan.",
+                {"fields": {"plan_id": "An active subscription for this customer and plan already exists."}},
+            )
+
     subscription = Subscription(
         organization_id=ctx.organization_id,
         subscription_number=next_number(db, ctx.organization_id, "subscription"),
@@ -656,6 +671,22 @@ def activate_subscription(db: Session, ctx: CurrentContext, subscription: Subscr
     """Transition DRAFT or PENDING_ACTIVATION subscription to ACTIVE."""
     if subscription.status not in (SubscriptionStatus.DRAFT, SubscriptionStatus.PENDING_ACTIVATION):
         raise InvalidStateError(f"Only draft or pending subscriptions can be activated; this one is {subscription.status.value}.")
+
+    existing_active = db.scalar(
+        select(Subscription).where(
+            Subscription.organization_id == ctx.organization_id,
+            Subscription.customer_id == subscription.customer_id,
+            Subscription.plan_id == subscription.plan_id,
+            Subscription.id != subscription.id,
+            Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]),
+        )
+    )
+    if existing_active:
+        raise ValidationAppError(
+            f"Customer already has an active subscription ({existing_active.subscription_number}) for this plan.",
+            {"fields": {"plan_id": "An active subscription for this customer and plan already exists."}},
+        )
+
     before = snapshot(subscription)
     today = date.today()
     months = interval_months(subscription.plan)

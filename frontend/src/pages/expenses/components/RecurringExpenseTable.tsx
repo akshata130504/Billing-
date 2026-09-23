@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { RecurringExpense } from '../types';
 import { formatINR } from '../mockExpenses';
 import {
@@ -30,6 +31,21 @@ export function RecurringExpenseTable({
   onNew,
 }: RecurringExpenseTableProps) {
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number; openUp: boolean } | null>(null);
+
+  useEffect(() => {
+    if (!activeMenuId) return;
+    const handleDismiss = () => {
+      setActiveMenuId(null);
+      setMenuPos(null);
+    };
+    window.addEventListener('scroll', handleDismiss, true);
+    window.addEventListener('resize', handleDismiss);
+    return () => {
+      window.removeEventListener('scroll', handleDismiss, true);
+      window.removeEventListener('resize', handleDismiss);
+    };
+  }, [activeMenuId]);
 
   const getStatusBadge = (status: RecurringExpense['status']) => {
     switch (status) {
@@ -112,9 +128,8 @@ export function RecurringExpenseTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {recurringExpenses.map((expense, idx) => {
+            {recurringExpenses.map((expense) => {
               const isMenuOpen = activeMenuId === expense.id;
-              const isNearBottom = idx >= Math.max(1, recurringExpenses.length - 2);
 
               return (
                 <tr
@@ -209,30 +224,54 @@ export function RecurringExpenseTable({
                       <div className="relative inline-block text-left">
                         <button
                           type="button"
-                          onClick={() => setActiveMenuId(isMenuOpen ? null : expense.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isMenuOpen) {
+                              setActiveMenuId(null);
+                              setMenuPos(null);
+                            } else {
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const spaceBelow = window.innerHeight - rect.bottom;
+                              const openUp = spaceBelow < 150 && rect.top > 150;
+                              setMenuPos({
+                                top: openUp ? rect.top - 4 : rect.bottom + 4,
+                                right: Math.max(8, window.innerWidth - rect.right),
+                                openUp,
+                              });
+                              setActiveMenuId(expense.id);
+                            }
+                          }}
                           className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
                           title="More Actions"
                         >
                           <MoreVertical className="w-3.5 h-3.5" />
                         </button>
 
-                        {/* Dropdown Menu */}
-                        {isMenuOpen && (
+                        {/* Dropdown Menu Rendered via Portal */}
+                        {isMenuOpen && menuPos && createPortal(
                           <>
                             <div
-                              className="fixed inset-0 z-20"
-                              onClick={() => setActiveMenuId(null)}
+                              className="fixed inset-0 z-50 bg-transparent"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveMenuId(null);
+                                setMenuPos(null);
+                              }}
                             />
                             <div
-                              className={`absolute right-0 w-44 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1 text-xs ${
-                                isNearBottom ? 'bottom-full mb-1' : 'top-full mt-1'
-                              }`}
-                              style={isNearBottom ? { top: 'auto', bottom: '100%', marginBottom: '4px' } : undefined}
+                              className="fixed w-44 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-1 text-xs"
+                              style={{
+                                top: menuPos.openUp ? 'auto' : `${menuPos.top}px`,
+                                bottom: menuPos.openUp ? `${window.innerHeight - menuPos.top}px` : 'auto',
+                                right: `${menuPos.right}px`,
+                              }}
+                              onClick={(e) => e.stopPropagation()}
                             >
                               <button
                                 type="button"
                                 onClick={() => {
                                   setActiveMenuId(null);
+                                  setMenuPos(null);
                                   onToggleStatus(expense.id);
                                 }}
                                 className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
@@ -253,6 +292,7 @@ export function RecurringExpenseTable({
                                 type="button"
                                 onClick={() => {
                                   setActiveMenuId(null);
+                                  setMenuPos(null);
                                   onDuplicate(expense.id);
                                 }}
                                 className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
@@ -265,6 +305,7 @@ export function RecurringExpenseTable({
                                 type="button"
                                 onClick={() => {
                                   setActiveMenuId(null);
+                                  setMenuPos(null);
                                   onDelete(expense);
                                 }}
                                 className="w-full px-3 py-1.5 text-left text-rose-600 hover:bg-rose-50 flex items-center gap-2 font-medium"
@@ -273,7 +314,8 @@ export function RecurringExpenseTable({
                                 Delete Profile
                               </button>
                             </div>
-                          </>
+                          </>,
+                          document.body
                         )}
                       </div>
                     </div>

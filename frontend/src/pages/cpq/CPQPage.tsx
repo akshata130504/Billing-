@@ -742,12 +742,20 @@ export function CPQPage() {
                       <span>Subtotal:</span>
                       <span className="font-semibold">₹{simulation.subtotal}</span>
                     </div>
-                    {Number(simulation.discount_amount) > 0 && (
-                      <div className="flex justify-between text-red-600 font-medium">
-                        <span>Total Discounts ({simulation.discount_pct}%):</span>
-                        <span>-₹{simulation.discount_amount}</span>
-                      </div>
-                    )}
+                    {Number(simulation.discount_amount) > 0 && (() => {
+                      const subtotalNum = Number(simulation.subtotal) || 0;
+                      const discountNum = Number(simulation.discount_amount) || 0;
+                      const calculatedPct = subtotalNum > 0 ? (discountNum / subtotalNum) * 100 : (Number(simulation.discount_pct) || 0);
+                      const displayPct = Number.isInteger(calculatedPct)
+                        ? calculatedPct.toString()
+                        : calculatedPct.toFixed(1).replace(/\.0$/, '');
+                      return (
+                        <div className="flex justify-between text-red-600 font-medium">
+                          <span>Total Discounts ({displayPct}%):</span>
+                          <span>-₹{simulation.discount_amount}</span>
+                        </div>
+                      );
+                    })()}
                     <div className="flex justify-between text-slate-600">
                       <span>Tax (GST):</span>
                       <span className="font-semibold">+₹{simulation.tax_amount}</span>

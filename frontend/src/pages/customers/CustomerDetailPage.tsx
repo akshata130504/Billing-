@@ -53,6 +53,7 @@ import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { cn } from '../../utils/cn';
 import { formatDate, formatDateTime, formatMoney, humanize, statusVariant } from '../../utils/format';
+import { validateSensibleName, validateEmail, validatePhone } from '../../utils/validation';
 
 const TABS: { key: CustomerDetailTab; label: string; icon: ReactNode }[] = [
   { key: 'overview', label: 'Overview', icon: <Building2 className="w-4 h-4" /> },
@@ -986,7 +987,28 @@ function ContactsTab({
   };
 
   const updateRow = (key: string, patch: Partial<ContactIn>) => {
-    setDrafts((prev) => prev.map((d) => (d.key === key ? { ...d, ...patch } : d)));
+    setDrafts((prev) => {
+      const idx = prev.findIndex((d) => d.key === key);
+      if (idx !== -1) {
+        const keysToClear = Object.keys(patch).map((k) => `${idx}.${k}`);
+        setErrors((prevErr) => {
+          let hasMatch = false;
+          for (const k of keysToClear) {
+            if (prevErr[k]) {
+              hasMatch = true;
+              break;
+            }
+          }
+          if (!hasMatch) return prevErr;
+          const nextErr = { ...prevErr };
+          for (const k of keysToClear) {
+            delete nextErr[k];
+          }
+          return nextErr;
+        });
+      }
+      return prev.map((d) => (d.key === key ? { ...d, ...patch } : d));
+    });
   };
 
   const setPrimary = (key: string) => {
@@ -1004,7 +1026,14 @@ function ContactsTab({
   const save = async () => {
     const localErrors: Record<string, string> = {};
     drafts.forEach((d, i) => {
-      if (!d.name || d.name.trim() === '') localErrors[`${i}.name`] = 'Name is required';
+      const nameErr = validateSensibleName(d.name, 'Name');
+      if (nameErr) localErrors[`${i}.name`] = nameErr;
+
+      const emailErr = validateEmail(d.email);
+      if (emailErr) localErrors[`${i}.email`] = emailErr;
+
+      const phoneErr = validatePhone(d.phone);
+      if (phoneErr) localErrors[`${i}.phone`] = phoneErr;
     });
     if (Object.keys(localErrors).length > 0) {
       setErrors(localErrors);

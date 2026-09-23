@@ -44,7 +44,7 @@ export const InvoicesListPage: React.FC = () => {
       setError(null);
       const params: any = {};
       if (activeTab !== 'all') {
-        params.status = activeTab.toUpperCase();
+        params.status = activeTab.toLowerCase();
       }
       if (searchTerm) {
         params.search = searchTerm;

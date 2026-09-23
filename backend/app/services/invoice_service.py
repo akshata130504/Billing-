@@ -244,7 +244,7 @@ def list_invoices(
         )
     if status:
         try:
-            stmt = stmt.where(Invoice.status == InvoiceStatus(status))
+            stmt = stmt.where(Invoice.status == InvoiceStatus(status.strip().lower()))
         except ValueError:
             raise ValidationAppError("Unknown invoice status.", {"fields": {"status": "invalid"}})
     if customer_id:
