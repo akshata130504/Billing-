@@ -5,6 +5,8 @@
  * everything on submit, but this gives users inline errors before they hit it.
  */
 
+import { isValidPhoneNumber } from 'react-phone-number-input';
+
 export type ValidationResult = string | null;
 
 const NAME_CHARS_RE = /^[A-Za-z0-9\s.,'&\-()/]{1,200}$/;
@@ -64,6 +66,11 @@ export function normalizeEmail(value: string | null | undefined): string {
 export function validatePhone(value: string | null | undefined, options: { required?: boolean } = {}): ValidationResult {
   const val = (value ?? '').trim();
   if (val === '') return options.required ? 'Phone number is required.' : null;
+  // Numbers entered via the country-code phone input arrive in E.164 form
+  // (e.g. "+919876543210") - validate those precisely per-country.
+  if (val.startsWith('+')) {
+    return isValidPhoneNumber(val) ? null : 'Enter a valid phone number for the selected country.';
+  }
   if (!PHONE_RE.test(val)) {
     return 'Enter a valid phone number (digits, spaces, hyphens, parentheses, optional leading +).';
   }

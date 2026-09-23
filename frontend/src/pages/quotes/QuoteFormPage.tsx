@@ -14,6 +14,7 @@ import {
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
 import { LoadingState } from '../../components/common/LoadingState';
+import { PhoneInput } from '../../components/common/PhoneInput';
 import { validateDateAfter, validateDateNotPast, validateNonNegativeMoney, validatePercentage, validatePositiveQuantity } from '../../utils/validation';
 import { quoteService } from '../../services/quoteService';
 import { customerService } from '../../services/customerService';
@@ -859,14 +860,7 @@ export function QuoteFormPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-              <input
-                type="tel"
-                placeholder="+91 98765 43210"
-                value={newCustPhone}
-                onChange={(e) => setNewCustPhone(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-              />
+              <PhoneInput label="Phone" value={newCustPhone} onChange={setNewCustPhone} />
             </div>
           </div>
 

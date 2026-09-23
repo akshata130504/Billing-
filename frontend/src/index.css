@@ -70,6 +70,27 @@
 }
 
 /* ==========================================================================
+   Phone input (react-phone-number-input) - blend the library's country
+   select + flag into our bordered field shell instead of its own box styles.
+   ========================================================================== */
+.rooman-phone-input .PhoneInputCountry {
+  margin-right: 0.5rem;
+}
+
+.rooman-phone-input .PhoneInputCountrySelect {
+  cursor: pointer;
+}
+
+.rooman-phone-input .PhoneInputInput {
+  outline: none;
+  box-shadow: none;
+}
+
+html.dark .rooman-phone-input .PhoneInputCountrySelectArrow {
+  opacity: 0.7;
+}
+
+/* ==========================================================================
    Dark Theme Overrides (Applied when html has .dark class)
    ========================================================================== */
 html.dark {

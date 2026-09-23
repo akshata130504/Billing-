@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Save } from 'lucide-react';
 import { Input } from '../../components/common/Input';
+import { PhoneInput } from '../../components/common/PhoneInput';
 import { Select } from '../../components/common/Select';
 import { Button } from '../../components/common/Button';
 import { useToast } from '../../components/common/Toast';
@@ -179,7 +180,7 @@ export function OrganizationTab({ organization, canEdit }: { organization: Organ
           <Input label="Organization name" required value={values.name} onChange={set('name')} error={errors.name} disabled={disabled} />
           <Input label="Legal name" value={values.legal_name} onChange={set('legal_name')} error={errors.legal_name} disabled={disabled} helperText="Registered entity name, if different." />
           <Input label="Billing email" type="email" value={values.email} onChange={set('email')} error={errors.email} disabled={disabled} />
-          <Input label="Phone" value={values.phone} onChange={set('phone')} error={errors.phone} disabled={disabled} />
+          <PhoneInput label="Phone" value={values.phone} onChange={(v) => setValues((prev) => ({ ...prev, phone: v }))} error={errors.phone} disabled={disabled} />
           <Input label="Website" type="url" placeholder="https://" value={values.website} onChange={set('website')} error={errors.website} disabled={disabled} />
           <Input label="Logo URL" type="url" placeholder="https://" value={values.logo_url} onChange={set('logo_url')} error={errors.logo_url} disabled={disabled} helperText="Public image URL used on documents." />
         </div>

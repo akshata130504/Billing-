@@ -19,6 +19,7 @@ import type { InvoiceLineItemIn } from '../../types/invoices';
 import type { PlanPricingItem } from '../../types/plans_pricing';
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
+import { PhoneInput } from '../../components/common/PhoneInput';
 import { validateDateNotBefore, validateNonNegativeMoney, validatePercentage, validatePositiveQuantity } from '../../utils/validation';
 
 export const InvoiceFormPage: React.FC = () => {
@@ -816,14 +817,7 @@ export const InvoiceFormPage: React.FC = () => {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-              <input
-                type="tel"
-                placeholder="+91 98765 43210"
-                value={newCustPhone}
-                onChange={(e) => setNewCustPhone(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-              />
+              <PhoneInput label="Phone" value={newCustPhone} onChange={setNewCustPhone} />
             </div>
           </div>
 

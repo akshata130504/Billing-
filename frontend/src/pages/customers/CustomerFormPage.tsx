@@ -9,6 +9,7 @@ import { ErrorState } from '../../components/common/ErrorState';
 import { Input } from '../../components/common/Input';
 import { LoadingState } from '../../components/common/LoadingState';
 import { PageHeader } from '../../components/common/PageHeader';
+import { PhoneInput } from '../../components/common/PhoneInput';
 import { Select } from '../../components/common/Select';
 import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
@@ -265,6 +266,55 @@ export function CustomerFormPage() {
     }
   }, [isEdit, loadCustomer]);
 
+  const [pinLookupLoading, setPinLookupLoading] = useState(false);
+
+  // Auto-fetch city and state when a 6-digit Indian PIN code is entered
+  useEffect(() => {
+    const pin = values.billing_postal_code.trim();
+    const country = values.billing_country.trim().toUpperCase();
+    if ((country === '' || country === 'IN') && /^[1-9][0-9]{5}$/.test(pin)) {
+      const controller = new AbortController();
+      setPinLookupLoading(true);
+      fetch(`https://api.postalpincode.in/pincode/${pin}`, { signal: controller.signal })
+        .then((res) => res.json())
+        .then((data) => {
+          if (Array.isArray(data) && data[0]?.Status === 'Success' && data[0]?.PostOffice?.length > 0) {
+            const po = data[0].PostOffice[0];
+            const city = po.District || po.Block || po.Circle || '';
+            const state = po.State || '';
+            setValues((prev) => {
+              if (prev.billing_postal_code.trim() !== pin) return prev;
+              return {
+                ...prev,
+                billing_city: city || prev.billing_city,
+                billing_state: state || prev.billing_state,
+                billing_country: prev.billing_country || 'IN',
+              };
+            });
+            setErrors((prev) => {
+              if (!prev.billing_city && !prev.billing_state) return prev;
+              const next = { ...prev };
+              if (city) delete next.billing_city;
+              if (state) delete next.billing_state;
+              return next;
+            });
+          }
+        })
+        .catch(() => {
+          // Ignore network or abort errors
+        })
+        .finally(() => {
+          setPinLookupLoading(false);
+        });
+
+      return () => {
+        controller.abort();
+      };
+    } else {
+      setPinLookupLoading(false);
+    }
+  }, [values.billing_postal_code, values.billing_country]);
+
   const setField = <K extends keyof FormValues>(key: K, value: FormValues[K]) => {
     setValues((prev) => ({ ...prev, [key]: value }));
     if (errors[key]) {
@@ -277,10 +327,31 @@ export function CustomerFormPage() {
   };
 
   const updateContact = (key: string, patch: Partial<ContactDraft>) => {
-    setValues((prev) => ({
-      ...prev,
-      contacts: prev.contacts.map((c) => (c.key === key ? { ...c, ...patch } : c)),
-    }));
+    setValues((prev) => {
+      const idx = prev.contacts.findIndex((c) => c.key === key);
+      if (idx !== -1) {
+        const keysToClear = Object.keys(patch).map((k) => `contacts.${idx}.${k}`);
+        setErrors((prevErr) => {
+          let hasMatch = false;
+          for (const k of keysToClear) {
+            if (prevErr[k]) {
+              hasMatch = true;
+              break;
+            }
+          }
+          if (!hasMatch) return prevErr;
+          const nextErr = { ...prevErr };
+          for (const k of keysToClear) {
+            delete nextErr[k];
+          }
+          return nextErr;
+        });
+      }
+      return {
+        ...prev,
+        contacts: prev.contacts.map((c) => (c.key === key ? { ...c, ...patch } : c)),
+      };
+    });
   };
 
   const addContact = () => {
@@ -422,12 +493,11 @@ export function CustomerFormPage() {
                 placeholder="accounts@acme.com"
                 helperText="Invoices and reminders are sent here."
               />
-              <Input
+              <PhoneInput
                 label="Phone"
                 value={values.phone}
-                onChange={(e) => setField('phone', e.target.value)}
+                onChange={(v) => setField('phone', v)}
                 error={errors.phone}
-                placeholder="+91 98765 43210"
               />
               <Input
                 label="Website"
@@ -586,6 +656,7 @@ export function CustomerFormPage() {
                 value={values.billing_postal_code}
                 onChange={(e) => setField('billing_postal_code', e.target.value)}
                 error={errors.billing_postal_code}
+                helperText={pinLookupLoading ? 'Fetching city & state...' : undefined}
                 placeholder="560001"
               />
               <Input
@@ -677,12 +748,11 @@ export function CustomerFormPage() {
                     error={errors[`contacts.${i}.email`]}
                     placeholder="name@company.com"
                   />
-                  <Input
+                  <PhoneInput
                     label="Phone"
                     value={c.phone}
-                    onChange={(e) => updateContact(c.key, { phone: e.target.value })}
+                    onChange={(v) => updateContact(c.key, { phone: v })}
                     error={errors[`contacts.${i}.phone`]}
-                    placeholder="+91 ..."
                   />
                 </div>
               ))}
