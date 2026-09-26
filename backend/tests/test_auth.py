@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
+import pytest
 from sqlalchemy import select
 
 from backend.app.core.config import settings
@@ -18,7 +19,37 @@ def unique(label: str) -> str:
     return f"{label}-{uuid.uuid4().hex[:8]}"
 
 
+_SENT_OTPS: dict = {}
+_SENT_MAIL: list = []
+
+
+@pytest.fixture(autouse=True)
+def _capture_auth_email(monkeypatch):
+    """Signup codes and reset links are only ever emailed; capture them for the tests."""
+    from backend.app.services import auth_service
+
+    _SENT_OTPS.clear()
+    _SENT_MAIL.clear()
+
+    def fake_otp(email, full_name, otp):
+        _SENT_OTPS[email] = otp
+        return True
+
+    def fake_send(to, subject, text_body, html_body=None, **kwargs):
+        _SENT_MAIL.append({"to": to, "subject": subject, "text": text_body, "html": html_body})
+        return True
+
+    monkeypatch.setattr(auth_service, "_send_signup_verification_email", fake_otp)
+    monkeypatch.setattr(auth_service, "send_email", fake_send)
+
+
+def emailed_reset_token(email: str) -> str:
+    body = [m for m in _SENT_MAIL if m["to"] == email.lower()][-1]["text"]
+    return token_of(next(word for word in body.split() if "reset-password?token=" in word))
+
+
 def signup(client, **overrides):
+    """Email-verified signup: request-verification, then verify-otp with the emailed code."""
     body = {
         "organization_name": overrides.pop("organization_name", f"Org {unique('signup')}"),
         "full_name": overrides.pop("full_name", "Sign Up"),
@@ -26,7 +57,21 @@ def signup(client, **overrides):
         "password": overrides.pop("password", PASSWORD),
     }
     body.update(overrides)
-    return client.post(f"{API}/auth/signup", json=body)
+    requested = client.post(f"{API}/auth/signup/request-verification", json=body)
+    if requested.status_code != 200:
+        return requested
+    email = requested.json()["email"]
+    return client.post(
+        f"{API}/auth/signup/verify-otp", json={"email": email, "otp": _SENT_OTPS[email], "password": body["password"]}
+    )
+
+
+def test_legacy_unverified_signup_endpoint_is_gone(client):
+    r = client.post(
+        f"{API}/auth/signup",
+        json={"organization_name": "X", "full_name": "Y", "email": f"{unique('legacy')}@example.test", "password": PASSWORD},
+    )
+    assert r.status_code == 410 and r.json()["error"]["code"] == "GONE"
 
 
 def login(client, email, password=PASSWORD):
@@ -151,40 +196,65 @@ def test_login_wrong_password_and_unknown_email_look_the_same(client, db, tenant
     assert bad.json()["error"]["code"] == "UNAUTHORIZED"
     assert bad.json()["error"]["message"] == unknown.json()["error"]["message"]
 
-    db.refresh(tenant.owner)
-    assert tenant.owner.failed_login_attempts == 1
     rows = audit_rows(db, "LOGIN_FAILED", tenant.owner.id)
     assert rows and rows[0].status.value == "denied" and rows[0].actor_label == tenant.owner.email
 
-    # a correct login resets the counter
+    # a correct login resets the (email, IP) failure counter
+    from backend.app.models.identity import LoginThrottle
+
+    db.expire_all()
+    assert db.scalars(select(LoginThrottle).where(LoginThrottle.subject == tenant.owner.email)).first() is not None
     assert login(client, tenant.owner.email).status_code == 200
-    db.refresh(tenant.owner)
-    assert tenant.owner.failed_login_attempts == 0
+    db.expire_all()
+    assert db.scalars(select(LoginThrottle).where(LoginThrottle.subject == tenant.owner.email)).first() is None
 
 
-def test_account_locks_after_five_failures(client, db, tenant):
+def _client_from(ip: str):
+    """A TestClient whose TCP peer is a private proxy address forwarding X-Real-IP=ip."""
+    from fastapi.testclient import TestClient
+
+    from backend.app.main import app
+
+    c = TestClient(app, client=("172.18.0.5", 50000))
+    c.headers.update({"X-Real-IP": ip})
+    return c
+
+
+def test_failed_logins_throttle_per_account_and_ip(client, db, tenant):
+    from backend.app.models.identity import LoginThrottle
+
     user = tenant.add_member("locky", MemberRole.FINANCE)
     db.commit()
+    attacker = _client_from("203.0.113.66")
+    victim = _client_from("198.51.100.7")
     for attempt in range(1, 5):
-        r = login(client, user.email, "WrongPassw0rd!")
+        r = login(attacker, user.email, "WrongPassw0rd!")
         assert r.status_code == 401
-        assert "locked" not in r.json()["error"]["message"].lower(), attempt
-    fifth = login(client, user.email, "WrongPassw0rd!")
+        assert r.json()["error"]["message"] == "Invalid email or password.", attempt
+    fifth = login(attacker, user.email, "WrongPassw0rd!")
     assert fifth.status_code == 401
-    assert "locked" in fifth.json()["error"]["message"].lower()
+    assert "too many" in fifth.json()["error"]["message"].lower()
 
+    # even the right password is refused from the throttled address...
+    blocked = login(attacker, user.email)
+    assert blocked.status_code == 401 and "too many" in blocked.json()["error"]["message"].lower()
+    # ...but the real user on another address is not locked out
+    assert login(victim, user.email).status_code == 200
     db.refresh(user)
-    assert user.locked_until is not None
+    assert user.locked_until is None
 
-    # even the right password is refused while locked
-    locked = login(client, user.email)
-    assert locked.status_code == 401
-    assert "locked" in locked.json()["error"]["message"].lower()
+    # unknown emails are throttled identically, so the message never reveals account existence
+    ghost = f"{unique('ghost')}@example.test"
+    for _ in range(4):
+        login(attacker, ghost, "WrongPassw0rd!")
+    assert fifth.json()["error"]["message"] == login(attacker, ghost, "WrongPassw0rd!").json()["error"]["message"]
 
-    # once the lock expires the account works again
-    user.locked_until = datetime.now(timezone.utc) - timedelta(minutes=1)
+    # once the block expires the address works again
+    db.expire_all()
+    row = db.scalars(select(LoginThrottle).where(LoginThrottle.subject == user.email, LoginThrottle.ip_address == "203.0.113.66")).one()
+    row.locked_until = datetime.now(timezone.utc) - timedelta(minutes=1)
     db.commit()
-    assert login(client, user.email).status_code == 200
+    assert login(attacker, user.email).status_code == 200
 
 
 def test_login_requires_an_active_membership(client, db):
@@ -405,8 +475,8 @@ def test_forgot_and_reset_password_flow(client, db, tenant):
     assert r.status_code == 202, r.text
     body = r.json()
     assert body["message"] == unknown.json()["message"]
-    assert body["reset_url"].startswith(settings.FRONTEND_URL.rstrip("/") + "/reset-password?token=")
-    token = token_of(body["reset_url"])
+    assert "reset_url" not in body  # the link is only ever emailed
+    token = emailed_reset_token(user.email)
     assert audit_rows(db, "PASSWORD_RESET_REQUESTED", user.id)
 
     weak = client.post(f"{API}/auth/reset-password", json={"token": token, "new_password": "weak"})
@@ -425,17 +495,37 @@ def test_forgot_and_reset_password_flow(client, db, tenant):
     assert rows and rows[0].organization_id == tenant.organization.id
 
 
-def test_reset_password_clears_lockout(client, db, tenant):
+def test_reset_password_clears_login_throttle(client, db, tenant):
     user = tenant.add_member("lockedout", MemberRole.VIEWER)
-    user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=10)
-    user.failed_login_attempts = 4
     db.commit()
+    for _ in range(5):
+        login(client, user.email, "WrongPassw0rd!")
     assert login(client, user.email).status_code == 401
-    token = token_of(client.post(f"{API}/auth/forgot-password", json={"email": user.email}).json()["reset_url"])
+    assert client.post(f"{API}/auth/forgot-password", json={"email": user.email}).status_code == 202
+    token = emailed_reset_token(user.email)
     assert client.post(f"{API}/auth/reset-password", json={"token": token, "new_password": NEW_PASSWORD}).status_code == 204
-    db.refresh(user)
-    assert user.locked_until is None and user.failed_login_attempts == 0
     assert login(client, user.email, NEW_PASSWORD).status_code == 200
+
+
+def test_new_reset_link_voids_older_ones(client, db, tenant):
+    user = tenant.add_member("tworesets", MemberRole.VIEWER)
+    db.commit()
+    client.post(f"{API}/auth/forgot-password", json={"email": user.email})
+    first = emailed_reset_token(user.email)
+    client.post(f"{API}/auth/forgot-password", json={"email": user.email})
+    second = emailed_reset_token(user.email)
+    assert first != second
+    assert client.post(f"{API}/auth/reset-password", json={"token": first, "new_password": NEW_PASSWORD}).status_code == 422
+    assert client.post(f"{API}/auth/reset-password", json={"token": second, "new_password": NEW_PASSWORD}).status_code == 204
+
+
+def test_reset_email_escapes_user_supplied_name(client, db, tenant):
+    user = tenant.add_member("xssname", MemberRole.VIEWER)
+    user.full_name = "<img src=x onerror=alert(1)>"
+    db.commit()
+    client.post(f"{API}/auth/forgot-password", json={"email": user.email})
+    html_body = [m for m in _SENT_MAIL if m["to"] == user.email][-1]["html"]
+    assert "<img" not in html_body and "&lt;img" in html_body
 
 
 def test_reset_password_rejects_bad_or_expired_tokens(client, db, tenant):
@@ -459,17 +549,34 @@ def test_reset_password_rejects_bad_or_expired_tokens(client, db, tenant):
 def test_rate_limit_returns_standard_envelope(client, monkeypatch):
     monkeypatch.setattr(settings, "AUTH_RATE_LIMIT", "2/minute")
     ip = f"10.9.{uuid.uuid4().int % 250}.{uuid.uuid4().int % 250}"
-    headers = {"X-Forwarded-For": ip}
+    proxied = _client_from(ip)
     body = {"email": f"{unique('rl')}@example.test"}
-    assert client.post(f"{API}/auth/forgot-password", json=body, headers=headers).status_code == 202
-    assert client.post(f"{API}/auth/forgot-password", json=body, headers=headers).status_code == 202
-    limited = client.post(f"{API}/auth/forgot-password", json=body, headers=headers)
+    assert proxied.post(f"{API}/auth/forgot-password", json=body).status_code == 202
+    assert proxied.post(f"{API}/auth/forgot-password", json=body).status_code == 202
+    # a spoofed X-Forwarded-For does not buy a fresh bucket
+    limited = proxied.post(f"{API}/auth/forgot-password", json=body, headers={"X-Forwarded-For": "1.2.3.4"})
     assert limited.status_code == 429
     assert limited.json()["error"]["code"] == "RATE_LIMITED"
     assert limited.headers.get("Retry-After")
-    # a different client IP is not affected
-    other = client.post(f"{API}/auth/forgot-password", json=body, headers={"X-Forwarded-For": "10.8.7.6"})
+    # a different client IP (as reported by our proxy) is not affected
+    other = _client_from("10.8.7.6").post(f"{API}/auth/forgot-password", json=body)
     assert other.status_code == 202
+
+
+def test_client_ip_ignores_forwarded_headers_from_untrusted_peers():
+    from starlette.requests import Request
+
+    from backend.app.api.deps import client_ip
+
+    def req(peer, headers):
+        return Request({"type": "http", "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()], "client": (peer, 1)})
+
+    # direct internet peer: both headers are ignored
+    assert client_ip(req("8.8.8.8", {"X-Forwarded-For": "1.1.1.1", "X-Real-IP": "2.2.2.2"})) == "8.8.8.8"
+    # our proxy on the private network: X-Real-IP wins, X-Forwarded-For is never used
+    assert client_ip(req("172.18.0.3", {"X-Forwarded-For": "1.1.1.1", "X-Real-IP": "2.2.2.2"})) == "2.2.2.2"
+    assert client_ip(req("172.18.0.3", {"X-Forwarded-For": "1.1.1.1"})) == "172.18.0.3"
+    assert client_ip(req("172.18.0.3", {"X-Real-IP": "not-an-ip"})) == "172.18.0.3"
 
 
 def test_security_headers_are_set(client):
@@ -489,7 +596,7 @@ def test_meta_integrations_is_public(client):
 
 def test_openapi_documents_auth_routes(client):
     spec = client.get(f"{API}/openapi.json").json()
-    for path in ("/auth/signup", "/auth/login", "/auth/refresh", "/auth/me", "/auth/forgot-password", "/auth/accept-invitation", "/organization", "/team", "/team/invitations"):
+    for path in ("/auth/signup/request-verification", "/auth/signup/verify-otp", "/auth/login", "/auth/login/mfa", "/auth/sessions", "/auth/refresh", "/auth/me", "/auth/forgot-password", "/auth/accept-invitation", "/organization", "/team", "/team/invitations"):
         assert f"{API}{path}" in spec["paths"], path
     login_ok = spec["paths"][f"{API}/auth/login"]["post"]["responses"]["200"]
-    assert "AuthTokens" in login_ok["content"]["application/json"]["schema"]["$ref"]
+    assert "LoginResponse" in login_ok["content"]["application/json"]["schema"]["$ref"]

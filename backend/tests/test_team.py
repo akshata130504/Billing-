@@ -10,6 +10,7 @@ from backend.app.core.security import decode_access_token
 from backend.app.models import AuditLog, Membership, MemberRole, MembershipStatus, RefreshToken, User
 from backend.app.services import organization_service
 from backend.app.services.auth_service import make_ctx
+from backend.app.core.security import hash_password as organization_service_hash
 
 API = "/api/v1"
 PASSWORD = "Str0ngPassw0rd!"
@@ -33,6 +34,26 @@ def invite(client, headers, email, role="viewer", **extra):
 
 def token_of(url: str) -> str:
     return parse_qs(urlparse(url).query)["token"][0]
+
+
+@pytest.fixture()
+def sent_invites(monkeypatch):
+    """Capture invitation emails. Existing accounts never get invite_url in the API response,
+    so tests read the link from the (platform) email instead."""
+    sent = []
+
+    def fake_send(to, subject, text_body, html_body=None, **kwargs):
+        sent.append({"to": to, "subject": subject, "text": text_body, "html": html_body, "kwargs": kwargs})
+        return False  # behave like SMTP disabled
+
+    monkeypatch.setattr(organization_service, "send_email", fake_send)
+    return sent
+
+
+def emailed_token(sent, email: str) -> str:
+    body = [m for m in sent if m["to"] == email][-1]["text"]
+    url = next(word for word in body.split() if "accept-invitation?token=" in word)
+    return token_of(url)
 
 
 def audit_rows(db, action: str, entity_id: str | None = None):
@@ -245,19 +266,30 @@ def test_invite_new_user_and_accept(client, db, tenant, auth_headers):
     assert listed[email]["status"] == "active" and listed[email]["invited_by"]["email"] == tenant.owner.email
 
 
-def test_invite_existing_user_only_needs_the_token(client, db, tenant, auth_headers):
+def test_invite_existing_user_requires_their_password(client, db, tenant, auth_headers, sent_invites):
     from backend.tests.conftest import Tenant
 
     other = Tenant(db, uuid.uuid4().hex[:8])
     existing = other.owner  # already has a password in another organization
+    existing.hashed_password = organization_service_hash(PASSWORD)
+    db.commit()
 
     r = invite(client, auth_headers, existing.email, role="admin", full_name="Ignored Name")
     assert r.status_code == 201, r.text
-    token = token_of(r.json()["invite_url"])
+    assert "invite_url" not in r.json()  # never hand an existing account's link to the admin
+    token = emailed_token(sent_invites, existing.email)
+    assert sent_invites[-1]["kwargs"].get("smtp_config") is None  # platform SMTP, not the org's
     preview = client.get(f"{API}/auth/invitations/{token}").json()
     assert preview["user_exists"] is True and preview["role"] == "admin"
 
-    accepted = client.post(f"{API}/auth/accept-invitation", json={"token": token})
+    # The token alone (what an org admin could obtain) must never yield a session.
+    token_only = client.post(f"{API}/auth/accept-invitation", json={"token": token})
+    assert token_only.status_code == 422 and token_only.json()["error"]["details"]["fields"]["password"] == "required"
+    wrong = client.post(f"{API}/auth/accept-invitation", json={"token": token, "password": "Wr0ngPassword!"})
+    assert wrong.status_code == 401
+    assert membership_of(db, tenant.organization.id, existing.id).status == MembershipStatus.INVITED
+
+    accepted = client.post(f"{API}/auth/accept-invitation", json={"token": token, "password": PASSWORD})
     assert accepted.status_code == 200, accepted.text
     me = client.get(f"{API}/auth/me", headers=bearer(accepted.json()["access_token"])).json()
     assert me["organization"]["id"] == tenant.organization.id and me["membership"]["role"] == "admin"
@@ -466,7 +498,7 @@ def test_deactivate_guards(client, db, tenant, auth_headers):
     assert client.delete(f"{API}/team/{owner2_membership.id}", headers=auth_headers).status_code == 204  # owner removes other owner
 
 
-def test_reinvite_deactivated_member_reactivates_on_accept(client, db, tenant, auth_headers):
+def test_reinvite_deactivated_member_reactivates_on_accept(client, db, tenant, auth_headers, sent_invites):
     member = tenant.add_member("comeback", MemberRole.FINANCE)
     db.commit()
     membership = membership_of(db, tenant.organization.id, member.id)
@@ -478,10 +510,43 @@ def test_reinvite_deactivated_member_reactivates_on_accept(client, db, tenant, a
     rows = audit_rows(db, "TEAM_MEMBER_INVITED", membership.id)
     assert rows[-1].before_state == {"status": "deactivated"}
 
-    token = token_of(r.json()["invite_url"])
+    assert "invite_url" not in r.json()
+    token = emailed_token(sent_invites, member.email)
     assert client.get(f"{API}/auth/invitations/{token}").json()["user_exists"] is True
-    accepted = client.post(f"{API}/auth/accept-invitation", json={"token": token})
+    accepted = client.post(f"{API}/auth/accept-invitation", json={"token": token, "password": PASSWORD})
     assert accepted.status_code == 200, accepted.text
     me = client.get(f"{API}/auth/me", headers=bearer(accepted.json()["access_token"])).json()
     assert me["membership"]["role"] == "viewer" and me["membership"]["status"] == "active"
     assert login(client, member.email).status_code == 200
+
+
+def test_invitation_email_escapes_html(client, db, tenant, auth_headers, sent_invites):
+    tenant.owner.full_name = "<script>alert(1)</script>"
+    db.commit()
+    email = f"{unique('xss')}@example.test"
+    assert invite(client, auth_headers, email, full_name="<b>Bob</b>").status_code == 201
+    html_body = sent_invites[-1]["html"]
+    assert "<script>" not in html_body and "&lt;script&gt;" in html_body
+    assert "<b>Bob</b>" not in html_body
+
+
+def test_invited_placeholder_does_not_block_signup(client, db, tenant, auth_headers, monkeypatch):
+    """Email squatting: the mailbox owner can claim a password-less invited user via OTP signup."""
+    from backend.app.services import auth_service
+
+    email = f"{unique('squat')}@example.test"
+    assert invite(client, auth_headers, email).status_code == 201
+    codes = {}
+    monkeypatch.setattr(auth_service, "_send_signup_verification_email", lambda to, name, otp: codes.setdefault(to, otp) or True)
+    req = client.post(
+        f"{API}/auth/signup/request-verification",
+        json={"organization_name": "Mine", "full_name": "Real Owner", "email": email, "password": PASSWORD},
+    )
+    assert req.status_code == 200, req.text
+    done = client.post(f"{API}/auth/signup/verify-otp", json={"email": email, "otp": codes[email], "password": PASSWORD})
+    assert done.status_code == 201, done.text
+    db.expire_all()
+    users = db.scalars(select(User).where(User.email == email)).all()
+    assert len(users) == 1 and users[0].hashed_password is not None and users[0].email_verified_at is not None
+    # the pending invitation is still there to accept later
+    assert membership_of(db, tenant.organization.id, users[0].id).status == MembershipStatus.INVITED

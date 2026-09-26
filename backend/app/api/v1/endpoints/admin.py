@@ -1,17 +1,11 @@
-"""/admin — operational endpoints for owners."""
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+"""/admin — operational endpoints for owners.
 
-from backend.app.api.deps import CurrentContext, get_db, require_owner
-from backend.app.schemas.dashboard import JobsRunResult
-from backend.app.services.scheduler import run_billing_jobs
+POST /admin/jobs/run was removed: it ran the billing jobs (renewals, dunning charges,
+trial conversions) for EVERY tenant on behalf of any single organization owner and
+ignored SCHEDULER_ENABLED. Billing jobs run only in the dedicated scheduler process
+(docker-compose.prod.yml service `scheduler`). The router stays mounted (see
+api_router.py) so future tenant-scoped admin endpoints have a home.
+"""
+from fastapi import APIRouter
 
 router = APIRouter()
-
-
-@router.post("/jobs/run", response_model=JobsRunResult, summary="Run the billing jobs (renewals, overdue, dunning) now")
-def run_jobs(
-    ctx: CurrentContext = Depends(require_owner),
-    db: Session = Depends(get_db),
-):
-    return run_billing_jobs(db)

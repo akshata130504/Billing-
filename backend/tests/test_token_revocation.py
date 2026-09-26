@@ -34,15 +34,27 @@ def _unique(prefix: str) -> str:
 
 
 def _signup(client, email: str, password: str = PASSWORD):
-    return client.post(
-        f"{API}/auth/signup",
-        json={
-            "organization_name": f"Org {_unique('revoc')}",
-            "full_name": "Revocation Tester",
-            "email": email,
-            "password": password,
-        },
-    )
+    """Email-verified signup (request-verification + verify-otp with the emailed code)."""
+    from unittest.mock import patch
+
+    sent = {}
+    with patch(
+        "backend.app.services.auth_service._send_signup_verification_email",
+        side_effect=lambda to, name, otp: sent.setdefault(to, otp) or True,
+    ):
+        requested = client.post(
+            f"{API}/auth/signup/request-verification",
+            json={
+                "organization_name": f"Org {_unique('revoc')}",
+                "full_name": "Revocation Tester",
+                "email": email,
+                "password": password,
+            },
+        )
+    if requested.status_code != 200:
+        return requested
+    email = requested.json()["email"]
+    return client.post(f"{API}/auth/signup/verify-otp", json={"email": email, "otp": sent[email], "password": password})
 
 
 def _login(client, email: str, password: str = PASSWORD):
@@ -149,10 +161,18 @@ def test_password_reset_invalidates_old_access_token(client, db):
     old_access_token = login_resp.json()["access_token"]
     assert client.get(f"{API}/auth/me", headers=_bearer(old_access_token)).status_code == 200
 
-    # Request password reset link (SMTP disabled in test env, so reset_url is returned)
-    forgot_resp = client.post(f"{API}/auth/forgot-password", json={"email": email})
+    # Request password reset link (only ever delivered by email; capture it)
+    from unittest.mock import patch
+
+    mails = []
+    with patch(
+        "backend.app.services.auth_service.send_email",
+        side_effect=lambda to, subject, text_body, **kw: mails.append(text_body) or True,
+    ):
+        forgot_resp = client.post(f"{API}/auth/forgot-password", json={"email": email})
     assert forgot_resp.status_code == 202
-    reset_url = forgot_resp.json()["reset_url"]
+    assert "reset_url" not in forgot_resp.json()
+    reset_url = next(w for w in mails[-1].split() if "reset-password?token=" in w)
     reset_token = parse_qs(urlparse(reset_url).query)["token"][0]
 
     # Reset password

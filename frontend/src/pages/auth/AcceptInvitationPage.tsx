@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Lock, User } from 'lucide-react';
+import { Lock, ShieldCheck, User } from 'lucide-react';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
@@ -32,6 +32,9 @@ export function AcceptInvitationPage() {
   const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  // Existing accounts with two-factor authentication on are asked for a code too.
+  const [totpCode, setTotpCode] = useState('');
+  const [needsTotp, setNeedsTotp] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -54,6 +57,10 @@ export function AcceptInvitationPage() {
         setErrors(clientErrors);
         return;
       }
+    } else if (!password) {
+      // The invitation link alone never signs anyone into an existing account.
+      setErrors({ password: 'Enter the password of your existing account.' });
+      return;
     }
 
     setSubmitting(true);
@@ -63,7 +70,7 @@ export function AcceptInvitationPage() {
       const tokens = await authService.acceptInvitation(
         needsAccount
           ? { token, full_name: fullName.trim(), password }
-          : { token }
+          : { token, password, ...(totpCode.trim() ? { totp_code: totpCode.trim() } : {}) }
       );
       const me = await applyTokens(tokens);
       showToast('success', 'Invitation accepted', `You have joined ${me.organization.name}.`);
@@ -71,6 +78,7 @@ export function AcceptInvitationPage() {
     } catch (err) {
       const apiError = toApiError(err);
       const fields = fieldErrors(err);
+      if (fields.totp_code) setNeedsTotp(true);
       setErrors(fields);
       if (Object.keys(fields).length === 0) setFormError(apiError.message);
     } finally {
@@ -148,10 +156,40 @@ export function AcceptInvitationPage() {
         <FormErrorBanner message={formError} />
 
         {inv.user_exists ? (
-          <p className="text-sm text-slate-600 leading-relaxed">
-            An account already exists for this email. Accepting will add {inv.organization_name} to
-            your organizations.
-          </p>
+          <>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              An account already exists for {inv.email}. Sign in with its password to add{' '}
+              {inv.organization_name} to your organizations.
+            </p>
+            <Input
+              label="Your password"
+              type="password"
+              required
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              error={errors.password}
+              leadingIcon={<Lock className="w-4 h-4" />}
+            />
+            {needsTotp && (
+              <Input
+                label="Authentication code"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                required
+                maxLength={8}
+                value={totpCode}
+                onChange={(e) => setTotpCode(e.target.value)}
+                error={errors.totp_code}
+                leadingIcon={<ShieldCheck className="w-4 h-4" />}
+              />
+            )}
+            <p className="text-xs text-slate-500">
+              <Link to="/forgot-password" className="font-semibold text-brand-600 hover:text-brand-700">
+                Forgot your password?
+              </Link>
+            </p>
+          </>
         ) : (
           <>
             <Input
@@ -188,7 +226,7 @@ export function AcceptInvitationPage() {
         )}
 
         <Button type="submit" className="w-full" isLoading={submitting}>
-          {inv.user_exists ? 'Accept invitation' : 'Create account and join'}
+          {inv.user_exists ? 'Sign in and accept' : 'Create account and join'}
         </Button>
       </form>
     </AuthShell>

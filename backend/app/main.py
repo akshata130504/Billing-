@@ -21,8 +21,22 @@ SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "base-uri 'self'; "
+        "object-src 'none'; "
+        "script-src 'self' 'unsafe-inline' https://checkout.razorpay.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' data: https://fonts.gstatic.com; "
+        "img-src 'self' data: blob: https:; "
+        "connect-src 'self' https://api.razorpay.com https://lumberjack.razorpay.com https://lumberjack-cx.razorpay.com; "
+        "frame-src 'self' https://api.razorpay.com https://checkout.razorpay.com; "
+        "form-action 'self' https://api.razorpay.com; "
+        "frame-ancestors 'self';"
+    ),
 }
 HSTS_HEADER = "max-age=31536000; includeSubDomains"
+_DOCS_PATHS = {f"{settings.API_V1_STR}/docs", f"{settings.API_V1_STR}/redoc", f"{settings.API_V1_STR}/docs/oauth2-redirect"}
 
 
 def _init_error_tracking() -> bool:
@@ -114,9 +128,9 @@ def create_application() -> FastAPI:
         title=settings.PROJECT_NAME,
         version=__version__,
         description="Rooman Billing - Enterprise Billing and Subscription Management API",
-        openapi_url=f"{settings.API_V1_STR}/openapi.json",
-        docs_url=f"{settings.API_V1_STR}/docs",
-        redoc_url=f"{settings.API_V1_STR}/redoc",
+        openapi_url=f"{settings.API_V1_STR}/openapi.json" if not settings.is_production else None,
+        docs_url=f"{settings.API_V1_STR}/docs" if not settings.is_production else None,
+        redoc_url=f"{settings.API_V1_STR}/redoc" if not settings.is_production else None,
         lifespan=lifespan,
     )
 
@@ -132,7 +146,12 @@ def create_application() -> FastAPI:
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
         response = await call_next(request)
+        # Swagger UI / ReDoc (development only) load their bundles from a CDN, which the CSP
+        # would block; every other response (JSON API, uploads) keeps the full header set.
+        skip_csp = request.url.path in _DOCS_PATHS
         for header, value in SECURITY_HEADERS.items():
+            if skip_csp and header == "Content-Security-Policy":
+                continue
             response.headers.setdefault(header, value)
         if settings.SECURE_COOKIES:
             response.headers.setdefault("Strict-Transport-Security", HSTS_HEADER)
@@ -209,7 +228,7 @@ def create_application() -> FastAPI:
         return {
             "name": settings.PROJECT_NAME,
             "version": __version__,
-            "docs": f"{settings.API_V1_STR}/docs",
+            "docs": None if settings.is_production else f"{settings.API_V1_STR}/docs",
             "health": f"{settings.API_V1_STR}/health",
         }
 

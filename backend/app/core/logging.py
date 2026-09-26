@@ -6,7 +6,29 @@ from datetime import datetime, timezone
 
 from backend.app.core.config import settings
 
+import re
+
 correlation_id_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar("correlation_id", default=None)
+
+_SENSITIVE_PATTERNS = [
+    (re.compile(r"Bearer\s+[a-zA-Z0-9_\-\.]{15,}", re.IGNORECASE), "Bearer [redacted]"),
+    (re.compile(r"(['\"]?(?:password|passwd|secret|token)['\"]?\s*[:=]\s*)(?:'[^']+'|\"[^\"]+\"|[^\s,;]+)", re.IGNORECASE), r'\1"[redacted]"'),
+    (re.compile(r"ghp_[a-zA-Z0-9]{20,}", re.IGNORECASE), "ghp_[redacted]"),
+    (re.compile(r"AIza[a-zA-Z0-9_-]{20,}", re.IGNORECASE), "AIza[redacted]"),
+    (re.compile(r"rzp_(test|live)_[a-zA-Z0-9]{10,}", re.IGNORECASE), r"rzp_\1_[redacted]"),
+]
+
+
+class SensitiveDataFilter(logging.Filter):
+    """Scrubs passwords, tokens, API keys, and Authorization headers from log records."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            msg = record.msg
+            for pattern, replacement in _SENSITIVE_PATTERNS:
+                msg = pattern.sub(replacement, msg)
+            record.msg = msg
+        return True
 
 
 class CorrelationIdFilter(logging.Filter):
@@ -41,6 +63,7 @@ def setup_logging() -> logging.Logger:
 
     handler = logging.StreamHandler(sys.stdout)
     handler.addFilter(CorrelationIdFilter())
+    handler.addFilter(SensitiveDataFilter())
     if settings.LOG_JSON:
         handler.setFormatter(JsonFormatter())
     else:

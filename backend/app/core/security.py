@@ -5,6 +5,7 @@ organization id. Refresh, invite and password-reset tokens are opaque random
 strings; only their SHA-256 hash is persisted so a database leak cannot be
 replayed.
 """
+import base64
 import hashlib
 import hmac
 import secrets
@@ -13,10 +14,13 @@ from typing import Any, Dict, Optional
 
 import bcrypt
 import jwt
+from cryptography.fernet import Fernet, InvalidToken
 
 from backend.app.core.config import settings
 
 ACCESS_TOKEN_TYPE = "access"
+MFA_TOKEN_TYPE = "mfa"
+MFA_TOKEN_EXPIRE_MINUTES = 5
 
 
 # --- Passwords ---------------------------------------------------------------
@@ -52,7 +56,14 @@ def validate_password_strength(password: str) -> Optional[str]:
 # --- JWT access tokens -------------------------------------------------------------
 
 
-def create_access_token(user_id: str, organization_id: Optional[str], role: Optional[str]) -> str:
+def create_access_token(
+    user_id: str,
+    organization_id: Optional[str],
+    role: Optional[str],
+    session_id: Optional[str] = None,
+) -> str:
+    """`session_id` is the refresh-token row this access token was issued with; when present
+    get_current_user rejects the access token once that session is revoked."""
     now = datetime.now(timezone.utc)
     payload: Dict[str, Any] = {
         "sub": user_id,
@@ -63,7 +74,34 @@ def create_access_token(user_id: str, organization_id: Optional[str], role: Opti
         "exp": int((now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)).timestamp()),
         "jti": secrets.token_hex(8),
     }
+    if session_id:
+        payload["sid"] = session_id
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def create_mfa_token(user_id: str) -> str:
+    """Short-lived token proving the password step of a two-factor login succeeded.
+
+    It is useless on its own: get_current_user only accepts type=access tokens, and
+    /auth/login/mfa still requires a valid TOTP code alongside it.
+    """
+    now = datetime.now(timezone.utc)
+    payload: Dict[str, Any] = {
+        "sub": user_id,
+        "type": MFA_TOKEN_TYPE,
+        "iat": now.timestamp(),
+        "exp": int((now + timedelta(minutes=MFA_TOKEN_EXPIRE_MINUTES)).timestamp()),
+        "jti": secrets.token_hex(8),
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def decode_mfa_token(token: str) -> Dict[str, Any]:
+    """Decode and verify an MFA token. Raises jwt.PyJWTError on any problem."""
+    payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+    if payload.get("type") != MFA_TOKEN_TYPE:
+        raise jwt.InvalidTokenError("Not an MFA token")
+    return payload
 
 
 def decode_access_token(token: str) -> Dict[str, Any]:
@@ -99,3 +137,26 @@ def invite_token_expiry() -> datetime:
 
 def password_reset_expiry() -> datetime:
     return datetime.now(timezone.utc) + timedelta(minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES)
+
+
+# --- Symmetric encryption for small secrets at rest (e.g. TOTP seeds) -----------------
+
+
+def _fernet() -> Fernet:
+    # Same derivation as integrations_service so there is a single key to rotate (SECRET_KEY).
+    raw_key = hashlib.sha256(settings.SECRET_KEY.encode("utf-8")).digest()
+    return Fernet(base64.urlsafe_b64encode(raw_key))
+
+
+def encrypt_secret(value: str) -> str:
+    return _fernet().encrypt(value.encode("utf-8")).decode("utf-8")
+
+
+def decrypt_secret(token: Optional[str]) -> Optional[str]:
+    """Return the plaintext, or None when missing or undecryptable (e.g. SECRET_KEY rotated)."""
+    if not token:
+        return None
+    try:
+        return _fernet().decrypt(token.encode("utf-8")).decode("utf-8")
+    except (InvalidToken, ValueError):
+        return None

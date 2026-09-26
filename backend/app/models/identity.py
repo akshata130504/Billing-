@@ -103,6 +103,12 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Revocation cutoff: access tokens with iat issued before this timestamp are rejected.
     tokens_valid_after = Column(DateTime(timezone=True), nullable=True)
     avatar_url = Column(String(500), nullable=True)
+    # Two-factor authentication (RFC 6238 TOTP). The seed is Fernet-encrypted with a key
+    # derived from SECRET_KEY. A seed with totp_enabled_at NULL is a pending (unconfirmed) setup.
+    totp_secret = Column(String(255), nullable=True)
+    totp_enabled_at = Column(DateTime(timezone=True), nullable=True)
+    # Last accepted TOTP time step: a code can never be replayed within its validity window.
+    totp_last_used_step = Column(Integer, nullable=True)
 
     memberships = relationship(
         "Membership", back_populates="user", foreign_keys="Membership.user_id", cascade="all, delete-orphan"
@@ -151,3 +157,39 @@ class PasswordResetToken(UUIDPrimaryKeyMixin, Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
     used_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class PendingSignup(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "pending_signups"
+
+    email = Column(String(255), nullable=False, unique=True, index=True)
+    organization_name = Column(String(200), nullable=False)
+    full_name = Column(String(200), nullable=False)
+    hashed_password = Column(String(128), nullable=False)
+    otp_hash = Column(String(64), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    last_sent_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+
+class LoginThrottle(UUIDPrimaryKeyMixin, Base):
+    """Failed-attempt counters for credential checks, keyed per (scope, subject, client IP).
+
+    scope="login": subject is the normalised email (known or not, so the response never
+    reveals whether an account exists). Keying on the IP too means an attacker elsewhere
+    cannot lock the real user out; the per-IP slowapi limit caps spraying across accounts.
+    scope="mfa": subject is the user id and ip_address is "" (account-wide) - only someone
+    who already knows the password can reach the TOTP step.
+    """
+
+    __tablename__ = "login_throttles"
+    __table_args__ = (UniqueConstraint("scope", "subject", "ip_address", name="uq_login_throttle_key"),)
+
+    scope = Column(String(16), nullable=False)
+    subject = Column(String(255), nullable=False, index=True)
+    ip_address = Column(String(64), nullable=False, default="")
+    failures = Column(Integer, nullable=False, default=0)
+    window_started_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    locked_until = Column(DateTime(timezone=True), nullable=True)

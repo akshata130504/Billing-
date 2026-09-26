@@ -21,7 +21,21 @@ def signup(client, **overrides):
         "password": overrides.pop("password", PASSWORD),
     }
     body.update(overrides)
-    return client.post(f"{API}/auth/signup", json=body)
+    # Accounts are only created through the email-verified OTP flow; capture the emailed code.
+    from unittest.mock import patch
+
+    sent = {}
+    with patch(
+        "backend.app.services.auth_service._send_signup_verification_email",
+        side_effect=lambda to, name, otp: sent.setdefault(to, otp) or True,
+    ):
+        requested = client.post(f"{API}/auth/signup/request-verification", json=body)
+    if requested.status_code != 200:
+        return requested
+    email = requested.json()["email"]
+    return client.post(
+        f"{API}/auth/signup/verify-otp", json={"email": email, "otp": sent[email], "password": body["password"]}
+    )
 
 
 def bearer(token: str) -> dict:

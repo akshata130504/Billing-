@@ -4,12 +4,17 @@ Endpoints stay thin: everything that touches the database or decides an outcome
 lives here. Every function that changes state commits its own transaction and
 writes the matching audit row first.
 """
+import hashlib
+import hmac
+import html
 import re
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-from sqlalchemy import select, update
+import jwt
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -18,13 +23,19 @@ from backend.app.core.config import settings
 from backend.app.core.exceptions import (
     AppException,
     ConflictError,
+    EntityNotFoundError,
     ForbiddenError,
     UnauthorizedError,
     ValidationAppError,
 )
 from backend.app.core.logging import logger
 from backend.app.core.security import (
+    constant_time_equals,
     create_access_token,
+    create_mfa_token,
+    decode_mfa_token,
+    decrypt_secret,
+    encrypt_secret,
     generate_opaque_token,
     hash_password,
     hash_token,
@@ -33,6 +44,7 @@ from backend.app.core.security import (
     validate_password_strength,
     verify_password,
 )
+from backend.app.core.totp import generate_totp_secret, provisioning_uri, verify_totp
 from backend.app.models import (
     AuditStatus,
     Membership,
@@ -40,25 +52,36 @@ from backend.app.models import (
     MembershipStatus,
     Organization,
     PasswordResetToken,
+    PendingSignup,
     RefreshToken,
     User,
     utcnow,
 )
+from backend.app.models.identity import LoginThrottle
 from backend.app.schemas.auth import (
     MeResponse,
     MembershipOut,
     OrganizationSummary,
-    SignupRequest,
+    SignupVerificationRequest,
     UserOut,
 )
 from backend.app.schemas.organization import OrganizationOut, normalize_email
 from backend.app.services import audit
 from backend.app.services.email import frontend_url, send_email
 
+# Failed credential checks allowed per (email, client IP) - or per account for TOTP codes -
+# inside THROTTLE_WINDOW_MINUTES before that key is blocked for LOCKOUT_MINUTES.
 MAX_FAILED_LOGINS = 5
+THROTTLE_WINDOW_MINUTES = 15
 LOCKOUT_MINUTES = 15
 INVALID_CREDENTIALS = "Invalid email or password."
+# Deliberately identical for known and unknown emails so it never confirms an account exists.
+TOO_MANY_ATTEMPTS = "Too many failed sign-in attempts. Please wait a few minutes and try again."
+INVALID_MFA_CODE = "The authentication code is invalid or has already been used."
 NOT_A_MEMBER = "You are not an active member of any organization."
+OTP_EXPIRY_MINUTES = 10
+OTP_MAX_ATTEMPTS = 5
+OTP_RESEND_COOLDOWN_SECONDS = 60
 
 
 # --- helpers -------------------------------------------------------------------------
@@ -199,8 +222,11 @@ def issue_tokens(
     ip: Optional[str],
     user_agent: Optional[str],
 ) -> Tuple[TokenBundle, RefreshToken]:
-    """Create an access token + a persisted refresh token row (caller commits)."""
-    access = create_access_token(user.id, membership.organization_id, membership.role.value)
+    """Create an access token + a persisted refresh token row (caller commits).
+
+    The access token carries the refresh row id as `sid`, so revoking that session
+    (DELETE /auth/sessions/{id}) also invalidates its access token.
+    """
     raw = generate_opaque_token()
     row = RefreshToken(
         user_id=user.id,
@@ -212,7 +238,64 @@ def issue_tokens(
     )
     db.add(row)
     db.flush()
+    access = create_access_token(user.id, membership.organization_id, membership.role.value, session_id=row.id)
     return TokenBundle(access, raw, settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60), row
+
+
+# --- credential throttling ------------------------------------------------------------
+
+
+def _throttle_row(db: Session, scope: str, subject: str, ip: str) -> Optional[LoginThrottle]:
+    return db.scalars(
+        select(LoginThrottle).where(
+            LoginThrottle.scope == scope, LoginThrottle.subject == subject, LoginThrottle.ip_address == ip
+        )
+    ).first()
+
+
+def _throttle_key_ip(ip: Optional[str]) -> str:
+    return (ip or "")[:64]
+
+
+def throttle_is_locked(db: Session, scope: str, subject: str, ip: Optional[str]) -> bool:
+    row = _throttle_row(db, scope, subject, _throttle_key_ip(ip))
+    locked_until = aware(row.locked_until) if row is not None else None
+    return bool(locked_until and locked_until > utcnow())
+
+
+def throttle_register_failure(db: Session, scope: str, subject: str, ip: Optional[str]) -> bool:
+    """Count a failed attempt (caller commits). Returns True when this failure triggers a block."""
+    key_ip = _throttle_key_ip(ip)
+    now = utcnow()
+    row = _throttle_row(db, scope, subject, key_ip)
+    if row is None:
+        row = LoginThrottle(scope=scope, subject=subject, ip_address=key_ip, failures=0, window_started_at=now)
+        db.add(row)
+    window_started = aware(row.window_started_at)
+    if window_started is None or window_started <= now - timedelta(minutes=THROTTLE_WINDOW_MINUTES):
+        row.failures = 0
+        row.window_started_at = now
+    row.failures = (row.failures or 0) + 1
+    if row.failures >= MAX_FAILED_LOGINS:
+        row.locked_until = now + timedelta(minutes=LOCKOUT_MINUTES)
+        row.failures = 0
+        row.window_started_at = now
+        db.flush()
+        return True
+    db.flush()
+    return False
+
+
+def throttle_clear(db: Session, scope: str, subject: str, ip: Optional[str] = None) -> None:
+    """Forget failures for a key (caller commits). ip=None clears every IP for the subject."""
+    stmt = (
+        delete(LoginThrottle)
+        .where(LoginThrottle.scope == scope, LoginThrottle.subject == subject)
+        .execution_options(synchronize_session="fetch")
+    )
+    if ip is not None:
+        stmt = stmt.where(LoginThrottle.ip_address == _throttle_key_ip(ip))
+    db.execute(stmt)
 
 
 # --- /me ------------------------------------------------------------------------------
@@ -236,27 +319,330 @@ def build_me(db: Session, ctx: CurrentContext) -> MeResponse:
     )
 
 
-# --- signup / login / refresh / logout ------------------------------------------------
+def hash_otp(email: str, otp: str) -> str:
+    msg = f"{email.lower().strip()}:{otp.strip()}".encode("utf-8")
+    return hmac.new(settings.SECRET_KEY.encode("utf-8"), msg, hashlib.sha256).hexdigest()
 
 
-def signup(db: Session, data: SignupRequest, ip: Optional[str], user_agent: Optional[str]) -> Tuple[TokenBundle, ActorContext]:
-    email = normalize_email(data.email)
-    if get_user_by_email(db, email) is not None:
+def generate_otp() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def _send_signup_verification_email(email: str, full_name: str, otp: str) -> bool:
+    subject = "Verify your Rooman Billing email"
+    text_body = (
+        f"Hello {full_name},\n\n"
+        f"Your Rooman Billing verification code is: {otp}\n\n"
+        "This code will expire in 10 minutes.\n\n"
+        "For your security, do not share this code with anyone. Rooman Billing support will never ask for your verification code.\n\n"
+        "If you did not request this verification, please ignore this email.\n\n"
+        "— Rooman Billing"
+    )
+    html_body = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b; }}
+    .card {{ max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }}
+    .header {{ text-align: center; margin-bottom: 24px; }}
+    .title {{ font-size: 20px; font-weight: 700; color: #0f172a; margin: 0 0 8px 0; }}
+    .subtitle {{ font-size: 14px; color: #64748b; margin: 0; }}
+    .otp-container {{ text-align: center; margin: 32px 0; }}
+    .otp-box {{ display: inline-block; font-size: 32px; font-weight: 800; letter-spacing: 8px; color: #4f46e5; background: #f1f5f9; padding: 12px 28px; border-radius: 8px; border: 1px solid #cbd5e1; font-family: monospace; }}
+    .expiry {{ font-size: 13px; color: #64748b; margin-top: 12px; }}
+    .security-note {{ font-size: 13px; color: #475569; background: #f8fafc; border-left: 4px solid #6366f1; padding: 12px 16px; border-radius: 4px; margin: 24px 0; }}
+    .footer {{ font-size: 12px; color: #94a3b8; text-align: center; margin-top: 32px; border-top: 1px solid #f1f5f9; padding-top: 16px; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <h1 class="title">Verify your email address</h1>
+      <p class="subtitle">Welcome to Rooman Billing, {html.escape(full_name)}!</p>
+    </div>
+    <p>Please enter the following 6-digit verification code to complete your organization registration:</p>
+    <div class="otp-container">
+      <div class="otp-box">{otp}</div>
+      <div class="expiry">This code will expire in <strong>10 minutes</strong>.</div>
+    </div>
+    <div class="security-note">
+      <strong>Security notice:</strong> Never share this code with anyone. Rooman Billing team members will never ask for your verification code.
+    </div>
+    <p style="font-size: 13px; color: #64748b;">If you didn't create an account with Rooman Billing, you can safely ignore this email.</p>
+    <div class="footer">
+      &copy; Rooman Billing. All rights reserved.
+    </div>
+  </div>
+</body>
+</html>"""
+    return send_email(to=email, subject=subject, text_body=text_body, html_body=html_body)
+
+
+def _ensure_email_claimable(db: Session, email: str) -> Optional[User]:
+    """Reject emails that belong to a real account.
+
+    A password-less user row is only a placeholder created by a team invitation; the owner of
+    the mailbox may claim it through the OTP signup flow (proving control of the address), so
+    an invitation cannot be used to squat an email and block its owner from signing up.
+    """
+    user = get_user_by_email(db, email)
+    if user is not None and user.hashed_password is not None:
         raise ConflictError("An account with this email already exists.", {"fields": {"email": "already registered"}})
+    return user
+
+
+def purge_expired_pending_signups(db: Session) -> int:
+    """Delete pending signups whose OTP has expired. Commits; returns the number removed."""
+    result = db.execute(
+        delete(PendingSignup)
+        .where(PendingSignup.expires_at <= utcnow())
+        .execution_options(synchronize_session=False)
+    )
+    db.commit()
+    return result.rowcount or 0
+
+
+def request_signup_verification(
+    db: Session,
+    data: SignupVerificationRequest,
+    ip: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Tuple[str, int, int]:
+    email = normalize_email(data.email)
+    _ensure_email_claimable(db, email)
     _password_problem(data.password)
 
+    org_name = data.organization_name.strip()
+    if not org_name:
+        raise ValidationAppError("Organization name cannot be empty.", {"fields": {"organization_name": "required"}})
+
     now = utcnow()
-    organization = Organization(name=data.organization_name.strip(), slug=unique_slug(db, data.organization_name))
+    pending = db.scalars(select(PendingSignup).where(PendingSignup.email == email)).first()
+    if pending is not None:
+        last_sent = aware(pending.last_sent_at)
+        if last_sent is not None:
+            elapsed = (now - last_sent).total_seconds()
+            if elapsed < OTP_RESEND_COOLDOWN_SECONDS:
+                cooldown_remaining = int(OTP_RESEND_COOLDOWN_SECONDS - elapsed)
+                raise ValidationAppError(
+                    f"Please wait {cooldown_remaining} second(s) before requesting a new verification code.",
+                    {"cooldown_remaining": cooldown_remaining},
+                )
+
+    otp = generate_otp()
+    otp_hash = hash_otp(email, otp)
+    expires_at = now + timedelta(minutes=OTP_EXPIRY_MINUTES)
+
+    pending_expires = aware(pending.expires_at) if pending is not None else None
+    live_pending = pending is not None and pending_expires is not None and pending_expires > now
+    if live_pending and not verify_password(data.password, pending.hashed_password):
+        # A live request exists that was started with a different password - possibly by someone
+        # else racing the real owner of this mailbox. Never overwrite its details: just send a
+        # fresh code to the mailbox. verify-otp requires the original password, so whoever
+        # submitted this request cannot complete someone else's signup with their own password.
+        pending.otp_hash = otp_hash
+        pending.expires_at = expires_at
+        pending.attempts = 0
+        pending.last_sent_at = now
+        display_name = pending.full_name
+    elif pending is None:
+        display_name = data.full_name.strip()
+        pending = PendingSignup(
+            email=email,
+            organization_name=org_name,
+            full_name=data.full_name.strip(),
+            hashed_password=hash_password(data.password),
+            otp_hash=otp_hash,
+            expires_at=expires_at,
+            attempts=0,
+            last_sent_at=now,
+            created_at=now,
+        )
+        db.add(pending)
+    else:
+        # Same requester (password matches) editing their details, or an expired request.
+        display_name = data.full_name.strip()
+        pending.organization_name = org_name
+        pending.full_name = display_name
+        pending.hashed_password = hash_password(data.password)
+        pending.otp_hash = otp_hash
+        pending.expires_at = expires_at
+        pending.attempts = 0
+        pending.last_sent_at = now
+
+    db.flush()
+
+    try:
+        delivered = _send_signup_verification_email(email, display_name, otp)
+        if not delivered and settings.is_production:
+            raise ValidationAppError(
+                "Email delivery is not configured on this server. Please contact an administrator."
+            )
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to send signup verification email to %s: %s", email, exc)
+        raise ValidationAppError(
+            "Could not deliver verification email. Please check your email address or SMTP configuration and try again."
+        )
+
+    _commit(db)
+    logger.info("Signup verification OTP sent to %s", email)
+    return email, OTP_EXPIRY_MINUTES * 60, OTP_RESEND_COOLDOWN_SECONDS
+
+
+def resend_signup_otp(db: Session, email: str) -> Tuple[str, int, int]:
+    email = normalize_email(email)
+    _ensure_email_claimable(db, email)
+
+    pending = db.scalars(select(PendingSignup).where(PendingSignup.email == email)).first()
+    if pending is None:
+        raise ValidationAppError(
+            "No pending signup found for this email. Please fill out the registration form again.",
+            {"fields": {"email": "not_found"}},
+        )
+
+    now = utcnow()
+    last_sent = aware(pending.last_sent_at)
+    if last_sent is not None:
+        elapsed = (now - last_sent).total_seconds()
+        if elapsed < OTP_RESEND_COOLDOWN_SECONDS:
+            cooldown_remaining = int(OTP_RESEND_COOLDOWN_SECONDS - elapsed)
+            raise ValidationAppError(
+                f"Please wait {cooldown_remaining} second(s) before requesting a new verification code.",
+                {"cooldown_remaining": cooldown_remaining},
+            )
+
+    otp = generate_otp()
+    pending.otp_hash = hash_otp(email, otp)
+    pending.expires_at = now + timedelta(minutes=OTP_EXPIRY_MINUTES)
+    pending.attempts = 0
+    pending.last_sent_at = now
+    db.flush()
+
+    try:
+        delivered = _send_signup_verification_email(email, pending.full_name, otp)
+        if not delivered and settings.is_production:
+            raise ValidationAppError(
+                "Email delivery is not configured on this server. Please contact an administrator."
+            )
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to resend signup verification email to %s: %s", email, exc)
+        raise ValidationAppError(
+            "Could not deliver verification email. Please check your email address or SMTP configuration and try again."
+        )
+
+    _commit(db)
+    logger.info("Signup verification OTP resent to %s", email)
+    return email, OTP_EXPIRY_MINUTES * 60, OTP_RESEND_COOLDOWN_SECONDS
+
+
+def verify_signup_otp(
+    db: Session,
+    email: str,
+    otp: str,
+    password: str,
+    ip: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Tuple[TokenBundle, ActorContext]:
+    email = normalize_email(email)
+    pending = db.scalars(select(PendingSignup).where(PendingSignup.email == email)).first()
+    if pending is None:
+        raise ValidationAppError(
+            "No pending signup found for this email. Please request a new verification code.",
+            {"fields": {"otp": "not_found"}},
+        )
+
+    now = utcnow()
+    expires_at = aware(pending.expires_at)
+    if expires_at is None or expires_at <= now:
+        db.delete(pending)
+        _commit(db)
+        raise ValidationAppError(
+            "Verification code has expired. Please request a new code.",
+            {"fields": {"otp": "expired"}},
+        )
+
+    if pending.attempts >= OTP_MAX_ATTEMPTS:
+        db.delete(pending)
+        _commit(db)
+        raise ValidationAppError(
+            "Maximum verification attempts exceeded. Please request a new code.",
+            {"fields": {"otp": "locked"}, "attempts_remaining": 0},
+        )
+
+    expected_hash = hash_otp(email, otp)
+    otp_ok = constant_time_equals(pending.otp_hash, expected_hash)
+    # The password chosen on the signup form must accompany the code, so a signup request
+    # started by someone else (with their password) can never be completed by the mailbox
+    # owner unknowingly, nor the reverse.
+    password_ok = verify_password(password or "", pending.hashed_password)
+    if otp_ok and not password_ok:
+        pending.attempts += 1
+        remaining = max(0, OTP_MAX_ATTEMPTS - pending.attempts)
+        _commit(db)
+        raise ValidationAppError(
+            "The password does not match the one entered when this verification code was requested. "
+            "Use that password, or wait for the code to expire and sign up again.",
+            {"fields": {"password": "mismatch"}, "attempts_remaining": remaining},
+        )
+    if not otp_ok:
+        pending.attempts += 1
+        remaining = OTP_MAX_ATTEMPTS - pending.attempts
+        if remaining <= 0:
+            db.delete(pending)
+            _commit(db)
+            raise ValidationAppError(
+                "Maximum verification attempts exceeded. This code has been invalidated. Please request a new code.",
+                {"fields": {"otp": "locked"}, "attempts_remaining": 0},
+            )
+        _commit(db)
+        raise ValidationAppError(
+            f"Invalid verification code. {remaining} attempt(s) remaining.",
+            {"fields": {"otp": "invalid"}, "attempts_remaining": remaining},
+        )
+
+    # Valid OTP verified!
+    existing = get_user_by_email(db, email)
+    if existing is not None and existing.hashed_password is not None:
+        db.delete(pending)
+        _commit(db)
+        raise ConflictError("An account with this email already exists.", {"fields": {"email": "already registered"}})
+
+    org_name = pending.organization_name
+    full_name = pending.full_name
+    hashed_password = pending.hashed_password
+
+    # Remove pending record so OTP can never be reused
+    db.delete(pending)
+    db.flush()
+
+    organization = Organization(name=org_name, slug=unique_slug(db, org_name))
     db.add(organization)
     db.flush()
-    user = User(
-        email=email,
-        full_name=data.full_name.strip(),
-        hashed_password=hash_password(data.password),
-        last_login_at=now,
-    )
-    db.add(user)
+
+    if existing is not None:
+        # Claim the password-less placeholder an invitation created (see _ensure_email_claimable).
+        # Its pending invitations stay pending and can be accepted after signing in.
+        user = existing
+        user.full_name = full_name
+        user.hashed_password = hashed_password
+        user.is_active = True
+        user.email_verified_at = user.email_verified_at or now
+        user.last_login_at = now
+    else:
+        user = User(
+            email=email,
+            full_name=full_name,
+            hashed_password=hashed_password,
+            is_active=True,
+            email_verified_at=now,
+            last_login_at=now,
+        )
+        db.add(user)
     db.flush()
+
     membership = Membership(
         organization_id=organization.id,
         user_id=user.id,
@@ -276,7 +662,15 @@ def signup(db: Session, data: SignupRequest, ip: Optional[str], user_agent: Opti
         entity_id=user.id,
         entity_label=user.email,
         ctx=ctx,
-        after={"email": user.email, "full_name": user.full_name, "organization_id": organization.id, "organization_name": organization.name, "slug": organization.slug},
+        after={
+            "email": user.email,
+            "full_name": user.full_name,
+            "organization_id": organization.id,
+            "organization_name": organization.name,
+            "slug": organization.slug,
+            "email_verified": True,
+            "claimed_invited_user": existing is not None,
+        },
     )
     _commit(db, "An account with this email or organization already exists.")
     return tokens, ctx
@@ -308,49 +702,28 @@ def _record_login_failure(
     )
 
 
-def login(db: Session, email: str, password: str, ip: Optional[str], user_agent: Optional[str]) -> TokenBundle:
-    email = normalize_email(email)
-    user = get_user_by_email(db, email)
-    # Always pay the bcrypt cost so response time does not reveal whether the email exists.
-    stored_hash = user.hashed_password if (user and user.hashed_password) else _dummy_password_hash()
-    password_ok = verify_password(password, stored_hash) and user is not None and bool(user.hashed_password)
+@dataclass
+class MfaChallenge:
+    """Returned by login() instead of tokens when the user has two-factor authentication on."""
 
-    if user is None or not user.is_active:
-        _record_login_failure(db, email, user, "unknown_or_inactive_user", ip, user_agent)
-        db.commit()
-        raise UnauthorizedError(INVALID_CREDENTIALS)
+    mfa_token: str
+    expires_in: int = 5 * 60
 
+    def as_dict(self) -> Dict[str, Any]:
+        return {"mfa_required": True, "mfa_token": self.mfa_token, "expires_in": self.expires_in}
+
+
+def _complete_login(
+    db: Session,
+    user: User,
+    membership: Membership,
+    ip: Optional[str],
+    user_agent: Optional[str],
+    *,
+    mfa: bool = False,
+) -> TokenBundle:
     now = utcnow()
-    locked_until = aware(user.locked_until)
-    if locked_until and locked_until > now:
-        minutes = max(1, int((locked_until - now).total_seconds() // 60) + 1)
-        _record_login_failure(db, email, user, "account_locked", ip, user_agent)
-        db.commit()
-        raise UnauthorizedError(
-            f"Account is temporarily locked after too many failed attempts. Try again in {minutes} minute(s)."
-        )
-
-    if not password_ok:
-        user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
-        message = INVALID_CREDENTIALS
-        if user.failed_login_attempts >= MAX_FAILED_LOGINS:
-            user.locked_until = now + timedelta(minutes=LOCKOUT_MINUTES)
-            user.failed_login_attempts = 0
-            message = f"Too many failed attempts. Account locked for {LOCKOUT_MINUTES} minutes."
-            reason = "locked_after_failures"
-        else:
-            reason = "bad_password"
-        _record_login_failure(db, email, user, reason, ip, user_agent)
-        db.commit()
-        raise UnauthorizedError(message)
-
-    membership = pick_membership(db, user.id)
-    if membership is None:
-        _record_login_failure(db, email, user, "no_active_membership", ip, user_agent)
-        db.commit()
-        raise UnauthorizedError(NOT_A_MEMBER)
     organization = db.get(Organization, membership.organization_id)
-
     user.failed_login_attempts = 0
     user.locked_until = None
     user.last_login_at = now
@@ -364,18 +737,240 @@ def login(db: Session, email: str, password: str, ip: Optional[str], user_agent:
         entity_label=user.email,
         ctx=ctx,
         actor_label=user.email,
-        after={"organization_id": membership.organization_id, "role": membership.role.value},
+        after={"organization_id": membership.organization_id, "role": membership.role.value, "mfa": mfa},
     )
     _commit(db)
     return tokens
 
 
+def check_password_throttled(
+    db: Session, email: str, password: str, ip: Optional[str], user_agent: Optional[str]
+) -> User:
+    """Verify email + password under the per-(email, IP) throttle. Returns the user or raises.
+
+    Failures are counted per (email, client IP) instead of locking the account outright, so
+    someone guessing from another address cannot lock the real user out; the slowapi per-IP
+    limit on the endpoints caps password spraying across many accounts from one address.
+    Unknown emails are counted and answered exactly like known ones.
+    """
+    email = normalize_email(email)
+    if throttle_is_locked(db, "login", email, ip):
+        user = get_user_by_email(db, email)
+        _record_login_failure(db, email, user, "throttled", ip, user_agent)
+        db.commit()
+        raise UnauthorizedError(TOO_MANY_ATTEMPTS)
+
+    user = get_user_by_email(db, email)
+    # Always pay the bcrypt cost so response time does not reveal whether the email exists.
+    stored_hash = user.hashed_password if (user and user.hashed_password) else _dummy_password_hash()
+    password_ok = verify_password(password, stored_hash) and user is not None and bool(user.hashed_password)
+
+    if user is None or not user.is_active or not password_ok:
+        blocked = throttle_register_failure(db, "login", email, ip)
+        if user is None or not user.is_active:
+            reason = "unknown_or_inactive_user"
+        else:
+            reason = "throttled_after_failures" if blocked else "bad_password"
+        _record_login_failure(db, email, user, reason, ip, user_agent)
+        db.commit()
+        raise UnauthorizedError(TOO_MANY_ATTEMPTS if blocked else INVALID_CREDENTIALS)
+
+    throttle_clear(db, "login", email, ip)
+    return user
+
+
+def login(
+    db: Session, email: str, password: str, ip: Optional[str], user_agent: Optional[str]
+) -> Union[TokenBundle, MfaChallenge]:
+    user = check_password_throttled(db, email, password, ip, user_agent)
+
+    membership = pick_membership(db, user.id)
+    if membership is None:
+        _record_login_failure(db, user.email, user, "no_active_membership", ip, user_agent)
+        db.commit()
+        raise UnauthorizedError(NOT_A_MEMBER)
+
+    if user.totp_enabled_at is not None:
+        # Password step done; tokens are only issued by login_mfa() with a valid TOTP code.
+        db.commit()
+        return MfaChallenge(mfa_token=create_mfa_token(user.id))
+
+    return _complete_login(db, user, membership, ip, user_agent)
+
+
+def _check_totp_code(db: Session, user: User, code: str, ip: Optional[str], user_agent: Optional[str]) -> None:
+    """Validate a TOTP code for an enrolled (or enrolling) user under the per-account throttle.
+
+    Raises on failure (after committing the failure count); on success records the used step
+    so the same code cannot be replayed. Caller commits on success.
+    """
+    if throttle_is_locked(db, "mfa", user.id, None):
+        raise UnauthorizedError(TOO_MANY_ATTEMPTS)
+    secret = decrypt_secret(user.totp_secret)
+    step = verify_totp(secret, code) if secret else None
+    if step is None or (user.totp_last_used_step is not None and step <= user.totp_last_used_step):
+        blocked = throttle_register_failure(db, "mfa", user.id, None)
+        _record_login_failure(db, user.email, user, "bad_totp_code", ip, user_agent)
+        db.commit()
+        raise UnauthorizedError(TOO_MANY_ATTEMPTS if blocked else INVALID_MFA_CODE)
+    user.totp_last_used_step = step
+    throttle_clear(db, "mfa", user.id)
+
+
+def login_mfa(db: Session, mfa_token: str, code: str, ip: Optional[str], user_agent: Optional[str]) -> TokenBundle:
+    expired = UnauthorizedError("This sign-in attempt has expired. Please sign in again.")
+    try:
+        payload = decode_mfa_token(mfa_token)
+    except jwt.PyJWTError:
+        raise expired
+    user = db.get(User, payload.get("sub"))
+    if user is None or not user.is_active or user.totp_enabled_at is None:
+        raise expired
+    valid_after = aware(user.tokens_valid_after)
+    iat = payload.get("iat")
+    if valid_after is not None and (not isinstance(iat, (int, float)) or datetime.fromtimestamp(iat, tz=timezone.utc) < valid_after):
+        raise expired
+
+    _check_totp_code(db, user, code, ip, user_agent)
+    membership = pick_membership(db, user.id)
+    if membership is None:
+        db.commit()
+        raise UnauthorizedError(NOT_A_MEMBER)
+    return _complete_login(db, user, membership, ip, user_agent, mfa=True)
+
+
+# --- two-factor enrolment ------------------------------------------------------------
+
+
+def setup_totp(db: Session, ctx: CurrentContext) -> Dict[str, str]:
+    """Start (or restart) enrolment: store a new encrypted seed, not yet active."""
+    user = ctx.user
+    if user.totp_enabled_at is not None:
+        raise ConflictError("Two-factor authentication is already enabled. Disable it first to re-enrol.")
+    secret = generate_totp_secret()
+    user.totp_secret = encrypt_secret(secret)
+    user.totp_last_used_step = None
+    _commit(db)
+    return {
+        "secret": secret,
+        "otpauth_uri": provisioning_uri(secret, user.email, settings.PROJECT_NAME),
+    }
+
+
+def enable_totp(db: Session, ctx: CurrentContext, code: str) -> None:
+    user = ctx.user
+    if user.totp_enabled_at is not None:
+        raise ConflictError("Two-factor authentication is already enabled.")
+    if not user.totp_secret:
+        raise ValidationAppError("Start two-factor setup first.", {"fields": {"code": "setup_required"}})
+    try:
+        _check_totp_code(db, user, code, ctx.ip_address, ctx.user_agent)
+    except UnauthorizedError as exc:
+        # A wrong code while signed in is a form error, not a lost session.
+        raise ValidationAppError(exc.message, {"fields": {"code": "invalid"}}) from exc
+    user.totp_enabled_at = utcnow()
+    audit.record(
+        db,
+        action="TWO_FACTOR_ENABLED",
+        entity_type="user",
+        entity_id=user.id,
+        entity_label=user.email,
+        ctx=ctx,
+    )
+    _commit(db)
+
+
+def disable_totp(db: Session, ctx: CurrentContext, password: str, code: str) -> None:
+    user = ctx.user
+    if user.totp_enabled_at is None:
+        raise ConflictError("Two-factor authentication is not enabled.")
+    if not verify_password(password, user.hashed_password):
+        raise ValidationAppError("The password is incorrect.", {"fields": {"password": "incorrect"}})
+    try:
+        _check_totp_code(db, user, code, ctx.ip_address, ctx.user_agent)
+    except UnauthorizedError as exc:
+        raise ValidationAppError(exc.message, {"fields": {"code": "invalid"}}) from exc
+    user.totp_secret = None
+    user.totp_enabled_at = None
+    user.totp_last_used_step = None
+    audit.record(
+        db,
+        action="TWO_FACTOR_DISABLED",
+        entity_type="user",
+        entity_id=user.id,
+        entity_label=user.email,
+        ctx=ctx,
+    )
+    _commit(db)
+
+
+# --- sessions ------------------------------------------------------------------------
+
+
+def list_sessions(db: Session, ctx: CurrentContext, current_session_id: Optional[str]) -> List[Dict[str, Any]]:
+    """The caller's live refresh tokens (one per signed-in browser/device).
+
+    Refresh tokens rotate on every refresh, so `created_at` of the live row is the last time
+    that session was refreshed ("last active"), not the original sign-in time.
+    """
+    rows = db.scalars(
+        select(RefreshToken)
+        .where(
+            RefreshToken.user_id == ctx.user.id,
+            RefreshToken.revoked_at.is_(None),
+            RefreshToken.expires_at > utcnow(),
+        )
+        .order_by(RefreshToken.created_at.desc())
+    ).all()
+    return [
+        {
+            "id": row.id,
+            "organization_id": row.organization_id,
+            "created_at": aware(row.created_at),
+            "last_active_at": aware(row.created_at),
+            "expires_at": aware(row.expires_at),
+            "user_agent": row.user_agent,
+            "ip_address": row.ip_address,
+            "current": row.id == current_session_id,
+        }
+        for row in rows
+    ]
+
+
+def revoke_session(db: Session, ctx: CurrentContext, session_id: str) -> None:
+    row = db.scalars(
+        select(RefreshToken).where(RefreshToken.id == session_id, RefreshToken.user_id == ctx.user.id)
+    ).first()
+    if row is None or row.revoked_at is not None:
+        raise EntityNotFoundError("Session", session_id)
+    row.revoked_at = utcnow()
+    audit.record(
+        db,
+        action="SESSION_REVOKED",
+        entity_type="user",
+        entity_id=ctx.user.id,
+        entity_label=ctx.user.email,
+        ctx=ctx,
+        after={"session_id": row.id, "user_agent": row.user_agent, "ip_address": row.ip_address},
+    )
+    _commit(db)
+
+
 def refresh(db: Session, raw_token: str, ip: Optional[str], user_agent: Optional[str]) -> TokenBundle:
-    token = db.scalars(select(RefreshToken).where(RefreshToken.token_hash == hash_token(raw_token))).first()
+    # Lock the row for the rotation so two concurrent refreshes with the same token cannot both
+    # mint a successor (FOR UPDATE is a no-op on SQLite, which serialises writers anyway).
+    token = db.scalars(
+        select(RefreshToken).where(RefreshToken.token_hash == hash_token(raw_token)).with_for_update()
+    ).first()
     if token is None:
         raise UnauthorizedError("Refresh token is invalid.")
+    if token.revoked_at is not None and token.replaced_by_id is None:
+        # Explicitly revoked (logout, password change, DELETE /auth/sessions/{id}, deactivation):
+        # just refuse. Not treated as theft, so signing out one device from another does not
+        # cascade into signing out everything when the revoked device next tries to refresh.
+        raise UnauthorizedError("Refresh token has been revoked. Please sign in again.")
     if token.revoked_at is not None:
-        # Replay of a rotated/revoked token: someone else may hold the chain. Kill every session.
+        # Replay of a rotated token: someone else may hold the chain. Kill every session.
         revoked = revoke_refresh_tokens(db, token.user_id)
         db.commit()
         logger.warning("Refresh token reuse detected for user %s; revoked %d token(s)", token.user_id, revoked)
@@ -468,14 +1063,28 @@ def change_password(
     _commit(db)
 
 
-def forgot_password(db: Session, email: str, ip: Optional[str], user_agent: Optional[str]) -> Tuple[str, Optional[str]]:
-    """Always succeeds. Returns (message, reset_url) where reset_url is set only when SMTP is off."""
+def _invalidate_reset_tokens(db: Session, user_id: str, except_id: Optional[str] = None) -> None:
+    stmt = (
+        update(PasswordResetToken)
+        .where(PasswordResetToken.user_id == user_id, PasswordResetToken.used_at.is_(None))
+        .values(used_at=utcnow())
+    )
+    if except_id:
+        stmt = stmt.where(PasswordResetToken.id != except_id)
+    db.execute(stmt)
+
+
+def forgot_password(db: Session, email: str, ip: Optional[str], user_agent: Optional[str]) -> str:
+    """Always succeeds with the same message. The link is only ever delivered by email -
+    never in the response (production refuses to start without SMTP_HOST)."""
     message = "If an account exists for that email address, a password reset link has been sent."
     email = normalize_email(email)
     user = get_user_by_email(db, email)
     if user is None or not user.is_active:
-        return message, None
+        return message
 
+    # Only the newest link works: requesting another one voids the earlier ones.
+    _invalidate_reset_tokens(db, user.id)
     raw = generate_opaque_token()
     db.add(PasswordResetToken(user_id=user.id, token_hash=hash_token(raw), expires_at=password_reset_expiry()))
     link = frontend_url(f"reset-password?token={raw}")
@@ -492,7 +1101,7 @@ def forgot_password(db: Session, email: str, ip: Optional[str], user_agent: Opti
                 "If you did not request this you can ignore this email; your password will not change."
             ),
             html_body=(
-                f"<p>Hello {user.full_name},</p>"
+                f"<p>Hello {html.escape(user.full_name)},</p>"
                 f"<p>We received a request to reset the password for your Rooman Billing account. "
                 f"The link is valid for {settings.PASSWORD_RESET_EXPIRE_MINUTES} minutes.</p>"
                 f'<p><a href="{link}">Reset your password</a></p>'
@@ -516,9 +1125,9 @@ def forgot_password(db: Session, email: str, ip: Optional[str], user_agent: Opti
         after={"email_delivered": delivered},
     )
     _commit(db)
-    # Only hand the link back when this deployment has no SMTP at all (documented behaviour).
-    reset_url = link if not settings.email_enabled else None
-    return message, reset_url
+    if not delivered:
+        logger.warning("Password reset email for user %s was not delivered (SMTP disabled or failing)", user.id)
+    return message
 
 
 def reset_password(db: Session, raw_token: str, new_password: str, ip: Optional[str], user_agent: Optional[str]) -> None:
@@ -540,6 +1149,8 @@ def reset_password(db: Session, raw_token: str, new_password: str, ip: Optional[
         user.email_verified_at = utcnow()
     user.tokens_valid_after = utcnow()
     token.used_at = utcnow()
+    _invalidate_reset_tokens(db, user.id, except_id=token.id)
+    throttle_clear(db, "login", user.email)
     revoked = revoke_refresh_tokens(db, user.id)
 
     membership = pick_membership(db, user.id)
@@ -605,6 +1216,7 @@ def accept_invitation(
     password: Optional[str],
     ip: Optional[str],
     user_agent: Optional[str],
+    totp_code: Optional[str] = None,
 ) -> TokenBundle:
     membership = find_invitation(db, raw_token)
     user = db.get(User, membership.user_id)
@@ -625,6 +1237,21 @@ def accept_invitation(
         user.full_name = full_name.strip()  # type: ignore[union-attr]
         user.hashed_password = hash_password(password)  # type: ignore[arg-type]
         user.email_verified_at = user.email_verified_at or now
+    else:
+        # The invite token only proves someone can read the link, which an organization admin
+        # can too. Signing into an existing account needs that account's own credentials.
+        if not password:
+            raise ValidationAppError(
+                "Enter the password of your existing account to accept this invitation.",
+                {"fields": {"password": "required"}},
+            )
+        check_password_throttled(db, user.email, password, ip, user_agent)
+        if user.totp_enabled_at is not None:
+            if not (totp_code or "").strip():
+                raise ValidationAppError(
+                    "Enter the code from your authenticator app.", {"fields": {"totp_code": "required"}}
+                )
+            _check_totp_code(db, user, totp_code or "", ip, user_agent)
 
     membership.status = MembershipStatus.ACTIVE
     membership.accepted_at = now
