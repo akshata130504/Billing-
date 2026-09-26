@@ -1,15 +1,24 @@
-import React, { useState } from 'react';
-import { ProjectInvoice } from '../types';
+import React, { useEffect, useState } from 'react';
+import type { ProjectInvoiceInput } from '../../../services/projectService';
 import { Modal } from '../../../components/common/Modal';
 import { Button } from '../../../components/common/Button';
 import { Input } from '../../../components/common/Input';
 import { Select } from '../../../components/common/Select';
+import { parseStrictNumber } from '../../../utils/validation';
 
 interface CreateInvoiceModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreateInvoice: (invoice: Omit<ProjectInvoice, 'id' | 'projectId'>) => void;
+  /** Creates a real draft invoice on the server; resolve false to keep the modal open. */
+  onCreateInvoice: (invoice: ProjectInvoiceInput) => Promise<boolean> | boolean | void;
+  /** Suggested amount (e.g. the unbilled budget); 0 leaves the field empty. */
   defaultAmount: number;
+}
+
+function isoToday(offsetDays = 0): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return d.toISOString().split('T')[0];
 }
 
 export function CreateInvoiceModal({
@@ -18,39 +27,51 @@ export function CreateInvoiceModal({
   onCreateInvoice,
   defaultAmount,
 }: CreateInvoiceModalProps) {
-  const [invoiceNumber, setInvoiceNumber] = useState(
-    () => `INV-2026-${Math.floor(1000 + Math.random() * 9000)}`
-  );
-  const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [dueDate, setDueDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 15);
-    return d.toISOString().split('T')[0];
-  });
-  const [amount, setAmount] = useState(defaultAmount > 0 ? String(defaultAmount) : '40000');
-  const [status, setStatus] = useState<ProjectInvoice['status']>('draft');
+  const [description, setDescription] = useState('');
+  const [date, setDate] = useState(() => isoToday());
+  const [dueDate, setDueDate] = useState(() => isoToday(15));
+  const [amount, setAmount] = useState('');
+  const [taxRate, setTaxRate] = useState('18');
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Reset every time the modal opens so a previous draft never leaks into a new invoice.
+  useEffect(() => {
+    if (!isOpen) return;
+    setDescription('');
+    setDate(isoToday());
+    setDueDate(isoToday(15));
+    setAmount(defaultAmount > 0 ? String(Math.round(defaultAmount * 100) / 100) : '');
+    setTaxRate('18');
+    setError('');
+  }, [isOpen, defaultAmount]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!invoiceNumber.trim()) {
-      setError('Invoice number is required');
-      return;
-    }
-    const numAmount = parseFloat(amount);
-    if (isNaN(numAmount) || numAmount <= 0) {
+    if (submitting) return;
+    const numAmount = parseStrictNumber(amount);
+    if (numAmount === null || numAmount <= 0) {
       setError('Invoice amount must be greater than 0');
       return;
     }
-
-    onCreateInvoice({
-      invoiceNumber: invoiceNumber.trim(),
-      date,
-      dueDate,
-      amount: numAmount,
-      status,
-    });
-    onClose();
+    if (dueDate && date && dueDate < date) {
+      setError('Due date cannot be before the invoice date');
+      return;
+    }
+    setError('');
+    setSubmitting(true);
+    try {
+      const ok = await onCreateInvoice({
+        amount: numAmount,
+        description: description.trim() || undefined,
+        taxRatePct: Number(taxRate),
+        issueDate: date,
+        dueDate,
+      });
+      if (ok !== false) onClose();
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -58,15 +79,15 @@ export function CreateInvoiceModal({
       isOpen={isOpen}
       onClose={onClose}
       title="Create Project Invoice"
-      description="Issue milestone or progress billing against this engagement"
+      description="Raises a draft invoice for the project's customer. The invoice number is assigned by the invoice series."
       size="md"
       footer={
         <>
           <Button variant="outline" size="sm" onClick={onClose} type="button">
             Cancel
           </Button>
-          <Button variant="primary" size="sm" type="submit" form="invoice-form">
-            Generate Invoice
+          <Button variant="primary" size="sm" type="submit" form="invoice-form" isLoading={submitting} disabled={submitting}>
+            Create Draft Invoice
           </Button>
         </>
       }
@@ -81,10 +102,11 @@ export function CreateInvoiceModal({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="sm:col-span-2">
             <Input
-              label="Invoice Number"
-              required
-              value={invoiceNumber}
-              onChange={(e) => setInvoiceNumber(e.target.value)}
+              label="Line Description"
+              placeholder="e.g. Milestone 1 - Discovery & design"
+              maxLength={500}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
             />
           </div>
 
@@ -110,9 +132,10 @@ export function CreateInvoiceModal({
 
           <div>
             <Input
-              label="Invoice Amount (₹)"
+              label="Amount before tax (₹)"
               type="number"
-              min="100"
+              min="0.01"
+              step="0.01"
               required
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
@@ -121,13 +144,15 @@ export function CreateInvoiceModal({
 
           <div>
             <Select
-              label="Initial Status"
-              value={status}
-              onChange={(e) => setStatus(e.target.value as ProjectInvoice['status'])}
+              label="GST Rate"
+              value={taxRate}
+              onChange={(e) => setTaxRate(e.target.value)}
               options={[
-                { value: 'draft', label: 'Draft' },
-                { value: 'pending', label: 'Sent / Pending' },
-                { value: 'paid', label: 'Paid & Settled' },
+                { value: '0', label: '0% - Exempt / Nil' },
+                { value: '5', label: '5%' },
+                { value: '12', label: '12%' },
+                { value: '18', label: '18% - Standard' },
+                { value: '28', label: '28%' },
               ]}
             />
           </div>

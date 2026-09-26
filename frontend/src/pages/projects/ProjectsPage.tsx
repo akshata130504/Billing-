@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
-import { useProjects } from './ProjectsContext';
+import { useNavigate } from 'react-router-dom';
+import { useProjects, type ProjectFormData } from './ProjectsContext';
 import { Project, ProjectFilterState } from './types';
 import { ProjectSummaryCards } from './components/ProjectSummaryCards';
 import { ProjectFilters } from './components/ProjectFilters';
@@ -20,6 +21,7 @@ export function ProjectsPage() {
     markAsCompleted,
   } = useProjects();
   const { showToast } = useToast();
+  const navigate = useNavigate();
 
   // Filters State
   const [filters, setFilters] = useState<ProjectFilterState>({
@@ -92,43 +94,41 @@ export function ProjectsPage() {
     setIsFormModalOpen(true);
   };
 
-  const handleFormSubmit = (data: {
-    name: string;
-    customer: string;
-    description: string;
-    status: Project['status'];
-    startDate: string;
-    endDate: string;
-    billingMethod: Project['billingMethod'];
-    budget: number;
-    notes?: string;
-  }) => {
+  // Each handler awaits the server; failures are toasted by the context and the modal stays open.
+  const handleFormSubmit = async (data: ProjectFormData) => {
     if (editingProject) {
-      updateProject(editingProject.id, data);
+      const ok = await updateProject(editingProject.id, data);
+      if (!ok) return;
       showToast('success', 'Project Updated', `"${data.name}" has been updated.`);
     } else {
-      const created = addProject(data);
-      showToast('success', 'Project Created', `"${created.name}" created with ID ${created.id}.`);
+      const created = await addProject(data);
+      if (!created) return;
+      showToast('success', 'Project Created', `"${created.name}" created.`);
     }
     setIsFormModalOpen(false);
     setEditingProject(null);
   };
 
-  const handleDuplicate = (projectId: string) => {
-    const duplicated = duplicateProject(projectId);
+  const handleDuplicate = async (projectId: string) => {
+    const duplicated = await duplicateProject(projectId);
+    if (!duplicated) return;
     showToast('info', 'Project Duplicated', `Created draft clone: "${duplicated.name}".`);
+    navigate(`/projects/${duplicated.id}`);
   };
 
-  const handleMarkCompleted = (projectId: string) => {
-    markAsCompleted(projectId);
-    showToast('success', 'Status Updated', 'Project marked as Completed.');
+  const handleMarkCompleted = async (projectId: string) => {
+    if (await markAsCompleted(projectId)) {
+      showToast('success', 'Status Updated', 'Project marked as Completed.');
+    }
   };
 
-  const handleDeleteConfirm = () => {
+  const handleDeleteConfirm = async () => {
     if (deletingProject) {
-      deleteProject(deletingProject.id);
-      showToast('info', 'Project Deleted', `"${deletingProject.name}" has been removed.`);
+      const target = deletingProject;
       setDeletingProject(null);
+      if (await deleteProject(target.id)) {
+        showToast('info', 'Project Deleted', `"${target.name}" has been removed.`);
+      }
     }
   };
 

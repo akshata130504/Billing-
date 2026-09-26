@@ -134,6 +134,7 @@ def test_expense_batch_import(client: TestClient, tenant, auth_headers):
 
 
 def test_expense_add_to_invoice(client: TestClient, tenant, auth_headers):
+    customer = tenant.customer(display_name="Rebill Co")
     exp = client.post(
         "/api/v1/expenses",
         headers=auth_headers,
@@ -143,16 +144,112 @@ def test_expense_add_to_invoice(client: TestClient, tenant, auth_headers):
             "date": date.today().isoformat(),
             "amount": 500.0,
             "billable": True,
+            "customer_id": customer.id,
+            "tax_rate": 18,
             "status": "recorded",
         },
     ).json()
 
     res = client.post(f"/api/v1/expenses/{exp['id']}/add-to-invoice", headers=auth_headers)
-    assert res.status_code == 200
+    assert res.status_code == 200, res.text
     updated = res.json()
     assert updated["status"] == "invoiced"
     assert updated["billable"] is True
     assert Decimal(updated["billable_amount"]) == Decimal("500.00")
+    # A real draft invoice now carries the expense as a line
+    assert updated["invoice_id"]
+    inv = client.get(f"/api/v1/invoices/{updated['invoice_id']}", headers=auth_headers).json()
+    assert inv["status"] == "draft"
+    assert inv["customer"]["id"] == customer.id
+    assert Decimal(inv["subtotal"]) == Decimal("500.00")
+    assert any("Billable Design Fee" in item["description"] for item in inv["items"])
+
+    # Cannot be invoiced twice
+    again = client.post(f"/api/v1/expenses/{exp['id']}/add-to-invoice", headers=auth_headers)
+    assert again.status_code == 409
+
+    # A second expense can be appended to the same draft
+    exp2 = client.post(
+        "/api/v1/expenses",
+        headers=auth_headers,
+        json={
+            "name": "Courier",
+            "category": "Other",
+            "date": date.today().isoformat(),
+            "amount": 100.0,
+            "billable": True,
+            "customer_id": customer.id,
+        },
+    ).json()
+    res2 = client.post(
+        f"/api/v1/expenses/{exp2['id']}/add-to-invoice",
+        headers=auth_headers,
+        json={"invoice_id": updated["invoice_id"]},
+    )
+    assert res2.status_code == 200, res2.text
+    inv = client.get(f"/api/v1/invoices/{updated['invoice_id']}", headers=auth_headers).json()
+    assert len(inv["items"]) == 2
+    assert Decimal(inv["subtotal"]) == Decimal("600.00")
+
+
+def test_expense_add_to_invoice_requires_customer(client: TestClient, tenant, auth_headers):
+    exp = client.post(
+        "/api/v1/expenses",
+        headers=auth_headers,
+        json={"name": "Orphan", "category": "Other", "date": date.today().isoformat(), "amount": 10.0, "billable": True},
+    ).json()
+    res = client.post(f"/api/v1/expenses/{exp['id']}/add-to-invoice", headers=auth_headers)
+    assert res.status_code == 422
+
+
+def test_expense_rejects_unknown_customer_or_project(client: TestClient, tenant, auth_headers):
+    base = {"name": "Bad refs", "category": "Other", "date": date.today().isoformat(), "amount": 10.0}
+    assert client.post("/api/v1/expenses", headers=auth_headers, json={**base, "customer_id": "nope"}).status_code == 404
+    assert client.post("/api/v1/expenses", headers=auth_headers, json={**base, "project_id": "nope"}).status_code == 404
+    ok = client.post("/api/v1/expenses", headers=auth_headers, json=base).json()
+    assert client.patch(f"/api/v1/expenses/{ok['id']}", headers=auth_headers, json={"project_id": "nope"}).status_code == 404
+
+
+def test_expense_receipt_upload_and_download(client: TestClient, tenant, auth_headers):
+    from backend.tests.conftest import Tenant
+
+    exp = client.post(
+        "/api/v1/expenses",
+        headers=auth_headers,
+        json={"name": "Taxi", "category": "Travel", "date": date.today().isoformat(), "amount": 20.0},
+    ).json()
+    pdf = b"%PDF-1.4 fake receipt"
+    res = client.post(
+        f"/api/v1/expenses/{exp['id']}/receipt",
+        headers=auth_headers,
+        files={"file": ("taxi.pdf", pdf, "application/pdf")},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["has_receipt"] is True
+    assert body["receipt_file_name"] == "taxi.pdf"
+
+    dl = client.get(f"/api/v1/expenses/{exp['id']}/receipt", headers=auth_headers)
+    assert dl.status_code == 200
+    assert dl.content == pdf
+
+    # Content that does not match the extension is rejected
+    bad = client.post(
+        f"/api/v1/expenses/{exp['id']}/receipt",
+        headers=auth_headers,
+        files={"file": ("evil.pdf", b"<script>alert(1)</script>", "application/pdf")},
+    )
+    assert bad.status_code == 422
+    bad_ext = client.post(
+        f"/api/v1/expenses/{exp['id']}/receipt",
+        headers=auth_headers,
+        files={"file": ("x.exe", b"MZ....", "application/octet-stream")},
+    )
+    assert bad_ext.status_code == 422
+
+    # Another organization cannot download it
+    other = Tenant(tenant.db, uuid.uuid4().hex[:8])
+    assert client.get(f"/api/v1/expenses/{exp['id']}/receipt", headers=other.headers()).status_code == 404
 
 
 def test_recurring_expense_lifecycle(client: TestClient, tenant, auth_headers):

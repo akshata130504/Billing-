@@ -4,11 +4,11 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, func, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app.api.deps import CurrentContext
-from backend.app.core.exceptions import ConflictError, EntityNotFoundError, InvalidStateError
+from backend.app.core.exceptions import ConflictError, EntityNotFoundError, ForbiddenError, InvalidStateError
 from backend.app.models.catalog_cpq import (
     BundleItem,
     CPQDeal,
@@ -613,9 +613,52 @@ def create_deal(db: Session, ctx: CurrentContext, data: CPQDealCreate) -> CPQDea
     return get_deal_or_404(db, ctx.organization_id, deal.id)
 
 
+def _guard_deal_decision(ctx: CurrentContext, deal: CPQDeal) -> None:
+    """Same rules as approval_service: admins decide, never on their own deal, only while pending."""
+    from backend.app.models.identity import MemberRole
+
+    if not ctx.has_role(MemberRole.ADMIN):
+        raise ForbiddenError("Only an admin or owner can approve or reject deals.")
+    if deal.status != CPQDealStatus.PENDING_APPROVAL:
+        status = deal.status.value if hasattr(deal.status, "value") else str(deal.status)
+        raise InvalidStateError(f"Deal in status '{status}' is not awaiting approval.")
+    if deal.created_by_id and deal.created_by_id == ctx.user.id:
+        raise ForbiddenError("You cannot approve or reject your own deal.")
+
+
+def _lock_deal(db: Session, organization_id: str, deal_id: str) -> CPQDeal:
+    deal = db.scalars(
+        select(CPQDeal)
+        .where(CPQDeal.id == deal_id, CPQDeal.organization_id == organization_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).first()
+    if deal is None:
+        raise EntityNotFoundError("CPQDeal", deal_id)
+    return deal
+
+
+def _claim_deal(db: Session, deal: CPQDeal, from_statuses: List[CPQDealStatus], to_status: CPQDealStatus) -> bool:
+    """Compare-and-set the deal status so concurrent decisions / conversions cannot both win."""
+    result = db.execute(
+        update(CPQDeal)
+        .where(CPQDeal.id == deal.id, CPQDeal.status.in_(from_statuses))
+        .values(status=to_status)
+        .execution_options(synchronize_session=False)
+    )
+    if (result.rowcount or 0) != 1:
+        db.rollback()
+        return False
+    deal.status = to_status
+    return True
+
+
 def approve_deal(db: Session, ctx: CurrentContext, deal_id: str) -> CPQDeal:
-    deal = get_deal_or_404(db, ctx.organization_id, deal_id)
-    deal.status = CPQDealStatus.APPROVED
+    get_deal_or_404(db, ctx.organization_id, deal_id)
+    deal = _lock_deal(db, ctx.organization_id, deal_id)
+    _guard_deal_decision(ctx, deal)
+    if not _claim_deal(db, deal, [CPQDealStatus.PENDING_APPROVAL], CPQDealStatus.APPROVED):
+        raise InvalidStateError("This deal was already decided.")
     deal.approval_status = "approved"
     deal.approved_by_id = ctx.user.id
     deal.approved_at = datetime.now(timezone.utc)
@@ -624,8 +667,11 @@ def approve_deal(db: Session, ctx: CurrentContext, deal_id: str) -> CPQDeal:
 
 
 def reject_deal(db: Session, ctx: CurrentContext, deal_id: str, reason: str = "") -> CPQDeal:
-    deal = get_deal_or_404(db, ctx.organization_id, deal_id)
-    deal.status = CPQDealStatus.REJECTED
+    get_deal_or_404(db, ctx.organization_id, deal_id)
+    deal = _lock_deal(db, ctx.organization_id, deal_id)
+    _guard_deal_decision(ctx, deal)
+    if not _claim_deal(db, deal, [CPQDealStatus.PENDING_APPROVAL], CPQDealStatus.REJECTED):
+        raise InvalidStateError("This deal was already decided.")
     deal.approval_status = "rejected"
     deal.approval_reason = reason or "Rejected by reviewer"
     db.commit()
@@ -633,14 +679,33 @@ def reject_deal(db: Session, ctx: CurrentContext, deal_id: str, reason: str = ""
 
 
 def convert_deal_to_quote(db: Session, ctx: CurrentContext, deal_id: str) -> Quote:
-    """Creates a real Quote from the configured and approved CPQ Deal."""
+    """Creates a real Quote from an approved CPQ Deal (or a configured one that needs no approval)."""
+    get_deal_or_404(db, ctx.organization_id, deal_id)
+    deal = _lock_deal(db, ctx.organization_id, deal_id)
+
+    if deal.status == CPQDealStatus.CONVERTED or deal.converted_quote_id:
+        raise InvalidStateError("This deal has already been converted to a quote.")
+    if deal.approval_required:
+        allowed = [CPQDealStatus.APPROVED]
+    else:
+        allowed = [CPQDealStatus.APPROVED, CPQDealStatus.CONFIGURED]
+    if deal.status not in allowed:
+        if deal.approval_required:
+            raise InvalidStateError("This deal requires approval before converting to a Quote.")
+        status = deal.status.value if hasattr(deal.status, "value") else str(deal.status)
+        raise InvalidStateError(f"Deal in status '{status}' cannot be converted to a Quote.")
+    # Claim first so a double click cannot produce two quotes.
+    if not _claim_deal(db, deal, allowed, CPQDealStatus.CONVERTED):
+        raise InvalidStateError("This deal has already been converted to a quote.")
     deal = get_deal_or_404(db, ctx.organization_id, deal_id)
 
-    if deal.approval_required and deal.status != CPQDealStatus.APPROVED and deal.status != CPQDealStatus.CONFIGURED:
-        raise InvalidStateError("This deal requires approval before converting to a Quote.")
-
     # Format Quote Number
-    quote_number = f"QT-{uuid.uuid4().hex[:8].upper()}"
+    from backend.app.services import gst
+    from backend.app.services.numbering import next_number
+
+    quote_number = next_number(db, ctx.organization_id, "quote")
+    supply = gst.resolve_supply(ctx.organization, deal.customer)
+    quote_split = gst.split_tax(deal.tax_amount, supply)
 
     quote = Quote(
         organization_id=ctx.organization_id,
@@ -653,6 +718,12 @@ def convert_deal_to_quote(db: Session, ctx: CurrentContext, deal_id: str) -> Quo
         discount_pct=deal.discount_pct,
         discount_amount=deal.discount_amount,
         tax_amount=deal.tax_amount,
+        cgst_amount=quote_split.cgst,
+        sgst_amount=quote_split.sgst,
+        igst_amount=quote_split.igst,
+        supply_type=supply.supply_type,
+        place_of_supply_code=supply.place_of_supply_code,
+        place_of_supply_name=supply.place_of_supply_name,
         total=deal.total,
         title=deal.title,
         notes=deal.notes,
@@ -663,20 +734,28 @@ def convert_deal_to_quote(db: Session, ctx: CurrentContext, deal_id: str) -> Quo
     db.flush()
 
     for idx, d_item in enumerate(deal.items):
+        item_tax_split = gst.split_tax(d_item.tax_amount, supply)
+        item_rate_split = gst.split_rate(d_item.tax_rate_pct, supply)
         q_item = QuoteItem(
             organization_id=ctx.organization_id,
             quote_id=quote.id,
+            offering_id=d_item.offering_id,
             description=d_item.description,
             quantity=d_item.quantity,
             unit_price=d_item.unit_price,
             tax_rate_pct=d_item.tax_rate_pct,
             amount=round_money(d_item.quantity * d_item.unit_price),
+            cgst_amount=item_tax_split.cgst,
+            sgst_amount=item_tax_split.sgst,
+            igst_amount=item_tax_split.igst,
+            cgst_rate_pct=item_rate_split.cgst,
+            sgst_rate_pct=item_rate_split.sgst,
+            igst_rate_pct=item_rate_split.igst,
             position=idx,
         )
         db.add(q_item)
 
     deal.converted_quote_id = quote.id
-    deal.status = CPQDealStatus.CONVERTED
     db.commit()
 
     return quote

@@ -1,6 +1,7 @@
+import type { ProjectInvoiceInput } from '../../../services/projectService';
 import { useState } from 'react';
-import { Project, ProjectInvoice } from '../types';
-import { formatINR } from '../mockProjects';
+import { Project } from '../types';
+import { formatINR } from '../format';
 import { formatDate } from './ProjectTable';
 import { CreateInvoiceModal } from './CreateInvoiceModal';
 import { Button } from '../../../components/common/Button';
@@ -9,7 +10,7 @@ import { Plus, ArrowUpRight, ArrowDownLeft, FileText, Receipt } from 'lucide-rea
 
 interface ProjectTransactionsProps {
   project: Project;
-  onCreateInvoice: (invoice: Omit<ProjectInvoice, 'id' | 'projectId'>) => void;
+  onCreateInvoice: (invoice: ProjectInvoiceInput) => Promise<boolean> | boolean | void;
 }
 
 export function ProjectTransactions({ project, onCreateInvoice }: ProjectTransactionsProps) {
@@ -152,7 +153,7 @@ export function ProjectTransactions({ project, onCreateInvoice }: ProjectTransac
         isOpen={isInvoiceModalOpen}
         onClose={() => setIsInvoiceModalOpen(false)}
         onCreateInvoice={onCreateInvoice}
-        defaultAmount={Math.max(10000, project.budget - project.billed)}
+        defaultAmount={Math.max(0, project.budget - project.billed)}
       />
     </div>
   );

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { RecurringExpense } from '../types';
-import { formatINR } from '../mockExpenses';
+import { formatINR } from '../format';
 import {
   Repeat,
   MoreVertical,

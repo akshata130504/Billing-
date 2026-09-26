@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Body, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
-from backend.app.api.deps import CurrentContext, get_db, require_finance, require_viewer
+from backend.app.api.deps import CurrentContext, get_db, require_admin, require_finance, require_viewer
 from backend.app.schemas.common_refs import PaginatedResponse
 from backend.app.schemas.quotes import (
     InvoiceFromQuoteOut,
@@ -15,8 +15,10 @@ from backend.app.schemas.quotes import (
     QuoteOut,
     QuoteUpdate,
 )
+from sqlalchemy import select
 from backend.app.services import quote_service as svc
 from backend.app.services.pagination import PageParams, page_params
+from backend.app.services.quote_pdf import render_quote_pdf
 
 router = APIRouter()
 
@@ -68,6 +70,37 @@ def get_quote(
     return svc.serialize_quote_full(db, quote)
 
 
+@router.get(
+    "/{quote_id}/pdf",
+    response_class=Response,
+    summary="Download the quote PDF",
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+def quote_pdf(
+    quote_id: str,
+    template_id: Optional[str] = Query(None),
+    ctx: CurrentContext = Depends(require_viewer),
+    db: Session = Depends(get_db),
+):
+    quote = svc.get_quote(db, ctx, quote_id)
+    template = None
+    if template_id:
+        from backend.app.models.customization import DocumentTemplate
+
+        template = db.scalars(
+            select(DocumentTemplate).where(
+                DocumentTemplate.id == template_id,
+                DocumentTemplate.organization_id == ctx.organization_id,
+            )
+        ).first()
+    pdf = render_quote_pdf(quote, ctx.organization, template=template)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="Quote-{quote.quote_number}.pdf"'},
+    )
+
+
 @router.patch("/{quote_id}", response_model=QuoteOut, summary="Update a draft / pending quote")
 def update_quote(
     quote_id: str,
@@ -100,13 +133,15 @@ def send_quote(
     return svc.serialize_quote_full(db, quote)
 
 
-@router.post("/{quote_id}/approve", response_model=QuoteOut, summary="Approve a pending quote")
+@router.post("/{quote_id}/approve", response_model=QuoteOut, summary="Approve a pending quote's discount request")
 def approve_quote(
     quote_id: str,
-    ctx: CurrentContext = Depends(require_finance),
+    body: QuoteDeclineIn = Body(default=QuoteDeclineIn()),
+    ctx: CurrentContext = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    quote = svc.approve_quote(db, ctx, quote_id)
+    # Same guards as /approvals/{id}/approve: admin only, never the requester.
+    quote = svc.approve_quote(db, ctx, quote_id, body.reason)
     return svc.serialize_quote_full(db, quote)
 
 
@@ -114,7 +149,7 @@ def approve_quote(
 def reject_quote(
     quote_id: str,
     body: QuoteDeclineIn = Body(default=QuoteDeclineIn()),
-    ctx: CurrentContext = Depends(require_finance),
+    ctx: CurrentContext = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     quote = svc.reject_quote(db, ctx, quote_id, body.reason)

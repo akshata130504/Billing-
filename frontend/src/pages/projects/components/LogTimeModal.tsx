@@ -4,15 +4,20 @@ import { Modal } from '../../../components/common/Modal';
 import { Button } from '../../../components/common/Button';
 import { Input } from '../../../components/common/Input';
 import { validateDescription, validateNonNegativeMoney, parseStrictNumber } from '../../../utils/validation';
+import { useAuth } from '../../../hooks/useAuth';
 
 interface LogTimeModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onLogTime: (entry: Omit<TimesheetEntry, 'id' | 'projectId'>) => void;
+  /** Resolve false to keep the modal open (the save failed and was already reported). */
+  onLogTime: (entry: Omit<TimesheetEntry, 'id' | 'projectId'>) => Promise<boolean> | boolean | void;
 }
 
 export function LogTimeModal({ isOpen, onClose, onLogTime }: LogTimeModalProps) {
-  const [employee, setEmployee] = useState('Akshata Rathod');
+  // Time is always logged as the signed-in user (the API records the caller).
+  const { user } = useAuth();
+  const employee = user?.full_name || user?.email || 'You';
+  const [submitting, setSubmitting] = useState(false);
   const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [description, setDescription] = useState('');
   const [hours, setHours] = useState('4.0');
@@ -20,12 +25,9 @@ export function LogTimeModal({ isOpen, onClose, onLogTime }: LogTimeModalProps) 
   const [hourlyRate, setHourlyRate] = useState('500');
   const [error, setError] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!employee.trim()) {
-      setError('Employee name is required');
-      return;
-    }
+    if (submitting) return;
     const descriptionError = validateDescription(description, 500, 'Work description');
     if (descriptionError) {
       setError(descriptionError);
@@ -59,16 +61,22 @@ export function LogTimeModal({ isOpen, onClose, onLogTime }: LogTimeModalProps) 
 
     const calculatedAmount = billable ? Math.round(numHours * numRate) : 0;
 
-    onLogTime({
-      employee: employee.trim(),
-      date,
-      description: description.trim(),
-      hours: numHours,
-      billable,
-      hourlyRate: numRate || 0,
-      amount: calculatedAmount,
-    });
-    onClose();
+    setError('');
+    setSubmitting(true);
+    try {
+      const ok = await onLogTime({
+        employee,
+        date,
+        description: description.trim(),
+        hours: numHours,
+        billable,
+        hourlyRate: numRate || 0,
+        amount: calculatedAmount,
+      });
+      if (ok !== false) onClose();
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -83,7 +91,7 @@ export function LogTimeModal({ isOpen, onClose, onLogTime }: LogTimeModalProps) 
           <Button variant="outline" size="sm" onClick={onClose} type="button">
             Cancel
           </Button>
-          <Button variant="primary" size="sm" type="submit" form="timesheet-form">
+          <Button variant="primary" size="sm" type="submit" form="timesheet-form" isLoading={submitting} disabled={submitting}>
             Log Time Entry
           </Button>
         </>
@@ -98,13 +106,7 @@ export function LogTimeModal({ isOpen, onClose, onLogTime }: LogTimeModalProps) 
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <Input
-              label="Employee Name"
-              required
-              value={employee}
-              onChange={(e) => setEmployee(e.target.value)}
-              placeholder="e.g. Akshata Rathod"
-            />
+            <Input label="Logged By" value={employee} readOnly disabled />
           </div>
 
           <div>

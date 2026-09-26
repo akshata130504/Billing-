@@ -66,6 +66,7 @@ export interface Expense {
   amount: number;
   currency: string;
   billable: boolean;
+  customerId?: string;
   customer?: string;
   project?: string;
   projectId?: string;
@@ -77,6 +78,10 @@ export interface Expense {
   paidBy: string;
   status: ExpenseStatus;
   receipt?: ExpenseReceipt;
+  /** True when a receipt file is stored on the server (downloadable). */
+  hasReceipt?: boolean;
+  /** Transient: a newly chosen receipt to upload after the expense is saved. */
+  receiptFile?: File | null;
   notes?: string;
   createdAt: string;
 }
@@ -94,6 +99,7 @@ export interface RecurringExpense {
   neverEnds: boolean;
   nextRun: string;
   billable: boolean;
+  customerId?: string;
   customer?: string;
   project?: string;
   projectId?: string;

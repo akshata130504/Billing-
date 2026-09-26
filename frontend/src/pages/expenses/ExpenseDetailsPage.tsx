@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useExpenses } from './ExpensesContext';
-import { formatINR } from './mockExpenses';
+import { formatINR } from './format';
 import { ExpenseFormModal } from './components/ExpenseFormModal';
 import { DeleteExpenseModal } from './components/DeleteExpenseModal';
 import {
@@ -26,7 +26,7 @@ import { useToast } from '../../components/common/Toast';
 export function ExpenseDetailsPage() {
   const { expenseId } = useParams<{ expenseId: string }>();
   const navigate = useNavigate();
-  const { getExpenseById, updateExpense, deleteExpense, duplicateExpense, addToInvoice } =
+  const { getExpenseById, updateExpense, deleteExpense, duplicateExpense, addToInvoice, downloadReceipt } =
     useExpenses();
   const { showToast } = useToast();
 
@@ -102,11 +102,11 @@ export function ExpenseDetailsPage() {
   };
 
   const handleDownloadReceipt = () => {
-    showToast(
-      'info',
-      'Download Receipt',
-      `Downloading ${expense.receipt?.fileName || 'receipt.pdf'} for local records.`
-    );
+    if (!expense.hasReceipt) {
+      showToast('info', 'No stored file', 'This receipt was recorded without an uploaded file. Edit the expense to attach one.');
+      return;
+    }
+    void downloadReceipt(expense.id);
   };
 
   const handleDuplicate = () => {
@@ -372,7 +372,8 @@ export function ExpenseDetailsPage() {
                       {expense.receipt.fileName}
                     </p>
                     <p className="text-[11px] text-slate-400">
-                      {expense.receipt.fileSize} · {expense.receipt.uploadDate}
+                      {expense.receipt.fileSize || ''}
+                      {expense.hasReceipt ? '' : ' · file not uploaded'}
                     </p>
                   </div>
                 </div>

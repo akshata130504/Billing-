@@ -16,7 +16,7 @@ from datetime import date, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, select, update
 from sqlalchemy.orm import Session, joinedload
 
 from backend.app.api.deps import CurrentContext
@@ -32,10 +32,8 @@ from backend.app.models.ai import (
     AIToolInvocation,
 )
 from backend.app.models.base import utcnow
-from backend.app.models.catalog import INTERVAL_MONTHS, Plan, PricingModel
 from backend.app.models.customers import Customer
 from backend.app.models.invoices import OPEN_INVOICE_STATUSES, Invoice, InvoiceStatus
-from backend.app.models.subscriptions import Subscription, SubscriptionStatus
 from backend.app.schemas.ai import (
     AIDraftConfirmResponse,
     AIDraftRequest,
@@ -122,32 +120,33 @@ def _tool_overdue_invoice_count(db: Session, organization_id: str) -> Tuple[str,
 
 
 def _tool_mrr_summary(db: Session, organization_id: str) -> Tuple[str, Dict[str, Any], List[Dict[str, Any]]]:
-    rows = db.execute(
-        select(Subscription, Plan)
-        .join(Plan, Plan.id == Subscription.plan_id)
-        .where(
-            Subscription.organization_id == organization_id,
-            Subscription.status == SubscriptionStatus.ACTIVE,
-        )
-    ).all()
+    # One MRR definition for the whole product (subscription price x qty - discount,
+    # monthly-normalised, ACTIVE + PAST_DUE, per currency) - see dashboard_service.
+    from backend.app.services.dashboard_service import compute_mrr
 
-    mrr = Decimal("0.00")
-    counted = 0
-    for sub, plan in rows:
-        months = INTERVAL_MONTHS.get(plan.billing_interval)
-        if not months:
-            continue  # one-time plans do not contribute to recurring revenue
-        base = plan.unit_amount * sub.quantity if plan.pricing_model == PricingModel.PER_UNIT else plan.unit_amount
-        mrr += (base / (months * plan.interval_count)).quantize(Decimal("0.01"))
-        counted += 1
+    result = compute_mrr(db, organization_id)
+    mrr = result["mrr"]
+    counted = result["subscription_count"]
+    currency = result["currency"]
+    others = result["other_currencies"]
 
-    answer = f"Monthly Recurring Revenue from {counted} active recurring subscription(s) is approximately {mrr:.2f}."
-    data = {"mrr": str(mrr), "active_subscription_count": counted}
+    answer = (
+        f"Monthly Recurring Revenue from {counted} billing recurring subscription(s) is approximately "
+        f"{currency} {mrr:.2f}."
+    )
+    if others:
+        answer += " Other currencies: " + ", ".join(f"{cur} {amt:.2f}" for cur, amt in sorted(others.items())) + "."
+    data = {
+        "mrr": str(mrr),
+        "currency": currency,
+        "other_currencies": {cur: str(amt) for cur, amt in others.items()},
+        "active_subscription_count": counted,
+    }
     sources = [{
         "source_type": "mrr_report",
         "source_id": None,
-        "label": "MRR (active subscriptions)",
-        "snippet": f"mrr={mrr}, active_subscription_count={counted}",
+        "label": "MRR (active and past-due subscriptions)",
+        "snippet": f"mrr={mrr} {currency}, active_subscription_count={counted}",
     }]
     return answer, data, sources
 
@@ -377,11 +376,15 @@ def propose_draft(db: Session, ctx: CurrentContext, data: AIDraftRequest) -> AID
 
 def confirm_draft(db: Session, ctx: CurrentContext, draft_id: str) -> AIDraftConfirmResponse:
     """Re-validates a draft against current data and, if still valid, executes it via the owning domain service."""
+    # Row lock (no-op on SQLite) + the compare-and-set below make a double click
+    # produce exactly one credit note.
     draft = db.scalars(
-        select(AIActionDraft).where(
+        select(AIActionDraft)
+        .where(
             AIActionDraft.id == draft_id,
             AIActionDraft.organization_id == ctx.organization_id,
         )
+        .with_for_update()
     ).first()
     if not draft:
         raise NotFoundAppError("AI action draft not found.")
@@ -412,6 +415,22 @@ def confirm_draft(db: Session, ctx: CurrentContext, draft_id: str) -> AIDraftCon
         raise ValidationAppError("The draft is no longer valid.", {"fields": {"draft": errors}})
 
     payload = draft.proposed_payload
+    claimed = db.execute(
+        update(AIActionDraft)
+        .where(
+            AIActionDraft.id == draft.id,
+            AIActionDraft.status.in_(
+                [AIActionDraftStatus.PROPOSED, AIActionDraftStatus.VALIDATED, AIActionDraftStatus.APPROVED]
+            ),
+        )
+        .values(status=AIActionDraftStatus.EXECUTED, confirmed_by_id=ctx.user_id, confirmed_at=now)
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    if claimed != 1:
+        db.rollback()
+        raise ValidationAppError("This draft has already been executed.")
+    # The claim is committed together with the credit note (create_credit_note commits);
+    # if creation fails the rollback releases the draft again.
     credit_note = credit_service.create_credit_note(
         db,
         ctx,

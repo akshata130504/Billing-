@@ -6,8 +6,13 @@ Python loops are over the small "recent" lists.
 Documented approximations
 - revenue = Σ (amount - amount_refunded) of settled payments by paid_at.
 - pipeline amounts: draft/paid use `total`, open buckets use `amount_due`.
-- mrr_change_pct compares today's MRR with the MRR of subscriptions that existed at
-  the start of the previous month (created_at before it and not cancelled before it).
+- MRR (compute_mrr) = sum over ACTIVE + PAST_DUE subscriptions of the subscription's own
+  unit price x quantity - discount, normalised to a month; reported in the org's base
+  currency with other currencies listed separately (never summed across currencies).
+- mrr_change_pct compares today's MRR with the MRR of subscriptions that were billing at
+  the start of the previous month (created before it, not cancelled/ended before it).
+- churn_rate = logo churn: customers billing at period start who cancelled during the
+  period with nothing left billing / customers billing at period start.
 - recovery.recovered_amount = settled payments in range from customers who also
   had a failed payment in the range (failed gateway attempts carry no allocation).
 """
@@ -17,7 +22,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import Select, and_, case, func, or_, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app.core.exceptions import ValidationAppError
@@ -27,7 +32,7 @@ from backend.app.models import (
     ApprovalStatus,
     AuditLog,
     AuditStatus,
-    BillingInterval,
+    INTERVAL_MONTHS,
     Customer,
     CustomerStatus,
     Invoice,
@@ -48,7 +53,7 @@ from backend.app.services.invoice_service import SETTLED_PAYMENT_STATUSES
 from backend.app.services.money import D, q2
 from backend.app.services.pagination import PageParams, paginate
 from backend.app.services.payment_service import serialize_payment
-from backend.app.services.subscription_service import add_months
+from backend.app.services.subscription_service import add_months, effective_unit_price
 
 RANGE_KEYS = ("today", "7_days", "30_days", "3_months", "12_months")
 
@@ -129,28 +134,148 @@ def _invoiced_between(db: Session, org_id: str, start: date, end: date) -> Decim
     return _dec(value)
 
 
-def _mrr(db: Session, org_id: str, *extra_filters) -> Decimal:
-    """Σ recurring amount grouped by months-per-period, divided in Python (exact Decimal; no SQL division)."""
-    months = case(
-        (Plan.billing_interval == BillingInterval.MONTHLY, 1),
-        (Plan.billing_interval == BillingInterval.QUARTERLY, 3),
-        (Plan.billing_interval == BillingInterval.SEMIANNUAL, 6),
-        (Plan.billing_interval == BillingInterval.YEARLY, 12),
-        else_=0,
-    ) * case((Plan.interval_count > 0, Plan.interval_count), else_=1)
-    units = case((Plan.pricing_model == PricingModel.PER_UNIT, Subscription.quantity), else_=1)
+# Statuses whose subscriptions bill today. PAST_DUE still bills (the renewal is unpaid,
+# not cancelled); trials, drafts and paused subscriptions do not.
+MRR_STATUSES = (SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE)
+# Statuses that can never have been billing at an earlier point in time.
+_NEVER_BILLED_STATUSES = (
+    SubscriptionStatus.DRAFT,
+    SubscriptionStatus.PENDING_ACTIVATION,
+    SubscriptionStatus.TRIALING,
+    SubscriptionStatus.TRIAL_EXPIRED,
+)
+
+
+def _live_subscription_filters(org_id: str, as_of: Optional[datetime]) -> List[Any]:
+    """Filters selecting subscriptions that were billing at `as_of` (now when None).
+
+    History is reconstructed from created_at / cancelled_at / ended_at (there is no
+    status history table): a subscription counts when it existed before `as_of`, was
+    not cancelled or ended before it, and is not in a status that never bills.
+    """
+    filters: List[Any] = [Subscription.organization_id == org_id]
+    if as_of is None:
+        filters.append(Subscription.status.in_(list(MRR_STATUSES)))
+        return filters
+    filters.extend(
+        [
+            Subscription.created_at < as_of,
+            or_(Subscription.cancelled_at.is_(None), Subscription.cancelled_at >= as_of),
+            or_(Subscription.ended_at.is_(None), Subscription.ended_at >= as_of),
+            Subscription.status.not_in(list(_NEVER_BILLED_STATUSES)),
+        ]
+    )
+    return filters
+
+
+def subscription_monthly_amount(subscription: Subscription, plan: Plan) -> Decimal:
+    """The subscription's own contracted price x quantity - discount, normalised to one month.
+
+    Uses the price agreed on the subscription (falling back to the plan list price when
+    no override was stored), so negotiated prices and discounts are reflected.
+    One-time plans contribute nothing.
+    """
+    months = INTERVAL_MONTHS.get(plan.billing_interval)
+    if not months:
+        return Decimal("0")
+    months *= max(1, int(plan.interval_count or 1))
+    units = D(subscription.quantity or 1) if plan.pricing_model == PricingModel.PER_UNIT else Decimal("1")
+    period_amount = effective_unit_price(subscription, plan) * units - D(subscription.discount_amount or 0)
+    if period_amount <= 0:
+        return Decimal("0")
+    return period_amount / Decimal(months)
+
+
+def compute_mrr(
+    db: Session,
+    org_id: str,
+    as_of: Optional[datetime] = None,
+    base_currency: Optional[str] = None,
+) -> Dict[str, Any]:
+    """The single MRR definition used by the dashboard, the AI assistant and reports.
+
+    Returns {"currency", "mrr" (base currency), "by_currency" {cur: Decimal},
+    "other_currencies" {cur: Decimal}, "subscription_count"}. Amounts in different
+    currencies are never added together: the headline figure is the org's base
+    currency and the rest are listed separately.
+    """
+    if base_currency is None:
+        from backend.app.models import Organization
+
+        org = db.get(Organization, org_id)
+        base_currency = (org.default_currency if org else None) or "INR"
+    base_currency = base_currency.upper()
     rows = db.execute(
-        select(months, func.coalesce(func.sum(Plan.unit_amount * units), 0))
-        .select_from(Subscription)
+        select(Subscription, Plan)
         .join(Plan, Plan.id == Subscription.plan_id)
-        .where(Subscription.organization_id == org_id, months > 0, *extra_filters)
-        .group_by(months)
+        .where(*_live_subscription_filters(org_id, as_of))
     ).all()
-    total = Decimal("0")
-    for period_months, amount in rows:
-        if period_months:
-            total += D(amount) / Decimal(int(period_months))
-    return q2(total)
+    by_currency: Dict[str, Decimal] = {}
+    counted = 0
+    for subscription, plan in rows:
+        if not INTERVAL_MONTHS.get(plan.billing_interval):
+            continue  # one-time plans are not recurring revenue
+        amount = subscription_monthly_amount(subscription, plan)
+        currency = (subscription.currency or plan.currency or base_currency).upper()
+        by_currency[currency] = by_currency.get(currency, Decimal("0")) + amount
+        counted += 1
+    by_currency = {cur: q2(value) for cur, value in by_currency.items()}
+    return {
+        "currency": base_currency,
+        "mrr": by_currency.get(base_currency, Decimal("0.00")),
+        "by_currency": by_currency,
+        "other_currencies": {cur: v for cur, v in by_currency.items() if cur != base_currency},
+        "subscription_count": counted,
+    }
+
+
+def logo_churn(db: Session, org_id: str, lo: datetime, hi: datetime) -> Tuple[int, int, Optional[str]]:
+    """Logo churn for [lo, hi).
+
+    churned = customers billing at `lo` who cancelled during the period and have
+    nothing left billing; base = customers billing at `lo`. Returns
+    (churned, base, churn_rate_pct), the rate being None when the base is empty.
+    """
+    start_customers = set(
+        db.scalars(select(Subscription.customer_id).where(*_live_subscription_filters(org_id, lo)).distinct())
+    )
+    if not start_customers:
+        return 0, 0, None
+    cancelled_customers = set(
+        db.scalars(
+            select(Subscription.customer_id)
+            .where(
+                Subscription.organization_id == org_id,
+                Subscription.cancelled_at >= lo,
+                Subscription.cancelled_at < hi,
+                Subscription.customer_id.in_(start_customers),
+            )
+            .distinct()
+        )
+    )
+    still_billing: set = set()
+    if cancelled_customers:
+        still_billing = set(
+            db.scalars(
+                select(Subscription.customer_id)
+                .where(
+                    Subscription.organization_id == org_id,
+                    Subscription.customer_id.in_(cancelled_customers),
+                    Subscription.status.in_(
+                        [
+                            SubscriptionStatus.ACTIVE,
+                            SubscriptionStatus.PAST_DUE,
+                            SubscriptionStatus.TRIALING,
+                            SubscriptionStatus.PAUSED,
+                        ]
+                    ),
+                )
+                .distinct()
+            )
+        )
+    churned = len(cancelled_customers - still_billing)
+    rate = money_str(Decimal(churned) / Decimal(len(start_customers)) * 100)
+    return churned, len(start_customers), rate
 
 
 def _bucket(db: Session, org_id: str, statuses, amount_column) -> Dict[str, Any]:
@@ -202,15 +327,12 @@ def dashboard_summary(db: Session, organization, range_key: str = "30_days") -> 
     )
 
     # --- revenue block
-    mrr = _mrr(db, org_id, Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE]))
+    base_currency = (organization.default_currency or "INR").upper()
+    mrr_now = compute_mrr(db, org_id, base_currency=base_currency)
+    mrr = mrr_now["mrr"]
     prev_month_start = _dt(add_months(today.replace(day=1), -1))
-    prev_mrr = _mrr(
-        db,
-        org_id,
-        Subscription.created_at < prev_month_start,
-        or_(Subscription.cancelled_at.is_(None), Subscription.cancelled_at >= prev_month_start),
-        Subscription.status != SubscriptionStatus.TRIALING,
-    )
+    prev_mrr = compute_mrr(db, org_id, as_of=prev_month_start, base_currency=base_currency)["mrr"]
+    churned_customers, churn_base, churn_rate = logo_churn(db, org_id, lo, hi)
     trend: List[Dict[str, Any]] = []
     first_of_month = today.replace(day=1)
     for offset in range(11, -1, -1):
@@ -326,6 +448,8 @@ def dashboard_summary(db: Session, organization, range_key: str = "30_days") -> 
             "mrr": money_str(mrr),
             "arr": money_str(mrr * 12),
             "mrr_change_pct": _pct_change(mrr, prev_mrr),
+            "mrr_currency": base_currency,
+            "mrr_other_currencies": {cur: money_str(v) for cur, v in mrr_now["other_currencies"].items()},
             "trend": trend,
         },
         "pipeline": pipeline,
@@ -335,6 +459,9 @@ def dashboard_summary(db: Session, organization, range_key: str = "30_days") -> 
             "past_due": health["past_due"],
             "paused": health["paused"],
             "cancelled_this_period": int(cancelled_this_period or 0),
+            "churned_customers": churned_customers,
+            "customers_at_period_start": churn_base,
+            "churn_rate": churn_rate,
         },
         "recovery": {
             "failed_payments": int(failed_row[0] or 0),

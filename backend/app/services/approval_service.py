@@ -1,5 +1,6 @@
 """Approval requests: listing, approve/reject and the side effects per type."""
 import importlib
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import Select, select
@@ -13,6 +14,7 @@ from backend.app.models import (
     ApprovalStatus,
     ApprovalType,
     Invoice,
+    MemberRole,
     Payment,
     Quote,
     QuoteStatus,
@@ -59,6 +61,10 @@ def list_approvals(
 
 
 def _guard_decision(ctx: CurrentContext, approval: ApprovalRequest) -> None:
+    # Enforced here as well as on the route so every entry point (e.g. /quotes/{id}/approve)
+    # gets the same rules: admins decide, never on their own request, and only once.
+    if not ctx.has_role(MemberRole.ADMIN):
+        raise ForbiddenError("Only an admin or owner can decide approval requests.")
     if approval.status != ApprovalStatus.PENDING:
         raise InvalidStateError(f"Approval request is already {enum_value(approval.status)}.")
     if approval.requested_by_id and approval.requested_by_id == ctx.user.id:
@@ -90,6 +96,14 @@ def _apply_approved_effect(db: Session, ctx: CurrentContext, approval: ApprovalR
         ).first()
         if quote is None:
             raise EntityNotFoundError("Quote", approval.entity_id)
+        payload = dict(approval.payload or {})
+        requested = payload.get("discount_pct")
+        if requested is not None and Decimal(str(quote.discount_pct)) > Decimal(str(requested)):
+            # The quote changed after the request was raised; never approve unseen terms.
+            raise InvalidStateError("The quote's discount changed after this request was raised; it needs a new approval.")
+        # Record exactly what was approved: send_quote only honours discounts up to this value.
+        payload["approved_discount_pct"] = str(requested if requested is not None else quote.discount_pct)
+        approval.payload = payload
         if quote.status == QuoteStatus.PENDING_APPROVAL:
             quote_service.mark_sent(db, quote, ctx.organization, ctx)
         return
@@ -110,7 +124,46 @@ def _apply_approved_effect(db: Session, ctx: CurrentContext, approval: ApprovalR
                 "The approval has not been recorded; retry once the service is back."
             )
         return
-    # INVOICE_DISCOUNT and any future type: recording the decision is the effect for now.
+    if approval.type == ApprovalType.INVOICE_DISCOUNT:
+        from backend.app.models.invoices import Invoice, InvoiceStatus
+        from backend.app.services import gst
+        from backend.app.services.invoice_service import compute_totals, line_inputs, attach_hsn_codes
+
+        invoice = db.scalars(
+            select(Invoice)
+            .where(Invoice.id == approval.entity_id, Invoice.organization_id == ctx.organization_id)
+            .options(selectinload(Invoice.customer), selectinload(Invoice.items))
+        ).first()
+        if invoice is None:
+            raise EntityNotFoundError("Invoice", approval.entity_id)
+        if invoice.status != InvoiceStatus.DRAFT:
+            # Preserving accounting integrity: Never modify already-issued/paid invoices directly
+            return
+
+        discount_to_apply = (
+            Decimal(str(approval.payload.get("discount_pct", invoice.discount_pct)))
+            if approval.payload
+            else invoice.discount_pct
+        )
+        organization = ctx.organization
+        customer = invoice.customer
+        supply = gst.resolve_supply(organization, customer)
+        lines = line_inputs(invoice.items)
+        attach_hsn_codes(db, ctx.organization_id, lines)
+        totals = compute_totals(lines, discount_to_apply, supply=supply)
+
+        invoice.subtotal = totals.subtotal
+        invoice.discount_pct = totals.discount_pct
+        invoice.discount_amount = totals.discount_amount
+        invoice.tax_amount = totals.tax_amount
+        invoice.cgst_amount = totals.cgst_amount
+        invoice.sgst_amount = totals.sgst_amount
+        invoice.igst_amount = totals.igst_amount
+        invoice.total = totals.total
+        invoice.amount_due = totals.total
+        invoice.updated_at = utcnow()
+        db.flush()
+        return
 
 
 def approve(db: Session, ctx: CurrentContext, approval_id: str, note: Optional[str]) -> ApprovalRequest:
@@ -159,6 +212,35 @@ def reject(db: Session, ctx: CurrentContext, approval_id: str, note: str) -> App
                 before=quote_before,
                 after={**audit.snapshot(quote, quote_service.QUOTE_SNAPSHOT_FIELDS), "reason": "discount approval rejected"},
             )
+    elif approval.type == ApprovalType.INVOICE_DISCOUNT:
+        from backend.app.models.invoices import Invoice, InvoiceStatus
+        from backend.app.services import gst
+        from backend.app.services.invoice_service import compute_totals, line_inputs, attach_hsn_codes
+
+        invoice = db.scalars(
+            select(Invoice)
+            .where(Invoice.id == approval.entity_id, Invoice.organization_id == ctx.organization_id)
+            .options(selectinload(Invoice.customer), selectinload(Invoice.items))
+        ).first()
+        if invoice is not None and invoice.status == InvoiceStatus.DRAFT:
+            organization = ctx.organization
+            customer = invoice.customer
+            supply = gst.resolve_supply(organization, customer)
+            lines = line_inputs(invoice.items)
+            attach_hsn_codes(db, ctx.organization_id, lines)
+            totals = compute_totals(lines, Decimal("0.00"), supply=supply)
+
+            invoice.subtotal = totals.subtotal
+            invoice.discount_pct = Decimal("0.00")
+            invoice.discount_amount = Decimal("0.00")
+            invoice.tax_amount = totals.tax_amount
+            invoice.cgst_amount = totals.cgst_amount
+            invoice.sgst_amount = totals.sgst_amount
+            invoice.igst_amount = totals.igst_amount
+            invoice.total = totals.total
+            invoice.amount_due = totals.total
+            invoice.updated_at = utcnow()
+            db.flush()
     approval.status = ApprovalStatus.REJECTED
     approval.reviewed_by_id = ctx.user.id
     approval.reviewed_at = utcnow()

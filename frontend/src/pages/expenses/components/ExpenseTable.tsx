@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Expense } from '../types';
-import { formatINR } from '../mockExpenses';
+import { formatINR } from '../format';
 import {
   FileText,
   Paperclip,

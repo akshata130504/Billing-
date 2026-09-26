@@ -20,8 +20,6 @@ from backend.app.models import (
     User,
     utcnow,
 )
-from backend.app.schemas.common_refs import LineItemIn
-from backend.app.schemas.invoices import InvoiceCreate
 from backend.app.schemas.timesheets import (
     TimeEntryCreate,
     TimeEntryRead,
@@ -33,7 +31,7 @@ from backend.app.schemas.timesheets import (
 )
 from backend.app.services import audit
 from backend.app.services import invoice_service
-from backend.app.services.money import D, q2
+from backend.app.services.money import D, LineInput, q2
 
 
 def _can_manage_all_entries(ctx: CurrentContext) -> bool:
@@ -86,10 +84,21 @@ def create_time_entry(db: Session, data: TimeEntryCreate, ctx: CurrentContext) -
     """Creates a new time entry with tenant isolation and rate/amount calculation."""
     org_id = ctx.organization.id
 
-    if data.customer_id:
-        cust = db.scalar(select(Customer).where(Customer.organization_id == org_id, Customer.id == data.customer_id))
+    customer_id = data.customer_id
+    project_name = data.project_name
+    if data.project_id:
+        from backend.app.models.projects import Project
+
+        project = db.scalar(select(Project).where(Project.organization_id == org_id, Project.id == data.project_id))
+        if project is not None:
+            # Hours logged against a project bill to the project's customer.
+            customer_id = customer_id or project.customer_id
+            project_name = project_name or project.name
+
+    if customer_id:
+        cust = db.scalar(select(Customer).where(Customer.organization_id == org_id, Customer.id == customer_id))
         if not cust:
-            raise EntityNotFoundError("Customer", data.customer_id)
+            raise EntityNotFoundError("Customer", customer_id)
 
     duration = q2(D(data.duration_hours))
     if duration <= Decimal("0.00"):
@@ -101,9 +110,9 @@ def create_time_entry(db: Session, data: TimeEntryCreate, ctx: CurrentContext) -
     entry = TimeEntry(
         organization_id=org_id,
         user_id=ctx.user.id,
-        customer_id=data.customer_id,
+        customer_id=customer_id,
         project_id=data.project_id,
-        project_name=data.project_name,
+        project_name=project_name,
         date=data.date,
         start_time=data.start_time,
         end_time=data.end_time,
@@ -456,6 +465,9 @@ def approve_time_entry(db: Session, entry_id: str, ctx: CurrentContext) -> TimeE
     if not entry:
         raise EntityNotFoundError("TimeEntry", entry_id)
 
+    if entry.user_id == ctx.user.id:
+        raise ForbiddenError("You cannot approve your own time entries; ask another finance or admin member.")
+
     if entry.status not in (TimeEntryStatus.SUBMITTED, TimeEntryStatus.DRAFT):
         raise InvalidStateError(f"Cannot approve entry with status '{entry.status.value}'")
 
@@ -519,12 +531,17 @@ def generate_invoice_from_timesheets(
     if not customer:
         raise EntityNotFoundError("Customer", payload.customer_id)
 
+    # Lock the rows for the whole transaction so two concurrent "generate invoice"
+    # requests cannot both bill the same entries (FOR UPDATE; a no-op on SQLite).
     entries = db.scalars(
-        select(TimeEntry).where(
+        select(TimeEntry)
+        .where(
             TimeEntry.organization_id == org_id,
             TimeEntry.customer_id == payload.customer_id,
             TimeEntry.id.in_(payload.time_entry_ids),
         )
+        .order_by(TimeEntry.date, TimeEntry.created_at)
+        .with_for_update()
     ).all()
 
     if not entries:
@@ -544,57 +561,74 @@ def generate_invoice_from_timesheets(
     for e in entries:
         if not e.billable:
             raise ValidationAppError(f"Time entry {e.id} is marked non-billable and cannot be invoiced")
-        if e.status == TimeEntryStatus.BILLED:
+        if e.status == TimeEntryStatus.BILLED or e.invoice_id:
             raise InvalidStateError(f"Time entry {e.id} is already billed on invoice {e.invoice_id}")
         if e.status == TimeEntryStatus.REJECTED:
             raise InvalidStateError(f"Time entry {e.id} was rejected by a reviewer and cannot be invoiced")
+        if e.status != TimeEntryStatus.APPROVED:
+            raise InvalidStateError(
+                f"Time entry {e.id} must be approved before invoicing (current status: '{e.status.value}')"
+            )
 
-    # Build line items for the invoice
-    items: List[LineItemIn] = []
-    for idx, e in enumerate(entries):
+    tax_rate = default_tax_rate_pct(ctx.organization)
+    lines: List[LineInput] = []
+    for e in entries:
         desc = f"Time Tracking: {e.project_name or 'General Services'} - {e.description} ({e.date.isoformat()})"
-        items.append(
-            LineItemIn(
+        lines.append(
+            LineInput(
                 description=desc[:500],
                 quantity=q2(D(e.duration_hours)),
                 unit_price=q2(D(e.billing_rate)),
-                tax_rate_pct=Decimal("0.00"),
+                tax_rate_pct=tax_rate,
             )
         )
 
     issue_date = payload.issue_date or date.today()
     due_date = payload.due_date or (issue_date + timedelta(days=customer.payment_terms_days or 30))
 
-    inv_create = InvoiceCreate(
-        customer_id=customer.id,
-        issue_date=issue_date,
-        due_date=due_date,
-        currency=customer.currency or "INR",
-        items=items,
-        notes=payload.notes or "Generated from approved timesheet entries.",
-    )
-
-    created_invoice = invoice_service.create_invoice(db, ctx, inv_create)
-
-    # Link entries to invoice and mark BILLED
-    for e in entries:
-        e.status = TimeEntryStatus.BILLED
-        e.invoice_id = created_invoice.id
-
-    audit.record(
-        db,
-        action="TIMESHEETS_BILLED_TO_INVOICE",
-        entity_type="invoice",
-        entity_id=created_invoice.id,
-        ctx=ctx,
-        after={
-            "invoice_number": created_invoice.invoice_number,
-            "entries_count": len(entries),
-            "total_amount": str(created_invoice.total),
-        },
-    )
-
-    db.commit()
+    # One transaction: the invoice is built with the non-committing builder, the entries
+    # are marked BILLED against it, and a single commit makes both visible together.
+    try:
+        created_invoice = invoice_service.create_invoice_record(
+            db,
+            organization_id=org_id,
+            customer=customer,
+            lines=lines,
+            issue_date=issue_date,
+            due_date=due_date,
+            currency=customer.currency or ctx.organization.default_currency or "INR",
+            notes=payload.notes or "Generated from approved timesheet entries.",
+            created_by_id=ctx.user.id,
+        )
+        for e in entries:
+            e.status = TimeEntryStatus.BILLED
+            e.invoice_id = created_invoice.id
+        db.flush()
+        audit.record(
+            db,
+            action="INVOICE_CREATED",
+            entity_type="invoice",
+            entity_id=created_invoice.id,
+            entity_label=created_invoice.invoice_number,
+            ctx=ctx,
+            after=invoice_service.snapshot(created_invoice),
+        )
+        audit.record(
+            db,
+            action="TIMESHEETS_BILLED_TO_INVOICE",
+            entity_type="invoice",
+            entity_id=created_invoice.id,
+            ctx=ctx,
+            after={
+                "invoice_number": created_invoice.invoice_number,
+                "entries_count": len(entries),
+                "total_amount": str(created_invoice.total),
+            },
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return {
         "id": created_invoice.id,
         "invoice_number": created_invoice.invoice_number,
@@ -605,3 +639,31 @@ def generate_invoice_from_timesheets(
         "issue_date": created_invoice.issue_date.isoformat() if created_invoice.issue_date else None,
         "due_date": created_invoice.due_date.isoformat() if created_invoice.due_date else None,
     }
+
+
+def default_tax_rate_pct(organization) -> Decimal:
+    """GST rate for service lines that carry no product: the org default, else 18%."""
+    raw = getattr(organization, "default_tax_rate_pct", None) if organization is not None else None
+    if raw is None:
+        return Decimal("18.00")
+    return q2(D(raw))
+
+
+def release_time_entries_for_invoice(db: Session, invoice_id: str, organization_id: Optional[str] = None) -> int:
+    """Return BILLED entries to APPROVED when their invoice is voided or deleted.
+
+    Called by invoice_service.void_invoice / delete_invoice (in their transaction; no
+    commit here) so the hours can be billed again. Returns the number of entries released.
+    """
+    stmt = select(TimeEntry).where(TimeEntry.invoice_id == invoice_id).with_for_update()
+    if organization_id:
+        stmt = stmt.where(TimeEntry.organization_id == organization_id)
+    released = 0
+    for entry in db.scalars(stmt).all():
+        entry.invoice_id = None
+        if entry.status == TimeEntryStatus.BILLED:
+            entry.status = TimeEntryStatus.APPROVED
+        released += 1
+    if released:
+        db.flush()
+    return released

@@ -1,5 +1,5 @@
 import { useExpenses } from '../ExpensesContext';
-import { formatINR } from '../mockExpenses';
+import { formatINR } from '../format';
 import { Receipt, CheckCircle, Wallet, Clock } from 'lucide-react';
 
 export function ExpenseSummary() {

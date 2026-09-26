@@ -9,7 +9,8 @@ import { validatePositiveMoney, parseStrictNumber } from '../../../utils/validat
 interface AddExpenseModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAddExpense: (expense: Omit<ProjectExpense, 'id' | 'projectId'>) => void;
+  /** Resolve false to keep the modal open (the save failed and was already reported). */
+  onAddExpense: (expense: Omit<ProjectExpense, 'id' | 'projectId'>) => Promise<boolean> | boolean | void;
 }
 
 export function AddExpenseModal({ isOpen, onClose, onAddExpense }: AddExpenseModalProps) {
@@ -19,9 +20,11 @@ export function AddExpenseModal({ isOpen, onClose, onAddExpense }: AddExpenseMod
   const [amount, setAmount] = useState('5000');
   const [billable, setBillable] = useState(true);
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
     if (!title.trim()) {
       setError('Expense title is required');
       return;
@@ -33,15 +36,21 @@ export function AddExpenseModal({ isOpen, onClose, onAddExpense }: AddExpenseMod
     }
     const numAmount = parseStrictNumber(amount) as number;
 
-    onAddExpense({
-      title: title.trim(),
-      category,
-      date,
-      amount: numAmount,
-      billable,
-      status: 'recorded',
-    });
-    onClose();
+    setError('');
+    setSubmitting(true);
+    try {
+      const ok = await onAddExpense({
+        title: title.trim(),
+        category,
+        date,
+        amount: numAmount,
+        billable,
+        status: 'recorded',
+      });
+      if (ok !== false) onClose();
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -56,7 +65,7 @@ export function AddExpenseModal({ isOpen, onClose, onAddExpense }: AddExpenseMod
           <Button variant="outline" size="sm" onClick={onClose} type="button">
             Cancel
           </Button>
-          <Button variant="primary" size="sm" type="submit" form="expense-form">
+          <Button variant="primary" size="sm" type="submit" form="expense-form" isLoading={submitting} disabled={submitting}>
             Save Expense
           </Button>
         </>

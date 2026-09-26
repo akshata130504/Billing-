@@ -3,6 +3,7 @@ to an invoice, and the public hosted quote page.
 
 All queries are tenant scoped; mutations audit and commit once per request.
 """
+import html as html_lib
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional, Sequence
@@ -65,7 +66,16 @@ QUOTE_SNAPSHOT_FIELDS = (
     "converted_invoice_id",
 )
 
+# Statuses in which PATCH is accepted at all. Only DRAFT keeps its status on a
+# commercial edit: a price, discount, item, customer or currency change on a
+# PENDING_APPROVAL / APPROVED quote drops it back to DRAFT and supersedes every
+# earlier discount approval, so an approval is never reused for terms the approver
+# did not see.
 EDITABLE_STATUSES = (QuoteStatus.DRAFT, QuoteStatus.PENDING_APPROVAL, QuoteStatus.APPROVED)
+SENDABLE_STATUSES = (QuoteStatus.DRAFT, QuoteStatus.APPROVED)
+# A customer can act on a quote that was sent, whether or not they opened it yet.
+OPEN_FOR_CUSTOMER_STATUSES = (QuoteStatus.SENT, QuoteStatus.VIEWED)
+FINANCIAL_FIELDS = ("customer_id", "currency", "discount_pct", "items")
 
 
 def _quote_query() -> Select:
@@ -76,12 +86,12 @@ def _quote_query() -> Select:
 
 
 def expire_stale_quotes(db: Session, organization_id: str, quote_id: Optional[str] = None) -> int:
-    """Persist `sent` -> `expired` for quotes whose expiry_date has passed. Returns rows changed."""
+    """Persist `sent`/`viewed` -> `expired` for quotes whose expiry_date has passed. Returns rows changed."""
     stmt = (
         update(Quote)
         .where(
             Quote.organization_id == organization_id,
-            Quote.status == QuoteStatus.SENT,
+            Quote.status.in_(OPEN_FOR_CUSTOMER_STATUSES),
             Quote.expiry_date.is_not(None),
             Quote.expiry_date < date.today(),
         )
@@ -296,10 +306,12 @@ def update_quote(db: Session, ctx: CurrentContext, quote_id: str, data: QuoteUpd
     if not changes:
         return quote
     before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
+    before_pricing = (quote.customer_id, quote.currency, D(quote.discount_pct), D(quote.subtotal), D(quote.total))
 
     if changes.get("customer_id"):
         customer = _customer_or_404(db, ctx.organization_id, changes["customer_id"])
         quote.customer_id = customer.id
+        quote.customer = customer
     for field in ("title", "notes", "terms", "expiry_date"):
         if field in changes:
             setattr(quote, field, changes[field])
@@ -317,17 +329,26 @@ def update_quote(db: Session, ctx: CurrentContext, quote_id: str, data: QuoteUpd
     elif "discount_pct" in changes and changes["discount_pct"] is not None:
         current = [
             LineItemIn(
+                offering_id=getattr(i, "offering_id", None),
                 product_id=i.product_id,
                 plan_id=i.plan_id,
                 description=i.description,
                 quantity=i.quantity,
                 unit_price=i.unit_price,
                 tax_rate_pct=i.tax_rate_pct,
+                pricing_explanation=getattr(i, "pricing_explanation", None),
             )
             for i in sorted(quote.items, key=lambda x: x.position or 0)
         ]
         totals = compute_quote_totals(current, discount, supply=quote_supply)
         _apply_totals(quote, totals, quote_supply)
+
+    after_pricing = (quote.customer_id, quote.currency, D(quote.discount_pct), D(quote.subtotal), D(quote.total))
+    if data.items is not None or (any(f in changes for f in FINANCIAL_FIELDS) and after_pricing != before_pricing):
+        # A commercial change invalidates every earlier discount decision; the quote
+        # must go through send (and, above threshold, approval) again.
+        supersede_discount_approvals(db, quote, reason="quote terms changed")
+        quote.status = QuoteStatus.DRAFT
     db.flush()
     audit.record(
         db,
@@ -360,20 +381,86 @@ def delete_quote(db: Session, ctx: CurrentContext, quote_id: str) -> None:
     db.commit()
 
 
-def _approved_request_exists(db: Session, quote: Quote) -> bool:
-    stmt = select(ApprovalRequest.id).where(
-        ApprovalRequest.organization_id == quote.organization_id,
-        ApprovalRequest.type == ApprovalType.QUOTE_DISCOUNT,
-        ApprovalRequest.entity_id == quote.id,
-        ApprovalRequest.status == ApprovalStatus.APPROVED,
+def _discount_requests(db: Session, quote: Quote, statuses: Sequence[ApprovalStatus]) -> List[ApprovalRequest]:
+    stmt = (
+        select(ApprovalRequest)
+        .where(
+            ApprovalRequest.organization_id == quote.organization_id,
+            ApprovalRequest.type == ApprovalType.QUOTE_DISCOUNT,
+            ApprovalRequest.entity_type == "quote",
+            ApprovalRequest.entity_id == quote.id,
+            ApprovalRequest.status.in_(list(statuses)),
+        )
+        .order_by(ApprovalRequest.created_at.desc())
     )
-    return db.scalars(stmt).first() is not None
+    return list(db.scalars(stmt))
 
 
-def _notify_customer(quote: Quote, organization: Organization) -> None:
+def _is_superseded(request: ApprovalRequest) -> bool:
+    return bool((request.payload or {}).get("superseded"))
+
+
+def approved_discount_pct(db: Session, quote: Quote) -> Optional[Decimal]:
+    """Highest discount % an admin approved for this quote, ignoring superseded approvals."""
+    best: Optional[Decimal] = None
+    for request in _discount_requests(db, quote, [ApprovalStatus.APPROVED]):
+        if _is_superseded(request):
+            continue
+        payload = request.payload or {}
+        raw = payload.get("approved_discount_pct", payload.get("discount_pct"))
+        if raw is None:
+            continue
+        try:
+            value = D(raw)
+        except Exception:  # a malformed payload never counts as an approval
+            continue
+        if best is None or value > best:
+            best = value
+    return best
+
+
+def _approved_request_exists(db: Session, quote: Quote) -> bool:
+    """True only when a live approval covers the quote's *current* discount."""
+    approved = approved_discount_pct(db, quote)
+    return approved is not None and D(quote.discount_pct) <= approved
+
+
+def pending_discount_request(db: Session, quote: Quote) -> Optional[ApprovalRequest]:
+    for request in _discount_requests(db, quote, [ApprovalStatus.PENDING]):
+        return request
+    return None
+
+
+def supersede_discount_approvals(db: Session, quote: Quote, reason: str) -> int:
+    """Invalidate pending and approved discount requests after the quote's terms changed.
+
+    Pending requests are closed as rejected (they describe terms that no longer exist);
+    approved ones stay approved for history but are flagged `superseded` in the payload
+    so they no longer authorise a send. Returns the number of requests touched (no commit).
+    """
+    touched = 0
+    for request in _discount_requests(db, quote, [ApprovalStatus.PENDING, ApprovalStatus.APPROVED]):
+        if _is_superseded(request):
+            continue
+        payload = dict(request.payload or {})
+        payload["superseded"] = True
+        payload["superseded_reason"] = reason
+        request.payload = payload  # reassign so the JSON column is flagged dirty
+        if request.status == ApprovalStatus.PENDING:
+            request.status = ApprovalStatus.REJECTED
+            request.reviewed_at = utcnow()
+            request.decision_note = f"Superseded: {reason}"
+        touched += 1
+    if touched:
+        db.flush()
+    return touched
+
+
+def _notify_customer(quote: Quote, organization: Organization, db: Optional[Session] = None) -> bool:
+    """Email the hosted quote link. Returns True only when the mail was handed to the SMTP server."""
     customer = quote.customer
     if not customer or not customer.email or not quote.public_token:
-        return
+        return False
     link = frontend_url(f"quote/{quote.public_token}")
     subject = f"Quote {quote.quote_number} from {organization.name}"
     text = (
@@ -382,27 +469,88 @@ def _notify_customer(quote: Quote, organization: Organization) -> None:
         f"{' - ' + quote.title if quote.title else ''} for {quote.currency} {money_str(quote.total)}.\n"
         f"Review and accept it here: {link}\n"
     )
+    esc = html_lib.escape
     html = (
-        f"<p>Hello {customer.display_name},</p>"
-        f"<p>{organization.name} has sent you quote <strong>{quote.quote_number}</strong>"
-        f"{' - ' + quote.title if quote.title else ''} for {quote.currency} {money_str(quote.total)}.</p>"
-        f'<p><a href="{link}">Review and accept the quote</a></p>'
+        f"<p>Hello {esc(customer.display_name or '')},</p>"
+        f"<p>{esc(organization.name or '')} has sent you quote <strong>{esc(quote.quote_number)}</strong>"
+        f"{' - ' + esc(quote.title) if quote.title else ''} for {esc(quote.currency)} {money_str(quote.total)}.</p>"
+        f'<p><a href="{esc(link, quote=True)}">Review and accept the quote</a></p>'
     )
+
+    smtp_cfg = None
+    attachments = []
+    if db is not None:
+        try:
+            from backend.app.services.integrations_service import get_active_smtp_credentials
+            smtp_cfg = get_active_smtp_credentials(db, organization.id)
+        except Exception:
+            pass
+
+        try:
+            from backend.app.services.quote_pdf import render_quote_pdf
+            pdf_bytes = render_quote_pdf(quote, organization)
+            if pdf_bytes:
+                attachments.append((f"Quote-{quote.quote_number}.pdf", pdf_bytes, "application/pdf"))
+        except Exception as exc:
+            logger.warning("Could not attach PDF to quote %s email: %s", quote.quote_number, exc)
+
+        try:
+            from backend.app.services.notification_service import (
+                get_active_template,
+                html_to_plain_text,
+                render_template_string,
+            )
+
+            tmpl = get_active_template(db, organization.id, "quote_sent")
+            if tmpl and tmpl.is_active:
+                ctx_vars = {
+                    "customer_name": customer.display_name,
+                    "company_name": organization.name,
+                    "quote_number": quote.quote_number,
+                    "quote_total": f"{quote.currency} {money_str(quote.total)}",
+                    "payment_link": link,
+                    "quote_link": link,
+                }
+                subject = render_template_string(tmpl.subject_template or "", ctx_vars)
+                body_raw = render_template_string(tmpl.body_template, ctx_vars)
+                if "<" in body_raw:
+                    html = body_raw
+                    text = html_to_plain_text(body_raw)
+                else:
+                    text = body_raw
+                    html = None
+        except Exception as exc:
+            logger.warning("Failed rendering notification template for quote %s: %s", quote.quote_number, exc)
+
     try:
-        send_email(customer.email, subject, text, html)
+        return bool(
+            send_email(
+                customer.email,
+                subject,
+                text,
+                html_body=html,
+                attachments=attachments,
+                reply_to=organization.email,
+                smtp_config=smtp_cfg,
+            )
+        )
     except Exception as exc:  # delivery problems must not block the state change
         logger.warning("Quote %s email failed: %s", quote.quote_number, exc)
+        return False
 
 
-def mark_sent(db: Session, quote: Quote, organization: Organization, ctx: Optional[CurrentContext] = None) -> None:
-    """Transition to `sent`, mint the public token, email the customer and audit QUOTE_SENT (no commit)."""
+def mark_sent(db: Session, quote: Quote, organization: Organization, ctx: Optional[CurrentContext] = None) -> bool:
+    """Transition to `sent`, mint the public token, email the customer and audit QUOTE_SENT (no commit).
+
+    Returns whether the customer email was actually handed to the mail server.
+    """
     before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
     quote.status = QuoteStatus.SENT
     quote.sent_at = utcnow()
     if not quote.public_token:
         quote.public_token = generate_opaque_token()
     db.flush()
-    _notify_customer(quote, organization)
+    email_sent = _notify_customer(quote, organization, db=db)
     audit.record(
         db,
         ctx=ctx,
@@ -412,20 +560,24 @@ def mark_sent(db: Session, quote: Quote, organization: Organization, ctx: Option
         entity_id=quote.id,
         entity_label=quote.quote_number,
         before=before,
-        after=audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS),
+        after={**audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS), "email_sent": email_sent},
     )
+    return email_sent
 
 
 def send_quote(db: Session, ctx: CurrentContext, quote_id: str) -> Quote:
     quote = get_quote(db, ctx, quote_id)
-    if quote.status not in EDITABLE_STATUSES:
+    if quote.status == QuoteStatus.PENDING_APPROVAL:
+        raise InvalidStateError("Quote is already awaiting discount approval.")
+    if quote.status not in SENDABLE_STATUSES:
         raise InvalidStateError(f"Quote in status '{enum_value(quote.status)}' cannot be sent.")
     org = ctx.organization
     threshold = D(org.discount_approval_threshold_pct)
+    # An approval only covers the discount it was granted for: raising the discount
+    # afterwards (or any edit, which supersedes approvals) needs a fresh approval.
     needs_approval = D(quote.discount_pct) > threshold and not _approved_request_exists(db, quote)
+    email_sent: Optional[bool] = None
     if needs_approval:
-        if quote.status == QuoteStatus.PENDING_APPROVAL:
-            raise InvalidStateError("Quote is already awaiting discount approval.")
         before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
         quote.status = QuoteStatus.PENDING_APPROVAL
         customer_name = quote.customer.display_name if quote.customer else ""
@@ -460,18 +612,23 @@ def send_quote(db: Session, ctx: CurrentContext, quote_id: str) -> Quote:
             after={**audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS), "approval_request_id": request.id},
         )
     else:
-        mark_sent(db, quote, org, ctx)
+        email_sent = mark_sent(db, quote, org, ctx)
     db.commit()
-    return get_quote_or_404(db, ctx.organization_id, quote.id)
+    result = get_quote_or_404(db, ctx.organization_id, quote.id)
+    # Transient, response-only flag (like invoices): did the customer email go out?
+    result._email_sent = email_sent  # type: ignore[attr-defined]
+    return result
 
 
 def mark_accepted(db: Session, ctx: CurrentContext, quote_id: str) -> Quote:
     quote = get_quote(db, ctx, quote_id)
-    if quote.status not in (QuoteStatus.SENT, QuoteStatus.VIEWED):
+    if quote.status not in OPEN_FOR_CUSTOMER_STATUSES:
         raise InvalidStateError(f"Only sent or viewed quotes can be accepted (current status '{enum_value(quote.status)}').")
+    if _is_past_expiry(quote):
+        raise InvalidStateError("This quote has expired and can no longer be accepted.")
     before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
-    quote.status = QuoteStatus.ACCEPTED
-    quote.accepted_at = utcnow()
+    if not _claim_transition(db, quote, OPEN_FOR_CUSTOMER_STATUSES, QuoteStatus.ACCEPTED, accepted_at=utcnow()):
+        raise InvalidStateError("This quote was changed by someone else; reload and try again.")
     db.flush()
     audit.record(
         db,
@@ -507,6 +664,45 @@ def mark_declined(db: Session, ctx: CurrentContext, quote_id: str, reason: Optio
     )
     db.commit()
     return get_quote_or_404(db, ctx.organization_id, quote.id)
+
+
+def _is_past_expiry(quote: Quote) -> bool:
+    return quote.expiry_date is not None and quote.expiry_date < date.today()
+
+
+def _claim_transition(
+    db: Session, quote: Quote, from_statuses: Sequence[QuoteStatus], to_status: QuoteStatus, **values: Any
+) -> bool:
+    """Compare-and-set the status in one UPDATE so two concurrent requests cannot both win.
+
+    Returns False (and rolls back) when another transaction already moved the quote on.
+    """
+    stmt = (
+        update(Quote)
+        .where(Quote.id == quote.id, Quote.status.in_(list(from_statuses)))
+        .values(status=to_status, updated_at=utcnow(), **values)
+        .execution_options(synchronize_session=False)
+    )
+    if (db.execute(stmt).rowcount or 0) != 1:
+        db.rollback()
+        return False
+    quote.status = to_status
+    for key, value in values.items():
+        setattr(quote, key, value)
+    return True
+
+
+def _lock_quote(db: Session, organization_id: str, quote_id: str) -> Quote:
+    """Re-read the quote with a row lock (ignored on SQLite) before a one-shot transition."""
+    quote = db.scalars(
+        select(Quote)
+        .where(Quote.id == quote_id, Quote.organization_id == organization_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).first()
+    if quote is None:
+        raise EntityNotFoundError("Quote", quote_id)
+    return quote
 
 
 # --- conversion to invoice ------------------------------------------------------------------------------
@@ -580,28 +776,52 @@ def _create_invoice_from_quote(db: Session, ctx: CurrentContext, quote: Quote, d
     return invoice
 
 
-def approve_quote(db: Session, ctx: CurrentContext, quote_id: str) -> Quote:
+def approve_quote(db: Session, ctx: CurrentContext, quote_id: str, note: Optional[str] = None) -> Quote:
+    """Approve the quote's pending discount request.
+
+    Delegates to approval_service so the same guards apply as on /approvals (admin
+    role, no self-approval, one decision per request) and the approved effect (the
+    quote is sent to the customer) runs exactly once.
+    """
+    from backend.app.services import approval_service
+
     quote = get_quote(db, ctx, quote_id)
     if quote.status != QuoteStatus.PENDING_APPROVAL:
         raise InvalidStateError(f"Quote in status '{enum_value(quote.status)}' is not awaiting approval.")
+    request = pending_discount_request(db, quote)
+    if request is None:
+        raise InvalidStateError("This quote has no pending discount approval request.")
+    approval_service.approve(db, ctx, request.id, note)
+    return get_quote_or_404(db, ctx.organization_id, quote.id)
+
+
+def reject_quote(db: Session, ctx: CurrentContext, quote_id: str, reason: Optional[str] = None) -> Quote:
+    """Reject the quote's pending discount request (the quote returns to draft) via approval_service."""
+    from backend.app.services import approval_service
+
+    quote = get_quote(db, ctx, quote_id)
+    if quote.status != QuoteStatus.PENDING_APPROVAL:
+        raise InvalidStateError(f"Quote in status '{enum_value(quote.status)}' is not awaiting approval.")
+    request = pending_discount_request(db, quote)
+    if request is None:
+        raise InvalidStateError("This quote has no pending discount approval request.")
+    approval_service.reject(db, ctx, request.id, (reason or "").strip() or "Rejected")
+    return get_quote_or_404(db, ctx.organization_id, quote.id)
+
+
+def mark_public_viewed(db: Session, quote: Quote) -> Quote:
+    """The customer opened the hosted page: `sent` -> `viewed` (idempotent, audited once)."""
+    if quote.status != QuoteStatus.SENT:
+        return quote
     before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
-    quote.status = QuoteStatus.APPROVED
-    db.flush()
-    req = db.scalars(
-        select(ApprovalRequest).where(
-            ApprovalRequest.organization_id == ctx.organization_id,
-            ApprovalRequest.entity_id == quote.id,
-            ApprovalRequest.status == ApprovalStatus.PENDING,
-        )
-    ).first()
-    if req:
-        req.status = ApprovalStatus.APPROVED
-        req.decided_by_id = ctx.user.id
-        req.decided_at = utcnow()
+    if not _claim_transition(db, quote, (QuoteStatus.SENT,), QuoteStatus.VIEWED):
+        db.refresh(quote)
+        return quote
     audit.record(
         db,
-        ctx=ctx,
-        action="QUOTE_APPROVED",
+        organization_id=quote.organization_id,
+        actor_label=audit.CUSTOMER_ACTOR,
+        action="QUOTE_VIEWED",
         entity_type="quote",
         entity_id=quote.id,
         entity_label=quote.quote_number,
@@ -609,40 +829,8 @@ def approve_quote(db: Session, ctx: CurrentContext, quote_id: str) -> Quote:
         after=audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS),
     )
     db.commit()
-    return get_quote_or_404(db, ctx.organization_id, quote.id)
-
-
-def reject_quote(db: Session, ctx: CurrentContext, quote_id: str, reason: Optional[str] = None) -> Quote:
-    quote = get_quote(db, ctx, quote_id)
-    if quote.status != QuoteStatus.PENDING_APPROVAL:
-        raise InvalidStateError(f"Quote in status '{enum_value(quote.status)}' is not awaiting approval.")
-    before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
-    quote.status = QuoteStatus.DRAFT
-    db.flush()
-    req = db.scalars(
-        select(ApprovalRequest).where(
-            ApprovalRequest.organization_id == ctx.organization_id,
-            ApprovalRequest.entity_id == quote.id,
-            ApprovalRequest.status == ApprovalStatus.PENDING,
-        )
-    ).first()
-    if req:
-        req.status = ApprovalStatus.REJECTED
-        req.decided_by_id = ctx.user.id
-        req.decided_at = utcnow()
-        req.decision_notes = reason
-    audit.record(
-        db,
-        ctx=ctx,
-        action="QUOTE_REJECTED",
-        entity_type="quote",
-        entity_id=quote.id,
-        entity_label=quote.quote_number,
-        before=before,
-        after={**audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS), "reason": reason},
-    )
-    db.commit()
-    return get_quote_or_404(db, ctx.organization_id, quote.id)
+    db.refresh(quote)
+    return quote
 
 
 def mark_viewed(db: Session, ctx: CurrentContext, quote_id: str) -> Quote:
@@ -666,12 +854,20 @@ def mark_viewed(db: Session, ctx: CurrentContext, quote_id: str) -> Quote:
 
 
 def convert_quote(db: Session, ctx: CurrentContext, quote_id: str, data: QuoteConvertIn) -> Invoice:
-    quote = get_quote(db, ctx, quote_id)
+    get_quote(db, ctx, quote_id)  # 404 + persist any pending expiry first
+    quote = _lock_quote(db, ctx.organization_id, quote_id)
     if quote.status != QuoteStatus.ACCEPTED:
         raise InvalidStateError(f"Only accepted quotes can be converted (current status '{enum_value(quote.status)}').")
     before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
-    invoice = _create_invoice_from_quote(db, ctx, quote, data)
-    quote.status = QuoteStatus.CONVERTED
+    # Claim the quote before building the invoice: a concurrent convert then finds it
+    # already CONVERTED and fails instead of minting a second invoice.
+    if not _claim_transition(db, quote, (QuoteStatus.ACCEPTED,), QuoteStatus.CONVERTED):
+        raise InvalidStateError("This quote has already been converted.")
+    try:
+        invoice = _create_invoice_from_quote(db, ctx, quote, data)
+    except Exception:
+        db.rollback()
+        raise
     quote.converted_invoice_id = invoice.id
     db.flush()
     audit.record(
@@ -729,11 +925,11 @@ def get_public_quote_or_404(db: Session, token: str) -> Quote:
 
 def public_accept(db: Session, token: str, accepted_by_name: str) -> Quote:
     quote = get_public_quote_or_404(db, token)
-    if quote.status != QuoteStatus.SENT:
+    if quote.status not in OPEN_FOR_CUSTOMER_STATUSES or _is_past_expiry(quote):
         raise InvalidStateError(f"This quote can no longer be accepted (status '{enum_value(quote.status)}').")
     before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
-    quote.status = QuoteStatus.ACCEPTED
-    quote.accepted_at = utcnow()
+    if not _claim_transition(db, quote, OPEN_FOR_CUSTOMER_STATUSES, QuoteStatus.ACCEPTED, accepted_at=utcnow()):
+        raise InvalidStateError("This quote can no longer be accepted.")
     db.flush()
     audit.record(
         db,
@@ -752,11 +948,11 @@ def public_accept(db: Session, token: str, accepted_by_name: str) -> Quote:
 
 def public_decline(db: Session, token: str, reason: Optional[str]) -> Quote:
     quote = get_public_quote_or_404(db, token)
-    if quote.status != QuoteStatus.SENT:
+    if quote.status not in OPEN_FOR_CUSTOMER_STATUSES or _is_past_expiry(quote):
         raise InvalidStateError(f"This quote can no longer be declined (status '{enum_value(quote.status)}').")
     before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
-    quote.status = QuoteStatus.DECLINED
-    quote.declined_at = utcnow()
+    if not _claim_transition(db, quote, OPEN_FOR_CUSTOMER_STATUSES, QuoteStatus.DECLINED, declined_at=utcnow()):
+        raise InvalidStateError("This quote can no longer be declined.")
     db.flush()
     audit.record(
         db,
@@ -842,6 +1038,7 @@ def serialize_quote(
         "declined_at": iso_dt(quote.declined_at),
         "converted_invoice_id": quote.converted_invoice_id,
         "approval_request_id": approval_request_id,
+        "email_sent": getattr(quote, "_email_sent", None),
         "created_by": created_by,
         "created_at": iso_dt(quote.created_at),
         "updated_at": iso_dt(quote.updated_at),

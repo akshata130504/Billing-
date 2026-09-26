@@ -1,5 +1,5 @@
 import { Project } from '../types';
-import { formatINR } from '../mockProjects';
+import { formatINR } from '../format';
 import { formatDate } from './ProjectTable';
 import { Badge } from '../../../components/common/Badge';
 import { CreditCard } from 'lucide-react';

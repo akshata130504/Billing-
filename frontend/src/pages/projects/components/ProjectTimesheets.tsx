@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Project, TimesheetEntry } from '../types';
-import { formatINR } from '../mockProjects';
+import { formatINR } from '../format';
 import { formatDate } from './ProjectTable';
 import { LogTimeModal } from './LogTimeModal';
 import { Button } from '../../../components/common/Button';
@@ -9,7 +9,7 @@ import { Plus, Clock } from 'lucide-react';
 
 interface ProjectTimesheetsProps {
   project: Project;
-  onLogTime: (entry: Omit<TimesheetEntry, 'id' | 'projectId'>) => void;
+  onLogTime: (entry: Omit<TimesheetEntry, 'id' | 'projectId'>) => Promise<boolean> | boolean | void;
 }
 
 export function ProjectTimesheets({ project, onLogTime }: ProjectTimesheetsProps) {

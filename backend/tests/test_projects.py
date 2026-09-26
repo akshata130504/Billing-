@@ -172,3 +172,63 @@ def test_project_rbac(client: TestClient, tenant):
     # Admin can delete
     a_del = client.delete(f"/api/v1/projects/{proj_id}", headers=admin_headers)
     assert a_del.status_code == 204
+
+
+def test_project_rejects_unknown_customer(client: TestClient, tenant, auth_headers):
+    res = client.post("/api/v1/projects", headers=auth_headers, json={"name": "Ghost", "customer_id": "missing"})
+    assert res.status_code == 404
+
+
+def test_project_invoice_is_real_and_listed_on_detail(client: TestClient, tenant, auth_headers):
+    customer = tenant.customer(display_name="Milestone Client")
+    project = client.post(
+        "/api/v1/projects",
+        headers=auth_headers,
+        json={"name": "Portal Build", "customer_id": customer.id, "budget": 100000},
+    ).json()
+
+    res = client.post(
+        f"/api/v1/projects/{project['id']}/invoices",
+        headers=auth_headers,
+        json={"amount": "25000", "description": "Milestone 1", "tax_rate_pct": "18"},
+    )
+    assert res.status_code == 201, res.text
+    created = res.json()
+    assert created["invoiceNumber"].startswith("INV-")
+    assert created["status"] == "draft"
+    assert created["amount"] == 29500.0
+
+    inv = client.get(f"/api/v1/invoices/{created['id']}", headers=auth_headers).json()
+    assert inv["customer"]["id"] == customer.id
+    assert inv["items"][0]["description"] == "Milestone 1"
+
+    detail = client.get(f"/api/v1/projects/{project['id']}", headers=auth_headers).json()
+    assert [i["id"] for i in detail["invoices"]] == [created["id"]]
+    assert any(t["type"] == "Invoice" for t in detail["transactions"])
+    assert Decimal(str(detail["billed"])) == Decimal("25000.00")
+
+    # A project without a customer cannot be invoiced
+    orphan = client.post("/api/v1/projects", headers=auth_headers, json={"name": "Internal"}).json()
+    res = client.post(f"/api/v1/projects/{orphan['id']}/invoices", headers=auth_headers, json={"amount": "10"})
+    assert res.status_code == 422
+
+
+def test_time_entry_logged_on_project_inherits_customer(client: TestClient, tenant, auth_headers):
+    customer = tenant.customer()
+    project = client.post(
+        "/api/v1/projects", headers=auth_headers, json={"name": "T&M", "customer_id": customer.id}
+    ).json()
+    entry = client.post(
+        "/api/v1/timesheets",
+        headers=auth_headers,
+        json={
+            "project_id": project["id"],
+            "date": date.today().isoformat(),
+            "duration_hours": 2,
+            "description": "Work",
+            "billing_rate": 50,
+        },
+    )
+    assert entry.status_code in (200, 201), entry.text
+    assert entry.json()["customer_id"] == customer.id
+    assert entry.json()["project_name"] == "T&M"

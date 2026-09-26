@@ -1,5 +1,5 @@
 import { Project } from '../types';
-import { formatINR } from '../mockProjects';
+import { formatINR } from '../format';
 import { Briefcase, CheckCircle2, Clock, CreditCard, Receipt } from 'lucide-react';
 
 interface ProjectSummaryCardsProps {

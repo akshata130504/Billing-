@@ -1,6 +1,8 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { useProjects } from './ProjectsContext';
+import { useProjects, type ProjectFormData } from './ProjectsContext';
+import type { ProjectInvoiceInput } from '../../services/projectService';
+import type { TimesheetEntry, ProjectExpense } from './types';
 import { ProjectOverview } from './components/ProjectOverview';
 import { ProjectTimesheets } from './components/ProjectTimesheets';
 import { ProjectExpenses } from './components/ProjectExpenses';
@@ -10,7 +12,7 @@ import { LogTimeModal } from './components/LogTimeModal';
 import { CreateInvoiceModal } from './components/CreateInvoiceModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { getStatusBadge, getBillingMethodLabel, formatDate } from './components/ProjectTable';
-import { formatINR } from './mockProjects';
+import { formatINR } from './format';
 import { Button } from '../../components/common/Button';
 import { useToast } from '../../components/common/Toast';
 import {
@@ -35,6 +37,7 @@ export function ProjectDetailsPage() {
   const navigate = useNavigate();
   const {
     getProject,
+    loadProject,
     updateProject,
     deleteProject,
     duplicateProject,
@@ -52,7 +55,22 @@ export function ProjectDetailsPage() {
   const [isNewInvoiceOpen, setIsNewInvoiceOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(true);
   const moreMenuRef = useRef<HTMLDivElement>(null);
+
+  // The list only carries summaries; fetch this project's detail (timesheets,
+  // expenses, invoices, payments) when the page opens.
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    setDetailLoading(true);
+    loadProject(projectId).finally(() => {
+      if (!cancelled) setDetailLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, loadProject]);
 
   // Close more menu on outside click
   useEffect(() => {
@@ -77,6 +95,14 @@ export function ProjectDetailsPage() {
     const list = Array.from(new Set(projects.map((p) => p.customer)));
     return list.sort();
   }, [projects]);
+
+  if (!project && detailLoading) {
+    return (
+      <div className="p-6 sm:p-12 max-w-4xl mx-auto text-center text-xs text-slate-500">
+        Loading project…
+      </div>
+    );
+  }
 
   if (!project) {
     return (
@@ -104,37 +130,54 @@ export function ProjectDetailsPage() {
 
   const unbilledAmount = Math.max(0, project.budget - project.billed);
 
-  const handleEditSubmit = (data: {
-    name: string;
-    customer: string;
-    description: string;
-    status: typeof project.status;
-    startDate: string;
-    endDate: string;
-    billingMethod: typeof project.billingMethod;
-    budget: number;
-    notes?: string;
-  }) => {
-    updateProject(project.id, data);
-    showToast('success', 'Project Updated', `"${data.name}" has been updated.`);
-    setIsEditModalOpen(false);
+  // Every action awaits the API; the context toasts failures and rolls back.
+  const handleEditSubmit = async (data: ProjectFormData) => {
+    if (await updateProject(project.id, data)) {
+      showToast('success', 'Project Updated', `"${data.name}" has been updated.`);
+      setIsEditModalOpen(false);
+    }
   };
 
-  const handleComplete = () => {
-    markAsCompleted(project.id);
-    showToast('success', 'Status Updated', 'Project marked as Completed.');
+  const handleComplete = async () => {
+    if (await markAsCompleted(project.id)) {
+      showToast('success', 'Status Updated', 'Project marked as Completed.');
+    }
   };
 
-  const handleDuplicate = () => {
-    const clone = duplicateProject(project.id);
+  const handleDuplicate = async () => {
+    const clone = await duplicateProject(project.id);
+    if (!clone) return;
     showToast('info', 'Project Duplicated', `Created draft clone: "${clone.name}".`);
     navigate(`/projects/${clone.id}`);
   };
 
-  const handleDeleteConfirm = () => {
-    deleteProject(project.id);
-    showToast('info', 'Project Deleted', `"${project.name}" has been removed.`);
-    navigate('/projects');
+  const handleDeleteConfirm = async () => {
+    const name = project.name;
+    setIsDeleteModalOpen(false);
+    if (await deleteProject(project.id)) {
+      showToast('info', 'Project Deleted', `"${name}" has been removed.`);
+      navigate('/projects');
+    }
+  };
+
+  const handleLogTime = async (entry: Omit<TimesheetEntry, 'id' | 'projectId'>) => {
+    const ok = await addTimesheet(project.id, entry);
+    if (ok) showToast('success', 'Time Logged', `${entry.hours} hrs logged.`);
+    return ok;
+  };
+
+  const handleAddExpense = async (expense: Omit<ProjectExpense, 'id' | 'projectId'>) => {
+    const ok = await addExpense(project.id, expense);
+    if (ok) showToast('success', 'Expense Recorded', `"${expense.title}" added to project ledger.`);
+    return ok;
+  };
+
+  const handleCreateInvoice = async (input: ProjectInvoiceInput) => {
+    const created = await addInvoice(project.id, input);
+    if (created) {
+      showToast('success', 'Invoice Created', `Draft invoice ${created.invoiceNumber} created.`);
+    }
+    return Boolean(created);
   };
 
   const tabs: { key: ProjectTab; label: string; icon: React.ComponentType<{ className?: string }>; count?: number }[] = [
@@ -354,33 +397,15 @@ export function ProjectDetailsPage() {
         {activeTab === 'overview' && <ProjectOverview project={project} />}
 
         {activeTab === 'timesheets' && (
-          <ProjectTimesheets
-            project={project}
-            onLogTime={(entry) => {
-              addTimesheet(project.id, entry);
-              showToast('success', 'Time Logged', `${entry.hours} hrs logged for ${entry.employee}.`);
-            }}
-          />
+          <ProjectTimesheets project={project} onLogTime={handleLogTime} />
         )}
 
         {activeTab === 'expenses' && (
-          <ProjectExpenses
-            project={project}
-            onAddExpense={(expense) => {
-              addExpense(project.id, expense);
-              showToast('success', 'Expense Recorded', `"${expense.title}" added to project ledger.`);
-            }}
-          />
+          <ProjectExpenses project={project} onAddExpense={handleAddExpense} />
         )}
 
         {activeTab === 'transactions' && (
-          <ProjectTransactions
-            project={project}
-            onCreateInvoice={(invoice) => {
-              addInvoice(project.id, invoice);
-              showToast('success', 'Invoice Created', `Invoice ${invoice.invoiceNumber} generated for ₹${invoice.amount.toLocaleString()}.`);
-            }}
-          />
+          <ProjectTransactions project={project} onCreateInvoice={handleCreateInvoice} />
         )}
       </div>
 
@@ -397,21 +422,15 @@ export function ProjectDetailsPage() {
       <LogTimeModal
         isOpen={isLogTimeOpen}
         onClose={() => setIsLogTimeOpen(false)}
-        onLogTime={(entry) => {
-          addTimesheet(project.id, entry);
-          showToast('success', 'Time Logged', `${entry.hours} hrs logged for ${entry.employee}.`);
-        }}
+        onLogTime={handleLogTime}
       />
 
       {/* Quick Invoice Modal */}
       <CreateInvoiceModal
         isOpen={isNewInvoiceOpen}
         onClose={() => setIsNewInvoiceOpen(false)}
-        onCreateInvoice={(invoice) => {
-          addInvoice(project.id, invoice);
-          showToast('success', 'Invoice Created', `Invoice ${invoice.invoiceNumber} generated.`);
-        }}
-        defaultAmount={unbilledAmount > 0 ? unbilledAmount : 25000}
+        onCreateInvoice={handleCreateInvoice}
+        defaultAmount={unbilledAmount}
       />
 
       {/* Delete Confirmation Modal */}

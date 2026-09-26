@@ -48,6 +48,14 @@ export function ExpensesPage() {
     return Array.from(set);
   }, [expenses]);
 
+  const availableCustomers = useMemo(() => {
+    const set = new Set<string>();
+    expenses.forEach((e) => {
+      if (e.customer && e.customer !== 'Internal') set.add(e.customer);
+    });
+    return Array.from(set).sort();
+  }, [expenses]);
+
   // Filter and sort expenses
   const filteredExpenses = useMemo(() => {
     return expenses
@@ -211,6 +219,7 @@ export function ExpensesPage() {
         onChange={setFilters}
         onReset={handleResetFilters}
         availableProjects={availableProjects}
+        availableCustomers={availableCustomers}
       />
 
       {/* Expense Table / Cards */}

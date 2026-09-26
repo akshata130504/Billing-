@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Project, ProjectStatus, BillingMethod } from '../types';
-import { formatINR } from '../mockProjects';
+import { formatINR } from '../format';
 import { Badge } from '../../../components/common/Badge';
 import {
   MoreVertical,

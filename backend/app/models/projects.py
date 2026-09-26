@@ -10,6 +10,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -58,3 +59,20 @@ class Project(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
 
     customer = relationship("Customer")
     time_entries = relationship("TimeEntry", foreign_keys="TimeEntry.project_id", primaryjoin="Project.id == foreign(TimeEntry.project_id)")
+
+
+class ProjectInvoice(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
+    """Link from a project to an invoice raised directly against it (milestone billing).
+
+    Invoices belong to the invoicing module, so projects keep their own link table
+    instead of adding a project column to invoices.
+    """
+
+    __tablename__ = "project_invoices"
+    __table_args__ = (UniqueConstraint("project_id", "invoice_id", name="uq_project_invoice"),)
+
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    invoice_id = Column(String(36), ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    project = relationship("Project")
+    invoice = relationship("Invoice")

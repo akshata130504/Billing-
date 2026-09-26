@@ -118,7 +118,7 @@ def get_deal(
 @router.post("/deals/{deal_id}/approve", response_model=CPQDealOut, summary="Approve CPQ deal")
 def approve_deal(
     deal_id: str,
-    ctx: CurrentContext = Depends(require_finance),
+    ctx: CurrentContext = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     deal = svc.approve_deal(db, ctx, deal_id)
@@ -129,7 +129,7 @@ def approve_deal(
 def reject_deal(
     deal_id: str,
     reason: Optional[str] = Query(None),
-    ctx: CurrentContext = Depends(require_finance),
+    ctx: CurrentContext = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     deal = svc.reject_deal(db, ctx, deal_id, reason=reason or "")
