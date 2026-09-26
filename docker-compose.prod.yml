@@ -9,6 +9,15 @@
 #   scheduler  same image, one instance, SCHEDULER_ENABLED=true - runs renewals /
 #              trial conversion / overdue marking / dunning. REQUIRED: nothing else runs them.
 #   frontend   nginx serving the SPA and proxying /api/ to backend:8000 (port 80)
+#   backup     nightly pg_dump + uploads tarball, optional rclone offsite copy and
+#              webhook alert on failure (script: deploy/backup.sh)
+#
+# Images are deployed by immutable git-SHA tag: deploy/deploy-poll.sh exports
+# IMAGE_TAG=<sha> (see .deploy/deployed_sha on the host). For a manual command use
+#   IMAGE_TAG=$(cat .deploy/deployed_sha) docker compose --env-file .env.production -f docker-compose.prod.yml ...
+#
+# Resource limits are sized for a small (2 vCPU / 4 GB) VM and can be overridden
+# per service from .env.production (e.g. BACKEND_MEM_LIMIT=2g, BACKEND_CPUS=2).
 #
 # TLS: terminate HTTPS in front of `frontend` (see docker-compose.caddy.yml and
 # docs/deployment.md). Set FRONTEND_BIND=127.0.0.1:8080 in .env.production when a
@@ -20,9 +29,12 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
-    # POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB are read straight from the env file.
-    env_file: .env.production
+    # Only what Postgres needs - NOT the whole .env.production (API secrets, Razorpay
+    # keys, SMTP passwords... have no business in the database container).
     environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env.production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env.production}
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -35,6 +47,8 @@ services:
       retries: 10
       start_period: 10s
     shm_size: 256m
+    mem_limit: ${DB_MEM_LIMIT:-1g}
+    cpus: ${DB_CPUS:-1.0}
     logging: &default-logging
       driver: json-file
       options:
@@ -52,6 +66,8 @@ services:
       timeout: 3s
       retries: 5
       start_period: 5s
+    mem_limit: ${REDIS_MEM_LIMIT:-256m}
+    cpus: ${REDIS_CPUS:-0.5}
     logging: *default-logging
 
   backend:
@@ -73,6 +89,8 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     volumes:
       - uploads_data:/app/backend/uploads
+      # Expense receipts - private (never served by nginx), see expense_service._receipt_root.
+      - private_uploads_data:/app/backend/private_uploads
     depends_on:
       db:
         condition: service_healthy
@@ -90,6 +108,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 40s
+    mem_limit: ${BACKEND_MEM_LIMIT:-1g}
+    cpus: ${BACKEND_CPUS:-1.0}
     logging: *default-logging
 
   scheduler:
@@ -107,6 +127,8 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     volumes:
       - uploads_data:/app/backend/uploads
+      # Expense receipts - private (never served by nginx), see expense_service._receipt_root.
+      - private_uploads_data:/app/backend/private_uploads
     # Exactly ONE instance of this service may run. `run_forever` is provided by
     # backend/app/services/scheduler.py and blocks while APScheduler runs the jobs.
     command: ["python", "-c", "from backend.app.services.scheduler import run_forever; run_forever()"]
@@ -119,53 +141,79 @@ services:
         condition: service_healthy
     deploy:
       replicas: 1
+    # The scheduler serves no HTTP port (the image's default HEALTHCHECK probes :8000),
+    # so check its heartbeat instead: unhealthy when the last billing-job heartbeat is
+    # older than 3 x SCHEDULER_INTERVAL_MINUTES (min 15 min). Builds without heartbeat
+    # support report healthy. Also surfaced as features.scheduler_heartbeat in
+    # GET /api/v1/health/ready.
     healthcheck:
-      disable: true
+      test: ["CMD", "python", "/app/backend/docker/scheduler_healthcheck.py"]
+      interval: 2m
+      timeout: 20s
+      retries: 3
+      start_period: 3m
+    mem_limit: ${SCHEDULER_MEM_LIMIT:-512m}
+    cpus: ${SCHEDULER_CPUS:-0.5}
     logging: *default-logging
 
   backup:
     image: postgres:16-alpine
     restart: unless-stopped
-    env_file: .env.production
+    # Explicit variables only (no env_file): DB credentials, backup/offsite settings and
+    # the alert webhook. See deploy/backup.sh for what each one does.
     environment:
       POSTGRES_SERVER: db
       POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env.production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env.production}
       BACKUP_DIR: /var/backups/rooman
-      BACKUP_RETENTION_DAYS: 30
+      UPLOADS_DIR: /uploads
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      BACKUP_CRON: ${BACKUP_CRON:-15 1 * * *}
+      BACKUP_MAX_AGE_MINUTES: ${BACKUP_MAX_AGE_MINUTES:-1560}
+      BACKUP_HOST_LABEL: ${BACKUP_HOST_LABEL:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      # Offsite copy via rclone. OFFSITE_BACKUP_REMOTE="offsite:<bucket>/<prefix>"; the
+      # "offsite" remote is defined by the RCLONE_CONFIG_OFFSITE_* variables below
+      # (S3 / Backblaze B2 S3 / Wasabi / Cloudflare R2 / MinIO...). Empty = local only.
+      OFFSITE_BACKUP_REMOTE: ${OFFSITE_BACKUP_REMOTE:-}
+      OFFSITE_RETENTION_DAYS: ${OFFSITE_RETENTION_DAYS:-}
+      OFFSITE_REQUIRED: ${OFFSITE_REQUIRED:-true}
+      RCLONE_CONFIG_OFFSITE_TYPE: ${OFFSITE_RCLONE_TYPE:-s3}
+      RCLONE_CONFIG_OFFSITE_PROVIDER: ${OFFSITE_S3_PROVIDER:-AWS}
+      RCLONE_CONFIG_OFFSITE_ACCESS_KEY_ID: ${OFFSITE_S3_ACCESS_KEY_ID:-}
+      RCLONE_CONFIG_OFFSITE_SECRET_ACCESS_KEY: ${OFFSITE_S3_SECRET_ACCESS_KEY:-}
+      RCLONE_CONFIG_OFFSITE_REGION: ${OFFSITE_S3_REGION:-}
+      RCLONE_CONFIG_OFFSITE_ENDPOINT: ${OFFSITE_S3_ENDPOINT:-}
+      RCLONE_CONFIG_OFFSITE_NO_CHECK_BUCKET: "true"
     volumes:
       - backup_data:/var/backups/rooman
+      - uploads_data:/uploads:ro
+      # Nested mount so the uploads tarball also captures private expense receipts.
+      - private_uploads_data:/uploads/_private_uploads:ro
+      # Synced from the repo by deploy/deploy-poll.sh together with this file.
+      - ./deploy/backup.sh:/usr/local/bin/backup-job.sh:ro
     depends_on:
       db:
         condition: service_healthy
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        mkdir -p /var/backups/rooman
-        cat << 'EOF' > /usr/local/bin/backup-job.sh
-        #!/bin/sh
-        set -e
-        DATE=$$(date +%Y%m%d_%H%M%S)
-        FILENAME=/var/backups/rooman/rooman_$${DATE}.dump
-        echo "[$$(date -Iseconds)] [backup] Starting scheduled database backup to $${FILENAME}..."
-        export PGPASSWORD="$$POSTGRES_PASSWORD"
-        if pg_dump -h "$$POSTGRES_SERVER" -p "$$POSTGRES_PORT" -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" --no-owner --format=custom -f "$$FILENAME"; then
-            echo "[$$(date -Iseconds)] [backup] Database backup completed successfully: $$(ls -lh "$$FILENAME")"
-            echo "[$$(date -Iseconds)] [backup] Cleaning up dumps older than $${BACKUP_RETENTION_DAYS:-30} days..."
-            find /var/backups/rooman -name 'rooman_*.dump' -mtime +$${BACKUP_RETENTION_DAYS:-30} -delete
-            echo "[$$(date -Iseconds)] [backup] Cleanup complete. Retention policy maintained."
-            if [ -n "$$OFFSITE_BACKUP_COMMAND" ]; then
-                echo "[$$(date -Iseconds)] [backup] Running offsite backup command..."
-                eval "$$OFFSITE_BACKUP_COMMAND" || echo "[$$(date -Iseconds)] [backup] WARNING: Offsite backup command failed." >&2
-            fi
-        else
-            echo "[$$(date -Iseconds)] [backup] ERROR: pg_dump failed!" >&2
-            exit 1
-        fi
-        EOF
-        chmod +x /usr/local/bin/backup-job.sh
-        /usr/local/bin/backup-job.sh || echo "[backup] Initial backup attempt encountered error, will retry on schedule."
-        echo "15 1 * * * /usr/local/bin/backup-job.sh" > /etc/crontabs/root
-        exec crond -f -l 2
+        apk add --no-cache rclone curl >/dev/null 2>&1           || echo "[backup] WARNING: could not install rclone/curl - offsite upload and alerts unavailable" >&2
+        # cron output goes to the container log (docker compose logs backup).
+        echo "$$BACKUP_CRON sh /usr/local/bin/backup-job.sh > /proc/1/fd/1 2> /proc/1/fd/2" > /etc/crontabs/root
+        sh /usr/local/bin/backup-job.sh           || echo "[backup] initial backup failed (alert sent if configured); will retry on schedule" >&2
+        exec crond -f -l 8
+    # Unhealthy when no successful backup in BACKUP_MAX_AGE_MINUTES (default 26 h).
+    healthcheck:
+      test: ["CMD-SHELL", "test -n \"$$(find /var/backups/rooman/last_success -mmin -$${BACKUP_MAX_AGE_MINUTES:-1560} 2>/dev/null)\""]
+      interval: 10m
+      timeout: 10s
+      retries: 1
+      start_period: 15m
+    mem_limit: ${BACKUP_MEM_LIMIT:-256m}
+    cpus: ${BACKUP_CPUS:-0.5}
     logging: *default-logging
 
   frontend:
@@ -191,12 +239,16 @@ services:
       timeout: 3s
       retries: 3
       start_period: 5s
+    mem_limit: ${FRONTEND_MEM_LIMIT:-256m}
+    cpus: ${FRONTEND_CPUS:-0.5}
     logging: *default-logging
 
 volumes:
   postgres_data:
     driver: local
   uploads_data:
+    driver: local
+  private_uploads_data:
     driver: local
   backup_data:
     driver: local

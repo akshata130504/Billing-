@@ -1,0 +1,8 @@
+[Unit]
+Description=Rooman Billing - send failure alert for %i
+
+[Service]
+Type=oneshot
+# Adjust this path if the repo checkout on this server lives somewhere else.
+WorkingDirectory=/opt/rooman-billing
+ExecStart=/bin/sh /opt/rooman-billing/deploy/alert.sh %i

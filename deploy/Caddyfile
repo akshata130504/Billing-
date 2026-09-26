@@ -5,7 +5,6 @@
 
 {
 	email {$ACME_EMAIL}
-	debug
 }
 
 {$DOMAIN} {

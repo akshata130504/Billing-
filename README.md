@@ -142,7 +142,7 @@ start with an insecure `SECRET_KEY`, `DEBUG=true`, the default `postgres` passwo
 | `SECURE_COOKIES` | `false` | Set `true` behind HTTPS. |
 | `POSTGRES_SERVER` / `POSTGRES_PORT` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `localhost` / `5432` / `postgres` / `postgres` / `rooman_billing` | Assembled into the connection string when `DATABASE_URL` is unset. |
 | `DATABASE_URL` | unset | Full SQLAlchemy URL (`postgresql+psycopg://...`); overrides the `POSTGRES_*` values. SQLite allowed only outside production. |
-| `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | `10` / `20` | Connection pool per process. |
+| `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | `5` / `5` | Connection pool per process (so up to 10 connections per worker; size Postgres `max_connections` for `WEB_CONCURRENCY` x 10). |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | empty | Enable online payments when both are set. |
 | `RAZORPAY_WEBHOOK_SECRET` | empty | Verifies `X-Razorpay-Signature` on `/api/v1/webhooks/razorpay`. |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` | empty / `587` | Outbound mail; empty host disables email and surfaces links in the UI instead. |

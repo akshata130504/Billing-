@@ -1,39 +1,43 @@
+# Runtime dependencies of the API / scheduler image (backend/Dockerfile installs ONLY
+# this file). Test and lint tools live in requirements-dev.txt.
+#
+# Versions are pinned exactly so image builds are reproducible. To upgrade: bump the
+# pin here, run the test suite, and let CI's pip-audit report on the result.
+
 # Web framework
-fastapi>=0.115.0,<1.0.0
-uvicorn[standard]>=0.30.0,<1.0.0
-gunicorn>=23.0.0,<24.0.0
-python-multipart>=0.0.12,<1.0.0
-pydantic>=2.8.0,<3.0.0
-pydantic-settings>=2.7.0,<3.0.0
-email-validator>=2.2.0,<3.0.0
+fastapi==0.115.12
+uvicorn[standard]==0.34.0
+gunicorn==23.0.0
+python-multipart==0.0.20
+pydantic==2.11.1
+pydantic-settings==2.9.1
+email-validator==2.3.0
 
 # Database
-sqlalchemy>=2.0.32,<3.0.0
-alembic>=1.13.2,<2.0.0
-psycopg[binary]>=3.2.0,<4.0.0
-python-dotenv>=1.0.1,<2.0.0
+sqlalchemy==2.0.40
+alembic==1.14.0
+psycopg[binary]==3.3.4
+python-dotenv==1.1.1
 
 # Security
-PyJWT>=2.9.0,<3.0.0
-bcrypt>=4.2.0,<6.0.0
-slowapi>=0.1.9,<0.2.0
-redis>=5.0.0,<6.0.0
+PyJWT==2.10.1
+bcrypt==4.3.0
+slowapi==0.1.10
+redis==5.3.1
 # Fernet, used to encrypt tenant integration credentials at rest.
-cryptography>=43.0.0,<47.0.0
+cryptography==44.0.2
 
 # Payments
-razorpay>=1.4.2,<3.0.0
+razorpay==2.0.1
 
 # Documents
-reportlab>=4.2.0,<6.0.0
+reportlab==4.3.1
 
 # Background jobs
-APScheduler>=3.10.4,<4.0.0
+APScheduler==3.10.4
 
 # Error tracking (optional: inert unless SENTRY_DSN is set)
-sentry-sdk[fastapi]>=2.14.0,<3.0.0
+sentry-sdk[fastapi]==2.19.2
 
-# HTTP client & tests
-httpx>=0.27.0,<1.0.0
-pytest>=8.3.0,<9.0.0
-pytest-asyncio>=0.24.0,<1.0.0
+# HTTP client (outbound webhooks / integrations; also used by the test client)
+httpx==0.28.1

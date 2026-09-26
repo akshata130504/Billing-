@@ -1,0 +1,9 @@
+# Test / lint / audit tooling. CI and local development install both files:
+#   pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+# The production image installs only requirements.txt.
+-r requirements.txt
+
+pytest==8.4.2
+pytest-asyncio==0.26.0
+ruff==0.11.2
+pip-audit==2.9.0

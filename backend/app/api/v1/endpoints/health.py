@@ -1,12 +1,76 @@
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
+
 from fastapi import APIRouter, Response, status
 
 from backend.app import __version__
 from backend.app.core.config import settings
-from backend.app.core.database import check_db_health
+from backend.app.core.database import SessionLocal, check_db_health
+from backend.app.core.logging import logger
 from backend.app.core.migrations import migration_status
 from backend.app.schemas.common import HealthResponse, ReadinessResponse
 
 router = APIRouter()
+
+
+def _as_aware(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return None
+
+
+def scheduler_heartbeat_status() -> Dict[str, Any]:
+    """Staleness of the dedicated scheduler's heartbeat (informational, never fails readiness).
+
+    ``get_scheduler_heartbeat(db)`` lives in backend/app/services/scheduler.py. It may return a
+    datetime, an ISO string, a dict with a ``last_heartbeat``/``last_run_at`` key, or None. Older
+    builds without the function report ``status="unavailable"``.
+    """
+    interval_min = max(1, int(getattr(settings, "SCHEDULER_INTERVAL_MINUTES", 5) or 5))
+    # Stale after three missed intervals (minimum 15 minutes).
+    stale_after = int(getattr(settings, "SCHEDULER_HEARTBEAT_STALE_SECONDS", 0) or max(900, interval_min * 60 * 3))
+    try:
+        from backend.app.services.scheduler import get_scheduler_heartbeat  # type: ignore[attr-defined]
+    except (ImportError, AttributeError):
+        return {"status": "unavailable", "detail": "heartbeat not implemented in this build"}
+
+    try:
+        db = SessionLocal()
+        try:
+            raw = get_scheduler_heartbeat(db)
+        finally:
+            db.close()
+    except Exception as exc:  # never let the probe itself crash
+        logger.warning("Scheduler heartbeat lookup failed: %s", exc)
+        return {"status": "unknown", "detail": "heartbeat lookup failed"}
+
+    extra: Dict[str, Any] = {}
+    if isinstance(raw, dict):
+        if "last_error_count" in raw:
+            extra["last_error_count"] = raw.get("last_error_count")
+        raw = (
+            raw.get("last_finished_at")
+            or raw.get("last_heartbeat")
+            or raw.get("last_run_at")
+            or raw.get("timestamp")
+        )
+    last = _as_aware(raw)
+    if last is None:
+        return {"status": "missing", "last_heartbeat": None, "stale_after_seconds": stale_after}
+    age = int((datetime.now(timezone.utc) - last).total_seconds())
+    return {
+        "status": "ok" if age <= stale_after else "stale",
+        "last_heartbeat": last.isoformat(),
+        "age_seconds": age,
+        "stale_after_seconds": stale_after,
+        **extra,
+    }
 
 
 @router.get(
@@ -71,6 +135,9 @@ def readiness_check(response: Response) -> ReadinessResponse:
             "razorpay_configured": settings.razorpay_enabled,
             "smtp_configured": settings.email_enabled,
             "sentry_enabled": settings.sentry_enabled,
+            # Heartbeat of the separate scheduler container. Reported only: the API is ready
+            # to serve even when the scheduler is down, so this never adds to `failures`.
+            "scheduler_heartbeat": scheduler_heartbeat_status() if db_ok else {"status": "unknown"},
         },
         failures=failures,
     )

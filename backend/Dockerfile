@@ -48,9 +48,10 @@ RUN pip install --no-index --find-links=/wheels /wheels/*.whl \
  && rm -rf /wheels
 
 # Application code. backend/ lands in /app/backend so backend.app.main:app
-# resolves with WORKDIR=/app. pytest.ini is included so pytest works inside
-# the container for smoke tests. The root .dockerignore keeps venvs, .env files
-# and local SQLite databases out of the context.
+# resolves with WORKDIR=/app. Only backend/requirements.txt is installed (no
+# pytest/ruff - those are in requirements-dev.txt). The root .dockerignore keeps
+# venvs, .env files, local databases, backend/tests and backend/uploads out of the
+# context.
 COPY --chown=app:app backend/ /app/backend/
 COPY --chown=app:app pytest.ini /app/pytest.ini
 COPY --chown=app:app backend/docker/entrypoint.sh /app/entrypoint.sh

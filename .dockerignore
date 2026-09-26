@@ -31,7 +31,19 @@ frontend/.env.*
 # Local databases created by tests / the SQLite fallback
 **/*.sqlite3
 **/*.db
+*.db
 postgres_data
+
+# Runtime data, tests and scratch files - not part of the runtime image
+backend/uploads/
+backend/tests/
+backend/requirements-dev.txt
+backend/ruff.toml
+scratch/
+backups/
+.deploy/
+*.pdf
+pin_to_pin_audit_results.json
 
 # Frontend is built by its own Dockerfile (context ./frontend)
 frontend/node_modules
@@ -48,3 +60,4 @@ docker-compose*.yml
 .idea
 .DS_Store
 Thumbs.db
+backend/private_uploads/
