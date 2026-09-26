@@ -132,6 +132,11 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_USE_TLS: bool = True
     SMTP_USE_SSL: bool = False
+    # Per-step (connect/STARTTLS/login/send) and whole-conversation SMTP time limits. The total
+    # must stay well under the gunicorn worker timeout (60s) and the proxy read timeout (65s),
+    # otherwise an unreachable mail server turns into a 502 from nginx instead of a clear error.
+    SMTP_TIMEOUT_SECONDS: float = 10.0
+    SMTP_TOTAL_TIMEOUT_SECONDS: float = 25.0
     EMAIL_FROM_ADDRESS: str = "billing@example.com"
     EMAIL_FROM_NAME: str = "Rooman Billing"
 

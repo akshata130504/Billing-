@@ -12,7 +12,9 @@ Two delivery paths:
   with the organization's SMTP settings and retries with backoff.
 """
 import smtplib
+import socket
 import ssl
+import time
 import uuid
 from email.message import EmailMessage
 from email.utils import formataddr
@@ -22,6 +24,85 @@ from backend.app.core.config import settings
 from backend.app.core.logging import logger
 
 Attachment = Tuple[str, bytes, str]  # (filename, content, mime type e.g. "application/pdf")
+
+
+class EmailDeliveryError(smtplib.SMTPException):  # SMTPException is an OSError: old handlers still catch it
+    """SMTP delivery failed. ``reason`` is a short, secret-free category for users and logs:
+    unreachable | timeout | tls | auth | rejected | error."""
+
+    def __init__(self, reason: str, detail: str = ""):
+        self.reason = reason
+        self.detail = detail
+        super().__init__(f"{reason}: {detail}" if detail else reason)
+
+
+def _time_left(deadline: float) -> float:
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise socket.timeout("SMTP total time budget exhausted")
+    return left
+
+
+def _bounded_connect(host: str, port: int, step_timeout: float, deadline: float, source_address=None) -> socket.socket:
+    """Connect to the first reachable address within ONE overall deadline. smtplib's own
+    connect gives every resolved address (and every later command) the full timeout, so an
+    unreachable server - e.g. a host whose provider blocks outbound port 587 - can take
+    20s x addresses x steps, far past the gunicorn worker timeout: the worker is killed and
+    the proxy answers 502."""
+    last_error: Optional[BaseException] = None
+    infos = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+    # Prefer IPv4: many servers have no IPv6 route and would burn the budget on it.
+    infos.sort(key=lambda info: 0 if info[0] == socket.AF_INET else 1)
+    for family, socktype, proto, _canon, addr in infos:
+        sock = socket.socket(family, socktype, proto)
+        try:
+            sock.settimeout(min(step_timeout, _time_left(deadline)))
+            if source_address:
+                sock.bind(source_address)
+            sock.connect(addr)
+            sock.settimeout(min(step_timeout, _time_left(deadline)))
+            return sock
+        except OSError as exc:
+            last_error = exc
+            sock.close()
+            if time.monotonic() >= deadline:
+                break
+    raise last_error or OSError(f"could not connect to {host}:{port}")
+
+
+def _open_smtp(host: str, port: int, use_ssl: bool, context: ssl.SSLContext, step_timeout: float, deadline: float) -> smtplib.SMTP:
+    """smtplib.SMTP / SMTP_SSL whose connect honours the overall deadline. The classes are looked
+    up at call time (tests patch them) and the instance's socket hook is replaced before connecting."""
+    server = smtplib.SMTP_SSL(context=context, timeout=step_timeout) if use_ssl else smtplib.SMTP(timeout=step_timeout)
+    server._host = host  # STARTTLS / SMTPS use it for SNI + certificate hostname checks
+
+    def _get_socket(h, p, t):
+        sock = _bounded_connect(h, p, t, deadline, getattr(server, "source_address", None))
+        return context.wrap_socket(sock, server_hostname=host) if use_ssl else sock
+
+    server._get_socket = _get_socket
+    server.connect(host, port)
+    return server
+
+
+def _bound_next_step(server: smtplib.SMTP, step_timeout: float, deadline: float) -> None:
+    sock = getattr(server, "sock", None)
+    if sock is not None and hasattr(sock, "settimeout"):
+        sock.settimeout(min(step_timeout, _time_left(deadline)))
+
+
+def _classify(exc: BaseException) -> str:
+    if isinstance(exc, smtplib.SMTPAuthenticationError):
+        return "auth"
+    if isinstance(exc, (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, smtplib.SMTPDataError)):
+        return "rejected"
+    if isinstance(exc, (socket.timeout, TimeoutError)):
+        return "timeout"
+    if isinstance(exc, ssl.SSLError):
+        return "tls"
+    if isinstance(exc, (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected, ConnectionError, socket.gaierror, OSError)):
+        return "unreachable"
+    return "error"
 
 
 def send_email(
@@ -69,21 +150,33 @@ def send_email(
         msg.add_attachment(content, maintype=maintype, subtype=subtype or "octet-stream", filename=filename)
 
     context = ssl.create_default_context()
-    if use_ssl:
-        server: smtplib.SMTP = smtplib.SMTP_SSL(host, port, context=context, timeout=20)
-    else:
-        server = smtplib.SMTP(host, port, timeout=20)
+    step_timeout = float(getattr(settings, "SMTP_TIMEOUT_SECONDS", 10) or 10)
+    deadline = time.monotonic() + float(getattr(settings, "SMTP_TOTAL_TIMEOUT_SECONDS", 25) or 25)
+    started = time.monotonic()
+    server: Optional[smtplib.SMTP] = None
     try:
+        server = _open_smtp(host, port, use_ssl, context, step_timeout, deadline)
         if not use_ssl and use_tls:
+            _bound_next_step(server, step_timeout, deadline)
             server.starttls(context=context)
         if username:
+            _bound_next_step(server, step_timeout, deadline)
             server.login(username, password)
+        _bound_next_step(server, step_timeout, deadline)
         server.send_message(msg)
+    except Exception as exc:
+        reason = _classify(exc)
+        logger.error(
+            "SMTP delivery of '%s' via %s:%s failed after %.1fs (%s): %s",
+            subject, host, port, time.monotonic() - started, reason, type(exc).__name__,
+        )
+        raise EmailDeliveryError(reason, type(exc).__name__) from exc
     finally:
-        try:
-            server.quit()
-        except Exception:  # pragma: no cover - best effort close
-            pass
+        if server is not None:
+            try:
+                server.quit()
+            except Exception:  # pragma: no cover - best effort close
+                pass
     logger.info("Email '%s' sent to %s", subject, recipients)
     return True
 

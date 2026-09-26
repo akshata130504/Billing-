@@ -67,7 +67,7 @@ from backend.app.schemas.auth import (
 )
 from backend.app.schemas.organization import OrganizationOut, normalize_email
 from backend.app.services import audit
-from backend.app.services.email import frontend_url, send_email
+from backend.app.services.email import EmailDeliveryError, frontend_url, send_email
 
 # Failed credential checks allowed per (email, client IP) - or per account for TOTP codes -
 # inside THROTTLE_WINDOW_MINUTES before that key is blocked for LOCKOUT_MINUTES.
@@ -403,6 +403,30 @@ def purge_expired_pending_signups(db: Session) -> int:
     return result.rowcount or 0
 
 
+_EMAIL_FAILURE_MESSAGES = {
+    "unreachable": "We couldn't reach the email server to send your verification code. Please try again in a few minutes; if it keeps failing, contact support.",
+    "timeout": "The email server took too long to respond, so your verification code wasn't sent. Please try again in a few minutes.",
+    "tls": "A secure connection to the email server could not be established, so your verification code wasn't sent. Please contact support.",
+    "auth": "The email server rejected this server's login, so your verification code wasn't sent. Please contact support.",
+    "rejected": "The email server refused to deliver to this address. Please check the email address and try again.",
+    "error": "We couldn't send your verification code. Please try again in a few minutes.",
+}
+
+
+def _raise_email_delivery_failure(db: Session, email: str, exc: Exception, action: str) -> None:
+    """Roll back the pending OTP and answer with a clear 503 (not a generic 422, and never a
+    proxy 502 from a hung request). The category is logged for operators; no secrets."""
+    db.rollback()
+    reason = exc.reason if isinstance(exc, EmailDeliveryError) else "error"
+    logger.error("Signup verification email %s to %s failed (%s): %s", action, email, reason, type(exc).__name__)
+    raise AppException(
+        message=_EMAIL_FAILURE_MESSAGES.get(reason, _EMAIL_FAILURE_MESSAGES["error"]),
+        code="EMAIL_DELIVERY_FAILED",
+        status_code=503,
+        details={"reason": reason},
+    )
+
+
 def request_signup_verification(
     db: Session,
     data: SignupVerificationRequest,
@@ -479,12 +503,11 @@ def request_signup_verification(
             raise ValidationAppError(
                 "Email delivery is not configured on this server. Please contact an administrator."
             )
-    except Exception as exc:
+    except ValidationAppError:
         db.rollback()
-        logger.error("Failed to send signup verification email to %s: %s", email, exc)
-        raise ValidationAppError(
-            "Could not deliver verification email. Please check your email address or SMTP configuration and try again."
-        )
+        raise
+    except Exception as exc:
+        _raise_email_delivery_failure(db, email, exc, "send")
 
     _commit(db)
     logger.info("Signup verification OTP sent to %s", email)
@@ -526,12 +549,11 @@ def resend_signup_otp(db: Session, email: str) -> Tuple[str, int, int]:
             raise ValidationAppError(
                 "Email delivery is not configured on this server. Please contact an administrator."
             )
-    except Exception as exc:
+    except ValidationAppError:
         db.rollback()
-        logger.error("Failed to resend signup verification email to %s: %s", email, exc)
-        raise ValidationAppError(
-            "Could not deliver verification email. Please check your email address or SMTP configuration and try again."
-        )
+        raise
+    except Exception as exc:
+        _raise_email_delivery_failure(db, email, exc, "resend")
 
     _commit(db)
     logger.info("Signup verification OTP resent to %s", email)
