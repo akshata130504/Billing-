@@ -19,6 +19,7 @@ _VALID_PROD_OVERRIDES = {
     "SECRET_KEY": "a-cryptographically-secure-random-secret-key-67890",
     "DATABASE_URL": "postgresql+psycopg://app_user:prod_strong_pass_123@localhost:5432/rooman_billing",
     "ALLOWED_ORIGINS": ["https://billing.example.com"],
+    "SMTP_HOST": "smtp.example.com",
 }
 
 
@@ -149,3 +150,22 @@ def test_secret_key_masked_in_repr_and_str():
     assert prod_secret not in str_str
     assert "SECRET_KEY='***'" in repr_str
     assert "POSTGRES_PASSWORD='***'" in repr_str
+
+
+def test_production_requires_smtp_host():
+    """Auth emails (signup codes, resets, invitations) have no other delivery channel."""
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(_env_file=None, ENVIRONMENT="production", **{**_VALID_PROD_OVERRIDES, "SMTP_HOST": ""})
+    assert "SMTP_HOST must be set" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("origin", ["http://localhost:5173", "http://127.0.0.1:5173"])
+def test_production_rejects_local_origins(origin):
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(_env_file=None, ENVIRONMENT="production", **{**_VALID_PROD_OVERRIDES, "ALLOWED_ORIGINS": [origin]})
+    assert "ALLOWED_ORIGINS must not include localhost" in str(exc_info.value)
+
+
+def test_default_db_pool_fits_postgres_connection_budget():
+    s = Settings(_env_file=None)
+    assert s.DB_POOL_SIZE + s.DB_MAX_OVERFLOW <= 10

@@ -3,6 +3,13 @@ import { Expense, RecurringExpense } from './types';
 import { expenseService } from '../../services/expenseService';
 import { tokenStorage } from '../../services/apiClient';
 import { useToast } from '../../components/common/Toast';
+import { toApiError } from '../../services/apiClient';
+
+/** Server message when there is one (e.g. "Customer not found"), else the fallback. */
+function errorMessage(err: unknown, fallback: string): string {
+  const message = toApiError(err).message;
+  return message || fallback;
+}
 
 export interface ExpensesSummary {
   total: number;
@@ -30,7 +37,8 @@ interface ExpensesContextType {
   updateExpense: (id: string, updates: Partial<Expense>) => void;
   deleteExpense: (id: string) => void;
   duplicateExpense: (id: string) => Expense;
-  addToInvoice: (id: string) => void;
+  addToInvoice: (id: string, invoiceId?: string) => void;
+  downloadReceipt: (id: string) => Promise<void>;
   addRecurringExpense: (data: Omit<RecurringExpense, 'id' | 'createdAt'>) => RecurringExpense;
   updateRecurringExpense: (id: string, updates: Partial<RecurringExpense>) => void;
   deleteRecurringExpense: (id: string) => void;
@@ -145,26 +153,34 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
   // CRUD for Expenses
   const addExpense = useCallback(
     (data: Omit<Expense, 'id' | 'createdAt'>): Expense => {
+      const { receiptFile, ...fields } = data;
       const tempId = `EXP-TEMP-${Date.now()}`;
       const newExpense: Expense = {
-        ...data,
+        ...fields,
         id: tempId,
         createdAt: new Date().toISOString(),
       };
       setExpenses((prev) => [newExpense, ...prev]);
 
       expenseService
-        .create(data)
-        .then((created) => {
+        .create(fields)
+        .then(async (created) => {
           setExpenses((prev) =>
             prev.map((e) => (e.id === tempId ? created : e))
           );
           showToast('success', 'Expense Recorded', `${created.name} recorded successfully.`);
+          if (receiptFile) {
+            try {
+              const withReceipt = await expenseService.uploadReceipt(created.id, receiptFile);
+              setExpenses((prev) => prev.map((e) => (e.id === created.id ? withReceipt : e)));
+            } catch (err) {
+              showToast('error', 'Receipt not uploaded', errorMessage(err, 'The expense was saved without its receipt.'));
+            }
+          }
         })
         .catch((err) => {
-          console.error('Failed to create expense on backend:', err);
           setExpenses((prev) => prev.filter((e) => e.id !== tempId));
-          showToast('error', 'Failed to save expense to server.');
+          showToast('error', 'Failed to save expense', errorMessage(err, 'Failed to save expense to server.'));
         });
 
       return newExpense;
@@ -193,21 +209,34 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
 
   const updateExpense = useCallback(
     (id: string, updates: Partial<Expense>) => {
+      const { receiptFile, ...fields } = updates;
+      const backup = expenses.find((item) => item.id === id);
       setExpenses((prev) =>
-        prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
+        prev.map((item) => (item.id === id ? { ...item, ...fields } : item))
       );
 
       expenseService
-        .update(id, updates)
-        .then(() => {
+        .update(id, fields)
+        .then(async (saved) => {
+          let latest = saved;
+          if (receiptFile) {
+            try {
+              latest = await expenseService.uploadReceipt(id, receiptFile);
+            } catch (err) {
+              showToast('error', 'Receipt not uploaded', errorMessage(err, 'Changes were saved without the new receipt.'));
+            }
+          }
+          setExpenses((prev) => prev.map((item) => (item.id === id ? latest : item)));
           showToast('success', 'Expense Updated', 'Changes saved successfully.');
         })
         .catch((err) => {
-          console.error('Failed to update expense on backend:', err);
-          showToast('error', 'Failed to update expense on server.');
+          if (backup) {
+            setExpenses((prev) => prev.map((item) => (item.id === id ? backup : item)));
+          }
+          showToast('error', 'Failed to update expense', errorMessage(err, 'Failed to update expense on server.'));
         });
     },
-    [showToast]
+    [expenses, showToast]
   );
 
   const deleteExpense = useCallback(
@@ -241,27 +270,41 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
         date: new Date().toISOString().split('T')[0],
         status: 'draft',
         invoiceId: undefined,
+        receipt: undefined,
+        hasReceipt: false,
+        receiptFile: null,
       });
     },
     [expenses, addExpense]
   );
 
   const addToInvoice = useCallback(
-    (id: string) => {
+    (id: string, invoiceId?: string) => {
       expenseService
-        .addToInvoice(id)
+        .addToInvoice(id, invoiceId)
         .then((updated) => {
           setExpenses((prev) =>
             prev.map((item) => (item.id === id ? updated : item))
           );
-          showToast('success', 'Associated with Invoice', 'Expense converted to invoice billing line.');
+          showToast('success', 'Added to Invoice', 'The expense is now a line on a draft invoice.');
         })
         .catch((err) => {
-          console.error('Failed to associate expense with invoice on backend:', err);
-          showToast('error', 'Failed to add expense to invoice.');
+          showToast('error', 'Failed to add expense to invoice', errorMessage(err, 'Failed to add expense to invoice.'));
         });
     },
     [showToast]
+  );
+
+  const downloadReceipt = useCallback(
+    async (id: string) => {
+      const expense = expenses.find((e) => e.id === id);
+      try {
+        await expenseService.downloadReceipt(id, expense?.receipt?.fileName || 'receipt');
+      } catch (err) {
+        showToast('error', 'Download failed', errorMessage(err, 'Could not download the receipt.'));
+      }
+    },
+    [expenses, showToast]
   );
 
   // CRUD for Recurring Expenses
@@ -390,6 +433,7 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
         deleteExpense,
         duplicateExpense,
         addToInvoice,
+        downloadReceipt,
         addRecurringExpense,
         updateRecurringExpense,
         deleteRecurringExpense,

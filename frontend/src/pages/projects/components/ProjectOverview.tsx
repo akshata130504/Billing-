@@ -1,5 +1,5 @@
 import { Project } from '../types';
-import { formatINR } from '../mockProjects';
+import { formatINR } from '../format';
 import { formatDate, getBillingMethodLabel } from './ProjectTable';
 import { Card, CardContent } from '../../../components/common/Card';
 import {

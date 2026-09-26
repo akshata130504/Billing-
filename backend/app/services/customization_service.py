@@ -2,13 +2,23 @@
 web tabs, the automation rule engine, webhook delivery, and schedules."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+import base64
+import hashlib
+import hmac
+import html
+import json
+import os
+import secrets
+import time
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, joinedload
 
+from backend.app.core import network_security
 from backend.app.core.exceptions import NotFoundAppError, ValidationAppError
+from backend.app.core.logging import logger
 from backend.app.models.base import utcnow
 from backend.app.models.customization import (
     AutomationAction,
@@ -263,6 +273,44 @@ _SAMPLE_DOCUMENT_CONTEXT = {
 }
 
 
+_LOGO_MIME_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif"}
+_MAX_PREVIEW_LOGO_BYTES = 2 * 1024 * 1024
+
+
+def _resolve_local_logo_data_uri(logo_url: Optional[str]) -> Optional[str]:
+    """Inlines an uploaded logo as a data: URI for the preview.
+
+    Only files that live under ``settings.UPLOAD_DIR`` are read (``os.path.commonpath``
+    containment defeats ``../`` traversal), only image extensions are accepted, and remote
+    URLs are never fetched server-side. Anything else yields no logo.
+    """
+    if not logo_url:
+        return None
+    if not (logo_url.startswith("/uploads/") or logo_url.startswith("/api/v1/uploads/")):
+        return None
+    from backend.app.core.config import settings
+
+    rel = logo_url.split("?", 1)[0].removeprefix("/api/v1/uploads/").removeprefix("/uploads/")
+    upload_root = os.path.realpath(os.path.abspath(settings.UPLOAD_DIR))
+    file_path = os.path.realpath(os.path.abspath(os.path.join(upload_root, rel)))
+    try:
+        if os.path.commonpath([upload_root, file_path]) != upload_root or file_path == upload_root:
+            return None
+    except ValueError:  # different drives on Windows
+        return None
+    mime = _LOGO_MIME_TYPES.get(os.path.splitext(file_path)[1].lower())
+    if not mime or not os.path.isfile(file_path):
+        return None
+    try:
+        if os.path.getsize(file_path) > _MAX_PREVIEW_LOGO_BYTES:
+            return None
+        with open(file_path, "rb") as img_f:
+            img_bytes = img_f.read()
+    except OSError:
+        return None
+    return f"data:{mime};base64,{base64.b64encode(img_bytes).decode('ascii')}"
+
+
 def render_template_preview(db: Session, template_id: str, organization_id: str) -> Dict[str, str]:
     """Renders a sample HTML/text preview of a document template using placeholder data."""
     template = get_template(db, template_id, organization_id)
@@ -275,9 +323,14 @@ def render_template_preview(db: Session, template_id: str, organization_id: str)
         if org and org.logo_url:
             logo_url = org.logo_url
 
+    resolved_logo_src = _resolve_local_logo_data_uri(logo_url)
+    if not resolved_logo_src and logo_url and logo_url.lower().startswith("https://"):
+        # Rendered by the viewer's browser only; the server never fetches remote logos.
+        resolved_logo_src = logo_url
+
     logo_html = (
-        f'<div class="logo-container" style="margin-bottom: 16px;"><img src="{logo_url}" alt="Organization Logo" style="max-height: 50px; max-width: 200px; object-fit: contain;" /></div>'
-        if logo_url
+        f'<div class="logo-container" style="margin-bottom: 16px;"><img src="{html.escape(resolved_logo_src, quote=True)}" alt="Organization Logo" style="max-height: 50px; max-width: 200px; object-fit: contain;" /></div>'
+        if resolved_logo_src
         else ""
     )
 
@@ -297,7 +350,7 @@ td, th {{ border: 1px solid #ddd; padding: 6px; }}
 </style></head>
 <body>
 {logo_html}
-{f"<div class='header'>{template.header_text}</div>" if template.header_text else ""}
+{f"<div class='header'>{html.escape(template.header_text)}</div>" if template.header_text else ""}
 <h1>{template.document_type.value.replace('_', ' ').title()} {ctx['document_number']}</h1>
 {f"<p>{ctx['customer_name']}</p>" if template.show_company_address else ""}
 <p>Issue Date: {ctx['issue_date']} | Due Date: {ctx['due_date']}</p>
@@ -308,8 +361,8 @@ td, th {{ border: 1px solid #ddd; padding: 6px; }}
 <p class="accent">Subtotal: {ctx['subtotal']}</p>
 {f"<p class='accent'>Tax: {ctx['tax']}</p>" if template.show_tax_summary else ""}
 <p class="accent"><strong>Total: {ctx['total']}</strong></p>
-{f"<p>{template.terms_and_conditions}</p>" if template.terms_and_conditions else ""}
-{f"<div class='footer'>{template.footer_text}</div>" if template.footer_text else ""}
+{f"<p>{html.escape(template.terms_and_conditions)}</p>" if template.terms_and_conditions else ""}
+{f"<div class='footer'>{html.escape(template.footer_text)}</div>" if template.footer_text else ""}
 </body>
 </html>"""
 
@@ -449,6 +502,8 @@ def get_rule(db: Session, rule_id: str, organization_id: str) -> AutomationRule:
 
 
 def create_rule(db: Session, organization_id: str, data: AutomationRuleCreate) -> AutomationRule:
+    # Validate every action before writing anything.
+    prepared = [_prepare_action_configuration(a.action_type, a.configuration) for a in data.actions]
     rule = AutomationRule(
         organization_id=organization_id,
         name=data.name,
@@ -461,18 +516,47 @@ def create_rule(db: Session, organization_id: str, data: AutomationRuleCreate) -
     db.add(rule)
     db.flush()
 
-    for order, action_data in enumerate(data.actions, start=1):
+    generated_secrets: Dict[str, str] = {}
+    for order, (action_data, configuration) in enumerate(zip(data.actions, prepared), start=1):
         action = AutomationAction(
             organization_id=organization_id,
             rule_id=rule.id,
             action_type=action_data.action_type,
             name=action_data.name,
-            configuration=action_data.configuration,
+            configuration=configuration,
             execution_order=action_data.execution_order or order,
         )
         db.add(action)
+        db.flush()
+        if action_data.action_type == AutomationActionType.WEBHOOK:
+            generated_secrets[action.id] = configuration["secret"]
     db.flush()
-    return get_rule(db, rule.id, organization_id)
+    created = get_rule(db, rule.id, organization_id)
+    # Transient: lets the create endpoint reveal the signing secrets exactly once.
+    created._revealed_signing_secrets = generated_secrets
+    return created
+
+
+def _prepare_action_configuration(action_type: AutomationActionType, configuration: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Validates action configuration at save time; webhook actions get an SSRF-checked URL and a
+    per-endpoint random signing secret when none was supplied."""
+    config = dict(configuration or {})
+    if action_type == AutomationActionType.WEBHOOK:
+        url = (config.get("url") or "").strip()
+        if not url:
+            raise ValidationAppError("Webhook actions require a destination URL.", {"fields": {"url": "required"}})
+        config["url"] = assert_webhook_destination_allowed(url)
+        config.pop("simulate_failure", None)
+        if not (config.get("secret") or "").strip():
+            config["secret"] = generate_webhook_secret()
+    elif action_type == AutomationActionType.FIELD_UPDATE:
+        field = (config.get("field") or "").strip()
+        if field and field not in {f.split(".", 1)[1] for f in supported_field_updates()}:
+            raise ValidationAppError(
+                f"Field '{field}' cannot be updated by automation. Supported: {', '.join(supported_field_updates())}.",
+                {"fields": {"field": "unsupported"}},
+            )
+    return config
 
 
 def update_rule(db: Session, rule_id: str, organization_id: str, data: AutomationRuleUpdate) -> AutomationRule:
@@ -550,67 +634,284 @@ def test_rule(db: Session, rule_id: str, organization_id: str, event_data: Dict[
     }
 
 
-def generate_webhook_signature(payload: Any, secret: str) -> str:
-    """Computes HMAC-SHA256 signature for outgoing webhook payload."""
-    import hashlib
-    import hmac
-    import json
-    raw = json.dumps(payload, sort_keys=True) if isinstance(payload, (dict, list)) else str(payload or "")
-    return hmac.new(secret.encode("utf-8"), raw.encode("utf-8"), hashlib.sha256).hexdigest()
+# ---------------------------------------------------------------------------
+# Outbound webhook signing & delivery
+# ---------------------------------------------------------------------------
+
+WEBHOOK_TIMEOUT_SECONDS = 5.0
+MAX_STORED_RESPONSE_CHARS = 1024
+WEBHOOK_SECRET_PREFIX = "whsec_"
+WEBHOOK_SIGNATURE_HEADER = "X-Rooman-Signature"
+WEBHOOK_TIMESTAMP_HEADER = "X-Rooman-Timestamp"
 
 
-def _attempt_webhook_delivery(
-    delivery: OutboundWebhookDelivery,
-    secret: Optional[str] = None,
-    force_fail: bool = False,
-    timeout_seconds: float = 5.0,
-) -> None:
-    """Attempts an outbound HTTP/HTTPS delivery with HMAC-SHA256 signature."""
+class WebhookDestinationBlocked(ValidationAppError):
+    """Raised when a webhook URL resolves to a private/loopback/metadata address or is not http(s)."""
+
+
+def generate_webhook_secret() -> str:
+    """Generates a random per-endpoint signing secret (shown to the admin once)."""
+    return WEBHOOK_SECRET_PREFIX + secrets.token_urlsafe(32)
+
+
+def derive_org_webhook_secret(organization_id: str) -> str:
+    """Fallback signing secret for legacy endpoints without their own secret:
+    HMAC(SECRET_KEY, organization_id). Never a shared hard-coded default."""
     from backend.app.core.config import settings
 
-    signing_secret = secret or getattr(settings, "WEBHOOK_SIGNING_SECRET", "rooman_webhook_default_secret")
-    sig = generate_webhook_signature(delivery.payload, signing_secret)
+    return hmac.new(
+        settings.SECRET_KEY.encode("utf-8"),
+        f"outbound-webhook:{organization_id}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
-    if force_fail:
-        delivery.status = "failed"
-        delivery.response_status_code = 500
-        delivery.error_message = "Simulated delivery failure"
-        return
 
-    from urllib.parse import urlparse
-    url = (delivery.destination_url or "").strip()
-    parsed_host = (urlparse(url).hostname or "").lower()
-    is_test_host = any(parsed_host.endswith(suffix) for suffix in (".test", ".example", ".invalid", ".localhost")) or parsed_host in ("example.com", "localhost", "127.0.0.1")
+def serialize_webhook_body(payload: Any) -> bytes:
+    """Serializes a webhook payload exactly once; these bytes are both signed and sent."""
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
 
-    if (url.startswith("http://") or url.startswith("https://")) and not is_test_host:
-        try:
-            import httpx
-            headers = {
-                "Content-Type": "application/json",
-                "X-Rooman-Signature": f"sha256={sig}",
-                "X-Rooman-Event": delivery.event_type,
-            }
-            with httpx.Client(timeout=timeout_seconds) as client:
-                resp = client.post(url, json=delivery.payload, headers=headers)
-                delivery.response_status_code = resp.status_code
-                delivery.response_body = resp.text[:2000]
-                if 200 <= resp.status_code < 300:
-                    delivery.status = "delivered"
-                    delivery.delivered_at = utcnow()
-                    delivery.error_message = None
-                else:
-                    delivery.status = "failed"
-                    delivery.error_message = f"Webhook recipient responded with HTTP {resp.status_code}"
-        except Exception as exc:
-            delivery.status = "failed"
-            delivery.response_status_code = 502
-            delivery.error_message = str(exc)[:2000]
+
+def sign_webhook_body(body: bytes, secret: str, timestamp: str) -> str:
+    """HMAC-SHA256 over ``{timestamp}.{raw body}`` (hex). Receivers must verify the exact bytes
+    received and reject stale timestamps to prevent replay."""
+    return hmac.new(secret.encode("utf-8"), timestamp.encode("ascii") + b"." + body, hashlib.sha256).hexdigest()
+
+
+def generate_webhook_signature(payload: Any, secret: str) -> str:
+    """Legacy helper: HMAC-SHA256 over the canonical serialized body (no timestamp)."""
+    raw = serialize_webhook_body(payload) if isinstance(payload, (dict, list)) else str(payload or "").encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).hexdigest()
+
+
+def build_webhook_headers(
+    body: bytes,
+    secret: str,
+    event_type: str,
+    delivery_id: Optional[str] = None,
+    timestamp: Optional[str] = None,
+) -> Dict[str, str]:
+    ts = timestamp or str(int(time.time()))
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Rooman-Billing-Webhooks/1.0",
+        "X-Rooman-Event": event_type,
+        WEBHOOK_TIMESTAMP_HEADER: ts,
+        WEBHOOK_SIGNATURE_HEADER: f"sha256={sign_webhook_body(body, secret, ts)}",
+    }
+    if delivery_id:
+        headers["X-Rooman-Delivery"] = delivery_id
+    return headers
+
+
+def _post_webhook(url: str, body: bytes, headers: Dict[str, str], timeout: float) -> Tuple[int, str]:
+    """Performs the HTTP POST (redirects disabled). Isolated so tests can stub the network."""
+    import httpx
+
+    with httpx.Client(timeout=timeout, follow_redirects=False) as client:
+        resp = client.post(url, content=body, headers=headers)
+        return resp.status_code, resp.text
+
+
+def assert_webhook_destination_allowed(url: Optional[str]) -> str:
+    """SSRF guard: http/https only; host must resolve exclusively to public addresses."""
+    cleaned = (url or "").strip()
+    if not network_security.is_safe_url(cleaned):
+        raise WebhookDestinationBlocked(
+            "Webhook URL is not permitted: it must be a public http(s) address "
+            "(private, loopback, link-local, multicast, reserved and metadata hosts are blocked).",
+            {"fields": {"url": "prohibited_address"}},
+        )
+    return cleaned
+
+
+def send_signed_webhook(
+    url: str,
+    payload: Any,
+    secret: str,
+    event_type: str,
+    delivery_id: Optional[str] = None,
+    timeout: float = WEBHOOK_TIMEOUT_SECONDS,
+) -> Tuple[int, str]:
+    """Validates the destination, serializes once, signs those bytes and POSTs them."""
+    clean_url = assert_webhook_destination_allowed(url)
+    body = serialize_webhook_body(payload)
+    headers = build_webhook_headers(body, secret, event_type, delivery_id=delivery_id)
+    return _post_webhook(clean_url, body, headers, timeout)
+
+
+def _resolve_delivery_secret(db: Session, delivery: OutboundWebhookDelivery) -> str:
+    """Finds the signing secret for a delivery: the rule action's secret, the Integrations
+    webhook endpoint's secret, or the per-organization derived fallback."""
+    destination = (delivery.destination_url or "").strip()
+    if delivery.rule_id:
+        actions = db.scalars(
+            select(AutomationAction).where(
+                AutomationAction.rule_id == delivery.rule_id,
+                AutomationAction.organization_id == delivery.organization_id,
+                AutomationAction.action_type == AutomationActionType.WEBHOOK,
+            )
+        ).all()
+        for action in actions:
+            cfg = action.configuration or {}
+            if (cfg.get("url") or "").strip() == destination and cfg.get("secret"):
+                return str(cfg["secret"])
     else:
+        from backend.app.services.integrations_service import get_webhook_config
+
+        cfg = get_webhook_config(db, delivery.organization_id) or {}
+        if (cfg.get("url") or "").strip() == destination and cfg.get("signing_secret"):
+            return str(cfg["signing_secret"])
+    return derive_org_webhook_secret(delivery.organization_id)
+
+
+def deliver_webhook(db: Session, delivery: OutboundWebhookDelivery) -> OutboundWebhookDelivery:
+    """Performs one signed delivery attempt and records the outcome on the delivery row.
+
+    Never raises for delivery problems; the caller (outbox) inspects ``delivery.status``.
+    """
+    delivery.attempt_count = (delivery.attempt_count or 0) + 1
+    delivery.response_status_code = None
+    delivery.response_body = None
+    try:
+        secret = _resolve_delivery_secret(db, delivery)
+        status_code, text = send_signed_webhook(
+            delivery.destination_url,
+            delivery.payload,
+            secret,
+            delivery.event_type,
+            delivery_id=delivery.id,
+        )
+    except WebhookDestinationBlocked as exc:
+        delivery.status = "failed"
+        delivery.error_message = str(getattr(exc, "message", None) or exc)[:500]
+        db.flush()
+        return delivery
+    except Exception as exc:  # noqa: BLE001 - network errors are recorded, retried by the outbox
+        delivery.status = "failed"
+        delivery.error_message = f"{type(exc).__name__}: {exc}"[:500]
+        db.flush()
+        return delivery
+
+    delivery.response_status_code = status_code
+    delivery.response_body = (text or "")[:MAX_STORED_RESPONSE_CHARS] or None
+    if 200 <= status_code < 300:
         delivery.status = "delivered"
-        delivery.response_status_code = 200
-        delivery.response_body = "OK"
-        delivery.error_message = None
         delivery.delivered_at = utcnow()
+        delivery.error_message = None
+    else:
+        delivery.status = "failed"
+        delivery.error_message = f"Webhook recipient responded with HTTP {status_code}"
+    db.flush()
+    return delivery
+
+
+def queue_webhook_delivery(
+    db: Session,
+    organization_id: str,
+    destination_url: str,
+    event_type: str,
+    payload: Dict[str, Any],
+    rule_id: Optional[str] = None,
+) -> OutboundWebhookDelivery:
+    """Creates a pending delivery row and a ``webhook.deliver`` outbox event (retried with backoff)."""
+    from backend.app.services.outbox_processor import enqueue_webhook_delivery
+
+    delivery = OutboundWebhookDelivery(
+        organization_id=organization_id,
+        rule_id=rule_id,
+        destination_url=destination_url.strip(),
+        event_type=event_type,
+        payload=payload,
+        status="pending",
+        attempt_count=0,
+    )
+    db.add(delivery)
+    db.flush()
+    enqueue_webhook_delivery(db, organization_id, delivery.id)
+    return delivery
+
+
+def enqueue_subscribed_webhooks(
+    db: Session,
+    organization_id: str,
+    event_type: str,
+    payload: Dict[str, Any],
+    event_id: Optional[str] = None,
+) -> int:
+    """Fans a domain event out to the organization's Integrations webhook endpoint when it is
+    connected and subscribed to ``event_type`` (or ``*``). Returns the number of deliveries queued."""
+    from backend.app.services.outbox_processor import INTERNAL_EVENT_TYPES
+    from backend.app.services.integrations_service import get_webhook_config
+
+    if not event_type or event_type in INTERNAL_EVENT_TYPES:
+        return 0
+    cfg = get_webhook_config(db, organization_id, only_enabled=True)
+    if not cfg or not cfg.get("url"):
+        return 0
+    events = cfg.get("events") or []
+    if event_type not in events and "*" not in events:
+        return 0
+    envelope = {
+        "id": event_id or secrets.token_hex(16),
+        "type": event_type,
+        "created_at": utcnow().isoformat(),
+        "organization_id": organization_id,
+        "data": payload,
+    }
+    queue_webhook_delivery(db, organization_id, cfg["url"], event_type, envelope)
+    return 1
+
+
+# ---------------------------------------------------------------------------
+# Automation action execution
+# ---------------------------------------------------------------------------
+
+# entity_type -> (module path, model name, fields an automation may overwrite)
+_FIELD_UPDATE_ALLOWLIST: Dict[str, Tuple[str, str, Tuple[str, ...]]] = {
+    "invoice": ("backend.app.models.invoices", "Invoice", ("notes",)),
+    "customer": ("backend.app.models.customers", "Customer", ("notes",)),
+    "subscription": ("backend.app.models.subscriptions", "Subscription", ("notes",)),
+}
+
+
+def supported_field_updates() -> List[str]:
+    return [f"{entity}.{field}" for entity, (_, _, fields) in _FIELD_UPDATE_ALLOWLIST.items() for field in fields]
+
+
+def _apply_field_update(
+    db: Session,
+    organization_id: str,
+    entity_type: str,
+    entity_id: Optional[str],
+    configuration: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Applies a FIELD_UPDATE action to an allowlisted text field of the tenant's own entity."""
+    import importlib
+
+    field = (configuration.get("field") or "").strip()
+    if not field:
+        raise ValidationAppError("No target field configured for field_update action.")
+    spec = _FIELD_UPDATE_ALLOWLIST.get(entity_type)
+    if not spec or field not in spec[2]:
+        raise ValidationAppError(
+            f"field_update is not supported for '{entity_type}.{field}'. "
+            f"Supported fields: {', '.join(supported_field_updates())}."
+        )
+    if not entity_id:
+        raise ValidationAppError("field_update requires an entity id on the triggering event.")
+    model = getattr(importlib.import_module(spec[0]), spec[1])
+    entity = db.scalars(select(model).where(model.id == entity_id, model.organization_id == organization_id)).first()
+    if entity is None:
+        raise NotFoundAppError(f"{entity_type} {entity_id} not found for field_update.")
+
+    value = configuration.get("value")
+    text = "" if value is None else str(value)
+    mode = (configuration.get("mode") or "replace").lower()
+    current = getattr(entity, field) or ""
+    new_value = f"{current}\n{text}" if mode == "append" and current else text
+    setattr(entity, field, new_value)
+    db.flush()
+    return {"entity_type": entity_type, "entity_id": entity_id, "field": field, "mode": mode, "value": text[:200]}
 
 
 def execute_automation_action(
@@ -623,14 +924,15 @@ def execute_automation_action(
     entity_id: Optional[str],
 ) -> Dict[str, Any]:
     """Executes a single automation action and records the outcome in automation_logs."""
+    config = action.configuration or {}
     try:
         if action.action_type == AutomationActionType.EMAIL_ALERT:
-            recipient = action.configuration.get("recipient") or event_data.get("customer_email") or event_data.get("email")
+            recipient = config.get("recipient") or event_data.get("customer_email") or event_data.get("email")
             if not recipient:
                 raise ValidationAppError("No recipient email available for email_alert action.")
-            subject = action.configuration.get("subject") or f"Automation Alert: {rule.name}"
-            body = action.configuration.get("body") or f"Automation rule '{rule.name}' was triggered."
-            notification_service.dispatch_notification(
+            subject = config.get("subject") or f"Automation Alert: {rule.name}"
+            body = config.get("body") or f"Automation rule '{rule.name}' was triggered."
+            notification = notification_service.dispatch_notification(
                 db,
                 organization_id,
                 NotificationChannel.EMAIL,
@@ -638,36 +940,32 @@ def execute_automation_action(
                 subject=subject,
                 body=body,
             )
-            details = {"recipient": recipient, "subject": subject}
+            status_value = getattr(notification.status, "value", notification.status)
+            if status_value == "failed":
+                raise ValidationAppError(f"Email alert could not be sent: {notification.error or 'delivery failed'}")
+            details = {
+                "recipient": recipient,
+                "subject": subject,
+                "notification_delivery_id": notification.id,
+                "delivery_status": status_value,
+            }
 
         elif action.action_type == AutomationActionType.WEBHOOK:
-            destination = action.configuration.get("url")
+            destination = (config.get("url") or "").strip()
             if not destination:
                 raise ValidationAppError("No destination URL configured for webhook action.")
-            delivery = OutboundWebhookDelivery(
-                organization_id=organization_id,
+            delivery = queue_webhook_delivery(
+                db,
+                organization_id,
+                destination,
+                f"{rule.module}.{rule.trigger_event.value}",
+                event_data,
                 rule_id=rule.id,
-                destination_url=destination,
-                event_type=f"{rule.module}.{rule.trigger_event.value}",
-                payload=event_data,
-                attempt_count=1,
             )
-            db.add(delivery)
-            db.flush()
-            secret = action.configuration.get("secret")
-            _attempt_webhook_delivery(
-                delivery,
-                secret=secret,
-                force_fail=bool(action.configuration.get("simulate_failure")),
-            )
-            details = {"delivery_id": delivery.id, "destination_url": destination, "status": delivery.status}
+            details = {"delivery_id": delivery.id, "destination_url": destination, "status": "queued"}
 
         elif action.action_type == AutomationActionType.FIELD_UPDATE:
-            field = action.configuration.get("field")
-            value = action.configuration.get("value")
-            if not field:
-                raise ValidationAppError("No target field configured for field_update action.")
-            details = {"field": field, "value": value}
+            details = _apply_field_update(db, organization_id, entity_type, entity_id, config)
 
         else:
             raise ValidationAppError(f"Unsupported automation action type: {action.action_type}")
@@ -686,6 +984,7 @@ def execute_automation_action(
         return {"action": action.name, "action_type": action.action_type.value, "status": "success", "details": details}
 
     except Exception as exc:  # noqa: BLE001 - one failed action must not abort the rest of the rule
+        message = getattr(exc, "message", None) or str(exc)
         log = AutomationLog(
             organization_id=organization_id,
             action_type=action.action_type.value,
@@ -693,11 +992,11 @@ def execute_automation_action(
             entity_type=entity_type,
             entity_id=entity_id,
             status=AutomationLogStatus.FAILED,
-            error_message=str(exc),
+            error_message=str(message)[:500],
         )
         db.add(log)
         db.flush()
-        return {"action": action.name, "action_type": action.action_type.value, "status": "failed", "error": str(exc)}
+        return {"action": action.name, "action_type": action.action_type.value, "status": "failed", "error": str(message)}
 
 
 def process_automation_event(
@@ -747,6 +1046,144 @@ def process_automation_event(
     }
 
 
+# Domain event (outbox) -> automation (module, trigger) mapping.
+_EVENT_MODULE_ALIASES = {"trial": "subscription"}
+_EVENT_TRIGGER_OVERRIDES: Dict[str, Tuple[AutomationTriggerEvent, ...]] = {
+    "invoice.paid": (AutomationTriggerEvent.STATUS_CHANGED, AutomationTriggerEvent.PAYMENT_SUCCEEDED),
+    "invoice.partially_paid": (AutomationTriggerEvent.STATUS_CHANGED, AutomationTriggerEvent.PAYMENT_SUCCEEDED),
+    "invoice.overdue": (AutomationTriggerEvent.STATUS_CHANGED, AutomationTriggerEvent.INVOICE_OVERDUE),
+    "invoice.payment_failed": (AutomationTriggerEvent.PAYMENT_FAILED,),
+    "payment.captured": (AutomationTriggerEvent.PAYMENT_SUCCEEDED,),
+    "payment.succeeded": (AutomationTriggerEvent.PAYMENT_SUCCEEDED,),
+    "payment.failed": (AutomationTriggerEvent.PAYMENT_FAILED,),
+    "subscription.payment_failed": (AutomationTriggerEvent.PAYMENT_FAILED,),
+}
+
+
+def automation_triggers_for_event(event_type: str) -> Tuple[Optional[str], Tuple[AutomationTriggerEvent, ...]]:
+    """Maps an outbox event type (``invoice.paid``) to the automation module and trigger events."""
+    prefix, _, action = (event_type or "").partition(".")
+    if not prefix or not action:
+        return None, ()
+    module = _EVENT_MODULE_ALIASES.get(prefix, prefix)
+    if event_type in _EVENT_TRIGGER_OVERRIDES:
+        return module, _EVENT_TRIGGER_OVERRIDES[event_type]
+    if action == "created":
+        return module, (AutomationTriggerEvent.CREATED,)
+    if action == "updated":
+        return module, (AutomationTriggerEvent.UPDATED,)
+    return module, (AutomationTriggerEvent.STATUS_CHANGED,)
+
+
+def _entity_snapshot(db: Session, organization_id: str, module: str, entity_id: Optional[str]) -> Dict[str, Any]:
+    """Best-effort current state of the entity so rule conditions can use its fields."""
+    if not entity_id:
+        return {}
+    try:
+        if module == "invoice":
+            from backend.app.models.invoices import Invoice
+
+            inv = db.scalars(select(Invoice).where(Invoice.id == entity_id, Invoice.organization_id == organization_id)).first()
+            if not inv:
+                return {}
+            customer = getattr(inv, "customer", None)
+            return {
+                "invoice_id": inv.id,
+                "invoice_number": inv.invoice_number,
+                "status": getattr(inv.status, "value", inv.status),
+                "currency": inv.currency,
+                "total": float(inv.total or 0),
+                "amount_due": float(inv.amount_due or 0),
+                "amount_paid": float(inv.amount_paid or 0),
+                "customer_id": inv.customer_id,
+                "customer_email": getattr(customer, "email", None),
+            }
+        if module == "subscription":
+            from backend.app.models.subscriptions import Subscription
+
+            sub = db.scalars(
+                select(Subscription).where(Subscription.id == entity_id, Subscription.organization_id == organization_id)
+            ).first()
+            if not sub:
+                return {}
+            customer = getattr(sub, "customer", None)
+            return {
+                "subscription_id": sub.id,
+                "subscription_number": sub.subscription_number,
+                "status": getattr(sub.status, "value", sub.status),
+                "plan_id": sub.plan_id,
+                "customer_id": sub.customer_id,
+                "customer_email": getattr(customer, "email", None),
+            }
+        if module == "customer":
+            from backend.app.models.customers import Customer
+
+            cust = db.scalars(select(Customer).where(Customer.id == entity_id, Customer.organization_id == organization_id)).first()
+            if not cust:
+                return {}
+            return {"customer_id": cust.id, "customer_email": cust.email, "display_name": cust.display_name}
+        if module == "payment":
+            from backend.app.models.payments import Payment
+
+            pay = db.scalars(select(Payment).where(Payment.id == entity_id, Payment.organization_id == organization_id)).first()
+            if not pay:
+                return {}
+            return {
+                "payment_id": pay.id,
+                "amount": float(pay.amount or 0),
+                "status": getattr(pay.status, "value", pay.status),
+                "customer_id": pay.customer_id,
+            }
+    except Exception as exc:  # noqa: BLE001 - enrichment must never block automation
+        logger.warning("Automation: could not snapshot %s %s: %s", module, entity_id, exc)
+    return {}
+
+
+def process_outbox_event_automation(
+    db: Session,
+    organization_id: str,
+    event_type: str,
+    payload: Dict[str, Any],
+    aggregate_type: Optional[str] = None,
+    aggregate_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Runs automation rules for one outbox domain event (called by ``process_pending_outbox``)."""
+    module, triggers = automation_triggers_for_event(event_type)
+    summary: Dict[str, Any] = {"event_type": event_type, "module": module, "results": []}
+    if not module or not triggers:
+        return summary
+    has_rules = db.scalar(
+        select(AutomationRule.id)
+        .where(
+            AutomationRule.organization_id == organization_id,
+            AutomationRule.module == module,
+            AutomationRule.is_active.is_(True),
+        )
+        .limit(1)
+    )
+    if not has_rules:
+        return summary
+
+    payload = payload or {}
+    entity_id = payload.get(f"{module}_id")
+    if not entity_id and aggregate_id and aggregate_id != "-" and (aggregate_type or module) in (module, "trial"):
+        entity_id = aggregate_id
+    event_data = {**_entity_snapshot(db, organization_id, module, entity_id), **payload, "event_type": event_type}
+    for trigger in triggers:
+        summary["results"].append(
+            process_automation_event(
+                db,
+                organization_id,
+                module=module,
+                trigger_event=trigger,
+                event_data=event_data,
+                entity_type=module,
+                entity_id=entity_id,
+            )
+        )
+    return summary
+
+
 # ---------------------------------------------------------------------------
 # Webhook Deliveries
 # ---------------------------------------------------------------------------
@@ -771,11 +1208,11 @@ def get_webhook_delivery(db: Session, delivery_id: str, organization_id: str) ->
 
 
 def retry_webhook_delivery(db: Session, delivery_id: str, organization_id: str) -> OutboundWebhookDelivery:
+    """Manual retry: performs one immediate signed attempt (automatic retries run via the outbox)."""
     delivery = get_webhook_delivery(db, delivery_id, organization_id)
     if delivery.status == "delivered":
         raise ValidationAppError("Webhook delivery has already succeeded.")
-    delivery.attempt_count += 1
-    _attempt_webhook_delivery(delivery, force_fail=False)
+    deliver_webhook(db, delivery)
     db.flush()
     return delivery
 
@@ -807,13 +1244,100 @@ _FREQUENCY_DELTAS = {
     ScheduleFrequency.HOURLY: timedelta(hours=1),
     ScheduleFrequency.DAILY: timedelta(days=1),
     ScheduleFrequency.WEEKLY: timedelta(weeks=1),
-    ScheduleFrequency.MONTHLY: timedelta(days=30),
 }
 
 
-def compute_next_schedule_date(frequency: ScheduleFrequency, from_dt: Optional[datetime] = None) -> datetime:
-    from_dt = from_dt or utcnow()
+def _add_one_month(dt: datetime) -> datetime:
+    import calendar
+
+    year, month = (dt.year + 1, 1) if dt.month == 12 else (dt.year, dt.month + 1)
+    day = min(dt.day, calendar.monthrange(year, month)[1])
+    return dt.replace(year=year, month=month, day=day)
+
+
+def _as_aware(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _cron_next(cron_expression: str, from_dt: datetime) -> datetime:
+    """Next fire time for a 5-field crontab expression (UTC), via APScheduler's CronTrigger."""
+    from apscheduler.triggers.cron import CronTrigger
+
+    try:
+        trigger = CronTrigger.from_crontab(cron_expression.strip(), timezone=timezone.utc)
+    except (ValueError, TypeError) as exc:
+        raise ValidationAppError(
+            f"Invalid cron expression '{cron_expression}': {exc}", {"fields": {"cron_expression": "invalid"}}
+        ) from exc
+    next_fire = trigger.get_next_fire_time(None, from_dt + timedelta(seconds=1))
+    if next_fire is None:
+        raise ValidationAppError("Cron expression never fires.", {"fields": {"cron_expression": "invalid"}})
+    return next_fire
+
+
+def compute_next_schedule_date(
+    frequency: ScheduleFrequency,
+    from_dt: Optional[datetime] = None,
+    cron_expression: Optional[str] = None,
+) -> datetime:
+    """Next run after ``from_dt``: the cron expression when set, otherwise the frequency
+    (monthly = same day next calendar month, clamped to month end)."""
+    from_dt = _as_aware(from_dt) or utcnow()
+    if cron_expression and cron_expression.strip():
+        return _cron_next(cron_expression, from_dt)
+    if frequency == ScheduleFrequency.MONTHLY:
+        return _add_one_month(from_dt)
     return from_dt + _FREQUENCY_DELTAS.get(frequency, timedelta(days=1))
+
+
+def _jsonable(value: Any) -> Any:
+    return json.loads(json.dumps(value, default=str))
+
+
+def _schedule_send_dunning_reminders(db: Session, organization_id: str) -> Dict[str, Any]:
+    from backend.app.services.dunning_service import execute_dunning_retries
+
+    return execute_dunning_retries(db, organization_id) or {}
+
+
+def _schedule_export_reports(db: Session, organization_id: str) -> Dict[str, Any]:
+    """Computes the month-to-date KPI snapshot and stores it on the automation log."""
+    from backend.app.services import reports_service
+
+    report_range = reports_service.resolve_report_range("this_month")
+    return {
+        "range": {"start": str(report_range.start), "end": str(report_range.end)},
+        "kpis": reports_service.kpis(db, organization_id, report_range),
+    }
+
+
+# target_action -> org-scoped callable(db, organization_id) -> result dict
+SCHEDULE_TARGET_ACTIONS: Dict[str, Any] = {
+    "send_dunning_reminders": _schedule_send_dunning_reminders,
+    "export_reports": _schedule_export_reports,
+}
+# Actions the platform scheduler already runs for every organization; a per-organization run
+# would duplicate cross-tenant work, so these are recorded as SKIPPED (never a fake success).
+SCHEDULER_MANAGED_TARGET_ACTIONS: Dict[str, str] = {
+    "run_billing_jobs": "Billing jobs (renewals, trial conversions, overdue marking) run automatically "
+    "on the platform scheduler for all organizations.",
+}
+
+
+def supported_schedule_target_actions() -> List[str]:
+    return sorted(set(SCHEDULE_TARGET_ACTIONS) | set(SCHEDULER_MANAGED_TARGET_ACTIONS))
+
+
+def _validate_schedule_definition(target_action: Optional[str], cron_expression: Optional[str]) -> None:
+    if target_action is not None and target_action not in supported_schedule_target_actions():
+        raise ValidationAppError(
+            f"Unsupported target action '{target_action}'. Supported: {', '.join(supported_schedule_target_actions())}.",
+            {"fields": {"target_action": "unsupported"}},
+        )
+    if cron_expression and cron_expression.strip():
+        _cron_next(cron_expression, utcnow())
 
 
 def list_schedules(db: Session, organization_id: str) -> List[AutomationSchedule]:
@@ -839,6 +1363,7 @@ def get_schedule(db: Session, schedule_id: str, organization_id: str) -> Automat
 
 
 def create_schedule(db: Session, organization_id: str, data: AutomationScheduleCreate) -> AutomationSchedule:
+    _validate_schedule_definition(data.target_action, data.cron_expression)
     now = utcnow()
     schedule = AutomationSchedule(
         organization_id=organization_id,
@@ -849,7 +1374,7 @@ def create_schedule(db: Session, organization_id: str, data: AutomationScheduleC
         target_action=data.target_action,
         status=data.status,
         is_active=data.is_active,
-        next_date=compute_next_schedule_date(data.frequency, now),
+        next_date=compute_next_schedule_date(data.frequency, now, data.cron_expression),
     )
     db.add(schedule)
     db.flush()
@@ -859,10 +1384,13 @@ def create_schedule(db: Session, organization_id: str, data: AutomationScheduleC
 def update_schedule(db: Session, schedule_id: str, organization_id: str, data: AutomationScheduleUpdate) -> AutomationSchedule:
     schedule = get_schedule(db, schedule_id, organization_id)
     payload = data.model_dump(exclude_unset=True)
+    _validate_schedule_definition(payload.get("target_action"), payload.get("cron_expression"))
     for key, value in payload.items():
         setattr(schedule, key, value)
-    if "frequency" in payload and schedule.next_date:
-        schedule.next_date = compute_next_schedule_date(schedule.frequency, schedule.last_executed_on or utcnow())
+    if "frequency" in payload or "cron_expression" in payload or not schedule.next_date:
+        schedule.next_date = compute_next_schedule_date(
+            schedule.frequency, schedule.last_executed_on or utcnow(), schedule.cron_expression
+        )
     db.flush()
     return schedule
 
@@ -873,32 +1401,129 @@ def delete_schedule(db: Session, schedule_id: str, organization_id: str) -> None
     db.flush()
 
 
+def execute_schedule(db: Session, schedule: AutomationSchedule, now: Optional[datetime] = None) -> Dict[str, Any]:
+    """Runs a schedule's target action, advances last/next run and writes an automation log.
+
+    Returns ``{"target_action", "executed", "status", ...}``; ``executed`` is True only when the
+    action actually ran successfully.
+    """
+    now = now or utcnow()
+    target = schedule.target_action
+    status = AutomationLogStatus.SUCCESS
+    error: Optional[str] = None
+    result: Dict[str, Any] = {"target_action": target}
+
+    handler = SCHEDULE_TARGET_ACTIONS.get(target)
+    if handler is not None:
+        try:
+            result["details"] = _jsonable(handler(db, schedule.organization_id))
+        except Exception as exc:  # noqa: BLE001 - recorded on the log, schedule keeps running
+            logger.exception("Automation schedule %s (%s) failed", schedule.id, target)
+            status = AutomationLogStatus.FAILED
+            error = f"{type(exc).__name__}: {exc}"
+    elif target in SCHEDULER_MANAGED_TARGET_ACTIONS:
+        status = AutomationLogStatus.SKIPPED
+        result["reason"] = "managed_by_platform_scheduler"
+        result["message"] = SCHEDULER_MANAGED_TARGET_ACTIONS[target]
+    else:
+        status = AutomationLogStatus.FAILED
+        error = f"unsupported_target_action: '{target}'"
+
+    result["executed"] = status == AutomationLogStatus.SUCCESS
+    result["status"] = status.value
+    if error:
+        result["error"] = error
+
+    schedule.last_executed_on = now
+    schedule.next_date = compute_next_schedule_date(schedule.frequency, now, schedule.cron_expression)
+    db.add(
+        AutomationLog(
+            organization_id=schedule.organization_id,
+            action_type="schedule",
+            name=schedule.name,
+            entity_type="automation_schedule",
+            entity_id=schedule.id,
+            status=status,
+            details=result,
+            error_message=error[:500] if error else None,
+        )
+    )
+    db.flush()
+    return result
+
+
 def trigger_schedule(db: Session, schedule_id: str, organization_id: str) -> ScheduleTriggerResponse:
-    """Executes a schedule's target action and advances next_date per its frequency."""
+    """Executes a schedule's target action now and advances next_date per its definition."""
     schedule = get_schedule(db, schedule_id, organization_id)
     if not schedule.is_active or schedule.status != "active":
         raise ValidationAppError("Cannot trigger an inactive or paused schedule.")
 
     now = utcnow()
-    schedule.last_executed_on = now
-    schedule.next_date = compute_next_schedule_date(schedule.frequency, now)
-
-    result = {"target_action": schedule.target_action, "executed": True}
-    log = AutomationLog(
-        organization_id=organization_id,
-        action_type="schedule",
-        name=schedule.name,
-        entity_type="automation_schedule",
-        entity_id=schedule.id,
-        status=AutomationLogStatus.SUCCESS,
-        details=result,
-    )
-    db.add(log)
-    db.flush()
-
+    result = execute_schedule(db, schedule, now)
     return ScheduleTriggerResponse(
         schedule_id=schedule.id,
         executed_at=now,
         target_action=schedule.target_action,
         result=result,
     )
+
+
+def run_due_automation_schedules(db: Session, limit: int = 50) -> int:
+    """Runs every active schedule whose ``next_date`` has passed (called by the scheduler).
+
+    Each schedule is claimed by advancing ``next_date`` under a row lock (SKIP LOCKED on
+    PostgreSQL) and committed before running, so concurrent workers never double-run it.
+    Schedules without a ``next_date`` get one computed and run on their next due time.
+    Returns the number of schedules executed.
+    """
+    now = utcnow()
+    # Backfill missing next_date so legacy rows become schedulable.
+    for schedule in db.scalars(
+        select(AutomationSchedule).where(
+            AutomationSchedule.is_active.is_(True),
+            AutomationSchedule.status == "active",
+            AutomationSchedule.next_date.is_(None),
+        )
+    ).all():
+        try:
+            schedule.next_date = compute_next_schedule_date(schedule.frequency, now, schedule.cron_expression)
+        except ValidationAppError:
+            schedule.next_date = compute_next_schedule_date(schedule.frequency, now)
+    db.commit()
+
+    stmt = (
+        select(AutomationSchedule)
+        .where(
+            AutomationSchedule.is_active.is_(True),
+            AutomationSchedule.status == "active",
+            AutomationSchedule.next_date <= now,
+        )
+        .order_by(AutomationSchedule.next_date.asc())
+        .limit(limit)
+    )
+    bind = db.get_bind()
+    if bind is not None and bind.dialect.name == "postgresql":
+        stmt = stmt.with_for_update(skip_locked=True)
+    due = list(db.scalars(stmt).all())
+    claimed: List[str] = []
+    for schedule in due:
+        try:
+            schedule.next_date = compute_next_schedule_date(schedule.frequency, now, schedule.cron_expression)
+        except ValidationAppError:
+            schedule.next_date = compute_next_schedule_date(schedule.frequency, now)
+        claimed.append(schedule.id)
+    db.commit()
+
+    executed = 0
+    for schedule_id in claimed:
+        schedule = db.get(AutomationSchedule, schedule_id)
+        if schedule is None:
+            continue
+        try:
+            execute_schedule(db, schedule, utcnow())
+            db.commit()
+            executed += 1
+        except Exception:  # noqa: BLE001 - one broken schedule must not block the rest
+            logger.exception("Automation schedule %s could not be executed", schedule_id)
+            db.rollback()
+    return executed

@@ -37,6 +37,9 @@ class SubscriptionUpdate(BaseModel):
 
 class SubscriptionCancelIn(BaseModel):
     at_period_end: bool = False
+    # Immediate cancellation only: issue a credit note for the unused, already-invoiced
+    # remainder of the current period.
+    prorate_credit: bool = False
     reason: Optional[str] = Field(default=None, max_length=500)
 
 

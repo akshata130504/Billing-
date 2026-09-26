@@ -10,7 +10,7 @@ from backend.app.api.deps import CurrentContext, get_db, require_admin, require_
 from backend.app.core.exceptions import UnauthorizedError, ValidationAppError
 from backend.app.core.rate_limit import auth_rate_limit, limiter, public_rate_limit
 from backend.app.models.customers import Customer
-from backend.app.models.invoices import Invoice
+from backend.app.models.invoices import Invoice, InvoiceStatus
 from backend.app.models.identity import Organization
 from backend.app.models.payments import (
     CustomerPaymentMethod,
@@ -31,6 +31,7 @@ from backend.app.schemas.portal import (
     PortalDashboardOut,
     PortalInvitationValidateOut,
     PortalLoginIn,
+    PortalProfileUpdateIn,
     PortalSignupIn,
     PortalUserOut,
 )
@@ -191,6 +192,7 @@ def list_portal_invoices(
             .where(
                 Invoice.organization_id == user.organization_id,
                 Invoice.customer_id == user.customer_id,
+                Invoice.status != InvoiceStatus.DRAFT,  # drafts are internal until issued
             )
             .order_by(desc(Invoice.issue_date))
         ).all()
@@ -231,6 +233,7 @@ def download_signed_invoice_pdf(
             Invoice.id == inv_id,
             Invoice.organization_id == org_id,
             Invoice.customer_id == cust_id,
+            Invoice.status != InvoiceStatus.DRAFT,
         )
     ).first()
     if not invoice:
@@ -258,6 +261,7 @@ def get_portal_invoice(
             Invoice.id == invoice_id,
             Invoice.organization_id == user.organization_id,
             Invoice.customer_id == user.customer_id,
+            Invoice.status != InvoiceStatus.DRAFT,
         )
     ).first()
     if not invoice:
@@ -309,6 +313,7 @@ def download_portal_invoice_pdf(
             Invoice.id == invoice_id,
             Invoice.organization_id == user.organization_id,
             Invoice.customer_id == user.customer_id,
+            Invoice.status != InvoiceStatus.DRAFT,
         )
     ).first()
     if not invoice:
@@ -335,6 +340,7 @@ def get_signed_invoice_download_url(
             Invoice.id == invoice_id,
             Invoice.organization_id == user.organization_id,
             Invoice.customer_id == user.customer_id,
+            Invoice.status != InvoiceStatus.DRAFT,
         )
     ).first()
     if not invoice:
@@ -406,6 +412,63 @@ def list_portal_payment_methods(
     ]
 
 
+@router.patch("/payment-methods/{method_id}/default", summary="Set default payment method from customer portal")
+def set_default_portal_payment_method(
+    method_id: str,
+    user: CustomerPortalUser = Depends(get_current_portal_user),
+    db: Session = Depends(get_db),
+):
+    from backend.app.services import payment_method_service
+
+    pm = db.scalars(
+        select(CustomerPaymentMethod).where(
+            CustomerPaymentMethod.id == method_id,
+            CustomerPaymentMethod.organization_id == user.organization_id,
+            CustomerPaymentMethod.customer_id == user.customer_id,
+            CustomerPaymentMethod.status == CustomerPaymentMethodStatus.ACTIVE,
+        )
+    ).first()
+    if not pm:
+        raise HTTPException(status_code=404, detail="Payment method not found.")
+
+    payment_method_service.set_default_payment_method(
+        db=db,
+        organization_id=user.organization_id,
+        customer_id=user.customer_id,
+        payment_method_id=pm.id,
+    )
+    db.commit()
+    return {"status": "success", "message": "Default payment method updated."}
+
+
+@router.delete("/payment-methods/{method_id}", summary="Remove saved payment method from customer portal")
+def delete_portal_payment_method(
+    method_id: str,
+    user: CustomerPortalUser = Depends(get_current_portal_user),
+    db: Session = Depends(get_db),
+):
+    from backend.app.services import payment_method_service
+
+    pm = db.scalars(
+        select(CustomerPaymentMethod).where(
+            CustomerPaymentMethod.id == method_id,
+            CustomerPaymentMethod.organization_id == user.organization_id,
+            CustomerPaymentMethod.customer_id == user.customer_id,
+        )
+    ).first()
+    if not pm:
+        raise HTTPException(status_code=404, detail="Payment method not found.")
+
+    payment_method_service.revoke_payment_method(
+        db=db,
+        organization_id=user.organization_id,
+        payment_method_id=pm.id,
+    )
+    db.commit()
+    return {"status": "success", "message": "Payment method removed successfully."}
+
+
+
 @router.get("/payments", response_model=List[Dict[str, Any]], summary="Customer portal payment history")
 def list_portal_payments(
     user: CustomerPortalUser = Depends(get_current_portal_user),
@@ -456,6 +519,10 @@ def customer_portal_extend_trial(
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found for this customer.")
 
+    denial = customer_portal_service.portal_trial_extension_denial(db, sub)
+    if denial:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=denial)
+
     tp = trial_service.extend_trial(
         db,
         sub,
@@ -487,6 +554,13 @@ def customer_portal_convert_trial(
     ).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found for this customer.")
+
+    portal_settings = customer_portal_service.get_or_create_portal_settings(db, user.organization_id)
+    if not portal_settings.trials_activate_immediately:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Early trial conversion is disabled; your subscription activates automatically when the trial ends.",
+        )
 
     sub, invoice, attempt, succeeded, message = trial_service.convert_trial_to_live(
         db,
@@ -555,3 +629,60 @@ def get_portal_profile(
         ],
     }
 
+
+@router.patch("/profile", response_model=Dict[str, Any], summary="Update customer portal profile contact information")
+def update_portal_profile(
+    data: PortalProfileUpdateIn,
+    user: CustomerPortalUser = Depends(get_current_portal_user),
+    db: Session = Depends(get_db),
+):
+    cust = db.scalars(
+        select(Customer)
+        .options(selectinload(Customer.contacts))
+        .where(
+            Customer.id == user.customer_id,
+            Customer.organization_id == user.organization_id,
+        )
+    ).first()
+    if not cust:
+        raise HTTPException(status_code=404, detail="Customer not found.")
+
+    # Update allowed safe customer fields
+    if data.display_name is not None:
+        cust.display_name = data.display_name
+    if data.email is not None:
+        cust.email = str(data.email)
+    if data.phone is not None:
+        cust.phone = data.phone
+    if data.website is not None:
+        cust.website = data.website
+    if data.billing_address_line1 is not None:
+        cust.billing_address_line1 = data.billing_address_line1
+    if data.billing_address_line2 is not None:
+        cust.billing_address_line2 = data.billing_address_line2
+    if data.billing_city is not None:
+        cust.billing_city = data.billing_city
+    if data.billing_state is not None:
+        cust.billing_state = data.billing_state
+    if data.billing_postal_code is not None:
+        cust.billing_postal_code = data.billing_postal_code
+    if data.billing_country is not None:
+        cust.billing_country = data.billing_country
+    if data.shipping_address_line1 is not None:
+        cust.shipping_address_line1 = data.shipping_address_line1
+    if data.shipping_address_line2 is not None:
+        cust.shipping_address_line2 = data.shipping_address_line2
+    if data.shipping_city is not None:
+        cust.shipping_city = data.shipping_city
+    if data.shipping_state is not None:
+        cust.shipping_state = data.shipping_state
+    if data.shipping_postal_code is not None:
+        cust.shipping_postal_code = data.shipping_postal_code
+    if data.shipping_country is not None:
+        cust.shipping_country = data.shipping_country
+
+    if data.user_display_name is not None:
+        user.display_name = data.user_display_name
+
+    db.commit()
+    return get_portal_profile(user=user, db=db)

@@ -5,6 +5,7 @@ AUTH LOGIN/PLAIN, MAIL FROM, RCPT TO, DATA, RSET, QUIT).
 Logs received emails to stdout.
 """
 import asyncio
+import re
 import sys
 
 
@@ -28,7 +29,13 @@ class LocalSMTPServer:
                 if line == b".\r\n" or line == b".\n":
                     in_data = False
                     raw_message = b"".join(data_buffer).decode("utf-8", errors="replace")
-                    print(f"[SMTP Server] Delivered message ({len(raw_message)} bytes)", flush=True)
+                    otp_match = re.search(r"(?:verification code is:\s*|otp-box\">)(\d{6})", raw_message)
+                    to_match = re.search(r"To:\s*([^\r\n]+)", raw_message)
+                    to_email = to_match.group(1).strip() if to_match else "unknown"
+                    if otp_match:
+                        print(f"[SMTP Server] ✉️  OTP for {to_email}: >>> {otp_match.group(1)} <<<", flush=True)
+                    else:
+                        print(f"[SMTP Server] Delivered message to {to_email} ({len(raw_message)} bytes)", flush=True)
                     writer.write(b"250 2.0.0 Ok: message queued for delivery\r\n")
                     await writer.drain()
                     data_buffer = []

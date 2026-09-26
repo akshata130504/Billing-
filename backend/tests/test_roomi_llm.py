@@ -489,3 +489,49 @@ def test_roomi_sidebar_section_question_is_grounded_not_guessed(client, tenant, 
     assert "Projects" in reply
     assert "Timesheets" in reply
     assert "Subscription" not in reply
+
+
+def test_roomi_gemini_key_sent_in_header_not_url(monkeypatch):
+    from unittest.mock import MagicMock
+    from backend.app.services.roomi_service import _call_gemini
+
+    ctx = MagicMock()
+    ctx.role.value = "admin"
+    ctx.user.full_name = "Admin User"
+    ctx.organization.name = "Acme Org"
+    ctx.organization_id = "org-1"
+    seen = {}
+
+    class Ok:
+        status_code = 200
+
+        def json(self):
+            return {"candidates": [{"content": {"parts": [{"text": "hello"}]}}]}
+
+    def fake_post(self, url, *args, **kwargs):
+        seen["url"] = url
+        seen["headers"] = kwargs.get("headers") or {}
+        return Ok()
+
+    monkeypatch.setattr(httpx.Client, "post", fake_post)
+    _call_gemini("secret-gemini-key", "test", ctx, {}, [])
+    assert "secret-gemini-key" not in seen["url"]
+    assert "key=" not in seen["url"]
+    assert seen["headers"].get("x-goog-api-key") == "secret-gemini-key"
+
+
+def test_roomi_conversations_are_private_to_their_user(client, tenant, auth_headers, db):
+    from backend.app.models import MemberRole
+
+    first = client.post("/api/v1/chat/roomi", headers=auth_headers, json={"message": "What is our outstanding balance?"})
+    assert first.status_code == 200
+    conv_id = first.json()["conversation_id"]
+
+    other_headers = tenant.headers_for_role(MemberRole.ADMIN)
+    second = client.post(
+        "/api/v1/chat/roomi",
+        headers=other_headers,
+        json={"message": "What is our outstanding balance?", "conversation_id": conv_id},
+    )
+    assert second.status_code == 200
+    assert second.json()["conversation_id"] != conv_id

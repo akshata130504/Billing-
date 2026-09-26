@@ -14,7 +14,7 @@ from backend.app.core.config import settings
 
 
 def rate_limit_key(request: Request) -> str:
-    """Rate limit by the real client address (honours X-Forwarded-For)."""
+    """Rate limit by the real client address (X-Real-IP from our proxy; see deps.client_ip)."""
     return client_ip(request) or "unknown"
 
 

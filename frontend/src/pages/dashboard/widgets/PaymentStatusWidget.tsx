@@ -42,15 +42,15 @@ export function PaymentStatusWidget({ pipeline }: PaymentStatusWidgetProps = {})
   ];
 
   return (
-    <div className="bg-white p-5 rounded-2xl border border-[#E7E9F2] shadow-sm space-y-4">
+    <div className="bg-white p-4 sm:p-5 rounded-2xl border border-[#E7E9F2] shadow-sm space-y-4">
       {/* Header */}
       <h3 className="text-sm font-bold text-[#11194F] tracking-tight">
         Payment Status
       </h3>
 
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col min-[360px]:flex-row items-center justify-between gap-3 sm:gap-4">
         {/* SVG Donut Chart */}
-        <div className="relative w-36 h-36 shrink-0 flex items-center justify-center">
+        <div className="relative w-32 h-32 sm:w-36 sm:h-36 shrink-0 flex items-center justify-center">
           <svg
             viewBox="0 0 130 130"
             className="w-full h-full -rotate-90 transform"

@@ -54,8 +54,8 @@ class LineItemIn(BaseModel):
     product_id: Optional[str] = None
     plan_id: Optional[str] = None
     description: str = Field(..., min_length=1, max_length=500)
-    quantity: Decimal = Field(default=Decimal("1"), gt=Decimal("0"))
-    unit_price: Decimal = Field(default=Decimal("0"), ge=Decimal("0"))
+    quantity: Decimal = Field(default=Decimal("1"), gt=Decimal("0"), le=Decimal("999999999"))
+    unit_price: Decimal = Field(default=Decimal("0"), ge=Decimal("0"), le=Decimal("999999999999.99"))
     tax_rate_pct: Decimal = Field(default=Decimal("0"), ge=Decimal("0"), le=Decimal("100"))
     pricing_explanation: Optional[str] = None
 

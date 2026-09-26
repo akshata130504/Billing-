@@ -19,7 +19,6 @@ import type {
   MeUser,
   MemberRole,
   OrganizationOut,
-  SignupRequest,
 } from '../types/api';
 
 const ROLE_RANK: Record<MemberRole, number> = {
@@ -34,6 +33,11 @@ export function roleAtLeast(role: MemberRole | null | undefined, min: MemberRole
   return ROLE_RANK[role] >= ROLE_RANK[min];
 }
 
+/** Result of the password step: signed in, or a TOTP code is still needed (2FA accounts). */
+export type LoginOutcome =
+  | { status: 'signed_in'; me: MeResponse }
+  | { status: 'mfa_required'; mfaToken: string };
+
 export interface AuthContextValue {
   user: MeUser | null;
   organization: OrganizationOut | null;
@@ -42,8 +46,9 @@ export interface AuthContextValue {
   isAuthenticated: boolean;
   /** True while the initial GET /auth/me (or an org switch) is in flight. */
   isLoading: boolean;
-  login: (body: LoginRequest) => Promise<MeResponse>;
-  signup: (body: SignupRequest) => Promise<MeResponse>;
+  login: (body: LoginRequest) => Promise<LoginOutcome>;
+  /** Second step of a two-factor sign-in. */
+  completeMfaLogin: (mfaToken: string, code: string) => Promise<MeResponse>;
   logout: () => Promise<void>;
   switchOrganization: (organizationId: string) => Promise<MeResponse>;
   refreshMe: () => Promise<MeResponse | null>;
@@ -115,23 +120,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const login = useCallback(
-    async (body: LoginRequest): Promise<MeResponse> => {
-      const tokens = await authService.login(body);
+    async (body: LoginRequest): Promise<LoginOutcome> => {
+      const result = await authService.login(body);
+      if (result.mfa_required) {
+        return { status: 'mfa_required', mfaToken: result.mfa_token };
+      }
+      return { status: 'signed_in', me: await applyTokens(result) };
+    },
+    [applyTokens]
+  );
+
+  const completeMfaLogin = useCallback(
+    async (mfaToken: string, code: string): Promise<MeResponse> => {
+      const tokens = await authService.loginMfa(mfaToken, code);
       return applyTokens(tokens);
     },
     [applyTokens]
   );
 
-  const signup = useCallback(
-    async (body: SignupRequest): Promise<MeResponse> => {
-      const response = await authService.signup(body);
-      tokenStorage.set(response);
-      queryClient.clear();
-      if (mounted.current) setMe(response.me);
-      return response.me;
-    },
-    [queryClient]
-  );
+  // Signup is not exposed here: accounts are only created through the email-verified OTP
+  // flow (authService.requestSignupVerification + verifySignupOtp, then applyTokens) that
+  // SignupPage drives. The unverified POST /auth/signup endpoint was removed (410 Gone).
 
   const logout = useCallback(async (): Promise<void> => {
     const refreshToken = tokenStorage.getRefreshToken();
@@ -176,14 +185,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: me !== null,
       isLoading,
       login,
-      signup,
+      completeMfaLogin,
       logout,
       switchOrganization,
       refreshMe,
       applyTokens,
       hasRole,
     }),
-    [me, isLoading, login, signup, logout, switchOrganization, refreshMe, applyTokens, hasRole]
+    [me, isLoading, login, completeMfaLogin, logout, switchOrganization, refreshMe, applyTokens, hasRole]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

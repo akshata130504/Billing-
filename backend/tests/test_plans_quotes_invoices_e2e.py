@@ -264,12 +264,24 @@ def test_6_to_8_quote_lifecycle_and_conversion_to_invoice(db: Session, org_and_u
     quote = quote_service.send_quote(db, ctx, quote.id)
     assert quote.status == QuoteStatus.PENDING_APPROVAL
 
-    # Approve
-    quote = quote_service.approve_quote(db, ctx, quote.id)
-    assert quote.status == QuoteStatus.APPROVED
+    # The requester cannot approve their own discount request
+    from backend.app.core.exceptions import ForbiddenError
 
-    # Now Send approved quote
-    quote = quote_service.send_quote(db, ctx, quote.id)
+    with pytest.raises(ForbiddenError):
+        quote_service.approve_quote(db, ctx, quote.id)
+
+    # Another admin approves -> routed through approval_service, which sends the quote
+    reviewer = User(email=f"reviewer_{uuid.uuid4().hex[:8]}@example.com", full_name="Reviewer", is_active=True)
+    db.add(reviewer)
+    db.flush()
+    reviewer_membership = Membership(organization_id=org.id, user_id=reviewer.id, role="admin", status="active")
+    db.add(reviewer_membership)
+    db.commit()
+    db.refresh(reviewer_membership)
+    reviewer_ctx = CurrentContext(
+        user=reviewer, organization=org, membership=reviewer_membership, ip_address=None, user_agent=None
+    )
+    quote = quote_service.approve_quote(db, reviewer_ctx, quote.id)
     assert quote.status == QuoteStatus.SENT
 
     # Mark viewed

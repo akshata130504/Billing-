@@ -73,6 +73,9 @@ class Expense(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
     receipt_file_name = Column(String(255), nullable=True)
     receipt_file_size = Column(String(50), nullable=True)
     receipt_file_type = Column(String(50), nullable=True)
+    # Server-generated file name of the uploaded receipt in the private upload store
+    # (never the client's file name; never served statically).
+    receipt_storage_key = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
 
     customer = relationship("Customer")

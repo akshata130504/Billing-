@@ -44,13 +44,18 @@ from backend.app.schemas.trials import (
     TrialReportPlanStat,
     TrialReportsOut,
 )
-from backend.app.services import audit
+from backend.app.services import audit, payment_service, razorpay_gateway
 from backend.app.services.gateways.registry import get_gateway_adapter
 from backend.app.services.notification_service import dispatch_notification
 from backend.app.services.numbering import next_number
 from backend.app.services.subscription_service import (
+    apply_plan_terms,
+    convert_trial,
+    end_cancelled_trial,
     generate_period_invoice,
+    interval_months,
     period_end_for,
+    period_invoice_exists,
     snapshot,
 )
 
@@ -287,11 +292,64 @@ def convert_trial_to_live(
                 "invoice_id": invoice.id,
             },
             idempotency_key=f"trial_conv_{subscription.id}_{invoice.id}",
+            credentials=razorpay_gateway.credentials_for(db, subscription.organization_id),
+            gateway_customer_id=getattr(pm, "gateway_customer_id", None),
+            email=subscription.customer.email if subscription.customer else None,
+            contact=subscription.customer.phone if subscription.customer else None,
+            description=f"Invoice {invoice.invoice_number}",
         )
 
-        charge_success = bool(gateway_result and gateway_result.success and gateway_result.gateway_payment_id)
+        # A pending charge (accepted, capture not yet confirmed) must NOT settle the
+        # invoice: it stays open and the payment.captured webhook settles it.
+        charge_pending = bool(gateway_result and getattr(gateway_result, "pending", False))
+        charge_success = bool(
+            gateway_result and gateway_result.success and gateway_result.gateway_payment_id
+        ) and not charge_pending
 
-        if charge_success:
+        if charge_pending:
+            payment_attempt = PaymentAttempt(
+                organization_id=subscription.organization_id,
+                customer_id=subscription.customer_id,
+                invoice_id=invoice.id,
+                customer_payment_method_id=pm.id,
+                amount=invoice.amount_due,
+                currency=invoice.currency or "INR",
+                gateway=pm.gateway,
+                status=PaymentAttemptStatus.PENDING,
+                gateway_attempt_reference=gateway_result.gateway_payment_id or gateway_result.gateway_order_id,
+                payload=gateway_result.raw_payload,
+            )
+            db.add(payment_attempt)
+            db.flush()
+            # PENDING payment keyed on the order id: the payment.captured webhook settles
+            # the invoice. Never mark it paid here.
+            payment_service.record_gateway_charge(
+                db,
+                invoice=invoice,
+                amount=invoice.amount_due,
+                gateway=pm.gateway,
+                gateway_payment_id=gateway_result.gateway_payment_id,
+                gateway_order_id=gateway_result.gateway_order_id,
+                pending=True,
+                payload=gateway_result.raw_payload,
+                notes=f"Trial conversion charge for {subscription.subscription_number}",
+                actor_label=actor_label,
+            )
+            db.add(
+                TrialConversionAttempt(
+                    organization_id=subscription.organization_id,
+                    trial_period_id=tp.id,
+                    subscription_id=subscription.id,
+                    attempt_type=attempt_type,
+                    status=TrialConversionStatus.PENDING,
+                    payment_method_id=pm.id,
+                    payment_attempt_id=payment_attempt.id,
+                    invoice_id=invoice.id,
+                )
+            )
+            payment_succeeded = False
+            message = "Trial converted; the first invoice stays open until the gateway confirms the payment."
+        elif charge_success:
             payment_attempt = PaymentAttempt(
                 organization_id=subscription.organization_id,
                 customer_id=subscription.customer_id,
@@ -307,34 +365,21 @@ def convert_trial_to_live(
             db.add(payment_attempt)
             db.flush()
 
-            pay_num = next_number(db, subscription.organization_id, "payment")
-            payment = Payment(
-                organization_id=subscription.organization_id,
-                payment_number=pay_num,
-                customer_id=subscription.customer_id,
+            # Captured synchronously: record + allocate through the payment service so
+            # allocations, reconciliation, invoice status and audit stay consistent.
+            payment_service.record_gateway_charge(
+                db,
+                invoice=invoice,
                 amount=invoice.amount_due,
-                currency=invoice.currency or "INR",
-                paid_at=utcnow(),
-                method=PaymentMethod.CARD,
                 gateway=pm.gateway,
                 gateway_payment_id=gateway_result.gateway_payment_id,
-                status=PaymentStatus.SUCCEEDED,
-                reconciliation_status=ReconciliationStatus.AUTO_MATCHED,
+                gateway_order_id=gateway_result.gateway_order_id,
+                pending=False,
+                payload=gateway_result.raw_payload,
+                notes=f"Trial conversion charge for {subscription.subscription_number}",
+                actor_label=actor_label,
             )
-            db.add(payment)
-            db.flush()
-
-            allocation = PaymentAllocation(
-                organization_id=subscription.organization_id,
-                payment_id=payment.id,
-                invoice_id=invoice.id,
-                amount=invoice.amount_due,
-            )
-            db.add(allocation)
-
-            invoice.amount_paid = invoice.total
-            invoice.amount_due = Decimal("0.00")
-            invoice.status = InvoiceStatus.PAID
+            db.refresh(invoice)
             payment_succeeded = True
             message = "Trial converted to active subscription and invoice payment successfully captured."
 
@@ -386,6 +431,9 @@ def convert_trial_to_live(
                 subscription.status = SubscriptionStatus.TRIALING
                 tp.status = TrialPeriodStatus.ACTIVE
                 raise ValidationAppError(f"Card charge failed: {payment_attempt.failure_reason}")
+            # Trial is over but the first invoice is unpaid: past_due (dunning takes
+            # over), never active-without-payment.
+            subscription.status = SubscriptionStatus.PAST_DUE
     else:
         attempt_record = TrialConversionAttempt(
             organization_id=subscription.organization_id,
@@ -440,17 +488,28 @@ def move_to_fallback_plan(
     actor_label: str = audit.SYSTEM_ACTOR,
 ) -> Subscription:
     """Moves an expired/ending trial to a configured Free or fallback Plan."""
+    if subscription.status not in (SubscriptionStatus.TRIALING, SubscriptionStatus.TRIAL_EXPIRED):
+        raise ValidationAppError(
+            f"Only trialing or trial-expired subscriptions can move to a fallback plan; this one is {subscription.status.value}."
+        )
     tp = get_or_create_trial_period(db, subscription)
     target_plan_id = fallback_plan_id or tp.fallback_plan_id
 
     target_plan: Optional[Plan] = None
     if target_plan_id:
-        target_plan = db.scalars(select(Plan).where(Plan.id == target_plan_id)).first()
+        # Scoped to the subscription's organization: an unscoped lookup let any tenant
+        # move a subscription onto another organization's plan by id.
+        target_plan = db.scalars(
+            select(Plan).where(Plan.id == target_plan_id, Plan.organization_id == subscription.organization_id)
+        ).first()
+        if target_plan is None:
+            raise NotFoundAppError(f"Fallback plan {target_plan_id} not found.")
 
     if not target_plan:
         # Check if product has a free plan (unit_amount == 0)
         target_plan = db.scalars(
             select(Plan).where(
+                Plan.organization_id == subscription.organization_id,
                 Plan.product_id == subscription.plan.product_id,
                 Plan.unit_amount == 0,
                 Plan.is_active.is_(True),
@@ -459,16 +518,29 @@ def move_to_fallback_plan(
 
     if not target_plan:
         raise ValidationAppError("No fallback or free plan found for this subscription.")
+    if not target_plan.is_active:
+        raise ValidationAppError("The fallback plan is inactive.")
+    sub_currency = (subscription.currency or subscription.plan.currency or "").upper()
+    if (target_plan.currency or "").upper() != sub_currency:
+        raise ValidationAppError(
+            f"The fallback plan is priced in {target_plan.currency}, but this subscription bills in {sub_currency}."
+        )
+    interval_months(target_plan)  # 422 for one-time plans
 
     before = snapshot(subscription)
     today = date.today()
 
-    subscription.plan_id = target_plan.id
+    # Plan, item and a fresh price snapshot move together so renewals bill the fallback plan.
+    apply_plan_terms(db, subscription, target_plan, int(subscription.quantity or 1))
     subscription.status = SubscriptionStatus.ACTIVE
     subscription.current_period_start = today
     subscription.current_period_end = period_end_for(today, target_plan, today.day)
     subscription.next_billing_date = subscription.current_period_end
     subscription.updated_at = utcnow()
+    db.flush()
+    if Decimal(str(target_plan.unit_amount or 0)) > 0 and not period_invoice_exists(db, subscription):
+        # A paid fallback plan bills its first period like any activation.
+        generate_period_invoice(db, subscription, actor_label=actor_label)
 
     tp.status = TrialPeriodStatus.CONVERTED
     tp.notes = f"Automatically moved to fallback free plan: {target_plan.code}"
@@ -489,13 +561,87 @@ def move_to_fallback_plan(
     return subscription
 
 
+def _void_unpaid_invoice(invoice: Optional[Invoice], reason: str) -> None:
+    if invoice is None or invoice.status == InvoiceStatus.VOID or Decimal(str(invoice.amount_paid or 0)) > 0:
+        return
+    invoice.status = InvoiceStatus.VOID
+    invoice.voided_at = utcnow()
+    invoice.void_reason = reason
+    invoice.amount_due = Decimal("0.00")
+    invoice.updated_at = utcnow()
+
+
+def _evaluate_ended_trial(db: Session, sub: Subscription) -> str:
+    """Apply the end-of-trial rules to one subscription; returns the stats bucket."""
+    tp = get_or_create_trial_period(db, sub)
+
+    if sub.cancel_at_period_end:
+        end_cancelled_trial(db, sub)
+        db.add(
+            OutboxEvent(
+                organization_id=sub.organization_id,
+                event_type=DomainEventType.TRIAL_EXPIRED,
+                aggregate_type="subscription",
+                aggregate_id=sub.id,
+                payload={"subscription_id": sub.id, "reason": "cancel_at_period_end"},
+                status=OutboxStatus.PENDING,
+            )
+        )
+        return "cancelled"
+
+    pm = db.scalars(
+        select(CustomerPaymentMethod).where(
+            CustomerPaymentMethod.customer_id == sub.customer_id,
+            CustomerPaymentMethod.is_default.is_(True),
+            CustomerPaymentMethod.status == CustomerPaymentMethodStatus.ACTIVE,
+        )
+    ).first()
+
+    if pm and tp.auto_charge_enabled:
+        sub, inv, _pa, success, _msg = convert_trial_to_live(
+            db,
+            sub,
+            payment_method_id=pm.id,
+            attempt_type=TrialConversionAttemptType.AUTOMATIC_TRIAL_END,
+        )
+        if success or sub.status == SubscriptionStatus.ACTIVE:
+            # Paid, pending gateway confirmation, or nothing to charge.
+            return "converted"
+        if tp.fallback_plan_id:
+            _void_unpaid_invoice(inv, "Trial conversion charge failed; moved to fallback plan")
+            sub.status = SubscriptionStatus.TRIAL_EXPIRED
+            move_to_fallback_plan(db, sub, fallback_plan_id=tp.fallback_plan_id)
+            return "fallback"
+        return "past_due"
+
+    if tp.fallback_plan_id:
+        move_to_fallback_plan(db, sub, fallback_plan_id=tp.fallback_plan_id)
+        return "fallback"
+
+    # No card on file: go live and issue the first invoice for manual payment.
+    convert_trial(db, sub, actor_label=audit.SYSTEM_ACTOR)
+    return "converted"
+
+
 def evaluate_expiring_trials(
     db: Session,
     *,
     today: Optional[date] = None,
     org_id: Optional[str] = None,
+    commit: bool = False,
 ) -> Dict[str, int]:
-    """Evaluates trials that have ended or are approaching expiry."""
+    """Evaluates trials that have ended or are approaching expiry.
+
+    Each ended trial is processed in its own savepoint so one failure never rolls back
+    the others; `commit=True` (scheduler) also commits after every subscription.
+    Rules per ended trial:
+      * cancel_at_period_end -> the subscription ends (never converts or charges)
+      * default payment method + auto-charge -> convert and charge; a declined charge
+        moves to the fallback plan if configured, else leaves it past_due with the
+        unpaid first invoice (dunning); a pending charge leaves the invoice open
+      * no payment method -> fallback plan if configured, else convert and issue the
+        first invoice for manual payment
+    """
     today = today or date.today()
     stats = {
         "evaluated": 0,
@@ -503,6 +649,7 @@ def evaluate_expiring_trials(
         "expired": 0,
         "fallback": 0,
         "cancelled": 0,
+        "past_due": 0,
         "reminders_sent": 0,
     }
 
@@ -518,44 +665,18 @@ def evaluate_expiring_trials(
     ended_subs = list(db.scalars(query).all())
     for sub in ended_subs:
         stats["evaluated"] += 1
-        tp = get_or_create_trial_period(db, sub)
-
-        # Check default payment method
-        pm = db.scalars(
-            select(CustomerPaymentMethod).where(
-                CustomerPaymentMethod.customer_id == sub.customer_id,
-                CustomerPaymentMethod.is_default.is_(True),
-                CustomerPaymentMethod.status == CustomerPaymentMethodStatus.ACTIVE,
-            )
-        ).first()
-
-        if pm and tp.auto_charge_enabled:
-            # Payment method on file -> attempt conversion
-            try:
-                sub, inv, pa, success, msg = convert_trial_to_live(
-                    db,
-                    sub,
-                    payment_method_id=pm.id,
-                    attempt_type=TrialConversionAttemptType.AUTOMATIC_TRIAL_END,
-                )
-                if success:
-                    stats["converted"] += 1
-                else:
-                    if tp.fallback_plan_id:
-                        try:
-                            move_to_fallback_plan(db, sub, fallback_plan_id=tp.fallback_plan_id)
-                            stats["fallback"] += 1
-                        except Exception as fb_err:
-                            logger.warning("Fallback plan failed for %s: %s", sub.id, fb_err)
-                            sub.status = SubscriptionStatus.TRIAL_EXPIRED
-                            tp.status = TrialPeriodStatus.EXPIRED
-                            stats["expired"] += 1
-                    else:
-                        sub.status = SubscriptionStatus.TRIAL_EXPIRED
-                        tp.status = TrialPeriodStatus.EXPIRED
-                        stats["expired"] += 1
-            except Exception as e:
-                logger.warning("Automatic trial conversion charge failed for subscription %s: %s", sub.id, e)
+        sub_id = sub.id
+        savepoint = db.begin_nested()
+        try:
+            outcome = _evaluate_ended_trial(db, sub)
+            savepoint.commit()
+            stats[outcome] = stats.get(outcome, 0) + 1
+        except Exception as e:
+            savepoint.rollback()
+            logger.warning("Automatic trial evaluation failed for subscription %s: %s", sub_id, e)
+            sub = db.get(Subscription, sub_id)
+            if sub is not None and sub.status == SubscriptionStatus.TRIALING:
+                tp = get_or_create_trial_period(db, sub)
                 sub.status = SubscriptionStatus.TRIAL_EXPIRED
                 tp.status = TrialPeriodStatus.EXPIRED
                 db.add(
@@ -565,7 +686,7 @@ def evaluate_expiring_trials(
                         subscription_id=sub.id,
                         attempt_type=TrialConversionAttemptType.AUTOMATIC_TRIAL_END,
                         status=TrialConversionStatus.FAILED,
-                        error_message=str(e),
+                        error_message=str(e)[:500],
                     )
                 )
                 db.add(
@@ -574,37 +695,17 @@ def evaluate_expiring_trials(
                         event_type=DomainEventType.TRIAL_EXPIRED,
                         aggregate_type="subscription",
                         aggregate_id=sub.id,
-                        payload={"subscription_id": sub.id, "reason": "auto_charge_failed"},
+                        payload={"subscription_id": sub.id, "reason": "auto_conversion_failed"},
                         status=OutboxStatus.PENDING,
                     )
                 )
                 stats["expired"] += 1
-        else:
-            # No payment method on file
-            if tp.fallback_plan_id:
-                try:
-                    move_to_fallback_plan(db, sub, fallback_plan_id=tp.fallback_plan_id)
-                    stats["fallback"] += 1
-                    continue
-                except Exception as e:
-                    logger.warning("Fallback plan application failed for subscription %s: %s", sub.id, e)
-
-            # Move to cancelled (per Zoho specification for uncharged trial without payment method)
-            sub.status = SubscriptionStatus.CANCELLED
-            sub.cancelled_at = utcnow()
-            tp.status = TrialPeriodStatus.CANCELLED
-            tp.cancelled_at = utcnow()
-            db.add(
-                OutboxEvent(
-                    organization_id=sub.organization_id,
-                    event_type=DomainEventType.TRIAL_EXPIRED,
-                    aggregate_type="subscription",
-                    aggregate_id=sub.id,
-                    payload={"subscription_id": sub.id, "reason": "no_payment_method_cancelled"},
-                    status=OutboxStatus.PENDING,
-                )
-            )
-            stats["cancelled"] += 1
+        if commit:
+            try:
+                db.commit()
+            except Exception:
+                logger.exception("Trial evaluation: commit failed for subscription %s", sub_id)
+                db.rollback()
 
     # 2. Upcoming expiry reminders: 7 days, 3 days, 1 day
     for days_ahead, reminder_code in [(7, "about_to_expire_7d"), (3, "about_to_expire_3d"), (1, "about_to_expire_1d")]:

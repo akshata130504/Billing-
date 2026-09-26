@@ -256,3 +256,68 @@ def test_ai_writing_assistant_and_history(client, tenant, auth_headers, db):
     assert len(history) == 1
     assert history[0]["mode"] == "writing"
     assert history[0]["status"] == "completed"
+
+
+def test_ai_draft_confirm_claim_is_released_when_execution_fails(client, tenant, auth_headers, db, monkeypatch):
+    """The draft is claimed atomically; a failed credit note must not leave it 'executed'."""
+    from backend.app.services import credit_service
+
+    customer = tenant.customer()
+    draft = client.post(
+        "/api/v1/ai/drafts",
+        headers=auth_headers,
+        json={
+            "prompt": "credit",
+            "action_type": "credit_note",
+            "customer_id": customer.id,
+            "reason": "Goodwill",
+            "lines": [{"description": "Credit", "quantity": 1, "unit_price": 10, "tax_rate_pct": 0}],
+        },
+    ).json()["draft"]
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("credit service down")
+
+    monkeypatch.setattr(credit_service, "create_credit_note", boom)
+    try:
+        client.post(f"/api/v1/ai/drafts/{draft['id']}/confirm", headers=auth_headers)
+    except RuntimeError:
+        pass
+    stored = db.get(AIActionDraft, draft["id"])
+    db.refresh(stored)
+    assert stored.status == AIActionDraftStatus.VALIDATED
+
+    monkeypatch.undo()
+    ok = client.post(f"/api/v1/ai/drafts/{draft['id']}/confirm", headers=auth_headers)
+    assert ok.status_code == 200, ok.text
+    assert client.post(f"/api/v1/ai/drafts/{draft['id']}/confirm", headers=auth_headers).status_code == 422
+
+
+def test_ai_mrr_uses_shared_definition(tenant, db):
+    from decimal import Decimal
+
+    from backend.app.models import Subscription, SubscriptionStatus
+    from backend.app.services.ai_service import _tool_mrr_summary
+
+    _, plan = tenant.product_with_plan(unit_amount="1000.00")
+    customer = tenant.customer()
+    today = date.today()
+    db.add(
+        Subscription(
+            organization_id=tenant.organization.id,
+            subscription_number=f"SUB-{uuid.uuid4().hex[:6]}",
+            customer_id=customer.id,
+            plan_id=plan.id,
+            quantity=3,
+            status=SubscriptionStatus.PAST_DUE,
+            unit_price=Decimal("500"),
+            discount_amount=Decimal("100"),
+            start_date=today,
+            current_period_start=today,
+            current_period_end=today + timedelta(days=30),
+        )
+    )
+    db.commit()
+    _, data, _ = _tool_mrr_summary(db, tenant.organization.id)
+    assert data["mrr"] == "1400.00"
+    assert data["active_subscription_count"] == 1

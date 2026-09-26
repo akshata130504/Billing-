@@ -1,6 +1,6 @@
 """Schemas for the control-center read models (contract §10) and admin jobs."""
 from datetime import date, datetime
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -33,6 +33,10 @@ class RevenueBlock(BaseModel):
     mrr: str
     arr: str
     mrr_change_pct: Optional[str] = None
+    # Currency of `mrr`/`arr` (the org's base currency). Subscriptions billed in other
+    # currencies are reported per currency here instead of being summed in.
+    mrr_currency: Optional[str] = None
+    mrr_other_currencies: Dict[str, str] = {}
     trend: List[TrendPoint]
 
 
@@ -55,6 +59,10 @@ class CustomerHealth(BaseModel):
     past_due: int
     paused: int
     cancelled_this_period: int
+    # Logo churn for the selected range: customers lost / customers billing at period start.
+    churned_customers: int = 0
+    customers_at_period_start: int = 0
+    churn_rate: Optional[str] = None
 
 
 class Recovery(BaseModel):
@@ -151,4 +159,6 @@ class JobsRunResult(BaseModel):
     marked_overdue: int
     reminders_sent: int
     recurring_expenses_processed: Optional[int] = 0
+    dunning_recovered: Optional[int] = 0
+    scheduled_changes_applied: Optional[int] = 0
 

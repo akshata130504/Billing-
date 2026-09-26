@@ -1,4 +1,5 @@
 """FastAPI dependencies: database session, authenticated user, tenant context, RBAC."""
+import ipaddress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Optional
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session
 from backend.app.core.database import get_db
 from backend.app.core.exceptions import ForbiddenError, UnauthorizedError
 from backend.app.core.security import decode_access_token
-from backend.app.models import ROLE_RANK, Membership, MemberRole, MembershipStatus, Organization, User
+from backend.app.models import ROLE_RANK, Membership, MemberRole, MembershipStatus, Organization, RefreshToken, User
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -43,11 +44,35 @@ class CurrentContext:
         return ROLE_RANK[self.role] >= ROLE_RANK[minimum]
 
 
+def _is_trusted_proxy_peer(host: str) -> bool:
+    """Our own reverse proxy (the nginx `frontend` container) reaches the API over the private
+    compose network, so only private/loopback peers may vouch for the client address."""
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return addr.is_private or addr.is_loopback
+
+
 def client_ip(request: Request) -> Optional[str]:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else None
+    """The real client address, used for rate limiting, login throttling and audit rows.
+
+    X-Forwarded-For is NOT used: its leftmost entry is whatever the client sent, so anyone could
+    pick their own rate-limit bucket. Instead we read X-Real-IP, which frontend/docker/nginx.conf
+    overwrites on every request with the address nginx itself resolved (the TCP peer, or - when
+    Caddy fronts nginx - Caddy's peer via the realip module). It is only honoured when the
+    request's TCP peer is on a private network (i.e. came through our proxy); a directly exposed
+    API ignores it and uses the socket address.
+    """
+    peer = request.client.host if request.client else None
+    if peer and _is_trusted_proxy_peer(peer):
+        real_ip = (request.headers.get("x-real-ip") or "").strip()
+        if real_ip:
+            try:
+                return str(ipaddress.ip_address(real_ip))
+            except ValueError:
+                pass
+    return peer
 
 
 def get_current_user(
@@ -83,8 +108,19 @@ def get_current_user(
         if token_issued_at < valid_after:
             raise UnauthorizedError("Access token has been revoked.")
 
+    # Access tokens are bound to the refresh-token row ("session") they were issued with.
+    # A session revoked explicitly (logout of one device, DELETE /auth/sessions/{id}, password
+    # change) kills its access token too. Rows revoked by normal rotation (replaced_by_id set)
+    # are not checked so in-flight requests racing a refresh keep working until expiry.
+    session_id = payload.get("sid")
+    if session_id:
+        session = db.get(RefreshToken, session_id)
+        if session is None or (session.revoked_at is not None and session.replaced_by_id is None):
+            raise UnauthorizedError("Access token has been revoked.")
+
     # Stash the org claim so get_current_context can pick the right membership.
     user._token_org_id = payload.get("org")  # type: ignore[attr-defined]
+    user._token_session_id = session_id  # type: ignore[attr-defined]
     return user
 
 

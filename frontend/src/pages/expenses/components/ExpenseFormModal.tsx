@@ -1,8 +1,13 @@
 import { useState, useEffect, ChangeEvent, FormEvent } from 'react';
 import { Expense, ExpenseCategory, PaymentMethod, InvoiceTreatment, ExpenseReceipt } from '../types';
-import { mockCustomers, mockProjectsByCustomer } from '../mockExpenses';
 import { X, UploadCloud, Trash2, FileText, CheckCircle } from 'lucide-react';
 import { validateSensibleName, validatePositiveMoney, validateNonNegativeMoney, parseStrictNumber } from '../../../utils/validation';
+import { CustomerCombobox } from '../../../components/common/CustomerCombobox';
+import { useAuth } from '../../../hooks/useAuth';
+import { useCustomerProjects } from '../useCustomerProjects';
+
+const MAX_RECEIPT_BYTES = 10 * 1024 * 1024;
+const RECEIPT_EXTENSIONS = ['.pdf', '.png', '.jpg', '.jpeg', '.webp'];
 
 interface ExpenseFormModalProps {
   isOpen: boolean;
@@ -46,21 +51,27 @@ export function ExpenseFormModal({
   const [amount, setAmount] = useState<string>('');
   const [currency, setCurrency] = useState('INR');
 
+  const { user } = useAuth();
+  const defaultPaidBy = user?.full_name || '';
+
   // Billing fields
   const [billable, setBillable] = useState(false);
-  const [customer, setCustomer] = useState(mockCustomers[0]);
+  const [customerId, setCustomerId] = useState('');
+  const [customer, setCustomer] = useState('');
+  const [projectId, setProjectId] = useState('');
   const [project, setProject] = useState('');
   const [billableAmount, setBillableAmount] = useState<string>('');
   const [taxRate, setTaxRate] = useState<number>(18);
   const [invoiceTreatment, setInvoiceTreatment] = useState<InvoiceTreatment>('add_to_next_invoice');
 
   // Payment fields
-  const [paidBy, setPaidBy] = useState('Akshata Rathod');
+  const [paidBy, setPaidBy] = useState(defaultPaidBy);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Corporate Card');
   const [notes, setNotes] = useState('');
 
-  // Receipt mock
+  // Receipt: the stored one (from the server) and/or a newly chosen file to upload on save.
   const [receipt, setReceipt] = useState<ExpenseReceipt | undefined>(undefined);
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
 
   // Errors
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -74,7 +85,9 @@ export function ExpenseFormModal({
       setAmount(String(editingExpense.amount));
       setCurrency(editingExpense.currency || 'INR');
       setBillable(editingExpense.billable);
-      setCustomer(editingExpense.customer || mockCustomers[0]);
+      setCustomerId(editingExpense.customerId || '');
+      setCustomer(editingExpense.customer || '');
+      setProjectId(editingExpense.projectId || '');
       setProject(editingExpense.project || '');
       setBillableAmount(editingExpense.billableAmount ? String(editingExpense.billableAmount) : String(editingExpense.amount));
       setTaxRate(editingExpense.taxRate ?? 18);
@@ -83,6 +96,7 @@ export function ExpenseFormModal({
       setPaymentMethod(editingExpense.paymentMethod);
       setNotes(editingExpense.notes || '');
       setReceipt(editingExpense.receipt);
+      setReceiptFile(null);
     } else {
       setName('');
       setDescription('');
@@ -91,18 +105,21 @@ export function ExpenseFormModal({
       setAmount('');
       setCurrency('INR');
       setBillable(false);
-      setCustomer(mockCustomers[0]);
+      setCustomerId('');
+      setCustomer('');
+      setProjectId('');
       setProject('');
       setBillableAmount('');
       setTaxRate(18);
       setInvoiceTreatment('add_to_next_invoice');
-      setPaidBy('Akshata Rathod');
+      setPaidBy(defaultPaidBy);
       setPaymentMethod('Corporate Card');
       setNotes('');
       setReceipt(undefined);
+      setReceiptFile(null);
     }
     setErrors({});
-  }, [editingExpense, isOpen]);
+  }, [editingExpense, isOpen, defaultPaidBy]);
 
   // Update default billableAmount when expense amount changes
   const handleAmountChange = (val: string) => {
@@ -112,19 +129,33 @@ export function ExpenseFormModal({
     }
   };
 
-  // Update project options when customer changes
-  const availableProjects = customer ? (mockProjectsByCustomer[customer] || []) : [];
+  // Real projects of the selected customer
+  const { projects: availableProjects, loading: projectsLoading } = useCustomerProjects(customerId || undefined);
 
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setReceipt({
-        fileName: file.name,
-        fileSize: `${(file.size / 1024).toFixed(0)} KB`,
-        uploadDate: new Date().toISOString().split('T')[0],
-        fileType: file.type || 'application/pdf',
-      });
+    e.target.value = '';
+    if (!file) return;
+    const lower = file.name.toLowerCase();
+    if (!RECEIPT_EXTENSIONS.some((ext) => lower.endsWith(ext))) {
+      setErrors((prev) => ({ ...prev, receipt: 'Receipts must be PDF, PNG, JPG or WEBP files.' }));
+      return;
     }
+    if (file.size > MAX_RECEIPT_BYTES) {
+      setErrors((prev) => ({ ...prev, receipt: 'Receipt exceeds the 10 MB limit.' }));
+      return;
+    }
+    setErrors((prev) => {
+      const { receipt: _omit, ...rest } = prev;
+      return rest;
+    });
+    setReceiptFile(file);
+    setReceipt({
+      fileName: file.name,
+      fileSize: `${(file.size / 1024).toFixed(0)} KB`,
+      uploadDate: new Date().toISOString().split('T')[0],
+      fileType: file.type || 'application/octet-stream',
+    });
   };
 
   const validate = () => {
@@ -138,11 +169,8 @@ export function ExpenseFormModal({
     if (!currency) newErrors.currency = 'Currency is required';
 
     if (billable) {
-      if (!customer || customer === 'Internal') {
-        newErrors.customer = 'Please select an enterprise customer for billable expense';
-      }
-      if (!project || project === '—') {
-        newErrors.project = 'Please select a project to associate billing';
+      if (!customerId) {
+        newErrors.customer = 'Please select the customer to bill this expense to';
       }
       const billableAmountError = validateNonNegativeMoney(billableAmount, 'Billable amount', { required: true });
       if (billableAmountError) newErrors.billableAmount = billableAmountError;
@@ -167,15 +195,18 @@ export function ExpenseFormModal({
       amount: numAmount,
       currency,
       billable,
-      customer: billable ? customer : 'Internal',
-      project: billable ? project : '—',
+      customerId: billable ? customerId : '',
+      customer: billable ? customer : '',
+      projectId: billable ? projectId : '',
+      project: billable ? project : '',
       billableAmount: numBillable,
       taxRate: billable ? taxRate : undefined,
       invoiceTreatment: billable ? invoiceTreatment : undefined,
       paymentMethod,
-      paidBy: paidBy.trim() || 'Operations',
+      paidBy: paidBy.trim() || defaultPaidBy || 'Self',
       status: editingExpense ? editingExpense.status : billable ? 'billable' : 'recorded',
       receipt,
+      receiptFile,
       notes: notes.trim() || undefined,
     });
 
@@ -331,44 +362,40 @@ export function ExpenseFormModal({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {/* Customer */}
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Customer <span className="text-rose-500">*</span>
-                    </label>
-                    <select
-                      value={customer}
-                      onChange={(e) => {
-                        setCustomer(e.target.value);
-                        const projects = mockProjectsByCustomer[e.target.value] || [];
-                        setProject(projects.length > 0 ? projects[0].name : '');
+                    <CustomerCombobox
+                      label="Customer"
+                      required
+                      value={customerId}
+                      error={errors.customer}
+                      onChange={(id, cust) => {
+                        setCustomerId(id);
+                        setCustomer(cust?.display_name || '');
+                        setProjectId('');
+                        setProject('');
                       }}
-                      className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                    >
-                      {mockCustomers
-                        .filter((c) => c !== 'Internal')
-                        .map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                    </select>
-                    {errors.customer && (
-                      <p className="text-[11px] text-rose-500 mt-1">{errors.customer}</p>
-                    )}
+                    />
                   </div>
 
                   {/* Project */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Project <span className="text-rose-500">*</span>
+                      Project
                     </label>
                     <select
-                      value={project}
-                      onChange={(e) => setProject(e.target.value)}
-                      className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      value={projectId}
+                      disabled={!customerId}
+                      onChange={(e) => {
+                        const selected = availableProjects.find((p) => p.id === e.target.value);
+                        setProjectId(selected?.id || '');
+                        setProject(selected?.name || '');
+                      }}
+                      className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:bg-slate-50"
                     >
-                      <option value="">Select Project</option>
+                      <option value="">
+                        {!customerId ? 'Select a customer first' : projectsLoading ? 'Loading projects…' : 'No project'}
+                      </option>
                       {availableProjects.map((p) => (
-                        <option key={p.id} value={p.name}>
+                        <option key={p.id} value={p.id}>
                           {p.name}
                         </option>
                       ))}
@@ -468,7 +495,7 @@ export function ExpenseFormModal({
                   type="text"
                   value={paidBy}
                   onChange={(e) => setPaidBy(e.target.value)}
-                  placeholder="e.g. Akshata Rathod, Operations, Finance"
+                  placeholder="e.g. employee name, Operations, Finance"
                   className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
               </div>
@@ -493,7 +520,7 @@ export function ExpenseFormModal({
             </div>
           </div>
 
-          {/* Section 4: Receipt Upload (Frontend Mock) */}
+          {/* Section 4: Receipt Upload (stored privately on the server on save) */}
           <div className="pt-4 border-t border-slate-100 space-y-3">
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-purple-600" />
@@ -511,36 +538,53 @@ export function ExpenseFormModal({
                       {receipt.fileName}
                     </p>
                     <p className="text-[11px] text-slate-500">
-                      {receipt.fileSize} · Attached on {receipt.uploadDate}
+                      {receipt.fileSize ? `${receipt.fileSize} · ` : ''}
+                      {receiptFile ? 'Uploads when you save' : 'Stored receipt'}
                     </p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setReceipt(undefined)}
-                  className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors"
-                  title="Remove receipt"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                {receiptFile ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReceiptFile(null);
+                      setReceipt(editingExpense?.receipt);
+                    }}
+                    className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors"
+                    title="Discard selected file"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <label className="px-2 py-1 text-[11px] font-medium text-brand-700 hover:bg-brand-50 rounded-lg cursor-pointer">
+                    Replace
+                    <input
+                      type="file"
+                      accept=".pdf,.png,.jpg,.jpeg,.webp"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
+                  </label>
+                )}
               </div>
             ) : (
               <label className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-slate-200 rounded-xl hover:border-brand-400 hover:bg-slate-50/50 cursor-pointer transition-colors">
                 <UploadCloud className="w-6 h-6 text-slate-400 mb-1" />
                 <span className="text-xs font-medium text-slate-700">
-                  Click to select receipt file (PDF, PNG, JPG)
+                  Click to select receipt file (PDF, PNG, JPG, WEBP)
                 </span>
                 <span className="text-[10px] text-slate-400 mt-0.5">
-                  Stored securely with project billing audit trail
+                  Up to 10 MB. Uploaded privately when you save.
                 </span>
                 <input
                   type="file"
-                  accept=".pdf,.png,.jpg,.jpeg"
+                  accept=".pdf,.png,.jpg,.jpeg,.webp"
                   onChange={handleFileUpload}
                   className="hidden"
                 />
               </label>
             )}
+            {errors.receipt && <p className="text-[11px] text-rose-500 mt-1">{errors.receipt}</p>}
           </div>
         </form>
 

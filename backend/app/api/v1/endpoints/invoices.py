@@ -2,7 +2,8 @@
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Response, status
+from fastapi.responses import JSONResponse
 from fastapi.responses import Response as RawResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -19,7 +20,7 @@ from backend.app.schemas.invoices import (
     RecordPaymentIn,
 )
 from backend.app.schemas.payments import PaymentOut
-from backend.app.services import invoice_service, payment_service
+from backend.app.services import idempotency_service, invoice_service, payment_service
 from backend.app.services.invoice_pdf import render_invoice_pdf
 from backend.app.services.pagination import PageParams, page_params
 
@@ -141,12 +142,30 @@ def void_invoice(
 def record_payment(
     invoice_id: str,
     body: RecordPaymentIn,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key", max_length=128),
     ctx: CurrentContext = Depends(require_finance),
     db: Session = Depends(get_db),
 ):
+    """Optional `Idempotency-Key` header: a retried request with the same key and body
+    returns the originally recorded payment instead of booking it twice."""
     invoice = invoice_service.get_invoice(db, ctx.organization_id, invoice_id)
-    payment = payment_service.record_invoice_payment(db, ctx, invoice, body)
-    return payment_service.serialize_payment(payment)
+    path = f"/invoices/{invoice_id}/record-payment"
+
+    def _record():
+        payment = payment_service.record_invoice_payment(db, ctx, invoice, body)
+        return PaymentOut.model_validate(payment_service.serialize_payment(payment)).model_dump(mode="json")
+
+    status_code, out = idempotency_service.run_idempotent(
+        db,
+        organization_id=ctx.organization_id,
+        key=idempotency_key,
+        request_path=path,
+        request_method="POST",
+        params={"path": path, "body": body.model_dump(mode="json")},
+        handler=_record,
+        status_code=status.HTTP_201_CREATED,
+    )
+    return JSONResponse(status_code=status_code, content=out)
 
 
 @router.get(

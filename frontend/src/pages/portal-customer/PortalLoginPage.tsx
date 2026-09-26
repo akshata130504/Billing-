@@ -1,6 +1,7 @@
+import { toApiError } from '../../services/apiClient';
 import React, { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Lock, Mail, Building2, ArrowRight, AlertCircle } from 'lucide-react';
+import { Lock, Mail, Building2, ArrowRight, AlertCircle, Info } from 'lucide-react';
 import { portalCustomerService } from '../../services/portalCustomerService';
 import { Button } from '../../components/common/Button';
 
@@ -15,6 +16,8 @@ export const PortalLoginPage: React.FC = () => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set by portalCustomerService when the portal session expired or was revoked.
+  const sessionExpired = searchParams.get('expired') === '1';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,10 +34,9 @@ export const PortalLoginPage: React.FC = () => {
         password,
       });
       navigate('/portal', { replace: true });
-    } catch (err: any) {
+    } catch (err) {
       const msg =
-        err?.response?.data?.detail ||
-        err?.message ||
+        toApiError(err).message ||
         'Failed to sign in. Please verify your credentials.';
       setError(msg);
     } finally {
@@ -58,6 +60,13 @@ export const PortalLoginPage: React.FC = () => {
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white py-8 px-6 shadow-sm border border-slate-200 rounded-2xl sm:px-10">
+          {sessionExpired && !error && (
+            <div className="mb-5 p-3 rounded-lg bg-sky-50 border border-sky-200 flex items-start gap-2.5 text-xs text-sky-800">
+              <Info className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+              <span>Your session expired, please sign in again</span>
+            </div>
+          )}
+
           {error && (
             <div className="mb-5 p-3 rounded-lg bg-rose-50 border border-rose-200 flex items-start gap-2.5 text-xs text-rose-700">
               <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />

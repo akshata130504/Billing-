@@ -66,6 +66,9 @@ export function CustomerLifecycleListPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStage, setSelectedStage] = useState<string>('all');
   const [selectedHealth, setSelectedHealth] = useState<string>('all');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState<number | null>(null);
+  const PAGE_SIZE = 50;
 
   // Stage update modal
   const [editItem, setEditItem] = useState<CustomerLifecycleItem | null>(null);
@@ -80,24 +83,35 @@ export function CustomerLifecycleListPage() {
       setLoading(true);
       const [kpiData, listData] = await Promise.all([
         lifecycleService.kpis(),
-        lifecycleService.list({
+        lifecycleService.listPage({
           stage: selectedStage !== 'all' ? (selectedStage as CustomerLifecycleStage) : undefined,
           health: selectedHealth !== 'all' ? (selectedHealth as HealthStatus) : undefined,
           search: searchQuery || undefined,
+          page,
+          page_size: PAGE_SIZE,
         }),
       ]);
       setKpis(kpiData);
-      setItems(listData);
+      setItems(listData.items);
+      setTotal(listData.total);
     } catch (err: any) {
       showToast('error', err.message || 'Failed to load customer lifecycle data');
     } finally {
       setLoading(false);
     }
-  }, [selectedStage, selectedHealth, searchQuery, showToast]);
+  }, [selectedStage, selectedHealth, searchQuery, page, showToast]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Any filter change starts from the first page again.
+  useEffect(() => {
+    setPage(1);
+  }, [selectedStage, selectedHealth, searchQuery]);
+
+  const totalPages = total !== null ? Math.max(1, Math.ceil(total / PAGE_SIZE)) : null;
+  const hasNextPage = totalPages !== null ? page < totalPages : items.length === PAGE_SIZE;
 
   const handleOpenEditModal = (item: CustomerLifecycleItem) => {
     setEditItem(item);
@@ -364,6 +378,23 @@ export function CustomerLifecycleListPage() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+        {(page > 1 || hasNextPage) && (
+          <div className="flex items-center justify-between px-5 py-3 border-t border-slate-200 text-xs text-slate-600">
+            <span>
+              Page {page}
+              {totalPages !== null ? ` of ${totalPages}` : ''}
+              {total !== null ? ` · ${total} customers` : ''}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" disabled={page <= 1 || loading} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                Previous
+              </Button>
+              <Button variant="outline" size="sm" disabled={!hasNextPage || loading} onClick={() => setPage((p) => p + 1)}>
+                Next
+              </Button>
+            </div>
           </div>
         )}
       </div>

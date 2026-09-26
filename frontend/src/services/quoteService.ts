@@ -1,4 +1,5 @@
 import { apiClient } from './apiClient';
+import { downloadAuthenticated } from './download';
 import type { Quote, QuoteCreateInput, QuoteUpdateInput, QuoteConvertInput } from '../types/quotes';
 
 export const quoteService = {
@@ -42,6 +43,9 @@ export const quoteService = {
   async deleteQuote(id: string): Promise<void> {
     await apiClient.delete(`/quotes/${id}`);
   },
+
+  /** Toast copy for a send whose customer email could not be delivered (`email_sent === false`). */
+  EMAIL_NOT_SENT_MESSAGE: 'Quote marked as sent but the email could not be delivered (email not configured)',
 
   async sendQuote(id: string): Promise<Quote> {
     const res = await apiClient.post<Quote>(`/quotes/${id}/send`);
@@ -91,5 +95,15 @@ export const quoteService = {
   async convertToInvoice(id: string, data?: QuoteConvertInput): Promise<any> {
     const res = await apiClient.post<any>(`/quotes/${id}/convert`, data || {});
     return res.data;
+  },
+
+  getDownloadPdfUrl(id: string): string {
+    return `${apiClient.defaults.baseURL || '/api/v1'}/quotes/${id}/pdf`;
+  },
+
+  async downloadPdf(id: string, quoteNumber?: string): Promise<void> {
+    const url = this.getDownloadPdfUrl(id);
+    const filename = quoteNumber ? `Quote-${quoteNumber}.pdf` : `Quote-${id}.pdf`;
+    await downloadAuthenticated(url, filename);
   },
 };

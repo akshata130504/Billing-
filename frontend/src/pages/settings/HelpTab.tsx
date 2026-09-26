@@ -112,6 +112,33 @@ const FAQS = [
   },
 ];
 
+/**
+ * Support mailbox for the "Contact support" / "Report an issue" forms, set per
+ * deployment via VITE_SUPPORT_EMAIL. There is no in-app ticketing backend, so
+ * the forms open the user's mail client instead of pretending to submit.
+ */
+const SUPPORT_EMAIL = ((import.meta.env.VITE_SUPPORT_EMAIL as string | undefined) || '').trim();
+
+function buildMailto(subject: string, body: string): string {
+  return `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+function SupportContactNote() {
+  return SUPPORT_EMAIL ? (
+    <p className="text-[11px] text-slate-500">
+      This opens your email app addressed to{' '}
+      <a href={`mailto:${SUPPORT_EMAIL}`} className="font-semibold text-brand-600 hover:underline">
+        {SUPPORT_EMAIL}
+      </a>
+      .
+    </p>
+  ) : (
+    <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
+      No support mailbox is configured for this workspace. Contact your administrator.
+    </p>
+  );
+}
+
 export function HelpTab() {
   const { showToast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
@@ -127,20 +154,32 @@ export function HelpTab() {
       item.desc.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const openMail = (subject: string, body: string) => {
+    if (!SUPPORT_EMAIL) {
+      showToast('warning', 'Support email not configured', 'Contact your administrator.');
+      return false;
+    }
+    window.location.href = buildMailto(subject, `${body}\n\n---\nPage: ${window.location.href}`);
+    showToast('info', 'Opening your email app', `Send the drafted email to ${SUPPORT_EMAIL} to reach support.`);
+    return true;
+  };
+
   const handleSendSupport = (e: React.FormEvent) => {
     e.preventDefault();
     if (!supportMessage.trim()) return;
-    showToast('success', 'Support message sent', 'Our support team will review your inquiry shortly.');
-    setSupportMessage('');
-    setIsSupportOpen(false);
+    if (openMail('Rooman Billing support request', supportMessage.trim())) {
+      setSupportMessage('');
+      setIsSupportOpen(false);
+    }
   };
 
   const handleSendReport = (e: React.FormEvent) => {
     e.preventDefault();
     if (!reportIssue.trim()) return;
-    showToast('success', 'Problem report submitted', 'Thank you for helping us improve Rooman Billing.');
-    setReportIssue('');
-    setIsReportOpen(false);
+    if (openMail('Rooman Billing problem report', reportIssue.trim())) {
+      setReportIssue('');
+      setIsReportOpen(false);
+    }
   };
 
   return (
@@ -307,7 +346,7 @@ export function HelpTab() {
         isOpen={isSupportOpen}
         onClose={() => setIsSupportOpen(false)}
         title="Contact Rooman Support"
-        description="Send a message to our support staff."
+        description="Draft an email to the support team."
         size="md"
       >
         <form onSubmit={handleSendSupport} className="space-y-4">
@@ -322,13 +361,14 @@ export function HelpTab() {
               className="w-full p-2.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:ring-1 focus:ring-brand-500 focus:border-brand-500 outline-none"
             />
           </div>
+          <SupportContactNote />
 
           <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
             <Button type="button" variant="outline" onClick={() => setIsSupportOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary">
-              Send Message
+            <Button type="submit" variant="primary" disabled={!SUPPORT_EMAIL}>
+              Compose Email
             </Button>
           </div>
         </form>
@@ -339,7 +379,7 @@ export function HelpTab() {
         isOpen={isReportOpen}
         onClose={() => setIsReportOpen(false)}
         title="Report a Problem"
-        description="Submit unexpected behavior or bug report."
+        description="Draft an email describing unexpected behavior or a bug."
         size="md"
       >
         <form onSubmit={handleSendReport} className="space-y-4">
@@ -354,13 +394,14 @@ export function HelpTab() {
               className="w-full p-2.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:ring-1 focus:ring-brand-500 focus:border-brand-500 outline-none"
             />
           </div>
+          <SupportContactNote />
 
           <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
             <Button type="button" variant="outline" onClick={() => setIsReportOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary">
-              Submit Report
+            <Button type="submit" variant="primary" disabled={!SUPPORT_EMAIL}>
+              Compose Email
             </Button>
           </div>
         </form>

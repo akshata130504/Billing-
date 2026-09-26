@@ -10,6 +10,8 @@ import {
   Package,
   Repeat,
   CreditCard,
+  FolderKanban,
+  Wallet,
   ArrowRight,
   CornerDownLeft,
 } from 'lucide-react';
@@ -35,6 +37,8 @@ const CATEGORY_ORDER: SearchCategory[] = [
   'products',
   'subscriptions',
   'payments',
+  'projects',
+  'expenses',
 ];
 
 const CATEGORY_ICONS: Record<SearchCategory, ComponentType<{ className?: string }>> = {
@@ -44,6 +48,9 @@ const CATEGORY_ICONS: Record<SearchCategory, ComponentType<{ className?: string 
   products: Package,
   subscriptions: Repeat,
   payments: CreditCard,
+  // Result paths come from the backend: /projects/:id and /expenses/:id.
+  projects: FolderKanban,
+  expenses: Wallet,
 };
 
 function useDebouncedValue<T>(value: T, delay: number): T {

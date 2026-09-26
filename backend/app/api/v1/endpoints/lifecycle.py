@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import (
@@ -28,14 +28,25 @@ router = APIRouter()
 
 @router.get("", response_model=List[CustomerLifecycleItem])
 def list_lifecycles(
+    response: Response,
     stage: Optional[CustomerLifecycleStage] = Query(None, description="Filter by lifecycle stage"),
     health: Optional[HealthStatus] = Query(None, description="Filter by health status"),
     search: Optional[str] = Query(None, description="Search by customer name/number/email"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
     ctx: CurrentContext = Depends(require_viewer),
     db: Session = Depends(get_db),
 ):
-    """Lists all customer lifecycles and aggregated health/financial indicators."""
-    return lifecycle_service.list_customer_lifecycles(db, ctx, stage=stage, health=health, search=search)
+    """Lists one page of customer lifecycles with aggregated health/financial indicators.
+
+    The body stays a plain list (backwards compatible); the total matching count is in the
+    `X-Total-Count` header for pagination controls.
+    """
+    total = lifecycle_service.count_customer_lifecycles(db, ctx, stage=stage, health=health, search=search)
+    response.headers["X-Total-Count"] = str(total)
+    return lifecycle_service.list_customer_lifecycles(
+        db, ctx, stage=stage, health=health, search=search, page=page, page_size=page_size
+    )
 
 
 @router.get("/kpis", response_model=LifecycleKPIs)

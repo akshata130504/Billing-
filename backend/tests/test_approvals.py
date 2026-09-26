@@ -1,4 +1,5 @@
 """Approval workflow tests."""
+from decimal import Decimal
 import uuid
 
 from backend.app.models import ApprovalRequest, ApprovalStatus, ApprovalType, AuditLog, MemberRole, Quote, QuoteStatus
@@ -119,27 +120,32 @@ def test_reject_returns_quote_to_draft(client, tenant, auth_headers, db):
 
 
 def test_other_types_only_record_decision(client, tenant, auth_headers, db):
-    """Types with no side effect (invoice discount) just record the decision.
+    """INVOICE_DISCOUNT applies the discount and records the decision."""
+    customer = tenant.customer()
+    inv_res = client.post(
+        "/api/v1/invoices",
+        headers=auth_headers,
+        json={
+            "customer_id": customer.id,
+            "items": [{"description": "Service item", "quantity": 1, "unit_price": "1000", "tax_rate_pct": 0}],
+        },
+    )
+    inv_id = inv_res.json()["id"]
 
-    Previously this test used a REFUND approval pointing at a non-existent
-    payment and asserted a 200 — which passed only because approving a refund
-    silently did nothing. REFUND now executes a real refund, so it is covered by
-    test_approving_a_refund_actually_refunds_the_payment instead.
-    """
     approval = ApprovalRequest(
         organization_id=tenant.organization.id,
         type=ApprovalType.INVOICE_DISCOUNT,
         entity_type="invoice",
-        entity_id=str(uuid.uuid4()),
-        title="Discount 500.00",
-        payload={"amount": "500.00"},
+        entity_id=inv_id,
+        title="Discount 10%",
+        payload={"discount_pct": "10.00"},
     )
     db.add(approval)
     db.commit()
     resp = client.post(f"{BASE}/{approval.id}/approve", json={}, headers=auth_headers)
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "approved"
-    assert resp.json()["entity_label"] == "Discount 500.00"
+    assert resp.json()["entity_label"] == inv_res.json()["invoice_number"]
     db.expire_all()
     assert db.get(ApprovalRequest, approval.id).status == ApprovalStatus.APPROVED
 
@@ -240,3 +246,101 @@ def test_refund_approval_for_a_missing_payment_is_rejected_loudly(client, tenant
 
     db.expire_all()
     assert db.get(ApprovalRequest, approval.id).status == ApprovalStatus.PENDING
+
+
+def test_invoice_discount_below_threshold_sends_normally(client, tenant, auth_headers):
+    """Below-threshold discount requires no approval and can be issued immediately."""
+    customer = tenant.customer()
+
+    # Org default discount threshold is 20. Discount 15% is below threshold.
+    inv_res = client.post(
+        "/api/v1/invoices",
+        headers=auth_headers,
+        json={
+            "customer_id": customer.id,
+            "discount_pct": "15",
+            "items": [{"description": "Service Item", "quantity": 1, "unit_price": "1000", "tax_rate_pct": 18}],
+        },
+    )
+    assert inv_res.status_code == 201, inv_res.text
+    invoice = inv_res.json()
+    assert invoice["status"] == "draft"
+    assert invoice["is_pending_approval"] is False
+
+    # Send succeeds immediately without approval gating
+    send_res = client.post(f"/api/v1/invoices/{invoice['id']}/send", headers=auth_headers)
+    assert send_res.status_code == 200, send_res.text
+    assert send_res.json()["status"] == "sent"
+
+
+def test_invoice_discount_above_threshold_lifecycle_approval_and_rejection(client, tenant, auth_headers, db):
+    """Above-threshold discount requires approval; blocks send; approved recalculates; rejected resets discount."""
+    finance = tenant.headers_for_role(MemberRole.FINANCE)
+    customer = tenant.customer()
+
+    # 1. Create invoice with 30% discount (exceeds 20% threshold) as finance user
+    inv_res = client.post(
+        "/api/v1/invoices",
+        headers=finance,
+        json={
+            "customer_id": customer.id,
+            "discount_pct": "30",
+            "items": [{"description": "Consulting", "quantity": 1, "unit_price": "10000", "tax_rate_pct": 18}],
+        },
+    )
+    assert inv_res.status_code == 201, inv_res.text
+    invoice = inv_res.json()
+    assert invoice["is_pending_approval"] is True
+    approval_id = invoice["approval_request_id"]
+    assert approval_id is not None
+
+    # 2. Verify invoice cannot be issued while pending approval
+    send_blocked = client.post(f"/api/v1/invoices/{invoice['id']}/send", headers=finance)
+    assert send_blocked.status_code in (400, 409, 422), send_blocked.text
+
+    # 3. Approve the discount request as admin
+    app_res = client.post(f"/api/v1/approvals/{approval_id}/approve", headers=auth_headers, json={"note": "Approved for VIP"})
+    assert app_res.status_code == 200, app_res.text
+    assert app_res.json()["status"] == "approved"
+
+    # 4. Verify financial recalculation and eligibility for issuance
+    inv_detail = client.get(f"/api/v1/invoices/{invoice['id']}", headers=finance).json()
+    assert Decimal(inv_detail["discount_pct"]) == Decimal("30.00")
+    # Subtotal = 10,000; Discount 30% = 3,000; Taxable = 7,000; Tax 18% = 1,260; Total = 8,260
+    assert Decimal(inv_detail["subtotal"]) == Decimal("10000.00")
+    assert Decimal(inv_detail["discount_amount"]) == Decimal("3000.00")
+    assert Decimal(inv_detail["tax_amount"]) == Decimal("1260.00")
+    assert Decimal(inv_detail["total"]) == Decimal("8260.00")
+    assert Decimal(inv_detail["amount_due"]) == Decimal("8260.00")
+
+    # 5. Now invoice can be issued
+    send_res = client.post(f"/api/v1/invoices/{invoice['id']}/send", headers=finance)
+    assert send_res.status_code == 200, send_res.text
+    assert send_res.json()["status"] == "sent"
+
+    # 6. Test Rejection flow on a second invoice
+    inv2_res = client.post(
+        "/api/v1/invoices",
+        headers=finance,
+        json={
+            "customer_id": customer.id,
+            "discount_pct": "40",
+            "items": [{"description": "Custom Software", "quantity": 1, "unit_price": "10000", "tax_rate_pct": 18}],
+        },
+    )
+    inv2 = inv2_res.json()
+    app2_id = inv2["approval_request_id"]
+
+    # Reject the second discount request as admin
+    rej_res = client.post(f"/api/v1/approvals/{app2_id}/reject", headers=auth_headers, json={"note": "Discount too high"})
+    assert rej_res.status_code == 200, rej_res.text
+    assert rej_res.json()["status"] == "rejected"
+
+    # Verify discount is reverted to 0%, totals recalculated with 0% discount, remains in draft
+    inv2_detail = client.get(f"/api/v1/invoices/{inv2['id']}", headers=finance).json()
+    assert inv2_detail["status"] == "draft"
+    assert Decimal(inv2_detail["discount_pct"]) == Decimal("0.00")
+    assert Decimal(inv2_detail["discount_amount"]) == Decimal("0.00")
+    assert Decimal(inv2_detail["subtotal"]) == Decimal("10000.00")
+    assert Decimal(inv2_detail["tax_amount"]) == Decimal("1800.00")
+    assert Decimal(inv2_detail["total"]) == Decimal("11800.00")

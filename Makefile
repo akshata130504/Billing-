@@ -10,11 +10,13 @@ PIP       ?= backend/venv/bin/pip
 PYTEST    ?= backend/venv/bin/pytest
 ALEMBIC   ?= backend/venv/bin/alembic
 UVICORN   ?= backend/venv/bin/uvicorn
-PROD      := docker compose --env-file .env.production -f docker-compose.prod.yml
+# Deployed release SHA (written by deploy/deploy-poll.sh); falls back to the env file's IMAGE_TAG.
+DEPLOYED  := $(shell cat .deploy/deployed_sha 2>/dev/null)
+PROD      := $(if $(DEPLOYED),IMAGE_TAG=$(DEPLOYED) )docker compose --env-file .env.production -f docker-compose.prod.yml
 PROD_TLS  := $(PROD) -f docker-compose.caddy.yml
 
-.PHONY: help venv install dev-db dev-backend dev-frontend migrate migration test test-pg typecheck build \
-        build-images up-prod up-prod-tls down-prod logs-prod ps-prod migrate-prod backup
+.PHONY: help venv install dev-db dev-backend dev-frontend migrate migration test test-pg lint typecheck build \
+        build-images up-prod up-prod-tls down-prod logs-prod ps-prod migrate-prod backup backup-now
 
 help: ## Show this help
 > @grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -24,7 +26,7 @@ venv: ## Create backend/venv (python3.12)
 > python3 -m venv backend/venv
 
 install: ## Install backend + frontend dependencies
-> $(PIP) install -r backend/requirements.txt
+> $(PIP) install -r backend/requirements.txt -r backend/requirements-dev.txt
 > cd frontend && npm ci
 
 dev-db: ## Start the local PostgreSQL 16 container
@@ -47,6 +49,9 @@ test: ## Run the backend test suite (SQLite)
 
 test-pg: ## Run the backend test suite against local PostgreSQL (needs dev-db)
 > TEST_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/rooman_billing_test $(PYTEST)
+
+lint: ## Ruff lint of the backend (same rules as CI)
+> $(PY) -m ruff check backend
 
 typecheck: ## Frontend type check
 > cd frontend && npx tsc --noEmit
@@ -75,6 +80,9 @@ ps-prod: ## Show production container status/health
 
 migrate-prod: ## Run migrations manually against the production DB
 > $(PROD) run --rm -e RUN_MIGRATIONS=false backend alembic -c backend/alembic.ini upgrade head
+
+backup-now: ## Run the backup service's job immediately (db dump + uploads + offsite)
+> $(PROD) exec backup sh /usr/local/bin/backup-job.sh
 
 backup: ## Dump the production database to backups/<timestamp>.sql.gz
 > mkdir -p backups

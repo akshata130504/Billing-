@@ -133,34 +133,71 @@ threshold.
 
 ## 7. Upgrading
 
+Normal path (automatic): merge to `main` -> CI passes -> `.github/workflows/deploy.yml` pushes
+`rooman-billing-{api,web}:<sha>` and moves `:latest` -> the host's `rooman-billing-poll.timer`
+(every 2 min) runs `deploy/deploy-poll.sh`, which
+
+1. reads the release SHA from the `org.opencontainers.image.revision` label of `api:latest`,
+2. fetches `docker-compose.prod.yml`, `deploy/backup.sh`, `deploy/alert.sh` and itself **at that
+   SHA** (needs `GITHUB_PAT`),
+3. pulls the images, takes a pre-deploy `pg_dump` into `backups/predeploy/`,
+4. `up -d` with `IMAGE_TAG=<sha>` and waits for `READINESS_URL` to return 200,
+5. records `.deploy/deployed_sha`, or rolls back and alerts (section 8).
+
+`workflow_dispatch` of Deploy only works on `main` and only for a commit whose CI already
+succeeded - it re-publishes, it cannot bypass CI.
+
+Install / update the systemd units once:
+
 ```bash
-cd /opt/rooman-billing
-docker compose --env-file .env.production -f docker-compose.prod.yml exec -T db \
-  sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner' | gzip > /var/backups/rooman_pre_upgrade_$(date +%F_%H%M).sql.gz
-git pull --ff-only
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+sudo cp deploy/rooman-billing-poll.service deploy/rooman-billing-poll.timer         deploy/rooman-billing-alert@.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now rooman-billing-poll.timer
+journalctl -u rooman-billing-poll.service -f
 ```
 
-- Images are rebuilt; the `backend` container runs new migrations on start, `frontend` picks up
-  the new bundle (index.html is served `no-cache`, assets are content-hashed).
-- Brief API downtime while the backend container restarts (seconds). For zero-downtime, run two
-  hosts behind a load balancer or scale `backend` before recreating (`--scale backend=2` is
-  safe because the scheduler is a separate service; migrations are idempotent).
-- Read the release notes for any migration that rewrites large tables and schedule accordingly.
+Any failure of the poll unit also triggers `rooman-billing-alert@.service` -> `ALERT_WEBHOOK_URL`.
 
-Pin releases by checking out a tag and setting `IMAGE_TAG=<tag>` in `.env.production` so old
-images remain available for rollback.
+Notes: the backend runs new migrations on start (brief API restart, seconds). Keep migrations
+backward compatible with the previous release (expand first, contract in a later release) so an
+image rollback stays possible. Read release notes for migrations that rewrite large tables.
+
+Manual build on the host (no GHCR) still works: `make up-prod` (`up -d --build`).
 
 ## 8. Rollback
 
-1. `git checkout <previous-tag>` (or set `IMAGE_TAG` to the previous tag if images were kept).
-2. If the new release added migrations that the old code cannot run with, downgrade first:
-   ```bash
-   docker compose --env-file .env.production -f docker-compose.prod.yml run --rm -e RUN_MIGRATIONS=false backend \
-     alembic -c backend/alembic.ini downgrade <previous_revision>
-   ```
-   or restore the pre-upgrade dump (see `operations.md`, restore section).
-3. `docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build`.
+Automatic: when the new release is not ready within `READINESS_TIMEOUT` the poller re-deploys the
+previous images (kept locally as `:previous`) with the previous compose file, writes the bad SHA
+to `.deploy/failed_sha` (skipped until you delete it) and alerts. **Migrations are not reverted.**
+
+Manual, to any published SHA:
+
+```bash
+IMAGE_TAG=<sha> docker compose --env-file .env.production -f docker-compose.prod.yml up -d --no-build
+echo <sha> > .deploy/deployed_sha
+```
+
+If the failed release's migrations broke the old code, restore the newest
+`backups/predeploy/*.dump` (see [`operations.md`](operations.md) section 1, "Restore") - or, only if
+the migration's `downgrade()` is known-good:
+`... run --rm -e RUN_MIGRATIONS=false backend alembic -c backend/alembic.ini downgrade <rev>`.
+
+### Deploy / backup variables (`.env.production`)
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `IMAGE_TAG` | `latest` | Fallback only; the poller exports `IMAGE_TAG=<sha>` |
+| `GITHUB_PAT` | - | Contents:read PAT so the poller syncs orchestration files at the release SHA |
+| `READINESS_URL` | `http://127.0.0.1:<FRONTEND_BIND>/api/v1/health/ready` | Deploy gate (must be reachable from the host) |
+| `READINESS_TIMEOUT` / `PREDEPLOY_BACKUP_KEEP` | `180` / `10` | Gate timeout (s) / pre-deploy dumps kept |
+| `ALERT_WEBHOOK_URL` | - | `{"text": ...}` POST on backup failure, rollback, poll-unit failure |
+| `BACKUP_CRON` / `BACKUP_RETENTION_DAYS` | `15 1 * * *` / `30` | Nightly backup schedule / local retention |
+| `OFFSITE_BACKUP_REMOTE` | - | rclone target `offsite:<bucket>/<prefix>`; empty = local only |
+| `OFFSITE_S3_PROVIDER`, `_REGION`, `_ENDPOINT`, `_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY` | `AWS` | S3-compatible credentials for the `offsite` remote |
+| `OFFSITE_RETENTION_DAYS` / `OFFSITE_REQUIRED` | - / `true` | Offsite pruning / fail+alert on upload error |
+| `*_MEM_LIMIT`, `*_CPUS` | backend 1g, scheduler 512m, db 1g, frontend/redis/backup 256m | Container limits |
+
+The `db` and `backup` containers no longer read `.env.production` wholesale; they receive only
+`POSTGRES_*` (and the backup/offsite/alert variables above) via compose interpolation.
 
 ## 9. Rotating secrets
 
@@ -212,6 +249,7 @@ Razorpay test-to-live key switchover.
       `https://checkout.razorpay.com` and `https://api.razorpay.com` to stay allow-listed.
 - [ ] `/api/v1/health/ready` returns 200 and is wired to an alert.
 - [ ] Exactly one process with `SCHEDULER_ENABLED=true`.
-- [ ] Daily `pg_dump` to off-host storage with a tested restore (see `operations.md`).
+- [ ] `OFFSITE_BACKUP_REMOTE` set, `backup` container healthy, restore drill done (see `operations.md`).
+- [ ] `ALERT_WEBHOOK_URL` set and tested; `rooman-billing-alert@.service` installed.
 - [ ] Razorpay live keys restricted to the production account; webhook secret set.
 - [ ] Docker and base images updated on a schedule (`docker compose pull db caddy`, rebuild app images).

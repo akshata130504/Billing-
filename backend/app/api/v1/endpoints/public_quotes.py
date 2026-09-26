@@ -14,6 +14,7 @@ router = APIRouter()
 @limiter.limit(public_rate_limit)
 def get_public_quote(request: Request, token: str, db: Session = Depends(get_db)):
     quote = svc.get_public_quote_or_404(db, token)
+    quote = svc.mark_public_viewed(db, quote)
     return svc.serialize_public_quote(db, quote)
 
 

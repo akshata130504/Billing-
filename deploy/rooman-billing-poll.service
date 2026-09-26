@@ -3,9 +3,16 @@ Description=Rooman Billing - pull & roll out latest production images
 Wants=network-online.target
 After=network-online.target docker.service
 Requires=docker.service
+# Any failure (pull/sync/pre-deploy backup/readiness/rollback, or the script missing)
+# posts to ALERT_WEBHOOK_URL via deploy/alert.sh. Install both units:
+#   cp deploy/rooman-billing-poll.service deploy/rooman-billing-poll.timer \
+#      deploy/rooman-billing-alert@.service /etc/systemd/system/ && systemctl daemon-reload
+OnFailure=rooman-billing-alert@%n.service
 
 [Service]
 Type=oneshot
 # Adjust this path if the repo checkout on this server lives somewhere else.
 WorkingDirectory=/opt/rooman-billing
 ExecStart=/opt/rooman-billing/deploy/deploy-poll.sh
+# pre-deploy pg_dump + pulls + readiness wait + possible rollback
+TimeoutStartSec=30min

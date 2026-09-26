@@ -21,21 +21,38 @@ from backend.app.models.events import DomainEventType
 from backend.app.models.invoices import Invoice, InvoiceStatus
 from backend.app.models.customers import Customer
 from backend.app.models.base import utcnow
-from backend.app.services import audit
+from backend.app.models.identity import Organization
+from backend.app.services import audit, gst
+from backend.app.services.numbering import next_number
 from backend.app.services.unit_of_work import UnitOfWork
 
 
 def _next_credit_note_number(db: Session, organization_id: str) -> str:
-    """Generate the next credit note number for the organization."""
-    count = db.scalar(
-        select(func.count(CreditNote.id)).where(CreditNote.organization_id == organization_id)
-    ) or 0
-    return f"CN-{(count + 1):06d}"
+    """Next credit note number from the locked per-organization series (never count+1,
+    which hands out duplicates under concurrency and after any gap)."""
+    return next_number(db, organization_id, "credit_note")
+
+
+def _supply_for(db: Session, organization_id: str, customer: Customer, invoice: Optional[Invoice]) -> gst.SupplyContext:
+    """A credit note follows the tax treatment of the invoice it corrects (frozen at
+    that invoice's issue); a standalone credit note uses the current org/customer."""
+    if invoice is not None and invoice.supply_type:
+        return gst.SupplyContext(
+            supply_type=invoice.supply_type,
+            supplier_state_code=gst.state_code_from_gstin(invoice.supplier_gstin),
+            place_of_supply_code=invoice.place_of_supply_code,
+            place_of_supply_name=invoice.place_of_supply_name,
+            customer_gstin=invoice.customer_gstin,
+            is_gst_registered=bool(invoice.customer_gstin),
+        )
+    organization = db.get(Organization, organization_id)
+    return gst.resolve_supply(organization, customer)
 
 
 def create_credit_note(
     db: Session,
-    ctx: CurrentContext,
+    ctx: Optional[CurrentContext] = None,
+    *,
     customer_id: str,
     lines: List[Dict[str, Any]],
     reason: Optional[str] = None,
@@ -44,12 +61,24 @@ def create_credit_note(
     issue_date: Optional[date] = None,
     currency: str = "INR",
     status: CreditNoteStatus = CreditNoteStatus.ISSUED,
+    organization_id: Optional[str] = None,
+    created_by_id: Optional[str] = None,
+    actor_label: Optional[str] = None,
 ) -> CreditNote:
-    """Create a new credit note for a customer."""
+    """Create a new credit note for a customer.
+
+    Pass `ctx` for an interactive request. Background/system callers (no logged-in
+    user) pass `organization_id` and, optionally, `actor_label` instead - mirrors
+    the ctx-or-organization_id+actor_label convention `audit.record` already uses.
+    """
+    org_id = organization_id or (ctx.organization_id if ctx else None)
+    if not org_id:
+        raise ValidationAppError("organization_id or ctx is required.")
+
     customer = db.scalars(
         select(Customer).where(
             Customer.id == customer_id,
-            Customer.organization_id == ctx.organization_id,
+            Customer.organization_id == org_id,
         )
     ).first()
     if customer is None:
@@ -58,9 +87,23 @@ def create_credit_note(
     if not lines:
         raise ValidationAppError("At least one credit note line is required.")
 
-    cn_number = _next_credit_note_number(db, ctx.organization_id)
+    invoice = None
+    if invoice_id:
+        invoice = db.scalars(
+            select(Invoice).where(Invoice.id == invoice_id, Invoice.organization_id == org_id)
+        ).first()
+        if invoice is None:
+            raise NotFoundAppError("Invoice not found.")
+        if invoice.customer_id != customer.id:
+            raise ConflictAppError("The linked invoice belongs to a different customer.")
+        if invoice.status == InvoiceStatus.DRAFT:
+            raise ConflictAppError("A credit note cannot reference a draft invoice.")
+        currency = invoice.currency or currency
+    supply = _supply_for(db, org_id, customer, invoice)
+
+    cn_number = _next_credit_note_number(db, org_id)
     credit_note = CreditNote(
-        organization_id=ctx.organization_id,
+        organization_id=org_id,
         credit_note_number=cn_number,
         customer_id=customer.id,
         invoice_id=invoice_id,
@@ -69,11 +112,17 @@ def create_credit_note(
         reason=reason,
         issue_date=issue_date or date.today(),
         currency=currency,
-        created_by_id=ctx.user_id,
+        created_by_id=created_by_id if created_by_id is not None else (ctx.user_id if ctx else None),
+        supply_type=supply.supply_type,
+        place_of_supply_code=supply.place_of_supply_code,
+        place_of_supply_name=supply.place_of_supply_name,
+        customer_gstin=supply.customer_gstin,
+        supplier_gstin=(invoice.supplier_gstin if invoice is not None else getattr(db.get(Organization, org_id), "gstin", None)),
     )
 
     subtotal = Decimal("0")
     total_tax = Decimal("0")
+    cgst_total = sgst_total = igst_total = Decimal("0")
 
     for idx, item in enumerate(lines):
         qty = Decimal(str(item.get("quantity", 1)))
@@ -84,18 +133,27 @@ def create_credit_note(
             price = (line_amount / qty).quantize(Decimal("0.01"))
         else:
             line_amount = (qty * price).quantize(Decimal("0.01"))
+        if supply.is_export:
+            tax_pct = Decimal("0")  # zero-rated export, same as the invoice side
         line_tax = (line_amount * tax_pct / Decimal("100")).quantize(Decimal("0.01"))
+        split = gst.split_tax(line_tax, supply)
 
         subtotal += line_amount
         total_tax += line_tax
+        cgst_total += split.cgst
+        sgst_total += split.sgst
+        igst_total += split.igst
 
         cn_line = CreditNoteLine(
-            organization_id=ctx.organization_id,
+            organization_id=org_id,
             description=item.get("description", "Credit adjustment"),
             quantity=qty,
             unit_price=price,
             tax_rate_pct=tax_pct,
             amount=line_amount,
+            cgst_amount=split.cgst,
+            sgst_amount=split.sgst,
+            igst_amount=split.igst,
             position=idx,
         )
         credit_note.lines.append(cn_line)
@@ -103,6 +161,9 @@ def create_credit_note(
     total = subtotal + total_tax
     credit_note.subtotal = subtotal
     credit_note.tax_amount = total_tax
+    credit_note.cgst_amount = cgst_total
+    credit_note.sgst_amount = sgst_total
+    credit_note.igst_amount = igst_total
     credit_note.total = total
     credit_note.balance_remaining = total
 
@@ -111,7 +172,7 @@ def create_credit_note(
 
     uow = UnitOfWork(db)
     uow.register_event(
-        organization_id=ctx.organization_id,
+        organization_id=org_id,
         event_type=DomainEventType.CREDIT_NOTE_ISSUED,
         aggregate_type="credit_note",
         aggregate_id=credit_note.id,
@@ -129,7 +190,9 @@ def create_credit_note(
         entity_type="credit_note",
         entity_id=credit_note.id,
         entity_label=credit_note.credit_note_number,
+        organization_id=org_id,
         ctx=ctx,
+        actor_label=actor_label,
         after={"total": str(credit_note.total), "customer_id": credit_note.customer_id},
     )
 
@@ -140,21 +203,38 @@ def create_credit_note(
 
 def apply_credit_note_to_invoice(
     db: Session,
-    ctx: CurrentContext,
+    ctx: Optional[CurrentContext] = None,
+    *,
     credit_note_id: str,
     invoice_id: str,
     amount: Decimal,
     notes: Optional[str] = None,
+    organization_id: Optional[str] = None,
+    actor_label: Optional[str] = None,
 ) -> CreditApplication:
-    """Apply an available credit note amount toward an unpaid invoice balance."""
-    credit_note = db.scalars(
+    """Apply an available credit note amount toward an unpaid invoice balance.
+
+    Pass `ctx` for an interactive request, or `organization_id` (+ optional
+    `actor_label`) for a background/system caller - same convention as
+    create_credit_note above.
+    """
+    org_id = organization_id or (ctx.organization_id if ctx else None)
+    if not org_id:
+        raise ValidationAppError("organization_id or ctx is required.")
+
+    # Lock the credit note row: two concurrent applications must not both spend the
+    # same balance_remaining.
+    cn_stmt = (
         select(CreditNote)
-        .options(selectinload(CreditNote.applications))
         .where(
             CreditNote.id == credit_note_id,
-            CreditNote.organization_id == ctx.organization_id,
+            CreditNote.organization_id == org_id,
         )
-    ).first()
+        .execution_options(populate_existing=True)
+    )
+    if db.bind is not None and db.bind.dialect.name != "sqlite":
+        cn_stmt = cn_stmt.with_for_update()
+    credit_note = db.scalars(cn_stmt).first()
     if credit_note is None:
         raise NotFoundAppError("Credit note not found.")
 
@@ -172,11 +252,16 @@ def apply_credit_note_to_invoice(
     invoice = db.scalars(
         select(Invoice).where(
             Invoice.id == invoice_id,
-            Invoice.organization_id == ctx.organization_id,
+            Invoice.organization_id == org_id,
         )
     ).first()
     if invoice is None:
         raise NotFoundAppError("Invoice not found.")
+    # Lock the invoice too (after the credit note): two different credit notes applied
+    # to the same invoice at once must not both consume its full amount_due.
+    from backend.app.services.invoice_service import lock_invoice
+
+    lock_invoice(db, invoice)
 
     if invoice.customer_id != credit_note.customer_id:
         raise ConflictAppError("Credit note customer does not match the invoice customer.")
@@ -196,17 +281,8 @@ def apply_credit_note_to_invoice(
     else:
         credit_note.status = CreditNoteStatus.PARTIALLY_APPLIED
 
-    invoice.amount_paid = (invoice.amount_paid + amount).quantize(Decimal("0.01"))
-    invoice.amount_due = (invoice.amount_due - amount).quantize(Decimal("0.01"))
-
-    if invoice.amount_due == Decimal("0"):
-        invoice.status = InvoiceStatus.PAID
-        invoice.paid_at = audit.utcnow()
-    else:
-        invoice.status = InvoiceStatus.PARTIALLY_PAID
-
     application = CreditApplication(
-        organization_id=ctx.organization_id,
+        organization_id=org_id,
         credit_note_id=credit_note.id,
         invoice_id=invoice.id,
         amount=amount,
@@ -214,10 +290,15 @@ def apply_credit_note_to_invoice(
     )
     db.add(application)
     db.flush()
+    # The invoice's paid/due/status are derived (payments + credit applications) so a
+    # later payment recompute can never erase the credit.
+    from backend.app.services.invoice_service import recompute_invoice
+
+    recompute_invoice(db, invoice, ctx=ctx, actor_label=actor_label)
 
     uow = UnitOfWork(db)
     uow.register_event(
-        organization_id=ctx.organization_id,
+        organization_id=org_id,
         event_type=DomainEventType.CREDIT_NOTE_APPLIED,
         aggregate_type="credit_note",
         aggregate_id=credit_note.id,
@@ -230,7 +311,7 @@ def apply_credit_note_to_invoice(
     )
     if invoice.status == InvoiceStatus.PAID:
         uow.register_event(
-            organization_id=ctx.organization_id,
+            organization_id=org_id,
             event_type=DomainEventType.INVOICE_PAID,
             aggregate_type="invoice",
             aggregate_id=invoice.id,
@@ -243,7 +324,9 @@ def apply_credit_note_to_invoice(
         entity_type="credit_note",
         entity_id=credit_note.id,
         entity_label=credit_note.credit_note_number,
+        organization_id=org_id,
         ctx=ctx,
+        actor_label=actor_label,
         after={"amount": str(amount), "invoice_id": invoice.id},
     )
 
@@ -356,7 +439,14 @@ def serialize_credit_note(cn: CreditNote) -> Dict[str, Any]:
         "customer": customer_ref(cn.customer) if cn.customer else None,
         "status": cn.status,
         "currency": cn.currency,
+        "invoice_id": cn.invoice_id,
         "subtotal": money_str(cn.subtotal),
+        "tax_amount": money_str(cn.tax_amount),
+        "cgst_amount": money_str(cn.cgst_amount),
+        "sgst_amount": money_str(cn.sgst_amount),
+        "igst_amount": money_str(cn.igst_amount),
+        "supply_type": cn.supply_type,
+        "place_of_supply_name": cn.place_of_supply_name,
         "total": money_str(cn.total),
         "balance_remaining": money_str(cn.balance_remaining),
         "reason": cn.reason,

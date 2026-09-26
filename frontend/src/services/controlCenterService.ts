@@ -15,7 +15,6 @@ import type {
   ImportResult,
   PageParams,
   Paginated,
-  RunJobsResult,
   SearchResponse,
   SearchResult,
 } from '../types/api';
@@ -103,11 +102,6 @@ export const controlCenterService = {
     const { data } = await apiClient.get<Paginated<ImportResult>>('/imports', {
       params: cleanParams(params),
     });
-    return data;
-  },
-
-  runJobs: async (): Promise<RunJobsResult> => {
-    const { data } = await apiClient.post<RunJobsResult>('/admin/jobs/run');
     return data;
   },
 };

@@ -20,8 +20,11 @@ class ManualGatewayAdapter:
         payment_method_token: Optional[str] = None,
         notes: Optional[Dict[str, Any]] = None,
         idempotency_key: Optional[str] = None,
+        **_: Any,
     ) -> GatewayChargeResult:
-        # Manual payments succeed immediately upon user recording
+        # Manual payments succeed immediately upon user recording. This adapter is
+        # only reachable from authenticated staff flows (recording an offline
+        # payment); public/unauthenticated checkout never selects it.
         return GatewayChargeResult(
             success=True,
             gateway_payment_id=f"manual_{uuid.uuid4().hex[:12]}",
@@ -33,6 +36,7 @@ class ManualGatewayAdapter:
         gateway_payment_id: str,
         amount: Decimal,
         reason: Optional[str] = None,
+        **_: Any,
     ) -> GatewayRefundResult:
         return GatewayRefundResult(
             success=True,
@@ -44,6 +48,7 @@ class ManualGatewayAdapter:
         self,
         raw_body: bytes,
         signature: Optional[str],
+        **_: Any,
     ) -> bool:
         return True
 
@@ -52,5 +57,6 @@ class ManualGatewayAdapter:
         payment_id: str,
         order_id: str,
         signature: str,
+        **_: Any,
     ) -> bool:
         return False

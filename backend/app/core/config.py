@@ -95,8 +95,11 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "rooman_billing"
     DATABASE_URL: str | None = None
-    DB_POOL_SIZE: int = 10
-    DB_MAX_OVERFLOW: int = 20
+    # Per process. The prod stack runs the API (several gunicorn workers), the scheduler and
+    # migrations against one PostgreSQL with max_connections=100, so keep
+    # (workers x (pool + overflow)) + scheduler comfortably below that.
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 5
 
     @property
     def sync_database_url(self) -> str:
@@ -118,8 +121,11 @@ class Settings(BaseSettings):
         return bool(self.RAZORPAY_KEY_ID and self.RAZORPAY_KEY_SECRET)
 
     # --- Email (SMTP) -------------------------------------------------------------
-    # Leave SMTP_HOST empty to disable outbound email. Invite / reset links are then
-    # returned to the administrator in the API response so the flows still work.
+    # Leave SMTP_HOST empty to disable outbound email (development only: production refuses
+    # to start without it). Password-reset links are never returned in API responses; in
+    # development an invitation link for a brand-new user is shown to the inviting admin.
+    # These platform settings are used for every authentication email (signup codes, resets,
+    # team invitations) - never an organization's own SMTP integration.
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
     SMTP_USERNAME: str = ""
@@ -136,9 +142,9 @@ class Settings(BaseSettings):
     # --- Background scheduler ---------------------------------------------------------
     # Runs renewals, overdue marking and dunning reminders in-process. Enable on exactly
     # one backend instance when running several replicas.
-    # Defaults to OFF: dunning retries and trial conversion currently mark payments
-    # successful without contacting a real gateway (see Rooman-Billing security audit).
-    # Do not flip this to true until those paths are fixed and verified.
+    # Defaults to OFF so that only the dedicated `scheduler` service in
+    # docker-compose.prod.yml runs jobs. Dunning retries and trial conversions charge through
+    # the payment gateway adapter (they no longer mark payments paid on their own).
     SCHEDULER_ENABLED: bool = False
     SCHEDULER_INTERVAL_MINUTES: int = 15
     DUNNING_REMINDER_INTERVAL_DAYS: int = 3
@@ -198,8 +204,12 @@ class Settings(BaseSettings):
                 problems.append("DATABASE_URL must point at PostgreSQL, not SQLite")
             if "postgres:postgres@" in self.sync_database_url:
                 problems.append("database password must not be the default 'postgres'")
-            if any(o.startswith("http://localhost") for o in self.ALLOWED_ORIGINS):
-                problems.append("ALLOWED_ORIGINS must not include localhost")
+            if any(o.startswith(("http://localhost", "http://127.0.0.1")) for o in self.ALLOWED_ORIGINS):
+                problems.append("ALLOWED_ORIGINS must not include localhost or 127.0.0.1")
+            if not (self.SMTP_HOST or "").strip():
+                problems.append(
+                    "SMTP_HOST must be set: signup codes, password resets and invitations are only delivered by email"
+                )
             if problems:
                 raise ValueError(
                     "Refusing to start in %s with insecure configuration: %s"

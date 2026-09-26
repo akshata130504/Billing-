@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Menu,
@@ -33,6 +33,45 @@ export interface HeaderProps {
   onMenuClick: () => void;
   onQuickCreateClick: () => void;
   onOpenSearch: () => void;
+}
+
+interface NotificationState {
+  read: string[];
+  dismissed: string[];
+}
+
+const EMPTY_NOTIFICATION_STATE: NotificationState = { read: [], dismissed: [] };
+/** Cap stored ids so the per-user record cannot grow without bound. */
+const MAX_TRACKED_IDS = 200;
+
+function loadNotificationState(key: string | null): NotificationState {
+  if (!key) return EMPTY_NOTIFICATION_STATE;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return EMPTY_NOTIFICATION_STATE;
+    const parsed = JSON.parse(raw) as Partial<NotificationState>;
+    return {
+      read: Array.isArray(parsed.read) ? parsed.read : [],
+      dismissed: Array.isArray(parsed.dismissed) ? parsed.dismissed : [],
+    };
+  } catch {
+    return EMPTY_NOTIFICATION_STATE;
+  }
+}
+
+function saveNotificationState(key: string | null, state: NotificationState): void {
+  if (!key) return;
+  try {
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({
+        read: state.read.slice(-MAX_TRACKED_IDS),
+        dismissed: state.dismissed.slice(-MAX_TRACKED_IDS),
+      })
+    );
+  } catch {
+    // Storage unavailable - read state simply won't persist across reloads.
+  }
 }
 
 /** Closes a dropdown on outside click / Escape. */
@@ -79,35 +118,28 @@ export function Header({ onMenuClick, onQuickCreateClick, onOpenSearch }: Header
   const notificationsRef = useRef<HTMLDivElement>(null);
   useDismiss(notificationsOpen, () => setNotificationsOpen(false), notificationsRef);
 
-  const [notifications, setNotifications] = useState<HeaderNotificationItem[]>([
-    {
-      id: 'notif-1',
-      title: 'Invoice #INV-2025-001 Overdue',
-      description: 'Acme Corp payment of ₹48,000 is 3 days past due date.',
-      time: '15m ago',
-      read: false,
-      type: 'invoice',
-      link: '/invoices',
+  // Read / dismissed ids are remembered per user + organization so the 60s
+  // refetch below doesn't flip everything back to unread. (Action-center items
+  // are computed server-side and have no read endpoint.)
+  const notificationStorageKey =
+    user?.id && organization?.id ? `rooman.header_notifications.${user.id}.${organization.id}` : null;
+  const [notificationState, setNotificationState] = useState<NotificationState>(() =>
+    loadNotificationState(notificationStorageKey)
+  );
+  useEffect(() => {
+    setNotificationState(loadNotificationState(notificationStorageKey));
+  }, [notificationStorageKey]);
+
+  const updateNotificationState = useCallback(
+    (update: (prev: NotificationState) => NotificationState) => {
+      setNotificationState((prev) => {
+        const next = update(prev);
+        saveNotificationState(notificationStorageKey, next);
+        return next;
+      });
     },
-    {
-      id: 'notif-2',
-      title: 'Payment Received',
-      description: '₹10,32,000 recorded via Stripe for September billing.',
-      time: '1h ago',
-      read: false,
-      type: 'payment',
-      link: '/payments',
-    },
-    {
-      id: 'notif-3',
-      title: 'Discount Approval Required',
-      description: 'Quote #QT-2025-084 requires manager sign-off (25% discount).',
-      time: '3h ago',
-      read: false,
-      type: 'approval',
-      link: '/approvals',
-    },
-  ]);
+    [notificationStorageKey]
+  );
 
   const actionCenterQuery = useQuery({
     queryKey: queryKeys.controlCenter.actionCenter(),
@@ -116,13 +148,18 @@ export function Header({ onMenuClick, onQuickCreateClick, onOpenSearch }: Header
     refetchInterval: 60000,
   });
 
-  useEffect(() => {
-    if (actionCenterQuery.data?.items && actionCenterQuery.data.items.length > 0) {
-      const mapped: HeaderNotificationItem[] = actionCenterQuery.data.items.slice(0, 5).map((item) => {
+  const notifications = useMemo<HeaderNotificationItem[]>(() => {
+    const items = actionCenterQuery.data?.items ?? [];
+    const readIds = new Set(notificationState.read);
+    const dismissedIds = new Set(notificationState.dismissed);
+    return items
+      .filter((item) => !dismissedIds.has(item.id))
+      .slice(0, 5)
+      .map((item) => {
         let link = '/invoices';
         let type: HeaderNotificationItem['type'] = 'alert';
         if (item.category === 'pending_approval') {
-          link = '/approvals';
+          link = '/control-center/approvals';
           type = 'approval';
         } else if (item.category === 'pending_quote') {
           link = '/quotes';
@@ -140,33 +177,37 @@ export function Header({ onMenuClick, onQuickCreateClick, onOpenSearch }: Header
           title: item.title,
           description: item.description,
           time: item.due_info || 'Today',
-          read: false,
+          read: readIds.has(item.id),
           type,
           link,
         };
       });
-      setNotifications(mapped);
-    }
-  }, [actionCenterQuery.data]);
+  }, [actionCenterQuery.data, notificationState]);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
+  const markRead = (ids: string[]) => {
+    updateNotificationState((prev) => {
+      const read = new Set(prev.read);
+      ids.forEach((id) => read.add(id));
+      return { ...prev, read: [...read] };
+    });
+  };
+
   const handleMarkAllRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    markRead(notifications.map((n) => n.id));
     showToast('info', 'Notifications Updated', 'All notifications marked as read.');
   };
 
   const handleNotificationClick = (item: HeaderNotificationItem) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === item.id ? { ...n, read: true } : n))
-    );
+    markRead([item.id]);
     setNotificationsOpen(false);
     navigate(item.link);
   };
 
   const handleDismissNotification = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    updateNotificationState((prev) => ({ ...prev, dismissed: [...prev.dismissed, id] }));
   };
 
   const displayedNotifications =
@@ -211,19 +252,19 @@ export function Header({ onMenuClick, onQuickCreateClick, onOpenSearch }: Header
   };
 
   return (
-    <header className="h-16 bg-white border-b border-[#E7E9F2] px-4 sm:px-6 flex items-center justify-between gap-4 sticky top-0 z-30">
+    <header className="h-16 bg-white border-b border-[#E7E9F2] px-3 sm:px-6 flex items-center justify-between gap-2 sm:gap-4 sticky top-0 z-30">
       {/* Left: mobile toggle + search trigger */}
-      <div className="flex items-center gap-3 flex-1 max-w-xl">
+      <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0 max-w-xl">
         <button
           onClick={onMenuClick}
-          className="lg:hidden p-2 rounded-xl text-slate-600 hover:bg-slate-100 focus:outline-none"
+          className="lg:hidden p-2 rounded-xl text-slate-600 hover:bg-slate-100 focus:outline-none shrink-0"
           aria-label="Open sidebar"
         >
           <Menu className="w-5 h-5" />
         </button>
 
-        <div onClick={onOpenSearch} className="relative w-full cursor-pointer group">
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-hover:text-slate-600 transition-colors pointer-events-none" />
+        <div onClick={onOpenSearch} className="relative w-full cursor-pointer group min-w-0">
+          <Search className="w-4 h-4 absolute left-3 sm:left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-hover:text-slate-600 transition-colors pointer-events-none" />
           <input
             type="text"
             readOnly
@@ -235,10 +276,10 @@ export function Header({ onMenuClick, onQuickCreateClick, onOpenSearch }: Header
                 onOpenSearch();
               }
             }}
-            placeholder="Search customers, invoices, subscriptions, payments... (Ctrl + K)"
-            className="w-full pl-10 pr-12 py-2 text-xs bg-[#F7F8FC] group-hover:bg-[#F0F2FA] border border-[#E7E9F2] rounded-xl text-[#11194F] placeholder:text-[#7B829A] cursor-pointer transition-colors outline-none focus:border-brand-500"
+            placeholder="Search... (Ctrl + K)"
+            className="w-full pl-8 sm:pl-10 pr-3 sm:pr-12 py-2 text-xs bg-[#F7F8FC] group-hover:bg-[#F0F2FA] border border-[#E7E9F2] rounded-xl text-[#11194F] placeholder:text-[#7B829A] cursor-pointer transition-colors outline-none focus:border-brand-500 truncate"
           />
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-0.5 pointer-events-none">
+          <div className="hidden sm:flex absolute right-3 top-1/2 -translate-y-1/2 items-center gap-0.5 pointer-events-none">
             <span className="text-[10px] font-mono bg-white text-[#7B829A] px-1.5 py-0.5 rounded border border-[#E7E9F2] shadow-2xs">
               Ctrl K
             </span>
@@ -247,7 +288,7 @@ export function Header({ onMenuClick, onQuickCreateClick, onOpenSearch }: Header
       </div>
 
       {/* Right controls */}
-      <div className="flex items-center gap-2.5 sm:gap-3">
+      <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
         {/* Organization selector */}
         <div className="relative hidden sm:block" ref={workspaceRef}>
           <button
@@ -380,7 +421,7 @@ export function Header({ onMenuClick, onQuickCreateClick, onOpenSearch }: Header
 
           {/* Dynamic Notification Panel Dropdown */}
           {notificationsOpen && (
-            <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-modal border border-[#E7E9F2] overflow-hidden z-40 animate-in fade-in zoom-in-95 duration-150">
+            <div className="fixed inset-x-2 top-16 sm:absolute sm:inset-x-auto sm:top-auto sm:right-0 sm:mt-2 w-auto sm:w-96 bg-white rounded-2xl shadow-modal border border-[#E7E9F2] overflow-hidden z-40 animate-in fade-in zoom-in-95 duration-150">
               {/* Header */}
               <div className="px-4 py-3 bg-white border-b border-slate-100 flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -524,7 +565,7 @@ export function Header({ onMenuClick, onQuickCreateClick, onOpenSearch }: Header
         {/* Settings */}
         <Link
           to="/settings"
-          className="p-2 rounded-xl text-[#7B829A] hover:text-[#11194F] hover:bg-[#F7F8FC] transition-colors cursor-pointer"
+          className="hidden sm:flex p-2 rounded-xl text-[#7B829A] hover:text-[#11194F] hover:bg-[#F7F8FC] transition-colors cursor-pointer"
           aria-label="Settings"
           title="Settings"
         >

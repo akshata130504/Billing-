@@ -127,6 +127,17 @@ def _dt_text(value: Optional[datetime]) -> str:
     return normalised.isoformat().replace("+00:00", "Z") if normalised else ""
 
 
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value: Any) -> Any:
+    """Neutralise spreadsheet formula injection (CWE-1236): a cell that starts with = + - @
+    TAB or CR is prefixed with a single quote so Excel/Sheets treat it as text."""
+    if isinstance(value, str) and value.startswith(_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
 def export_csv(db: Session, organization_id: str, filters: AuditFilters, tz_name: Optional[str] = None) -> Iterator[str]:
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
@@ -136,22 +147,21 @@ def export_csv(db: Session, organization_id: str, filters: AuditFilters, tz_name
     buffer.truncate(0)
     for log in _iter_rows(db, organization_id, filters, tz_name):
         actor = log.actor
-        writer.writerow(
-            [
-                log.id,
-                _dt_text(log.created_at),
-                f"{actor.full_name} <{actor.email}>" if actor else "",
-                log.actor_label,
-                log.action,
-                log.entity_type,
-                log.entity_id or "",
-                log.entity_label or "",
-                enum_value(log.status),
-                json.dumps(log.before_state, default=_json_default) if log.before_state is not None else "",
-                json.dumps(log.after_state, default=_json_default) if log.after_state is not None else "",
-                log.ip_address or "",
-            ]
+        row = (
+            log.id,
+            _dt_text(log.created_at),
+            f"{actor.full_name} <{actor.email}>" if actor else "",
+            log.actor_label,
+            log.action,
+            log.entity_type,
+            log.entity_id or "",
+            log.entity_label or "",
+            enum_value(log.status),
+            json.dumps(log.before_state, default=_json_default) if log.before_state is not None else "",
+            json.dumps(log.after_state, default=_json_default) if log.after_state is not None else "",
+            log.ip_address or "",
         )
+        writer.writerow([_csv_safe(cell) for cell in row])
         yield buffer.getvalue()
         buffer.seek(0)
         buffer.truncate(0)

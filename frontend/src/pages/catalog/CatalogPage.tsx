@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Package,
   BookOpen,
@@ -12,17 +12,56 @@ import {
 import { Button } from '../../components/common/Button';
 import { LoadingState } from '../../components/common/LoadingState';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
+import { ErrorState } from '../../components/common/ErrorState';
+import { Pagination } from '../../components/common/Pagination';
+import { useToast } from '../../components/common/Toast';
+import { useAuth } from '../../hooks/useAuth';
+import { toApiError } from '../../services/apiClient';
 import { catalogCpqService } from '../../services/catalogCpqService';
 import type { OfferingOut, PriceBookOut, OfferingIn, PriceBookIn } from '../../types/catalog_cpq';
 import { OfferingModal } from './components/OfferingModal';
 import { PriceBookModal } from './components/PriceBookModal';
 
+const PAGE_SIZE = 25;
+
+type CatalogTab = 'all' | 'products' | 'services' | 'plans' | 'bundles' | 'price_books';
+
+const TAB_TYPE: Partial<Record<CatalogTab, string>> = {
+  products: 'product',
+  services: 'service',
+  plans: 'plan',
+  bundles: 'bundle',
+};
+
+interface CatalogCounts {
+  all: number;
+  active: number;
+  product: number;
+  service: number;
+  plan: number;
+  bundle: number;
+}
+
+const EMPTY_COUNTS: CatalogCounts = { all: 0, active: 0, product: 0, service: 0, plan: 0, bundle: 0 };
+
 export function CatalogPage() {
-  const [activeTab, setActiveTab] = useState<'all' | 'products' | 'services' | 'plans' | 'bundles' | 'price_books'>('all');
+  const { showToast } = useToast();
+  const { hasRole } = useAuth();
+  const canEdit = hasRole('finance');
+  const canArchive = hasRole('admin');
+
+  const [activeTab, setActiveTab] = useState<CatalogTab>('all');
   const [offerings, setOfferings] = useState<OfferingOut[]>([]);
+  const [offeringsTotal, setOfferingsTotal] = useState(0);
   const [priceBooks, setPriceBooks] = useState<PriceBookOut[]>([]);
+  const [priceBooksTotal, setPriceBooksTotal] = useState(0);
+  const [counts, setCounts] = useState<CatalogCounts>(EMPTY_COUNTS);
+  // Capped list of active offerings for the bundle / price-book pickers in the modals.
+  const [pickerOfferings, setPickerOfferings] = useState<OfferingOut[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
 
   // Modals state
   const [isOfferingModalOpen, setIsOfferingModalOpen] = useState(false);
@@ -35,26 +74,83 @@ export function CatalogPage() {
   const [offeringToArchive, setOfferingToArchive] = useState<OfferingOut | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const trimmedSearch = searchQuery.trim() || undefined;
-      const [offeringData, pbData] = await Promise.all([
-        catalogCpqService.listOfferings({ search: trimmedSearch }),
-        catalogCpqService.listPriceBooks({ search: trimmedSearch }),
+      setLoadError(null);
+      const search = searchQuery.trim() || undefined;
+      const isPriceBooks = activeTab === 'price_books';
+      // KPI counts come from each filtered list's `total`, so they cover the
+      // whole catalog rather than just the rows on this page.
+      const count = (extra: { type?: string; is_active?: boolean }) =>
+        catalogCpqService
+          .listOfferings({ search, ...extra, page: 1, page_size: 1 })
+          .then((r) => r.total ?? 0);
+      const [offeringData, pbData, all, active, product, service, plan, bundle] = await Promise.all([
+        catalogCpqService.listOfferings({
+          search,
+          type: TAB_TYPE[activeTab],
+          page: isPriceBooks ? 1 : page,
+          page_size: PAGE_SIZE,
+        }),
+        catalogCpqService.listPriceBooks({
+          search,
+          page: isPriceBooks ? page : 1,
+          page_size: PAGE_SIZE,
+        }),
+        count({}),
+        count({ is_active: true }),
+        count({ type: 'product' }),
+        count({ type: 'service' }),
+        count({ type: 'plan' }),
+        count({ type: 'bundle' }),
       ]);
       setOfferings(offeringData.items || []);
+      setOfferingsTotal(offeringData.total ?? 0);
       setPriceBooks(pbData.items || []);
+      setPriceBooksTotal(pbData.total ?? 0);
+      setCounts({ all, active, product, service, plan, bundle });
     } catch (err) {
-      console.error('Failed to fetch catalog data:', err);
+      setLoadError(toApiError(err).message);
     } finally {
       setLoading(false);
     }
-  };
+  }, [searchQuery, activeTab, page]);
 
   useEffect(() => {
-    loadData();
-  }, [searchQuery]);
+    void loadData();
+  }, [loadData]);
+
+  const changeTab = (tab: CatalogTab) => {
+    setActiveTab(tab);
+    setPage(1);
+  };
+
+  const changeSearch = (value: string) => {
+    setSearchQuery(value);
+    setPage(1);
+  };
+
+  const loadPickerOfferings = useCallback(async () => {
+    try {
+      const res = await catalogCpqService.listOfferings({ is_active: true, page: 1, page_size: 100 });
+      setPickerOfferings(res.items || []);
+    } catch (err) {
+      showToast('error', 'Could not load offerings', toApiError(err).message);
+    }
+  }, [showToast]);
+
+  const openOfferingModal = (offering: OfferingOut | null) => {
+    setEditingOffering(offering);
+    setIsOfferingModalOpen(true);
+    void loadPickerOfferings();
+  };
+
+  const openPriceBookModal = (pb: PriceBookOut | null) => {
+    setEditingPriceBook(pb);
+    setIsPriceBookModalOpen(true);
+    void loadPickerOfferings();
+  };
 
   const handleSaveOffering = async (data: OfferingIn) => {
     if (editingOffering) {
@@ -62,6 +158,7 @@ export function CatalogPage() {
     } else {
       await catalogCpqService.createOffering(data);
     }
+    showToast('success', editingOffering ? 'Offering updated' : 'Offering created');
     await loadData();
   };
 
@@ -71,9 +168,10 @@ export function CatalogPage() {
       setIsArchiving(true);
       await catalogCpqService.archiveOffering(offeringToArchive.id);
       setOfferingToArchive(null);
+      showToast('success', 'Offering archived');
       await loadData();
     } catch (err) {
-      console.error('Failed to archive offering:', err);
+      showToast('error', 'Could not archive offering', toApiError(err).message);
     } finally {
       setIsArchiving(false);
     }
@@ -85,36 +183,20 @@ export function CatalogPage() {
     } else {
       await catalogCpqService.createPriceBook(data);
     }
+    showToast('success', editingPriceBook ? 'Price book updated' : 'Price book created');
     await loadData();
   };
 
-  // Filter offerings based on active tab
-  const filteredOfferings = offerings.filter((item) => {
-    if (activeTab === 'all') return true;
-    if (activeTab === 'products') return item.type === 'product';
-    if (activeTab === 'services') return item.type === 'service';
-    if (activeTab === 'plans') return item.type === 'plan';
-    if (activeTab === 'bundles') return item.type === 'bundle';
-    return true;
-  });
+  // Rows are already filtered server-side (type + search) and paginated.
+  const filteredOfferings = offerings;
+  const filteredPriceBooks = priceBooks;
 
-  // Filter price books based on search query
-  const filteredPriceBooks = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return priceBooks;
-    return priceBooks.filter(
-      (pb) =>
-        pb.name?.toLowerCase().includes(q) ||
-        pb.customer_segment?.toLowerCase().includes(q)
-    );
-  }, [priceBooks, searchQuery]);
-
-  // KPI stats
-  const activeCount = offerings.filter((o) => o.is_active).length;
-  const productsCount = offerings.filter((o) => o.type === 'product').length;
-  const servicesCount = offerings.filter((o) => o.type === 'service').length;
-  const plansCount = offerings.filter((o) => o.type === 'plan').length;
-  const bundlesCount = offerings.filter((o) => o.type === 'bundle').length;
+  // KPI stats: organization-wide totals for the current search.
+  const activeCount = counts.active;
+  const productsCount = counts.product;
+  const servicesCount = counts.service;
+  const plansCount = counts.plan;
+  const bundlesCount = counts.bundle;
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -132,15 +214,13 @@ export function CatalogPage() {
           </p>
         </div>
 
+        {canEdit && (
         <div className="flex items-center gap-2.5 shrink-0">
           <Button
             variant="outline"
             size="sm"
             leadingIcon={<BookOpen className="w-4 h-4 text-emerald-600" />}
-            onClick={() => {
-              setEditingPriceBook(null);
-              setIsPriceBookModalOpen(true);
-            }}
+            onClick={() => openPriceBookModal(null)}
             className="whitespace-nowrap font-medium"
           >
             New Price Book
@@ -150,15 +230,13 @@ export function CatalogPage() {
             variant="primary"
             size="sm"
             leadingIcon={<Plus className="w-4 h-4" />}
-            onClick={() => {
-              setEditingOffering(null);
-              setIsOfferingModalOpen(true);
-            }}
+            onClick={() => openOfferingModal(null)}
             className="whitespace-nowrap font-semibold shadow-xs"
           >
             New Offering
           </Button>
         </div>
+        )}
       </div>
 
       {/* KPI Cards */}
@@ -189,16 +267,16 @@ export function CatalogPage() {
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-b border-slate-200 pb-2">
         <div className="flex items-center gap-1 overflow-x-auto">
           {[
-            { id: 'all', label: 'All Offerings', count: offerings.length },
+            { id: 'all', label: 'All Offerings', count: counts.all },
             { id: 'products', label: 'Products', count: productsCount },
             { id: 'services', label: 'Services', count: servicesCount },
             { id: 'plans', label: 'Plans', count: plansCount },
             { id: 'bundles', label: 'Bundles', count: bundlesCount },
-            { id: 'price_books', label: 'Price Books', count: priceBooks.length },
+            { id: 'price_books', label: 'Price Books', count: priceBooksTotal },
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => changeTab(tab.id as CatalogTab)}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors flex items-center gap-1.5 ${
                 activeTab === tab.id
                   ? 'bg-slate-900 text-white shadow-2xs'
@@ -221,21 +299,28 @@ export function CatalogPage() {
             type="text"
             placeholder="Search offerings by SKU, name..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => changeSearch(e.target.value)}
             className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
           />
         </div>
       </div>
 
       {/* Main Table Content */}
-      {loading ? (
+      {loadError ? (
+        <ErrorState
+          title="Couldn't load the catalog"
+          message={loadError}
+          onRetry={() => void loadData()}
+        />
+      ) : loading ? (
         <div className="py-12 bg-white rounded-xl border border-slate-200/80 flex items-center justify-center">
           <LoadingState message="Loading catalog offerings..." />
         </div>
       ) : activeTab === 'price_books' ? (
         /* Price Books Table */
         <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden">
-          <table className="w-full text-left text-xs text-slate-600 border-collapse">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-slate-600 border-collapse">
             <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
               <tr>
                 <th className="px-4 py-3">Price Book Name</th>
@@ -275,27 +360,33 @@ export function CatalogPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setEditingPriceBook(pb);
-                          setIsPriceBookModalOpen(true);
-                        }}
-                      >
-                        Edit
-                      </Button>
+                      {canEdit ? (
+                        <Button variant="outline" size="sm" onClick={() => openPriceBookModal(pb)}>
+                          Edit
+                        </Button>
+                      ) : (
+                        <span className="text-[11px] text-slate-400">View only</span>
+                      )}
                     </td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
+          </div>
+          <Pagination
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={priceBooksTotal}
+            onPageChange={setPage}
+            itemLabel="price books"
+          />
         </div>
       ) : (
         /* Offerings Table */
         <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden">
-          <table className="w-full text-left text-xs text-slate-600 border-collapse">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-slate-600 border-collapse">
             <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
               <tr>
                 <th className="px-4 py-3">Offering / SKU</th>
@@ -353,17 +444,19 @@ export function CatalogPage() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
+                        {!canEdit && !canArchive && (
+                          <span className="text-[11px] text-slate-400">View only</span>
+                        )}
+                        {canEdit && (
                         <button
-                          onClick={() => {
-                            setEditingOffering(item);
-                            setIsOfferingModalOpen(true);
-                          }}
+                          onClick={() => openOfferingModal(item)}
                           className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100"
                           title="Edit Offering"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
-                        {item.is_active && (
+                        )}
+                        {canArchive && item.is_active && (
                           <button
                             onClick={() => setOfferingToArchive(item)}
                             className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50"
@@ -379,6 +472,14 @@ export function CatalogPage() {
               )}
             </tbody>
           </table>
+          </div>
+          <Pagination
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={offeringsTotal}
+            onPageChange={setPage}
+            itemLabel="offerings"
+          />
         </div>
       )}
 
@@ -388,7 +489,7 @@ export function CatalogPage() {
         onClose={() => setIsOfferingModalOpen(false)}
         onSave={handleSaveOffering}
         initialData={editingOffering}
-        availableOfferings={offerings}
+        availableOfferings={pickerOfferings}
       />
 
       {/* Price Book Modal */}
@@ -397,7 +498,7 @@ export function CatalogPage() {
         onClose={() => setIsPriceBookModalOpen(false)}
         onSave={handleSavePriceBook}
         initialData={editingPriceBook}
-        offerings={offerings}
+        offerings={pickerOfferings}
       />
 
       {/* Archive Confirmation Dialog */}

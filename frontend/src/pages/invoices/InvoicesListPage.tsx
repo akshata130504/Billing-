@@ -16,8 +16,12 @@ import { invoiceService } from '../../services/invoiceService';
 import type { Invoice, InvoiceStatus, InvoiceKPIs } from '../../types/invoices';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
+import { useAuth } from '../../hooks/useAuth';
+import { toApiError } from '../../services/apiClient';
 
 export const InvoicesListPage: React.FC = () => {
+  const { hasRole } = useAuth();
+  const canCreate = hasRole('finance');
   const navigate = useNavigate();
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -44,7 +48,7 @@ export const InvoicesListPage: React.FC = () => {
       setError(null);
       const params: any = {};
       if (activeTab !== 'all') {
-        params.status = activeTab.toUpperCase();
+        params.status = activeTab.toLowerCase();
       }
       if (searchTerm) {
         params.search = searchTerm;
@@ -67,8 +71,8 @@ export const InvoicesListPage: React.FC = () => {
           total_revenue: Number(summaryData.total_revenue ?? 0),
         });
       }
-    } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || 'Failed to load invoices');
+    } catch (err) {
+      setError(toApiError(err).message || 'Failed to load invoices');
     } finally {
       setLoading(false);
     }
@@ -132,13 +136,15 @@ export const InvoicesListPage: React.FC = () => {
           >
             Refresh
           </Button>
-          <Button
-            variant="primary"
-            onClick={() => navigate('/invoices/new')}
-            leadingIcon={<Plus className="w-4 h-4" />}
-          >
-            New Invoice
-          </Button>
+          {canCreate && (
+            <Button
+              variant="primary"
+              onClick={() => navigate('/invoices/new')}
+              leadingIcon={<Plus className="w-4 h-4" />}
+            >
+              New Invoice
+            </Button>
+          )}
         </div>
       </div>
 
@@ -254,13 +260,15 @@ export const InvoicesListPage: React.FC = () => {
                 ? 'Try adjusting your search or tab filters.'
                 : 'Create your first invoice to start billing your customers.'}
             </p>
-            <Button
-              variant="primary"
-              onClick={() => navigate('/invoices/new')}
-              leadingIcon={<Plus className="w-4 h-4" />}
-            >
-              Create Invoice
-            </Button>
+            {canCreate && (
+              <Button
+                variant="primary"
+                onClick={() => navigate('/invoices/new')}
+                leadingIcon={<Plus className="w-4 h-4" />}
+              >
+                Create Invoice
+              </Button>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">

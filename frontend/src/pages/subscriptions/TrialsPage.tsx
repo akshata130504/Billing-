@@ -10,9 +10,13 @@ import {
   Repeat,
   XCircle,
   Eye,
+  CalendarPlus,
+  LifeBuoy,
 } from 'lucide-react';
 import { subscriptionService } from '../../services/subscriptionService';
+import { catalogService } from '../../services/catalogService';
 import type {
+  PlanOut,
   SubscriptionOut,
   SubscriptionSummaryOut,
 } from '../../types/api';
@@ -44,6 +48,14 @@ export function TrialsPage() {
   const [convertModalOpen, setConvertModalOpen] = useState(false);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [extendModalOpen, setExtendModalOpen] = useState(false);
+  const [extendDays, setExtendDays] = useState('7');
+  const [extendReason, setExtendReason] = useState('');
+  const [fallbackModalOpen, setFallbackModalOpen] = useState(false);
+  const [fallbackPlans, setFallbackPlans] = useState<PlanOut[]>([]);
+  const [fallbackPlanId, setFallbackPlanId] = useState('');
+
+  const errorMessage = (err: any) => err?.response?.data?.error?.message || err?.message || 'Request failed';
 
   const fetchSummary = async () => {
     try {
@@ -85,11 +97,14 @@ export function TrialsPage() {
     if (!selectedTrial) return;
     try {
       setActionLoading(true);
-      await subscriptionService.activate(selectedTrial.id);
+      // Trials convert through the trial service (/trials/{id}/convert): it records the
+      // conversion, issues the first invoice and charges the default card when one is on
+      // file. /subscriptions/{id}/activate only handles drafts and rejected trials.
+      const result = await subscriptionService.convertTrial(selectedTrial.id);
       showToast(
-        'success',
+        result.payment_succeeded || result.status === 'active' ? 'success' : 'warning',
         'Trial Converted',
-        `Subscription ${selectedTrial.subscription_number} is now active and billed.`
+        result.message || `Subscription ${selectedTrial.subscription_number} is now active and billed.`
       );
       setConvertModalOpen(false);
       setSelectedTrial(null);
@@ -118,6 +133,69 @@ export function TrialsPage() {
       fetchSummary();
     } catch (err: any) {
       showToast('error', 'Cancellation Failed', err.response?.data?.error?.message || err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleExtendConfirm = async () => {
+    if (!selectedTrial) return;
+    const days = Number(extendDays);
+    if (!Number.isInteger(days) || days < 1 || days > 365) {
+      showToast('error', 'Invalid extension', 'Enter a whole number of days between 1 and 365.');
+      return;
+    }
+    try {
+      setActionLoading(true);
+      const tp = await subscriptionService.extendTrial(selectedTrial.id, {
+        days,
+        reason: extendReason.trim() || undefined,
+      });
+      showToast('success', 'Trial Extended', `Trial now ends on ${formatDate(tp.trial_end_date)}.`);
+      setExtendModalOpen(false);
+      setSelectedTrial(null);
+      setExtendReason('');
+      fetchTrials();
+      fetchSummary();
+    } catch (err: any) {
+      showToast('error', 'Extension Failed', errorMessage(err));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const openFallback = async (sub: SubscriptionOut) => {
+    setSelectedTrial(sub);
+    setFallbackPlanId('');
+    setFallbackModalOpen(true);
+    try {
+      const data = await catalogService.listPlans({ is_active: true, page_size: 100 });
+      // Only plans the subscription can legally move to: same currency, recurring.
+      setFallbackPlans(
+        data.items.filter(
+          (p) =>
+            p.id !== sub.plan?.id &&
+            p.billing_interval !== 'one_time' &&
+            p.currency === (sub.currency || sub.plan?.currency)
+        )
+      );
+    } catch (err: any) {
+      showToast('error', 'Error', 'Failed to load plans');
+    }
+  };
+
+  const handleFallbackConfirm = async () => {
+    if (!selectedTrial) return;
+    try {
+      setActionLoading(true);
+      await subscriptionService.moveTrialToFallback(selectedTrial.id, fallbackPlanId || null);
+      showToast('success', 'Moved to Fallback Plan', `Subscription ${selectedTrial.subscription_number} moved.`);
+      setFallbackModalOpen(false);
+      setSelectedTrial(null);
+      fetchTrials();
+      fetchSummary();
+    } catch (err: any) {
+      showToast('error', 'Fallback Failed', errorMessage(err));
     } finally {
       setActionLoading(false);
     }
@@ -299,6 +377,28 @@ export function TrialsPage() {
                               Convert
                             </Button>
                           )}
+                          {canWrite && (
+                            <button
+                              onClick={() => {
+                                setSelectedTrial(sub);
+                                setExtendDays('7');
+                                setExtendModalOpen(true);
+                              }}
+                              className="p-1 text-slate-400 hover:text-sky-600 rounded transition-colors"
+                              title="Extend Trial"
+                            >
+                              <CalendarPlus className="w-4 h-4" />
+                            </button>
+                          )}
+                          {canWrite && (
+                            <button
+                              onClick={() => openFallback(sub)}
+                              className="p-1 text-slate-400 hover:text-amber-600 rounded transition-colors"
+                              title="Move to Fallback Plan"
+                            >
+                              <LifeBuoy className="w-4 h-4" />
+                            </button>
+                          )}
                           <button
                             onClick={() => navigate(`/subscriptions/${sub.id}`)}
                             className="p-1 text-slate-400 hover:text-brand-600 rounded transition-colors"
@@ -338,11 +438,122 @@ export function TrialsPage() {
         }}
         onConfirm={handleConvertConfirm}
         title="Convert Trial to Active Subscription"
-        description={`Convert trial ${selectedTrial?.subscription_number} for customer ${selectedTrial?.customer?.display_name} to a paid active subscription? Active billing cycle will begin immediately.`}
+        description={`Convert trial ${selectedTrial?.subscription_number} for customer ${selectedTrial?.customer?.display_name} to a paid active subscription? The first invoice is issued now and charged to the default card on file, if any.`}
         confirmLabel="Convert to Active"
         variant="default"
         isLoading={actionLoading}
       />
+
+      {/* Extend Trial Modal */}
+      <Modal
+        isOpen={extendModalOpen}
+        onClose={() => {
+          setExtendModalOpen(false);
+          setSelectedTrial(null);
+        }}
+        title="Extend Trial"
+        size="md"
+        footer={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setExtendModalOpen(false);
+                setSelectedTrial(null);
+              }}
+              disabled={actionLoading}
+            >
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" onClick={handleExtendConfirm} isLoading={actionLoading}>
+              Extend Trial
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-slate-600">
+            Current trial end for{' '}
+            <span className="font-semibold text-slate-900">{selectedTrial?.subscription_number}</span>:{' '}
+            {formatDate(selectedTrial?.trial_end)}
+          </p>
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">Additional days</label>
+            <input
+              type="number"
+              min={1}
+              max={365}
+              step={1}
+              value={extendDays}
+              onChange={(e) => setExtendDays(e.target.value)}
+              className="w-32 text-xs p-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 text-slate-900"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">Reason (optional)</label>
+            <input
+              type="text"
+              maxLength={255}
+              value={extendReason}
+              onChange={(e) => setExtendReason(e.target.value)}
+              placeholder="e.g. Customer needs more time to evaluate"
+              className="w-full text-xs p-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 text-slate-900"
+            />
+          </div>
+        </div>
+      </Modal>
+
+      {/* Fallback Plan Modal */}
+      <Modal
+        isOpen={fallbackModalOpen}
+        onClose={() => {
+          setFallbackModalOpen(false);
+          setSelectedTrial(null);
+        }}
+        title="Move Trial to Fallback Plan"
+        size="md"
+        footer={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setFallbackModalOpen(false);
+                setSelectedTrial(null);
+              }}
+              disabled={actionLoading}
+            >
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" onClick={handleFallbackConfirm} isLoading={actionLoading}>
+              Move to Plan
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-slate-600">
+            Ends the trial of <span className="font-semibold text-slate-900">{selectedTrial?.subscription_number}</span>{' '}
+            and starts a new period on the selected plan. A paid plan invoices its first period immediately.
+          </p>
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">Fallback plan</label>
+            <select
+              value={fallbackPlanId}
+              onChange={(e) => setFallbackPlanId(e.target.value)}
+              className="w-full text-xs p-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 text-slate-900"
+            >
+              <option value="">Configured fallback / free plan of this product</option>
+              {fallbackPlans.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.code}) - {formatMoney(p.unit_amount, p.currency)} / {p.billing_interval}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </Modal>
 
       {/* Cancel Trial Modal */}
       <Modal

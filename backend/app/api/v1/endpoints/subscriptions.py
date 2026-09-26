@@ -5,6 +5,8 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import CurrentContext, get_db, require_finance, require_viewer
+from backend.app.core.exceptions import InvalidStateError
+from backend.app.models import SubscriptionStatus
 from backend.app.schemas.common import PaginatedResponse
 from backend.app.schemas.invoices import InvoiceOut
 from backend.app.schemas.subscriptions import (
@@ -120,7 +122,16 @@ def renew_subscription(
     db: Session = Depends(get_db),
 ):
     sub = subscription_service.get_subscription(db, ctx.organization_id, subscription_id)
-    subscription_service.renew_subscription(db, sub, actor_label=ctx.user.full_name)
+    if sub.status != SubscriptionStatus.ACTIVE:
+        raise InvalidStateError(f"Only active subscriptions can be renewed; this one is {sub.status.value}.")
+    if not subscription_service.is_renewal_due(sub):
+        # A manual renewal must not bill the next period early: it is only a catch-up
+        # for a renewal the scheduler has not processed yet.
+        raise InvalidStateError(
+            "This subscription is not due for renewal yet"
+            + (f" (next billing date {sub.next_billing_date.isoformat()})." if sub.next_billing_date else ".")
+        )
+    subscription_service.renew_subscription(db, sub, actor_label=ctx.user.full_name, only_if_due=True)
     db.commit()
     return subscription_service.serialize_subscription(subscription_service.get_subscription(db, ctx.organization_id, subscription_id))
 
@@ -134,7 +145,14 @@ def cancel_subscription(
 ):
     sub = subscription_service.get_subscription(db, ctx.organization_id, subscription_id)
     return subscription_service.serialize_subscription(
-        subscription_service.cancel_subscription(db, ctx, sub, at_period_end=body.at_period_end, reason=body.reason)
+        subscription_service.cancel_subscription(
+            db,
+            ctx,
+            sub,
+            at_period_end=body.at_period_end,
+            reason=body.reason,
+            prorate_credit=body.prorate_credit,
+        )
     )
 
 

@@ -1,26 +1,37 @@
 """Background billing jobs (contract §7): renewals, trial conversion, overdue marking, dunning.
 
-`run_billing_jobs(db)` is the pure function (also behind POST /admin/jobs/run);
-`start_scheduler()` / `stop_scheduler()` run it on an APScheduler interval with a
-session of its own. Every subscription/invoice is processed in its own
+`run_billing_jobs(db)` is the pure function; `start_scheduler()` / `stop_scheduler()`
+run it on an APScheduler interval with a session of its own. It runs only in the
+dedicated scheduler process (there is no HTTP trigger). Every subscription/invoice is processed in its own
 try/except and committed individually so one bad row never stops the run.
+
+Concurrency: on PostgreSQL a run holds a session-level advisory lock on a dedicated
+connection, so overlapping runs (several scheduler processes/replicas) skip instead
+of double-processing. Each run records a
+heartbeat row (see get_scheduler_heartbeat) for health checks.
 """
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
-from typing import Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app.core.config import settings
 from backend.app.core.logging import logger
 from backend.app.models import Invoice, InvoiceStatus, Organization, Plan, Subscription, SubscriptionStatus
+from backend.app.models.billing_cycles import BillingCycle, BillingCycleStatus, SchedulerHeartbeat
 from backend.app.services import audit
 from backend.app.services.invoice_service import mark_overdue, send_reminder
-from backend.app.services.subscription_service import convert_trial, renew_subscription
+from backend.app.services.subscription_service import renew_subscription
+from backend.app.services.timezones import today_in, tz_for
 
 _scheduler = None
+
+JOB_NAME = "billing_jobs"
+# Arbitrary, stable 64-bit key for pg_try_advisory_lock ("RBILLJOB").
+ADVISORY_LOCK_KEY = 0x52_42_49_4C_4C_4A_4F_42
 
 
 def _load_subscription(db: Session, subscription_id: str) -> Optional[Subscription]:
@@ -37,66 +48,193 @@ def _load_invoice(db: Session, invoice_id: str) -> Optional[Invoice]:
     ).first()
 
 
-def run_billing_jobs(db: Session, *, today: Optional[date] = None) -> Dict[str, int]:
-    """Run all four job steps once. Returns the counts the admin endpoint exposes."""
-    today = today or date.today()
-    counts = {"renewals": 0, "trials_converted": 0, "marked_overdue": 0, "reminders_sent": 0}
+def _org_todays(db: Session, today: Optional[date]) -> Dict[str, date]:
+    """Each organization's current local date (its `timezone`), or the forced `today`."""
+    return {
+        org.id: (today or today_in(tz_for(org)))
+        for org in db.scalars(select(Organization)).all()
+    }
+
+
+def _run_step(db: Session, name: str, fn: Callable[[], Any]) -> tuple[Any, int]:
+    """Run one independent job step; a failure is logged and rolled back, never fatal."""
+    try:
+        result = fn()
+        db.commit()
+        return result, 0
+    except Exception:
+        logger.exception("Scheduler: step '%s' failed", name)
+        db.rollback()
+        return None, 1
+
+
+# --- steps owned by other services (imported lazily so an import error there never
+# --- breaks scheduler start-up; each is wrapped by _run_step) -------------------------
+
+
+def _purge_expired_pending_signups(db: Session):
+    from backend.app.services import auth_service
+
+    return auth_service.purge_expired_pending_signups(db)
+
+
+def _process_pending_outbox(db: Session):
+    """process_pending_outbox commits per event, so it gets a session of its own
+    (bound to the same engine/connection source) instead of sharing the run's session."""
+    from sqlalchemy.orm import Session as _Session
+
+    from backend.app.services import outbox_processor
+
+    own = _Session(bind=db.get_bind())
+    try:
+        return outbox_processor.process_pending_outbox(own)
+    finally:
+        own.close()
+
+
+def _process_due_jobs(db: Session):
+    from backend.app.services import outbox_processor
+
+    return outbox_processor.process_due_jobs(db)
+
+
+def _run_due_automation_schedules(db: Session):
+    from backend.app.services import customization_service
+
+    return customization_service.run_due_automation_schedules(db)
+
+
+def _as_count(value: Any) -> int:
+    if isinstance(value, bool) or value is None:
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, (list, tuple, set)):
+        return len(value)
+    if isinstance(value, dict):
+        for key in ("processed", "count", "purged", "run", "executed", "sent"):
+            if isinstance(value.get(key), int):
+                return value[key]
+    return 0
+
+
+def _finalize_usage_before_renewal(db: Session, sub: Subscription) -> bool:
+    """Rate the usage of the period that is ending (usage is billed in arrears).
+
+    Only subscriptions that actually recorded usage in [current_period_start,
+    current_period_end) are finalized; an already-finalized cycle is left alone.
+    """
+    from backend.app.services import meter_service
+
+    if not meter_service.subscription_has_usage(db, sub.id, sub.current_period_start, sub.current_period_end):
+        return False
+    cycle = db.scalars(
+        select(BillingCycle).where(
+            BillingCycle.subscription_id == sub.id,
+            BillingCycle.period_start == sub.current_period_start,
+        )
+    ).first()
+    if cycle is None:
+        from sqlalchemy import func
+
+        max_cycle = db.scalar(select(func.max(BillingCycle.cycle_number)).where(BillingCycle.subscription_id == sub.id)) or 0
+        cycle = BillingCycle(
+            organization_id=sub.organization_id,
+            subscription_id=sub.id,
+            cycle_number=max_cycle + 1,
+            period_start=sub.current_period_start,
+            period_end=sub.current_period_end,
+            status=BillingCycleStatus.OPEN,
+        )
+        db.add(cycle)
+        db.flush()
+    if cycle.status == BillingCycleStatus.FINALIZED:
+        return False
+    meter_service.finalize_usage_for_cycle_system(
+        db, organization_id=sub.organization_id, subscription_id=sub.id, billing_cycle_id=cycle.id
+    )
+    return True
+
+
+def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict[str, int], int]:
+    org_today = _org_todays(db, today)
+    # The latest local date across organizations bounds the candidate queries; each
+    # row is then checked against its own organization's local date.
+    horizon = max(org_today.values()) if org_today else (today or date.today())
+
+    def local_today(org_id: str) -> date:
+        return org_today.get(org_id) or today or date.today()
+
+    counts: Dict[str, int] = {"renewals": 0, "trials_converted": 0, "marked_overdue": 0, "reminders_sent": 0}
     ended = errors = 0
 
-    # (a) trials that have ended -> active + first invoice
-    trial_ids = list(
-        db.scalars(
-            select(Subscription.id).where(Subscription.status == SubscriptionStatus.TRIALING, Subscription.trial_end <= today)
-        ).all()
-    )
-    for sid in trial_ids:
+    # (a) scheduled subscription changes due today - BEFORE renewals, so an end-of-term
+    # change moves the subscription onto the new plan before its renewal invoice is built.
+    scheduled_changes_applied = 0
+    for oid, day in org_today.items():
         try:
-            sub = _load_subscription(db, sid)
-            if sub is not None and sub.status == SubscriptionStatus.TRIALING:
-                from backend.app.models.payments import CustomerPaymentMethod, CustomerPaymentMethodStatus
-                from backend.app.models.trials import TrialConversionAttemptType
-                from backend.app.services.trial_service import convert_trial_to_live
+            from backend.app.services.subscription_change_service import execute_due_scheduled_changes
 
-                pm = db.scalars(
-                    select(CustomerPaymentMethod).where(
-                        CustomerPaymentMethod.customer_id == sub.customer_id,
-                        CustomerPaymentMethod.is_default.is_(True),
-                        CustomerPaymentMethod.status == CustomerPaymentMethodStatus.ACTIVE,
-                    )
-                ).first()
-
-                if pm is not None:
-                    convert_trial_to_live(
-                        db,
-                        sub,
-                        payment_method_id=pm.id,
-                        attempt_type=TrialConversionAttemptType.AUTOMATIC_TRIAL_END,
-                        actor_label=audit.SYSTEM_ACTOR,
-                    )
-                else:
-                    convert_trial(db, sub, actor_label=audit.SYSTEM_ACTOR)
-
-                counts["trials_converted"] += 1
+            applied = execute_due_scheduled_changes(db, organization_id=oid, today=day)
+            scheduled_changes_applied += len(applied)
             db.commit()
         except Exception:
             errors += 1
-            logger.exception("Scheduler: trial conversion failed for subscription %s", sid)
+            logger.exception("Scheduler: applying scheduled subscription changes failed for organization %s", oid)
             db.rollback()
+    counts["scheduled_changes_applied"] = scheduled_changes_applied
 
-    # (b) active subscriptions due for renewal
+    # (b) trials: conversion/charging, fallback plans, cancel-at-period-end and expiry
+    # reminders all go through the trial service (one rule set for API and scheduler).
+    trial_stats: Dict[str, int] = {}
+    for oid, day in org_today.items():
+        try:
+            from backend.app.services.trial_service import evaluate_expiring_trials
+
+            stats = evaluate_expiring_trials(db, today=day, org_id=oid, commit=True)
+            db.commit()
+            for key, value in stats.items():
+                trial_stats[key] = trial_stats.get(key, 0) + int(value or 0)
+        except Exception:
+            errors += 1
+            logger.exception("Scheduler: trial evaluation failed for organization %s", oid)
+            db.rollback()
+    counts["trials_converted"] = trial_stats.get("converted", 0)
+    counts["trials_fallback"] = trial_stats.get("fallback", 0)
+    counts["trials_cancelled"] = trial_stats.get("cancelled", 0)
+    counts["trials_past_due"] = trial_stats.get("past_due", 0)
+    counts["trial_reminders_sent"] = trial_stats.get("reminders_sent", 0)
+
+    # (c) active subscriptions due for renewal (usage of the ending period is finalized first)
+    usage_finalized = 0
     renewal_ids = list(
         db.scalars(
             select(Subscription.id).where(
                 Subscription.status == SubscriptionStatus.ACTIVE,
                 Subscription.next_billing_date.is_not(None),
-                Subscription.next_billing_date <= today,
+                Subscription.next_billing_date <= horizon,
             )
         ).all()
     )
     for sid in renewal_ids:
         try:
             sub = _load_subscription(db, sid)
-            outcome = renew_subscription(db, sub, actor_label=audit.SYSTEM_ACTOR) if sub is not None else "skipped"
+            if sub is None:
+                continue
+            day = local_today(sub.organization_id)
+            if sub.next_billing_date is None or sub.next_billing_date > day:
+                continue
+            try:
+                if _finalize_usage_before_renewal(db, sub):
+                    usage_finalized += 1
+            except Exception:
+                errors += 1
+                logger.exception("Scheduler: usage finalization failed for subscription %s", sid)
+                db.rollback()
+                sub = _load_subscription(db, sid)
+                if sub is None:
+                    continue
+            outcome = renew_subscription(db, sub, actor_label=audit.SYSTEM_ACTOR, only_if_due=True, today=day)
             db.commit()
             if outcome == "renewed":
                 counts["renewals"] += 1
@@ -106,27 +244,29 @@ def run_billing_jobs(db: Session, *, today: Optional[date] = None) -> Dict[str, 
             errors += 1
             logger.exception("Scheduler: renewal failed for subscription %s", sid)
             db.rollback()
+    counts["usage_finalized"] = usage_finalized
 
-    # (c) open invoices past due -> overdue (+ owning subscription past_due)
+    # (d) open invoices past due -> overdue (+ owning subscription past_due)
     overdue_ids = list(
         db.scalars(
             select(Invoice.id).where(
-                Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIALLY_PAID]), Invoice.due_date < today
+                Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIALLY_PAID]), Invoice.due_date < horizon
             )
         ).all()
     )
     for iid in overdue_ids:
         try:
             inv = _load_invoice(db, iid)
-            if inv is not None and mark_overdue(db, inv, actor_label=audit.SYSTEM_ACTOR):
-                counts["marked_overdue"] += 1
+            if inv is not None and inv.due_date < local_today(inv.organization_id):
+                if mark_overdue(db, inv, actor_label=audit.SYSTEM_ACTOR):
+                    counts["marked_overdue"] += 1
             db.commit()
         except Exception:
             errors += 1
             logger.exception("Scheduler: overdue marking failed for invoice %s", iid)
             db.rollback()
 
-    # (d) dunning reminders for overdue invoices
+    # (e) dunning reminders for overdue invoices
     cutoff = datetime.now(timezone.utc) - timedelta(days=settings.DUNNING_REMINDER_INTERVAL_DAYS)
     reminder_ids = list(
         db.scalars(
@@ -149,12 +289,12 @@ def run_billing_jobs(db: Session, *, today: Optional[date] = None) -> Dict[str, 
             logger.exception("Scheduler: reminder failed for invoice %s", iid)
             db.rollback()
 
-    # (e) dunning recovery retries across organizations
-    org_ids = list(db.scalars(select(Organization.id)).all())
+    # (f) dunning recovery retries across organizations
     dunning_recovered = 0
-    for oid in org_ids:
+    for oid in org_today:
         try:
             from backend.app.services.dunning_service import execute_dunning_retries
+
             res = execute_dunning_retries(db, oid)
             dunning_recovered += res.get("recovered_count", 0)
             db.commit()
@@ -164,24 +304,12 @@ def run_billing_jobs(db: Session, *, today: Optional[date] = None) -> Dict[str, 
             db.rollback()
     counts["dunning_recovered"] = dunning_recovered
 
-    # (f) scheduled subscription changes due today
-    scheduled_changes_applied = 0
-    try:
-        from backend.app.services.subscription_change_service import execute_due_scheduled_changes
-        applied = execute_due_scheduled_changes(db, today=today)
-        scheduled_changes_applied = len(applied)
-        db.commit()
-    except Exception:
-        errors += 1
-        logger.exception("Scheduler: applying scheduled subscription changes failed")
-        db.rollback()
-    counts["scheduled_changes_applied"] = scheduled_changes_applied
-
     # (g) recurring expenses due today
     recurring_expenses_processed = 0
     try:
         from backend.app.services.expense_service import process_due_recurring_expenses
-        recurring_expenses_processed = process_due_recurring_expenses(db, today=today)
+
+        recurring_expenses_processed = process_due_recurring_expenses(db, today=today or horizon)
         db.commit()
     except Exception:
         errors += 1
@@ -189,8 +317,19 @@ def run_billing_jobs(db: Session, *, today: Optional[date] = None) -> Dict[str, 
         db.rollback()
     counts["recurring_expenses_processed"] = recurring_expenses_processed
 
+    # (h) housekeeping owned by other services - independent, failure-isolated steps
+    for key, name, fn in (
+        ("pending_signups_purged", "purge_expired_pending_signups", _purge_expired_pending_signups),
+        ("outbox_processed", "process_pending_outbox", _process_pending_outbox),
+        ("durable_jobs_completed", "process_due_jobs", _process_due_jobs),
+        ("automation_schedules_run", "run_due_automation_schedules", _run_due_automation_schedules),
+    ):
+        result, failed = _run_step(db, name, lambda fn=fn: fn(db))
+        errors += failed
+        counts[key] = _as_count(result)
+
     logger.info(
-        "Billing jobs: renewals=%s trials_converted=%s marked_overdue=%s reminders_sent=%s dunning_recovered=%s scheduled_changes=%s recurring_expenses=%s ended=%s errors=%s",
+        "Billing jobs: renewals=%s trials_converted=%s marked_overdue=%s reminders_sent=%s dunning_recovered=%s scheduled_changes=%s recurring_expenses=%s usage_finalized=%s ended=%s errors=%s",
         counts["renewals"],
         counts["trials_converted"],
         counts["marked_overdue"],
@@ -198,10 +337,122 @@ def run_billing_jobs(db: Session, *, today: Optional[date] = None) -> Dict[str, 
         counts.get("dunning_recovered", 0),
         counts.get("scheduled_changes_applied", 0),
         counts.get("recurring_expenses_processed", 0),
+        counts.get("usage_finalized", 0),
         ended,
         errors,
     )
-    return counts
+    return counts, errors
+
+
+def _record_heartbeat(
+    db: Session, *, started_at: datetime, counts: Dict[str, int], errors: int, skipped: bool = False
+) -> None:
+    try:
+        row = db.get(SchedulerHeartbeat, JOB_NAME)
+        if row is None:
+            row = SchedulerHeartbeat(job_name=JOB_NAME, total_runs=0, last_error_count=0)
+            db.add(row)
+        if not skipped:
+            row.last_started_at = started_at
+            row.last_finished_at = datetime.now(timezone.utc)
+            row.last_error_count = errors
+            row.last_counts = dict(counts)
+            row.total_runs = int(row.total_runs or 0) + 1
+        row.updated_at = datetime.now(timezone.utc)
+        db.commit()
+    except Exception:
+        logger.exception("Scheduler: could not record heartbeat")
+        db.rollback()
+
+
+def get_scheduler_heartbeat(db: Session) -> Optional[Dict[str, Any]]:
+    """Last scheduler run for health checks: timestamps, error count and per-step counts.
+
+    Returns None when the scheduler has never completed a run (or the table is missing).
+    """
+    try:
+        row = db.get(SchedulerHeartbeat, JOB_NAME)
+    except Exception:
+        logger.exception("Scheduler: could not read heartbeat")
+        db.rollback()
+        return None
+    if row is None or row.last_finished_at is None:
+        return None
+    finished = row.last_finished_at
+    if finished.tzinfo is None:
+        finished = finished.replace(tzinfo=timezone.utc)
+    return {
+        "job_name": row.job_name,
+        "last_started_at": row.last_started_at.isoformat() if row.last_started_at else None,
+        "last_finished_at": finished.isoformat(),
+        "seconds_since_last_run": int((datetime.now(timezone.utc) - finished).total_seconds()),
+        "last_error_count": int(row.last_error_count or 0),
+        "last_counts": row.last_counts or {},
+        "total_runs": int(row.total_runs or 0),
+        "interval_minutes": int(settings.SCHEDULER_INTERVAL_MINUTES),
+    }
+
+
+def _acquire_run_lock(db: Session):
+    """PostgreSQL: take a session-level advisory lock on a dedicated connection.
+
+    Returns (acquired, connection). The ORM session commits per row and may hop
+    connections, so the lock lives on its own connection held for the whole run.
+    Non-PostgreSQL databases (SQLite in dev/tests) run unlocked.
+    """
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return True, None
+    engine = getattr(bind, "engine", bind)
+    conn = engine.connect()
+    try:
+        acquired = bool(conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": ADVISORY_LOCK_KEY}).scalar())
+        conn.commit()
+    except Exception:
+        conn.close()
+        raise
+    if not acquired:
+        conn.close()
+        return False, None
+    return True, conn
+
+
+def _release_run_lock(conn) -> None:
+    if conn is None:
+        return
+    try:
+        conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": ADVISORY_LOCK_KEY})
+        conn.commit()
+    except Exception:
+        logger.exception("Scheduler: failed to release advisory lock")
+    finally:
+        conn.close()
+
+
+def run_billing_jobs(db: Session, *, today: Optional[date] = None) -> Dict[str, int]:
+    """Run all job steps once. Returns the counts the admin endpoint exposes.
+
+    `today` forces one date for every organization (tests / backfills); by default each
+    organization is processed on its own local date (Organization.timezone).
+    """
+    started_at = datetime.now(timezone.utc)
+    acquired, lock_conn = _acquire_run_lock(db)
+    if not acquired:
+        logger.info("Billing jobs skipped: another run holds the scheduler lock")
+        return {
+            "renewals": 0,
+            "trials_converted": 0,
+            "marked_overdue": 0,
+            "reminders_sent": 0,
+            "skipped_locked": 1,
+        }
+    try:
+        counts, errors = _run_billing_jobs_unlocked(db, today)
+        counts["errors"] = errors
+        _record_heartbeat(db, started_at=started_at, counts=counts, errors=errors)
+        return counts
+    finally:
+        _release_run_lock(lock_conn)
 
 
 def _job() -> None:
@@ -232,7 +483,7 @@ def start_scheduler():
         _job,
         trigger="interval",
         minutes=max(1, int(settings.SCHEDULER_INTERVAL_MINUTES)),
-        id="billing_jobs",
+        id=JOB_NAME,
         name="Renewals, overdue marking and dunning",
         max_instances=1,
         coalesce=True,
@@ -261,7 +512,6 @@ def stop_scheduler() -> None:
 def run_forever() -> None:
     """Run the billing scheduler as a dedicated blocking worker process."""
     import signal
-    import time
     from threading import Event
 
     stop_event = Event()
@@ -289,7 +539,7 @@ def run_forever() -> None:
         logger.info("Dedicated billing scheduler exited cleanly.")
 
 
-__all__ = ["run_billing_jobs", "start_scheduler", "stop_scheduler", "run_forever"]
+__all__ = ["run_billing_jobs", "get_scheduler_heartbeat", "start_scheduler", "stop_scheduler", "run_forever"]
 
 if __name__ == "__main__":
     run_forever()

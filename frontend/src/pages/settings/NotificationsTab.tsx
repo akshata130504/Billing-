@@ -1,9 +1,18 @@
 import { useState } from 'react';
-import { Save, AlertCircle } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Save, Mail, Edit3, Eye, Send, CheckCircle2, XCircle } from 'lucide-react';
 import { Button } from '../../components/common/Button';
+import { Input } from '../../components/common/Input';
+import { Modal } from '../../components/common/Modal';
 import { useToast } from '../../components/common/Toast';
 import { cn } from '../../utils/cn';
 import { SettingsSection } from './settingsShared';
+import {
+  notificationService,
+  type NotificationTemplate,
+  type NotificationTemplateUpdate,
+  type NotificationTemplatePreview,
+} from '../../services/notificationService';
 
 const NOTIFICATIONS_STORAGE_KEY = 'rooman_notification_preferences';
 
@@ -75,11 +84,16 @@ function loadNotifications(): NotificationPreferences {
   }
 }
 
-function saveNotifications(prefs: NotificationPreferences) {
+/**
+ * There is no backend endpoint for per-user notification preferences yet, so
+ * these are stored in this browser only. Returns false if storage is blocked.
+ */
+function saveNotifications(prefs: NotificationPreferences): boolean {
   try {
     localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(prefs));
+    return true;
   } catch {
-    // Storage unavailable
+    return false;
   }
 }
 
@@ -103,13 +117,13 @@ function ToggleItem({ label, description, checked, onChange }: ToggleItemProps) 
         aria-checked={checked}
         onClick={() => onChange(!checked)}
         className={cn(
-          'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2',
-          checked ? 'bg-brand-600' : 'bg-slate-200'
+          'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+          checked ? 'bg-primary-600' : 'bg-slate-200'
         )}
       >
         <span
           className={cn(
-            'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out',
+            'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
             checked ? 'translate-x-4' : 'translate-x-0'
           )}
         />
@@ -118,222 +132,497 @@ function ToggleItem({ label, description, checked, onChange }: ToggleItemProps) 
   );
 }
 
+const AVAILABLE_PLACEHOLDERS = [
+  '{{customer_name}}',
+  '{{company_name}}',
+  '{{invoice_number}}',
+  '{{invoice_date}}',
+  '{{due_date}}',
+  '{{invoice_total}}',
+  '{{amount_due}}',
+  '{{payment_link}}',
+  '{{quote_number}}',
+  '{{quote_total}}',
+  '{{payment_date}}',
+  '{{payment_amount}}',
+];
+
 export function NotificationsTab() {
   const { showToast } = useToast();
+  const queryClient = useQueryClient();
   const [prefs, setPrefs] = useState<NotificationPreferences>(loadNotifications);
-  const [isSaving, setIsSaving] = useState(false);
 
-  const update = <K extends keyof NotificationPreferences>(key: K, value: NotificationPreferences[K]) => {
+  // Template state
+  const [editingTemplate, setEditingTemplate] = useState<NotificationTemplate | null>(null);
+  const [editForm, setEditForm] = useState<NotificationTemplateUpdate>({});
+  const [previewingTemplate, setPreviewingTemplate] = useState<NotificationTemplate | null>(null);
+  const [previewData, setPreviewData] = useState<NotificationTemplatePreview | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [testEmailRecipient, setTestEmailRecipient] = useState('');
+  const [isSendingTest, setIsSendingTest] = useState(false);
+
+  const { data: templates = [], isLoading: isLoadingTemplates } = useQuery({
+    queryKey: ['notification-templates'],
+    queryFn: () => notificationService.listTemplates(),
+  });
+
+  const updateTemplateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: NotificationTemplateUpdate }) =>
+      notificationService.updateTemplate(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notification-templates'] });
+      showToast('success', 'Notification template updated successfully');
+      setEditingTemplate(null);
+    },
+    onError: () => {
+      showToast('error', 'Failed to update notification template');
+    },
+  });
+
+  const update = (key: keyof NotificationPreferences, value: boolean) => {
     setPrefs((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSavePreferences = (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSaving(true);
-    try {
-      saveNotifications(prefs);
-      // These choices are stored in this browser. The server does not yet read
-      // them when deciding what to send, so the message must not promise that
-      // outgoing email has changed.
-      showToast(
-        'success',
-        'Preferences saved on this device',
-        'In-app alerts now follow these choices. Emails sent by the server are not filtered by them yet.'
-      );
-    } catch {
-      showToast('error', 'Save failed', 'Could not save notification preferences.');
-    } finally {
-      setIsSaving(false);
+    if (saveNotifications(prefs)) {
+      showToast('success', 'Preferences saved on this device', 'They apply to this browser only.');
+    } else {
+      showToast('error', 'Could not save preferences', 'Browser storage is unavailable.');
     }
   };
 
+  const handleOpenEdit = (template: NotificationTemplate) => {
+    setEditingTemplate(template);
+    setEditForm({
+      name: template.name,
+      subject_template: template.subject_template || '',
+      body_template: template.body_template,
+      description: template.description || '',
+      is_active: template.is_active,
+    });
+  };
+
+  const handleSaveTemplate = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTemplate) return;
+    updateTemplateMutation.mutate({
+      id: editingTemplate.id,
+      data: editForm,
+    });
+  };
+
+  const handleOpenPreview = async (template: NotificationTemplate) => {
+    setPreviewingTemplate(template);
+    setIsPreviewLoading(true);
+    setTestEmailRecipient('');
+    try {
+      const rendered = await notificationService.previewTemplate(template.id);
+      setPreviewData(rendered);
+    } catch {
+      showToast('error', 'Could not render template preview');
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
+
+  const handleSendTestEmail = async () => {
+    if (!previewingTemplate || !testEmailRecipient) return;
+    setIsSendingTest(true);
+    try {
+      const res = await notificationService.sendTestEmail(previewingTemplate.id, testEmailRecipient);
+      if (res.success) {
+        showToast('success', `Test email dispatched to ${testEmailRecipient}`);
+      } else {
+        showToast('warning', `SMTP is not configured. Email preview logged for ${testEmailRecipient}.`);
+      }
+    } catch {
+      showToast('error', 'Failed to send test email. Check your SMTP settings.');
+    } finally {
+      setIsSendingTest(false);
+    }
+  };
+
+  const insertPlaceholder = (tag: string) => {
+    setEditForm((prev) => ({
+      ...prev,
+      body_template: (prev.body_template || '') + ' ' + tag,
+    }));
+  };
+
   return (
-    <form onSubmit={handleSave} className="space-y-6">
-      <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-100 rounded-lg text-xs text-amber-800">
-        <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-        <span>
-          These preferences are stored in this browser and control in-app alerts. Server-sent email
-          (invoice reminders, dunning, trial notices) is not yet filtered by them.
-        </span>
-      </div>
-
-      {/* Channels */}
+    <div className="space-y-8">
+      {/* Email & Notification Templates */}
       <SettingsSection
-        title="Delivery Channels"
-        description="Choose how you wish to receive operational alerts and reports."
+        title="Email & Notification Templates"
+        description="Standard customer-facing email templates dispatched upon invoice issuance, reminders, quotes, and payment receipts."
       >
-        <div className="space-y-1">
-          <ToggleItem
-            label="Email Alerts"
-            description="Send notifications to your registered account email."
-            checked={prefs.emailNotifications}
-            onChange={(c) => update('emailNotifications', c)}
-          />
-          <ToggleItem
-            label="In-App Action Center"
-            description="Display badge counts and toast alerts inside the control center."
-            checked={prefs.inAppNotifications}
-            onChange={(c) => update('inAppNotifications', c)}
-          />
-        </div>
+        {isLoadingTemplates ? (
+          <div className="py-6 text-center text-xs text-slate-400">Loading templates...</div>
+        ) : (
+          <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white overflow-hidden">
+            {templates.map((tpl) => (
+              <div key={tpl.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1 max-w-xl">
+                  <div className="flex items-center gap-2">
+                    <Mail className="w-4 h-4 text-primary-600" />
+                    <span className="text-xs font-semibold text-slate-800">{tpl.name}</span>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                      {tpl.code}
+                    </span>
+                    {tpl.is_active ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 font-medium bg-emerald-50 px-2 py-0.5 rounded-full">
+                        <CheckCircle2 className="w-3 h-3" /> Active
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 font-medium bg-amber-50 px-2 py-0.5 rounded-full">
+                        <XCircle className="w-3 h-3" /> Disabled (Fallback)
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500">{tpl.description || 'Configured notification template.'}</p>
+                  <p className="text-[11px] text-slate-400 truncate">
+                    <span className="font-medium text-slate-600">Subject:</span> {tpl.subject_template || '(None)'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateTemplateMutation.mutate({
+                        id: tpl.id,
+                        data: { is_active: !tpl.is_active },
+                      })
+                    }
+                    className={cn(
+                      'text-xs px-2.5 py-1 rounded border font-medium transition-colors',
+                      tpl.is_active
+                        ? 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                        : 'border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
+                    )}
+                  >
+                    {tpl.is_active ? 'Disable' : 'Enable'}
+                  </button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleOpenPreview(tpl)}
+                    leadingIcon={<Eye className="w-3.5 h-3.5" />}
+                  >
+                    Preview
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleOpenEdit(tpl)}
+                    leadingIcon={<Edit3 className="w-3.5 h-3.5" />}
+                  >
+                    Edit
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </SettingsSection>
 
-      {/* Billing Notifications */}
-      <SettingsSection
-        title="Billing Notifications"
-        description="Alerts regarding payment attempts, invoice generation, and refund operations."
+      {/* Edit Template Modal */}
+      <Modal
+        isOpen={!!editingTemplate}
+        onClose={() => setEditingTemplate(null)}
+        title={`Edit Template: ${editingTemplate?.name}`}
+        size="lg"
       >
-        <div className="space-y-1">
-          <ToggleItem
-            label="Payment Received"
-            description="Notification when a customer makes an online or manual payment successfully."
-            checked={prefs.paymentReceived}
-            onChange={(c) => update('paymentReceived', c)}
-          />
-          <ToggleItem
-            label="Payment Failed"
-            description="Alert when a Razorpay card or UPI transaction is declined or fails."
-            checked={prefs.paymentFailed}
-            onChange={(c) => update('paymentFailed', c)}
-          />
-          <ToggleItem
-            label="Invoice Created"
-            description="Receive an update when draft or recurring invoices are generated."
-            checked={prefs.invoiceCreated}
-            onChange={(c) => update('invoiceCreated', c)}
-          />
-          <ToggleItem
-            label="Invoice Overdue"
-            description="Alert when an unpaid invoice crosses its payment due date."
-            checked={prefs.invoiceOverdue}
-            onChange={(c) => update('invoiceOverdue', c)}
-          />
-          <ToggleItem
-            label="Invoice Paid in Full"
-            description="Confirmation when an outstanding invoice balance reaches zero."
-            checked={prefs.invoicePaid}
-            onChange={(c) => update('invoicePaid', c)}
-          />
-          <ToggleItem
-            label="Refund Processed"
-            description="Notification when gateway or manual refunds are recorded against an invoice."
-            checked={prefs.refundProcessed}
-            onChange={(c) => update('refundProcessed', c)}
-          />
-        </div>
-      </SettingsSection>
+        {editingTemplate && (
+          <form onSubmit={handleSaveTemplate} className="space-y-4">
+            <Input
+              label="Template Name"
+              value={editForm.name || ''}
+              onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
+              required
+            />
+            <Input
+              label="Subject Template"
+              value={editForm.subject_template || ''}
+              onChange={(e) => setEditForm((prev) => ({ ...prev, subject_template: e.target.value }))}
+              placeholder="e.g. Invoice {{invoice_number}} from {{company_name}}"
+              required
+            />
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-slate-700">Body Template (HTML / Plain text)</label>
+                <span className="text-[10px] text-slate-400">Click a variable to insert</span>
+              </div>
+              <div className="flex flex-wrap gap-1 mb-1.5">
+                {AVAILABLE_PLACEHOLDERS.map((ph) => (
+                  <button
+                    key={ph}
+                    type="button"
+                    onClick={() => insertPlaceholder(ph)}
+                    className="text-[10px] font-mono bg-primary-50 text-primary-700 px-1.5 py-0.5 rounded hover:bg-primary-100 border border-primary-200"
+                  >
+                    {ph}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                rows={8}
+                value={editForm.body_template || ''}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, body_template: e.target.value }))}
+                className="w-full font-mono text-xs rounded-md border border-slate-300 p-2.5 focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
+                required
+              />
+            </div>
+            <Input
+              label="Description"
+              value={editForm.description || ''}
+              onChange={(e) => setEditForm((prev) => ({ ...prev, description: e.target.value }))}
+              placeholder="Optional notes about when this template triggers"
+            />
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+              <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editForm.is_active ?? true}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, is_active: e.target.checked }))}
+                  className="rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                />
+                Active (dispatches customized email)
+              </label>
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="outline" onClick={() => setEditingTemplate(null)}>
+                  Cancel
+                </Button>
+                <Button type="submit" variant="primary" isLoading={updateTemplateMutation.isPending}>
+                  Save Template
+                </Button>
+              </div>
+            </div>
+          </form>
+        )}
+      </Modal>
 
-      {/* Subscription Notifications */}
-      <SettingsSection
-        title="Subscription Notifications"
-        description="Updates regarding subscription life cycles, renewals, and plan tier transitions."
+      {/* Preview & Test Send Modal */}
+      <Modal
+        isOpen={!!previewingTemplate}
+        onClose={() => setPreviewingTemplate(null)}
+        title={`Preview & Test: ${previewingTemplate?.name}`}
+        size="lg"
       >
-        <div className="space-y-1">
-          <ToggleItem
-            label="Subscription Created"
-            description="Alert when a new subscription begins for a customer account."
-            checked={prefs.subscriptionCreated}
-            onChange={(c) => update('subscriptionCreated', c)}
-          />
-          <ToggleItem
-            label="Subscription Upgraded"
-            description="Notification when a subscriber changes to a higher pricing plan or adds units."
-            checked={prefs.subscriptionUpgraded}
-            onChange={(c) => update('subscriptionUpgraded', c)}
-          />
-          <ToggleItem
-            label="Subscription Downgraded"
-            description="Notification when a plan is switched to a lower tier."
-            checked={prefs.subscriptionDowngraded}
-            onChange={(c) => update('subscriptionDowngraded', c)}
-          />
-          <ToggleItem
-            label="Subscription Cancelled"
-            description="Immediate notification when a subscription is cancelled or scheduled to end."
-            checked={prefs.subscriptionCancelled}
-            onChange={(c) => update('subscriptionCancelled', c)}
-          />
-          <ToggleItem
-            label="Trial Ending Soon"
-            description="Reminder 3 days before a customer's product trial expires."
-            checked={prefs.trialEnding}
-            onChange={(c) => update('trialEnding', c)}
-          />
-          <ToggleItem
-            label="Trial Expired"
-            description="Alert when a trial finishes without an active payment conversion."
-            checked={prefs.trialExpired}
-            onChange={(c) => update('trialExpired', c)}
-          />
-        </div>
-      </SettingsSection>
+        <div className="space-y-4">
+          {isPreviewLoading ? (
+            <div className="py-8 text-center text-xs text-slate-400">Rendering preview...</div>
+          ) : previewData ? (
+            <div className="space-y-3">
+              <div className="bg-slate-50 border border-slate-200 rounded p-3">
+                <p className="text-[11px] text-slate-400 font-medium">Subject</p>
+                <p className="text-xs font-semibold text-slate-800 mt-0.5">{previewData.subject}</p>
+              </div>
 
-      {/* Customer Activity */}
-      <SettingsSection
-        title="Customer Activity"
-        description="Notifications when customer accounts are created or client portal actions occur."
-      >
-        <div className="space-y-1">
-          <ToggleItem
-            label="New Customer Created"
-            description="Notice when a new customer profile or organization contact is added."
-            checked={prefs.newCustomer}
-            onChange={(c) => update('newCustomer', c)}
-          />
-          <ToggleItem
-            label="Customer Portal Activity"
-            description="Alert when a client signs into their self-service portal or views quotes."
-            checked={prefs.customerPortalActivity}
-            onChange={(c) => update('customerPortalActivity', c)}
-          />
-          <ToggleItem
-            label="Payment Method Changes"
-            description="Notice when a customer adds or removes a card/UPI method in their portal."
-            checked={prefs.paymentMethodChanges}
-            onChange={(c) => update('paymentMethodChanges', c)}
-          />
-        </div>
-      </SettingsSection>
+              <div>
+                <p className="text-[11px] text-slate-400 font-medium mb-1">Rendered HTML</p>
+                <iframe
+                  title="Rendered HTML Email Preview"
+                  sandbox=""
+                  srcDoc={previewData.body_html}
+                  className="w-full h-56 p-2 bg-white border border-slate-200 rounded text-xs text-slate-700"
+                />
+              </div>
 
-      {/* System & Security */}
-      <SettingsSection
-        title="System & Security Alerts"
-        description="Critical system health alerts, credential changes, and security events."
-      >
-        <div className="space-y-1">
-          <ToggleItem
-            label="System Alerts"
-            description="Background scheduler notices, webhook retries, and automated job failures."
-            checked={prefs.systemAlerts}
-            onChange={(c) => update('systemAlerts', c)}
-          />
-          <ToggleItem
-            label="Important Service Notifications"
-            description="Planned platform maintenance, API rate updates, and service announcements."
-            checked={prefs.serviceNotifications}
-            onChange={(c) => update('serviceNotifications', c)}
-          />
-          <ToggleItem
-            label="Security Alerts"
-            description="Account logins from unrecognized IPs, password changes, and permission shifts."
-            checked={prefs.securityAlerts}
-            onChange={(c) => update('securityAlerts', c)}
-          />
-        </div>
-      </SettingsSection>
+              <div>
+                <p className="text-[11px] text-slate-400 font-medium mb-1">Plain-Text Fallback</p>
+                <pre className="p-3 bg-slate-900 text-slate-200 rounded text-[11px] font-mono whitespace-pre-wrap max-h-36 overflow-y-auto">
+                  {previewData.body_text}
+                </pre>
+              </div>
 
-      {/* Save Button */}
-      <div className="flex items-center justify-end">
-        <Button
-          type="submit"
-          variant="primary"
-          isLoading={isSaving}
-          leadingIcon={<Save className="w-4 h-4" />}
+              <div className="pt-3 border-t border-slate-200 flex flex-col sm:flex-row items-center gap-2">
+                <input
+                  type="email"
+                  placeholder="Enter test email (e.g. test@example.com)"
+                  value={testEmailRecipient}
+                  onChange={(e) => setTestEmailRecipient(e.target.value)}
+                  className="flex-1 text-xs rounded-md border border-slate-300 px-3 py-2 focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
+                />
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={handleSendTestEmail}
+                  isLoading={isSendingTest}
+                  disabled={!testEmailRecipient}
+                  leadingIcon={<Send className="w-3.5 h-3.5" />}
+                >
+                  Send Test Email
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </Modal>
+
+      {/* Existing Notification Preferences Form */}
+      <form onSubmit={handleSavePreferences} className="space-y-6">
+        {/* Billing Activity */}
+        <SettingsSection
+          title="Billing Notifications"
+          description="In-app and internal notifications triggered when invoices are paid, overdue, or payments fail."
         >
-          Save Notification Preferences
-        </Button>
-      </div>
-    </form>
+          <div className="space-y-1">
+            <ToggleItem
+              label="Payment Received"
+              description="Alert when an online or manual payment is successfully recorded."
+              checked={prefs.paymentReceived}
+              onChange={(c) => update('paymentReceived', c)}
+            />
+            <ToggleItem
+              label="Payment Failed"
+              description="Alert when a customer's online payment attempt is declined or fails."
+              checked={prefs.paymentFailed}
+              onChange={(c) => update('paymentFailed', c)}
+            />
+            <ToggleItem
+              label="Invoice Created"
+              description="Notify when a new draft or issued invoice is generated."
+              checked={prefs.invoiceCreated}
+              onChange={(c) => update('invoiceCreated', c)}
+            />
+            <ToggleItem
+              label="Invoice Overdue"
+              description="Notice when an issued invoice reaches its due date without payment."
+              checked={prefs.invoiceOverdue}
+              onChange={(c) => update('invoiceOverdue', c)}
+            />
+            <ToggleItem
+              label="Invoice Fully Paid"
+              description="Confirmation when an invoice balance reaches zero."
+              checked={prefs.invoicePaid}
+              onChange={(c) => update('invoicePaid', c)}
+            />
+            <ToggleItem
+              label="Refund Processed"
+              description="Alert when a payment refund or partial refund is processed."
+              checked={prefs.refundProcessed}
+              onChange={(c) => update('refundProcessed', c)}
+            />
+          </div>
+        </SettingsSection>
+
+        {/* Subscription Activity */}
+        <SettingsSection
+          title="Subscription Lifecycle"
+          description="Alerts for customer subscription changes, renewals, and trial events."
+        >
+          <div className="space-y-1">
+            <ToggleItem
+              label="Subscription Created"
+              description="Alert when a new recurring subscription is activated."
+              checked={prefs.subscriptionCreated}
+              onChange={(c) => update('subscriptionCreated', c)}
+            />
+            <ToggleItem
+              label="Subscription Upgraded"
+              description="Notice when a customer upgrades their tier or increases quantity."
+              checked={prefs.subscriptionUpgraded}
+              onChange={(c) => update('subscriptionUpgraded', c)}
+            />
+            <ToggleItem
+              label="Subscription Downgraded"
+              description="Notice when a customer downgrades to a lower plan tier."
+              checked={prefs.subscriptionDowngraded}
+              onChange={(c) => update('subscriptionDowngraded', c)}
+            />
+            <ToggleItem
+              label="Subscription Cancelled"
+              description="Immediate notification when a subscription is cancelled or scheduled to end."
+              checked={prefs.subscriptionCancelled}
+              onChange={(c) => update('subscriptionCancelled', c)}
+            />
+            <ToggleItem
+              label="Trial Ending Soon"
+              description="Reminder 3 days before a customer's product trial expires."
+              checked={prefs.trialEnding}
+              onChange={(c) => update('trialEnding', c)}
+            />
+            <ToggleItem
+              label="Trial Expired"
+              description="Alert when a trial finishes without an active payment conversion."
+              checked={prefs.trialExpired}
+              onChange={(c) => update('trialExpired', c)}
+            />
+          </div>
+        </SettingsSection>
+
+        {/* Customer Activity */}
+        <SettingsSection
+          title="Customer Activity"
+          description="Notifications when customer accounts are created or client portal actions occur."
+        >
+          <div className="space-y-1">
+            <ToggleItem
+              label="New Customer Created"
+              description="Notice when a new customer profile or organization contact is added."
+              checked={prefs.newCustomer}
+              onChange={(c) => update('newCustomer', c)}
+            />
+            <ToggleItem
+              label="Customer Portal Activity"
+              description="Alert when a client signs into their self-service portal or views quotes."
+              checked={prefs.customerPortalActivity}
+              onChange={(c) => update('customerPortalActivity', c)}
+            />
+            <ToggleItem
+              label="Payment Method Changes"
+              description="Notice when a customer adds or removes a card/UPI method in their portal."
+              checked={prefs.paymentMethodChanges}
+              onChange={(c) => update('paymentMethodChanges', c)}
+            />
+          </div>
+        </SettingsSection>
+
+        {/* System & Security */}
+        <SettingsSection
+          title="System & Security Alerts"
+          description="Critical system health alerts, credential changes, and security events."
+        >
+          <div className="space-y-1">
+            <ToggleItem
+              label="System Alerts"
+              description="Background scheduler notices, webhook retries, and automated job failures."
+              checked={prefs.systemAlerts}
+              onChange={(c) => update('systemAlerts', c)}
+            />
+            <ToggleItem
+              label="Important Service Notifications"
+              description="Planned platform maintenance, API rate updates, and service announcements."
+              checked={prefs.serviceNotifications}
+              onChange={(c) => update('serviceNotifications', c)}
+            />
+            <ToggleItem
+              label="Security Alerts"
+              description="Account logins from unrecognized IPs, password changes, and permission shifts."
+              checked={prefs.securityAlerts}
+              onChange={(c) => update('securityAlerts', c)}
+            />
+          </div>
+        </SettingsSection>
+
+        {/* Save Button */}
+        <div className="flex items-center justify-end gap-3">
+          <p className="text-xs text-slate-500">Saved on this device only.</p>
+          <Button
+            type="submit"
+            variant="primary"
+
+            leadingIcon={<Save className="w-4 h-4" />}
+          >
+            Save Notification Preferences
+          </Button>
+        </div>
+      </form>
+    </div>
   );
 }
 

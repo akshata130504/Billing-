@@ -2,7 +2,8 @@
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Header, Query, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import CurrentContext, get_db, require_admin, require_finance, require_viewer
@@ -16,7 +17,7 @@ from backend.app.schemas.payments import (
     ReconciliationSummary,
     RefundIn,
 )
-from backend.app.services import payment_service
+from backend.app.services import idempotency_service, payment_service
 from backend.app.services.pagination import PageParams, page_params
 
 router = APIRouter()
@@ -55,10 +56,25 @@ def list_payments(
 @router.post("", response_model=PaymentOut, status_code=status.HTTP_201_CREATED, summary="Record a payment")
 def create_payment(
     body: PaymentCreate,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key", max_length=128),
     ctx: CurrentContext = Depends(require_finance),
     db: Session = Depends(get_db),
 ):
-    return payment_service.serialize_payment(payment_service.create_payment(db, ctx, body))
+    """Send an optional `Idempotency-Key` header to make retries safe: a repeated key
+    with the same body returns the original payment instead of recording another."""
+    status_code, out = idempotency_service.run_idempotent(
+        db,
+        organization_id=ctx.organization_id,
+        key=idempotency_key,
+        request_path="/payments",
+        request_method="POST",
+        params={"path": "/payments", "body": body.model_dump(mode="json")},
+        handler=lambda: PaymentOut.model_validate(
+            payment_service.serialize_payment(payment_service.create_payment(db, ctx, body))
+        ).model_dump(mode="json"),
+        status_code=status.HTTP_201_CREATED,
+    )
+    return JSONResponse(status_code=status_code, content=out)
 
 
 # Declared BEFORE /{payment_id} so "summary" is never treated as an id.

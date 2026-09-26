@@ -273,7 +273,7 @@ interface PaymentOut {
 `subscriptionService (list, get, create, update, pause, resume, cancel, generateInvoice, invoices)`,
 `invoiceService (list, get, create, update, remove, send, sendReminder, voidInvoice, recordPayment, pdfUrl)`,
 `paymentService (list, get, create, update, setAllocations, refund, reconciliationSummary)`,
-`controlCenterService (dashboard, actionCenter, calendar, listApprovals, approve, reject, auditLogs, auditExportUrl, activity, search, importTemplateUrl, runImport, listImports, runJobs)`,
+`controlCenterService (dashboard, actionCenter, calendar, listApprovals, approve, reject, auditLogs, auditExportUrl, activity, search, importTemplateUrl, runImport, listImports)`,
 `publicService (getInvoice, invoicePdfUrl, createRazorpayOrder, verifyRazorpayPayment, getQuote, acceptQuote, declineQuote, integrations)`.
 
 `frontend/src/hooks/useAuth.tsx` — `AuthProvider` + `useAuth()` returning `{ user, organization, membership, organizations, isAuthenticated, isLoading, login, signup, logout, switchOrganization, refreshMe, hasRole(min: MemberRole) }`. Tokens persist in `localStorage` under `rooman.access_token` / `rooman.refresh_token`; the axios client attaches the access token and on 401 performs one refresh + retry, then logs out.

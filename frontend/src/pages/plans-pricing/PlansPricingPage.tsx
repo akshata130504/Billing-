@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Plus,
@@ -14,13 +14,32 @@ import {
 } from 'lucide-react';
 import { Button } from '../../components/common/Button';
 import { LoadingState } from '../../components/common/LoadingState';
+import { ErrorState } from '../../components/common/ErrorState';
+import { ConfirmDialog } from '../../components/common/ConfirmDialog';
+import { Pagination } from '../../components/common/Pagination';
+import { useToast } from '../../components/common/Toast';
+import { useAuth } from '../../hooks/useAuth';
+import { toApiError } from '../../services/apiClient';
 import { PlanModal } from './components/PlanModal';
 import { planPricingService } from '../../services/planPricingService';
 import type { PlanPricingItem, CreatePlanPricingInput } from '../../types/plans_pricing';
 
+const PAGE_SIZE = 25;
+
 export function PlansPricingPage() {
+  const { showToast } = useToast();
+  const { hasRole } = useAuth();
+  const canEdit = hasRole('finance');
+  const canDelete = hasRole('admin');
+
   const [plans, setPlans] = useState<PlanPricingItem[]>([]);
+  const [totalPlans, setTotalPlans] = useState(0);
+  const [counts, setCounts] = useState({ active: 0, archived: 0 });
+  const [page, setPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [planToDelete, setPlanToDelete] = useState<PlanPricingItem | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'active' | 'draft' | 'archived'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPricingModel, setSelectedPricingModel] = useState<string>('all');
@@ -30,32 +49,47 @@ export function PlansPricingPage() {
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
   const [editingPlan, setEditingPlan] = useState<PlanPricingItem | null>(null);
 
-  const fetchPlans = async () => {
+  // Tab + search are applied by the server so every plan is reachable via
+  // pagination; model filter and sorting apply to the loaded page.
+  const fetchPlans = useCallback(async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
-      const res = await planPricingService.listPlans();
-      setPlans(res.items);
+      const search = searchQuery.trim() || undefined;
+      const isActive =
+        activeTab === 'active' ? true : activeTab === 'archived' ? false : undefined;
+      if (activeTab === 'draft') {
+        // Plans are catalog offerings, which have no draft state on the backend.
+        setPlans([]);
+        setTotalPlans(0);
+      } else {
+        const res = await planPricingService.listPlans({ search, is_active: isActive, page, page_size: PAGE_SIZE });
+        setPlans(res.items);
+        setTotalPlans(res.total ?? res.items.length);
+      }
+      const [activeRes, archivedRes] = await Promise.all([
+        planPricingService.listPlans({ search, is_active: true, page: 1, page_size: 1 }),
+        planPricingService.listPlans({ search, is_active: false, page: 1, page_size: 1 }),
+      ]);
+      setCounts({ active: activeRes.total ?? 0, archived: archivedRes.total ?? 0 });
     } catch (err) {
-      console.error('Failed to fetch plans', err);
+      setLoadError(toApiError(err).message);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [searchQuery, activeTab, page]);
 
   useEffect(() => {
-    fetchPlans();
-  }, []);
+    void fetchPlans();
+  }, [fetchPlans]);
 
   // Dashboard KPIs
   const kpis = useMemo(() => {
-    const total = plans.length;
-    const active = plans.filter((p) => p.status === 'active' || p.is_active).length;
     const draft = plans.filter((p) => p.status === 'draft').length;
-    const archived = plans.filter((p) => p.status === 'archived' || !p.is_active).length;
     const prices = plans.map((p) => Number(p.base_price || 0));
     const avgPrice = prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : 0;
-    return { total, active, draft, archived, avgPrice };
-  }, [plans]);
+    return { active: counts.active, draft, archived: counts.archived, avgPrice };
+  }, [plans, counts]);
 
   // Filtered & Sorted Plans
   const filteredPlans = useMemo(() => {
@@ -101,15 +135,17 @@ export function PlansPricingPage() {
     } else {
       await planPricingService.createPlan(data);
     }
+    showToast('success', editingPlan ? 'Plan updated' : 'Plan created');
     await fetchPlans();
   };
 
   const handleClonePlan = async (plan: PlanPricingItem) => {
     try {
       await planPricingService.clonePlan(plan.id);
+      showToast('success', 'Plan cloned', `A copy of "${plan.name}" was created.`);
       await fetchPlans();
     } catch (err) {
-      console.error('Failed to clone plan', err);
+      showToast('error', 'Could not clone plan', toApiError(err).message);
     }
   };
 
@@ -119,20 +155,25 @@ export function PlansPricingPage() {
         is_active: !plan.is_active,
         status: plan.is_active ? 'archived' : 'active',
       });
+      showToast('success', plan.is_active ? 'Plan archived' : 'Plan activated');
       await fetchPlans();
     } catch (err) {
-      console.error('Failed to toggle plan status', err);
+      showToast('error', 'Could not update plan status', toApiError(err).message);
     }
   };
 
-  const handleDeletePlan = async (planId: string) => {
-    if (confirm('Are you sure you want to permanently delete this pricing plan?')) {
-      try {
-        await planPricingService.deletePlan(planId);
-        await fetchPlans();
-      } catch (err) {
-        console.error('Failed to delete plan', err);
-      }
+  const handleConfirmDelete = async () => {
+    if (!planToDelete) return;
+    setIsDeleting(true);
+    try {
+      await planPricingService.deletePlan(planToDelete.id);
+      setPlanToDelete(null);
+      showToast('success', 'Plan deleted');
+      await fetchPlans();
+    } catch (err) {
+      showToast('error', 'Could not delete plan', toApiError(err).message);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -158,17 +199,19 @@ export function PlansPricingPage() {
               Pricing Simulator
             </Button>
           </Link>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => {
-              setEditingPlan(null);
-              setIsPlanModalOpen(true);
-            }}
-            leadingIcon={<Plus className="w-4 h-4" />}
-          >
-            New Plan
-          </Button>
+          {canEdit && (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setEditingPlan(null);
+                setIsPlanModalOpen(true);
+              }}
+              leadingIcon={<Plus className="w-4 h-4" />}
+            >
+              New Plan
+            </Button>
+          )}
         </div>
       </div>
 
@@ -195,7 +238,7 @@ export function PlansPricingPage() {
         <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs">
           <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Avg Plan Rate</p>
           <p className="text-2xl font-bold text-slate-900 mt-1">₹{Math.round(kpis.avgPrice).toLocaleString('en-IN')}</p>
-          <p className="text-[11px] text-slate-500 mt-0.5">Base recurring benchmark</p>
+          <p className="text-[11px] text-slate-500 mt-0.5">Across plans on this page</p>
         </div>
       </div>
 
@@ -207,7 +250,10 @@ export function PlansPricingPage() {
             {(['all', 'active', 'draft', 'archived'] as const).map((tab) => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => {
+                  setActiveTab(tab);
+                  setPage(1);
+                }}
                 className={`px-3 py-1.5 rounded-lg capitalize transition-all ${
                   activeTab === tab ? 'bg-white text-slate-900 shadow-2xs font-bold' : 'text-slate-500 hover:text-slate-900'
                 }`}
@@ -224,7 +270,10 @@ export function PlansPricingPage() {
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setPage(1);
+                }}
                 placeholder="Search plan name, code..."
                 className="pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 w-56"
               />
@@ -246,7 +295,7 @@ export function PlansPricingPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={fetchPlans}
+              onClick={() => void fetchPlans()}
               title="Refresh"
               leadingIcon={<RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />}
             />
@@ -256,12 +305,20 @@ export function PlansPricingPage() {
 
       {/* Plans Table */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden">
-        {isLoading ? (
+        {loadError ? (
+          <ErrorState
+            title="Couldn't load plans"
+            message={loadError}
+            onRetry={() => void fetchPlans()}
+            className="rounded-none border-0"
+          />
+        ) : isLoading ? (
           <div className="py-16">
             <LoadingState message="Loading plans & pricing configurations..." />
           </div>
         ) : (
-          <table className="w-full text-left text-xs text-slate-600 border-collapse">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-slate-600 border-collapse">
             <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
               <tr>
                 <th
@@ -348,6 +405,9 @@ export function PlansPricingPage() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
+                        {!canEdit && <span className="text-[11px] text-slate-400">View only</span>}
+                        {canEdit && (
+                        <>
                         <button
                           onClick={() => {
                             setEditingPlan(plan);
@@ -372,13 +432,17 @@ export function PlansPricingPage() {
                         >
                           <Archive className="w-3.5 h-3.5" />
                         </button>
+                        </>
+                        )}
+                        {canDelete && (
                         <button
-                          onClick={() => handleDeletePlan(plan.id)}
+                          onClick={() => setPlanToDelete(plan)}
                           className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50"
                           title="Delete Plan"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -386,8 +450,33 @@ export function PlansPricingPage() {
               )}
             </tbody>
           </table>
+          </div>
+        )}
+        {!loadError && !isLoading && (
+          <Pagination
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={totalPlans}
+            onPageChange={setPage}
+            itemLabel="plans"
+          />
         )}
       </div>
+
+      <ConfirmDialog
+        isOpen={Boolean(planToDelete)}
+        onClose={() => setPlanToDelete(null)}
+        onConfirm={() => void handleConfirmDelete()}
+        title="Delete pricing plan"
+        description={
+          planToDelete
+            ? `Are you sure you want to permanently delete "${planToDelete.name}"? This cannot be undone.`
+            : ''
+        }
+        confirmLabel="Delete"
+        variant="danger"
+        isLoading={isDeleting}
+      />
 
       {/* Create / Edit Plan Modal */}
       <PlanModal

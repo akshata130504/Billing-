@@ -1,12 +1,13 @@
 import { ExpenseFilterState } from '../types';
 import { Search, RotateCcw, LayoutList, LayoutGrid } from 'lucide-react';
-import { mockCustomers } from '../mockExpenses';
 
 interface ExpenseFiltersProps {
   filters: ExpenseFilterState;
   onChange: (filters: ExpenseFilterState) => void;
   onReset: () => void;
   availableProjects: string[];
+  /** Customer names present in the loaded expenses (the filter matches by name). */
+  availableCustomers: string[];
 }
 
 const CATEGORIES = [
@@ -37,6 +38,7 @@ export function ExpenseFilters({
   onChange,
   onReset,
   availableProjects,
+  availableCustomers,
 }: ExpenseFiltersProps) {
   const isFiltered =
     filters.searchQuery.trim() !== '' ||
@@ -138,7 +140,7 @@ export function ExpenseFilters({
             className="w-full py-1 px-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-500"
           >
             <option value="all">All Customers</option>
-            {mockCustomers.map((cust) => (
+            {availableCustomers.map((cust) => (
               <option key={cust} value={cust}>
                 {cust}
               </option>

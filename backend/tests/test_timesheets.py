@@ -16,6 +16,19 @@ from backend.app.models import (
 )
 
 
+def test_cannot_approve_own_time_entry(client: TestClient, tenant, auth_headers):
+    entry = client.post(
+        "/api/v1/timesheets",
+        headers=auth_headers,
+        json={"date": date.today().isoformat(), "duration_hours": 1, "description": "Self review", "billing_rate": 10},
+    ).json()
+    client.post(f"/api/v1/timesheets/{entry['id']}/submit", headers=auth_headers)
+    res = client.post(f"/api/v1/timesheets/{entry['id']}/approve", headers=auth_headers)
+    assert res.status_code == 403
+    res = client.post(f"/api/v1/timesheets/{entry['id']}/approve", headers=tenant.headers_for_role(MemberRole.ADMIN))
+    assert res.status_code == 200
+
+
 def test_create_time_entry_billable_calculation(client: TestClient, tenant, auth_headers):
     customer = tenant.customer(display_name="Billable Client")
 
@@ -205,7 +218,7 @@ def test_submit_approve_reject_workflow(client: TestClient, tenant, auth_headers
     assert sub_res2.status_code == 200
     assert sub_res2.json()["status"] == "submitted"
 
-    app_res = client.post(f"/api/v1/timesheets/{entry_id}/approve", headers=auth_headers)
+    app_res = client.post(f"/api/v1/timesheets/{entry_id}/approve", headers=tenant.headers_for_role(MemberRole.FINANCE))
     assert app_res.status_code == 200
     assert app_res.json()["status"] == "approved"
     assert app_res.json()["approved_at"] is not None
@@ -243,6 +256,11 @@ def test_generate_invoice_from_timesheets(client: TestClient, tenant, auth_heade
         },
     ).json()
 
+    # Entries must be approved before invoicing
+    for entry_id in [e1["id"], e2["id"]]:
+        client.post(f"/api/v1/timesheets/{entry_id}/submit", headers=auth_headers)
+        client.post(f"/api/v1/timesheets/{entry_id}/approve", headers=tenant.headers_for_role(MemberRole.FINANCE))
+
     # Generate invoice
     inv_res = client.post(
         "/api/v1/timesheets/generate-invoice",
@@ -268,6 +286,107 @@ def test_generate_invoice_from_timesheets(client: TestClient, tenant, auth_heade
     # Verify billed entry cannot be deleted
     del_attempt = client.delete(f"/api/v1/timesheets/{e1['id']}", headers=auth_headers)
     assert del_attempt.status_code == 409  # InvalidStateError
+
+
+def test_unapproved_timesheets_cannot_be_invoiced(client: TestClient, tenant, auth_headers):
+    """B4 regression test: verify that DRAFT, SUBMITTED, REJECTED, BILLED, and NON-BILLABLE entries are blocked."""
+    customer = tenant.customer(display_name="Strict Billing Corp")
+
+    # 1. Draft entry
+    draft_entry = client.post(
+        "/api/v1/timesheets",
+        headers=auth_headers,
+        json={
+            "customer_id": customer.id,
+            "project_name": "Testing",
+            "date": date.today().isoformat(),
+            "duration_hours": 2.0,
+            "description": "Draft hours",
+            "billable": True,
+            "billing_rate": 150.0,
+        },
+    ).json()
+
+    res_draft = client.post(
+        "/api/v1/timesheets/generate-invoice",
+        headers=auth_headers,
+        json={"customer_id": customer.id, "time_entry_ids": [draft_entry["id"]]},
+    )
+    assert res_draft.status_code == 409  # InvalidStateError
+    assert "must be approved before invoicing" in res_draft.text
+
+    # 2. Submitted entry (unapproved)
+    client.post(f"/api/v1/timesheets/{draft_entry['id']}/submit", headers=auth_headers)
+    res_sub = client.post(
+        "/api/v1/timesheets/generate-invoice",
+        headers=auth_headers,
+        json={"customer_id": customer.id, "time_entry_ids": [draft_entry["id"]]},
+    )
+    assert res_sub.status_code == 409  # InvalidStateError
+    assert "must be approved before invoicing" in res_sub.text
+
+    # 3. Rejected entry
+    client.post(f"/api/v1/timesheets/{draft_entry['id']}/reject", headers=auth_headers, json={"reason": "Incorrect hours"})
+    res_rej = client.post(
+        "/api/v1/timesheets/generate-invoice",
+        headers=auth_headers,
+        json={"customer_id": customer.id, "time_entry_ids": [draft_entry["id"]]},
+    )
+    assert res_rej.status_code == 409  # InvalidStateError
+
+    # 4. Non-billable entry
+    nb_entry = client.post(
+        "/api/v1/timesheets",
+        headers=auth_headers,
+        json={
+            "customer_id": customer.id,
+            "project_name": "Testing",
+            "date": date.today().isoformat(),
+            "duration_hours": 1.0,
+            "description": "Internal sync",
+            "billable": False,
+        },
+    ).json()
+    res_nb = client.post(
+        "/api/v1/timesheets/generate-invoice",
+        headers=auth_headers,
+        json={"customer_id": customer.id, "time_entry_ids": [nb_entry["id"]]},
+    )
+    assert res_nb.status_code == 422  # ValidationAppError
+
+    # 5. Approved entry succeeds
+    app_entry = client.post(
+        "/api/v1/timesheets",
+        headers=auth_headers,
+        json={
+            "customer_id": customer.id,
+            "project_name": "Testing",
+            "date": date.today().isoformat(),
+            "duration_hours": 3.0,
+            "description": "Approved hours",
+            "billable": True,
+            "billing_rate": 200.0,
+        },
+    ).json()
+    client.post(f"/api/v1/timesheets/{app_entry['id']}/submit", headers=auth_headers)
+    client.post(f"/api/v1/timesheets/{app_entry['id']}/approve", headers=tenant.headers_for_role(MemberRole.FINANCE))
+
+    res_app = client.post(
+        "/api/v1/timesheets/generate-invoice",
+        headers=auth_headers,
+        json={"customer_id": customer.id, "time_entry_ids": [app_entry["id"]]},
+    )
+    assert res_app.status_code == 200
+    inv = res_app.json()
+
+    # 6. Already billed entry cannot be invoiced again
+    res_billed = client.post(
+        "/api/v1/timesheets/generate-invoice",
+        headers=auth_headers,
+        json={"customer_id": customer.id, "time_entry_ids": [app_entry["id"]]},
+    )
+    assert res_billed.status_code == 409  # InvalidStateError
+
 
 
 def test_timesheet_tenant_isolation(client: TestClient, tenant, auth_headers, db):
@@ -400,3 +519,44 @@ def test_generate_invoice_rejects_unknown_or_foreign_entry_ids(client: TestClien
     after = client.get(f"/api/v1/timesheets/{mine['id']}", headers=auth_headers).json()
     assert after["status"] == "draft"
     assert after["invoice_id"] is None
+
+
+def test_timesheet_invoice_uses_org_tax_rate_and_release_on_void(client: TestClient, tenant, auth_headers, db):
+    from backend.app.services.timesheet_service import release_time_entries_for_invoice
+
+    customer = tenant.customer(display_name="Taxed Hours Co")
+    entry = client.post(
+        "/api/v1/timesheets",
+        headers=auth_headers,
+        json={
+            "customer_id": customer.id,
+            "date": date.today().isoformat(),
+            "duration_hours": 2,
+            "description": "Consulting",
+            "billable": True,
+            "billing_rate": 100,
+        },
+    ).json()
+    client.post(f"/api/v1/timesheets/{entry['id']}/submit", headers=auth_headers)
+    assert client.post(
+        f"/api/v1/timesheets/{entry['id']}/approve", headers=tenant.headers_for_role(MemberRole.FINANCE)
+    ).status_code == 200
+
+    res = client.post(
+        "/api/v1/timesheets/generate-invoice",
+        headers=auth_headers,
+        json={"customer_id": customer.id, "time_entry_ids": [entry["id"]]},
+    )
+    assert res.status_code == 200, res.text
+    inv = res.json()
+    assert Decimal(inv["subtotal"]) == Decimal("200.00")
+    # org default GST rate (18%) instead of a hardcoded 0
+    assert Decimal(inv["total"]) == Decimal("236.00")
+
+    released = release_time_entries_for_invoice(db, inv["id"], tenant.organization.id)
+    db.commit()
+    assert released == 1
+    stored = db.get(TimeEntry, entry["id"])
+    db.refresh(stored)
+    assert stored.status == TimeEntryStatus.APPROVED
+    assert stored.invoice_id is None

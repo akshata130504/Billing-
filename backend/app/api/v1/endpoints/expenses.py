@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Body, Depends, File, Query, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import (
@@ -14,6 +15,7 @@ from backend.app.api.deps import (
     require_viewer,
 )
 from backend.app.schemas.expenses import (
+    ExpenseAddToInvoiceIn,
     ExpenseBatchCreate,
     ExpenseCreate,
     ExpenseRead,
@@ -183,10 +185,39 @@ def delete_expense(
     expense_service.delete_expense(db, ctx.organization_id, expense_id)
 
 
-@router.post("/{expense_id}/add-to-invoice", response_model=ExpenseRead, summary="Mark expense as invoiced")
+@router.post(
+    "/{expense_id}/add-to-invoice",
+    response_model=ExpenseRead,
+    summary="Bill the expense as a line on a draft invoice (new draft when no invoice_id)",
+)
 def add_to_invoice(
     expense_id: str,
+    body: ExpenseAddToInvoiceIn = Body(default=ExpenseAddToInvoiceIn()),
     ctx: CurrentContext = Depends(require_finance),
     db: Session = Depends(get_db),
 ):
-    return expense_service.add_to_invoice(db, ctx.organization_id, expense_id)
+    return expense_service.add_to_invoice(db, ctx, expense_id, invoice_id=body.invoice_id)
+
+
+@router.post("/{expense_id}/receipt", response_model=ExpenseRead, summary="Upload (or replace) the expense receipt")
+async def upload_receipt(
+    expense_id: str,
+    file: UploadFile = File(...),
+    ctx: CurrentContext = Depends(require_finance),
+    db: Session = Depends(get_db),
+):
+    # Read at most one byte past the limit so an oversized upload is rejected cheaply.
+    content = await file.read(expense_service.MAX_RECEIPT_SIZE + 1)
+    return expense_service.save_receipt(
+        db, ctx.organization_id, expense_id, file.filename or "", file.content_type, content
+    )
+
+
+@router.get("/{expense_id}/receipt", response_class=FileResponse, summary="Download the expense receipt")
+def download_receipt(
+    expense_id: str,
+    ctx: CurrentContext = Depends(require_viewer),
+    db: Session = Depends(get_db),
+):
+    path, media_type, name = expense_service.get_receipt_file(db, ctx.organization_id, expense_id)
+    return FileResponse(path, media_type=media_type, filename=name)

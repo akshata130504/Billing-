@@ -28,6 +28,7 @@ from backend.app.models.identity import (
     MembershipStatus,
     Organization,
     PasswordResetToken,
+    PendingSignup,
     RefreshToken,
     User,
 )
@@ -194,6 +195,7 @@ __all__ = [
     "ROLE_RANK",
     "RefreshToken",
     "PasswordResetToken",
+    "PendingSignup",
     "Customer",
     "CustomerContact",
     "CustomerStatus",

@@ -106,7 +106,21 @@ def get_user_avatar(
     db: Session = Depends(get_db),
 ):
     target_id = ctx.user.id if user_id == "me" else user_id
+    if target_id != ctx.user.id:
+        from sqlalchemy import select
+        from backend.app.models.identity import Membership, MembershipStatus
+
+        is_member = db.scalars(
+            select(Membership.id).where(
+                Membership.user_id == target_id,
+                Membership.organization_id == ctx.organization_id,
+                Membership.status == MembershipStatus.ACTIVE,
+            )
+        ).first()
+        if not is_member:
+            raise EntityNotFoundError("User", target_id)
+
     user = db.get(User, target_id)
     if not user:
-        raise EntityNotFoundError(f"User '{target_id}' not found.")
+        raise EntityNotFoundError("User", target_id)
     return {"user_id": target_id, "avatar_url": user.avatar_url}

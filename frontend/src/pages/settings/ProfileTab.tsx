@@ -4,6 +4,7 @@ import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { Input } from '../../components/common/Input';
 import { Modal } from '../../components/common/Modal';
+import { PhoneInput } from '../../components/common/PhoneInput';
 import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { formatDateTime, initials, ROLE_LABELS } from '../../utils/format';
@@ -220,13 +221,10 @@ export function ProfileTab() {
             helperText="Email cannot be changed directly as it is your unique login credential."
           />
 
-          <Input
+          <PhoneInput
             label="Phone Number"
-            type="tel"
             value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            leadingIcon={<Phone className="w-4 h-4" />}
-            placeholder="+91 98765 43210"
+            onChange={setPhone}
             helperText="Used for important security and account recovery notifications."
           />
 

@@ -320,15 +320,144 @@ def test_trial_conversion_declined_charge_does_not_fabricate_success(client, ten
         assert eval_res.status_code == 200
         stats = eval_res.json()
         assert stats["converted"] == 0
-        assert stats["expired"] >= 1
+        assert stats["past_due"] >= 1
     finally:
         register_gateway_adapter(PaymentGateway.RAZORPAY, real_adapter)
 
     db.refresh(sub)
-    assert sub.status == SubscriptionStatus.TRIAL_EXPIRED
+    # The trial is over and the first invoice is unpaid: past_due (dunning), not active.
+    assert sub.status == SubscriptionStatus.PAST_DUE
 
     # Verify invoice was not marked paid
     inv = db.query(Invoice).filter(Invoice.subscription_id == sub.id).first()
-    if inv:
-        assert inv.status != "paid"
-        assert inv.amount_due > Decimal("0.00")
+    assert inv is not None
+    assert inv.status != "paid"
+    assert inv.amount_due > Decimal("0.00")
+
+
+# --- production-readiness regressions ---------------------------------------------------------
+
+
+def test_fallback_plan_lookup_is_scoped_to_the_organization(client, tenant, auth_headers, db):
+    from backend.app.models import Organization
+    from backend.app.models import BillingInterval, PricingModel, Product, ProductType
+
+    customer = tenant.customer()
+    _, plan = tenant.product_with_plan(unit_amount="1000.00", trial_days=7)
+    res = client.post(
+        "/api/v1/subscriptions",
+        headers=auth_headers,
+        json={"customer_id": customer.id, "plan_id": plan.id, "quantity": 1},
+    )
+    sub_id = res.json()["id"]
+
+    other_org = Organization(name="Other Org", slug=f"other-{sub_id[:8]}")
+    db.add(other_org)
+    db.flush()
+    other_product = Product(organization_id=other_org.id, name="X", sku=f"X-{sub_id[:6]}", type=ProductType.SUBSCRIPTION)
+    db.add(other_product)
+    db.flush()
+    foreign_plan = Plan(
+        organization_id=other_org.id,
+        product_id=other_product.id,
+        name="Free",
+        code=f"FREE-{sub_id[:6]}",
+        billing_interval=BillingInterval.MONTHLY,
+        pricing_model=PricingModel.FLAT,
+        unit_amount=0,
+        currency="INR",
+    )
+    db.add(foreign_plan)
+    db.commit()
+
+    resp = client.post(f"/api/v1/trials/{sub_id}/fallback", headers=auth_headers, json={"fallback_plan_id": foreign_plan.id})
+    assert resp.status_code == 404, resp.text
+
+
+def test_fallback_moves_item_and_snapshot(client, tenant, auth_headers, db):
+    from backend.app.models.billing_cycles import SubscriptionItem, SubscriptionItemType
+
+    customer = tenant.customer()
+    _, plan = tenant.product_with_plan(unit_amount="1000.00", trial_days=7)
+    _, free = tenant.product_with_plan(unit_amount="0.00")
+    res = client.post(
+        "/api/v1/subscriptions",
+        headers=auth_headers,
+        json={"customer_id": customer.id, "plan_id": plan.id, "quantity": 1},
+    )
+    sub_id = res.json()["id"]
+    resp = client.post(f"/api/v1/trials/{sub_id}/fallback", headers=auth_headers, json={"fallback_plan_id": free.id})
+    assert resp.status_code == 200, resp.text
+    item = (
+        db.query(SubscriptionItem)
+        .filter(SubscriptionItem.subscription_id == sub_id, SubscriptionItem.item_type == SubscriptionItemType.PLAN)
+        .one()
+    )
+    db.refresh(item)
+    assert item.plan_id == free.id
+    assert item.price_snapshot.plan_id == free.id
+
+
+def test_pending_conversion_charge_leaves_invoice_open(client, tenant, auth_headers, db):
+    from backend.app.services.gateways.base import GatewayChargeResult
+    from backend.app.services.gateways.registry import get_gateway_adapter, register_gateway_adapter
+
+    customer = tenant.customer()
+    _, plan = tenant.product_with_plan(unit_amount="4000.00", trial_days=7)
+    db.add(
+        CustomerPaymentMethod(
+            organization_id=tenant.organization.id,
+            customer_id=customer.id,
+            gateway=PaymentGateway.RAZORPAY,
+            type="card",
+            gateway_token="tok_pending",
+            last4="1111",
+            card_brand="Visa",
+            is_default=True,
+            status=CustomerPaymentMethodStatus.ACTIVE,
+        )
+    )
+    sub = Subscription(
+        organization_id=tenant.organization.id,
+        customer_id=customer.id,
+        plan_id=plan.id,
+        quantity=1,
+        status=SubscriptionStatus.TRIALING,
+        start_date=date.today() - timedelta(days=8),
+        trial_end=date.today(),
+        current_period_start=date.today() - timedelta(days=8),
+        current_period_end=date.today(),
+        subscription_number="SUB-PEND-CONV-01",
+    )
+    db.add(sub)
+    db.commit()
+
+    real_adapter = get_gateway_adapter(PaymentGateway.RAZORPAY)
+
+    class _PendingGateway:
+        gateway_type = PaymentGateway.RAZORPAY
+
+        def charge(self, **kwargs):
+            return GatewayChargeResult(success=True, gateway_payment_id="pay_pending_1", pending=True)
+
+        def refund(self, **kwargs):
+            raise NotImplementedError
+
+        def verify_webhook(self, **kwargs):
+            return True
+
+        def verify_payment_signature(self, **kwargs):
+            return False
+
+    register_gateway_adapter(PaymentGateway.RAZORPAY, _PendingGateway())
+    try:
+        stats = client.post("/api/v1/trials/evaluate", headers=auth_headers).json()
+        assert stats["converted"] >= 1
+    finally:
+        register_gateway_adapter(PaymentGateway.RAZORPAY, real_adapter)
+
+    db.refresh(sub)
+    assert sub.status == SubscriptionStatus.ACTIVE
+    inv = db.query(Invoice).filter(Invoice.subscription_id == sub.id).one()
+    assert inv.status.value == "sent"
+    assert inv.amount_due > 0

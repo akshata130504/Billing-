@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -101,3 +101,43 @@ def complete_idempotency(
         record.status_code = status_code
         record.response_body = response_body or {}
         db.commit()
+
+
+def run_idempotent(
+    db: Session,
+    *,
+    organization_id: str,
+    key: Optional[str],
+    request_path: str,
+    request_method: str,
+    params: Optional[Any],
+    handler: Callable[[], Dict[str, Any]],
+    status_code: int = 200,
+) -> Tuple[int, Dict[str, Any]]:
+    """Run `handler` at most once per (organization, Idempotency-Key).
+
+    Without a key the handler simply runs. With a key, a completed earlier request
+    with the same parameters returns its stored response instead of re-executing
+    (so a retried "record payment" never books the money twice); a key reused with
+    different parameters, or while the first request is still running, is a 409.
+    If the handler raises, the reservation is released so the client can retry.
+    `handler` must return a JSON-serialisable dict.
+    """
+    if not key:
+        return status_code, handler()
+    key = key.strip()[:128]
+    record, cached = check_idempotency(db, organization_id, key, request_path, request_method, params_hash=params)
+    if cached:
+        return int(record.status_code or status_code), dict(record.response_body or {})
+    record_id = record.id
+    try:
+        body = handler()
+    except Exception:
+        db.rollback()
+        stale = db.get(IdempotencyRecord, record_id)
+        if stale is not None and stale.status != "completed":
+            db.delete(stale)
+            db.commit()
+        raise
+    complete_idempotency(db, record_id=record_id, status_code=status_code, response_body=body)
+    return status_code, body

@@ -14,17 +14,26 @@ import {
   Check,
   ExternalLink,
   Globe,
+  ReceiptText,
 } from 'lucide-react';
 import { invoiceService } from '../../services/invoiceService';
 import type { Invoice, InvoiceStatus, PaymentRecordIn } from '../../types/invoices';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
 import { Modal } from '../../components/common/Modal';
+import { ConfirmDialog } from '../../components/common/ConfirmDialog';
+import { loadPreferences } from '../settings/PreferencesTab';
 import { validateDateNotFuture } from '../../utils/validation';
+import { useToast } from '../../components/common/Toast';
+import { useAuth } from '../../hooks/useAuth';
+import { toApiError } from '../../services/apiClient';
 
 export const InvoiceDetailPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { showToast } = useToast();
+  const { hasRole } = useAuth();
+  const canEdit = hasRole('finance');
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [payments, setPayments] = useState<any[]>([]);
@@ -44,13 +53,20 @@ export const InvoiceDetailPage = () => {
   const [showVoidModal, setShowVoidModal] = useState(false);
   const [voidReason, setVoidReason] = useState('');
 
+  // Send Confirmation State
+  const [showSendConfirm, setShowSendConfirm] = useState(false);
+
   // Hosted Payment Link State
   const [copied, setCopied] = useState(false);
   const handleCopyPaymentLink = (url: string) => {
     if (!url) return;
-    navigator.clipboard.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+    navigator.clipboard.writeText(url).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2500);
+      },
+      () => showToast('error', 'Could not copy link', 'Copy the link manually from the address.')
+    );
   };
 
   const fetchInvoiceData = async (invoiceId: string) => {
@@ -64,8 +80,8 @@ export const InvoiceDetailPage = () => {
       setInvoice(invData);
       setPayments(paymentsData || invData.payments || []);
       setPaymentAmount(Number(invData.amount_due || invData.balance_due || 0));
-    } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || 'Failed to load invoice');
+    } catch (err) {
+      setError(toApiError(err).message || 'Failed to load invoice');
     } finally {
       setLoading(false);
     }
@@ -77,14 +93,35 @@ export const InvoiceDetailPage = () => {
     }
   }, [id]);
 
-  const handleSend = async () => {
+  const handleSend = () => {
+    if (!id) return;
+    const prefs = loadPreferences();
+    if (prefs.confirmBeforeSendInvoice) {
+      setShowSendConfirm(true);
+    } else {
+      void executeSend();
+    }
+  };
+
+  const executeSend = async () => {
+    setShowSendConfirm(false);
     if (!id) return;
     try {
       setActionLoading(true);
-      await invoiceService.sendInvoice(id);
+      const sent = await invoiceService.sendInvoice(id);
       await fetchInvoiceData(id);
-    } catch (err: any) {
-      alert(err.response?.data?.detail || err.message || 'Send failed');
+      if (sent.email_delivery_failed) {
+        showToast(
+          'warning',
+          'Email not delivered',
+          'Invoice marked as sent, but the email could not be delivered. Check your SMTP settings under Settings > Integrations.',
+          8000
+        );
+      } else {
+        showToast('success', 'Invoice sent');
+      }
+    } catch (err) {
+      showToast('error', 'Send failed', toApiError(err).message);
     } finally {
       setActionLoading(false);
     }
@@ -95,13 +132,13 @@ export const InvoiceDetailPage = () => {
     if (!id || !invoice) return;
 
     if (Number(paymentAmount) <= 0) {
-      alert('Payment amount must be greater than zero');
+      showToast('warning', 'Payment amount must be greater than zero');
       return;
     }
 
     const dateErr = validateDateNotFuture(paymentDate, 'Payment date', { required: true });
     if (dateErr) {
-      alert(dateErr);
+      showToast('warning', dateErr);
       return;
     }
 
@@ -118,9 +155,10 @@ export const InvoiceDetailPage = () => {
       setShowPaymentModal(false);
       setPaymentRef('');
       setPaymentNotes('');
+      showToast('success', 'Payment recorded');
       await fetchInvoiceData(id);
-    } catch (err: any) {
-      alert(err.response?.data?.detail || err.message || 'Failed to record payment');
+    } catch (err) {
+      showToast('error', 'Failed to record payment', toApiError(err).message);
     } finally {
       setActionLoading(false);
     }
@@ -133,9 +171,10 @@ export const InvoiceDetailPage = () => {
       await invoiceService.voidInvoice(id, voidReason.trim() || 'Voided by user');
       setShowVoidModal(false);
       setVoidReason('');
+      showToast('success', 'Invoice voided');
       await fetchInvoiceData(id);
-    } catch (err: any) {
-      alert(err.response?.data?.detail || err.message || 'Failed to void invoice');
+    } catch (err) {
+      showToast('error', 'Failed to void invoice', toApiError(err).message);
     } finally {
       setActionLoading(false);
     }
@@ -247,7 +286,7 @@ export const InvoiceDetailPage = () => {
             </>
           )}
 
-          {upperStatus === 'DRAFT' && (
+          {canEdit && upperStatus === 'DRAFT' && (
             <>
               <Button variant="secondary" onClick={() => navigate(`/invoices/${invoice.id}/edit`)}>
                 <Edit2 className="w-4 h-4 mr-1.5" /> Edit
@@ -258,7 +297,7 @@ export const InvoiceDetailPage = () => {
             </>
           )}
 
-          {!isPaid && !isVoid && (
+          {canEdit && !isPaid && !isVoid && (
             <Button
               variant="primary"
               onClick={() => {
@@ -271,7 +310,21 @@ export const InvoiceDetailPage = () => {
             </Button>
           )}
 
-          {!isVoid && upperStatus !== 'PAID' && (
+          {canEdit && !isVoid && upperStatus !== 'DRAFT' && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                const params = new URLSearchParams({ new: '1', invoice_id: invoice.id });
+                if (invoice.customer?.id) params.set('customer_id', invoice.customer.id);
+                navigate(`/credit-notes?${params.toString()}`);
+              }}
+              disabled={actionLoading}
+            >
+              <ReceiptText className="w-4 h-4 mr-1.5" /> Issue Credit Note
+            </Button>
+          )}
+
+          {canEdit && !isVoid && upperStatus !== 'PAID' && (
             <Button variant="danger" onClick={() => setShowVoidModal(true)} disabled={actionLoading}>
               <Ban className="w-4 h-4 mr-1.5" /> Void
             </Button>
@@ -501,7 +554,7 @@ export const InvoiceDetailPage = () => {
               <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
                 <CreditCard className="w-4 h-4 text-indigo-600" /> Payments Received
               </h3>
-              {!isPaid && !isVoid && (
+              {canEdit && !isPaid && !isVoid && (
                 <Button
                   variant="secondary"
                   size="sm"
@@ -516,7 +569,7 @@ export const InvoiceDetailPage = () => {
             </div>
 
             {payments.length === 0 ? (
-              <div className="p-6 text-center text-gray-400 text-sm bg-gray-50 rounded-lg border border-dashed border-gray-200">
+              <div className="p-6 text-center text-gray-500 text-sm bg-gray-50 rounded-lg border border-dashed border-gray-200">
                 No payments recorded yet.
               </div>
             ) : (
@@ -722,6 +775,17 @@ export const InvoiceDetailPage = () => {
           </div>
         </div>
       </Modal>
+
+      {/* Send Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showSendConfirm}
+        onClose={() => setShowSendConfirm(false)}
+        onConfirm={executeSend}
+        title="Send Invoice"
+        description={`Are you sure you want to send invoice ${invoice?.invoice_number || ''} to ${invoice?.customer?.display_name || 'the customer'}? This will dispatch an email with the invoice and payment link.`}
+        confirmLabel="Send Invoice"
+        isLoading={actionLoading}
+      />
     </div>
   );
 };

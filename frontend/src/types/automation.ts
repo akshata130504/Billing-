@@ -72,6 +72,8 @@ export interface AutomationRule {
   actions: AutomationAction[];
   created_at: string;
   updated_at: string;
+  /** action_id -> webhook signing secret; populated ONLY in the create response (shown once). */
+  revealed_signing_secrets?: Record<string, string> | null;
 }
 
 export interface AutomationRuleCreate {

@@ -1,11 +1,13 @@
 import { apiClient } from './apiClient';
 import type {
+  BillingCycleOut,
   UsageAggregateOut,
   UsageEventBatchIn,
   UsageEventIn,
   UsageEventOut,
   UsageMeterCreateIn,
   UsageMeterOut,
+  UsageMeterUpdateIn,
 } from '../types/meters';
 
 export const meterService = {
@@ -22,6 +24,19 @@ export const meterService = {
 
   create: async (body: UsageMeterCreateIn): Promise<UsageMeterOut> => {
     const { data } = await apiClient.post<UsageMeterOut>('/meters', body);
+    return data;
+  },
+
+  update: async (idOrCode: string, body: UsageMeterUpdateIn): Promise<UsageMeterOut> => {
+    const { data } = await apiClient.patch<UsageMeterOut>(`/meters/${encodeURIComponent(idOrCode)}`, body);
+    return data;
+  },
+
+  /** A subscription's billing cycles, newest first (for the finalize-usage picker). */
+  listBillingCycles: async (subscriptionId: string): Promise<BillingCycleOut[]> => {
+    const { data } = await apiClient.get<BillingCycleOut[]>('/meters/billing-cycles', {
+      params: { subscription_id: subscriptionId },
+    });
     return data;
   },
 

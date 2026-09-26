@@ -30,6 +30,15 @@ def round_money(val: Decimal) -> Decimal:
 
 from datetime import date
 
+_CURRENCY_SYMBOLS = {"INR": "₹", "USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥", "AUD": "A$", "CAD": "C$", "SGD": "S$", "AED": "AED "}
+
+
+def currency_symbol(code: Optional[str]) -> str:
+    """Display symbol for explanation strings (was hard-coded to ₹ for every currency)."""
+    code = (code or "INR").upper()
+    return _CURRENCY_SYMBOLS.get(code, f"{code} ")
+
+
 def calculate_line_item_pricing(
     offering: Offering,
     quantity: Decimal,
@@ -47,6 +56,7 @@ def calculate_line_item_pricing(
     if qty < Decimal("0"):
         raise ValueError("Quantity must be non-negative.")
 
+    sym = currency_symbol(getattr(offering, "currency", None))
     base_price = Decimal(str(offering.base_price))
     tax_rate = Decimal(str(offering.tax_rate_pct))
 
@@ -99,12 +109,12 @@ def calculate_line_item_pricing(
             if price_book_entry.custom_price is not None:
                 step_price = Decimal(str(price_book_entry.custom_price))
                 has_custom_pb_price = True
-                price_book_info = f"Price book custom price applied: ₹{step_price}"
+                price_book_info = f"Price book custom price applied: {sym}{step_price}"
             elif price_book_entry.discount_pct and price_book_entry.discount_pct > 0:
                 pb_discount_pct = Decimal(str(price_book_entry.discount_pct))
                 pb_discount = (base_price * pb_discount_pct) / Decimal("100")
                 step_price = max(Decimal("0"), base_price - pb_discount)
-                price_book_info = f"Price book discount ({price_book_entry.discount_pct}%) applied: -₹{round_money(pb_discount)}"
+                price_book_info = f"Price book discount ({price_book_entry.discount_pct}%) applied: -{sym}{round_money(pb_discount)}"
         else:
             price_book_info = "Price book is expired or inactive (standard base price used)"
 
@@ -117,7 +127,7 @@ def calculate_line_item_pricing(
     if has_custom_pb_price:
         subtotal_pre_discount = step_price * qty
         effective_unit_price = step_price
-        tier_note = f"Price book custom price override: ₹{step_price}/unit"
+        tier_note = f"Price book custom price override: {sym}{step_price}/unit"
 
     elif pricing_model == OfferingPricingModel.FLAT:
         subtotal_pre_discount = step_price
@@ -138,7 +148,7 @@ def calculate_line_item_pricing(
             if qty >= min_q and (max_q is None or qty <= max_q):
                 effective_unit_price = t_price
                 bracket_found = True
-                tier_note = f"Volume bracket [{min_q} - {max_q or '∞'}]: ₹{t_price}/unit for all {qty} units"
+                tier_note = f"Volume bracket [{min_q} - {max_q or '∞'}]: {sym}{t_price}/unit for all {qty} units"
                 break
 
         if not bracket_found:
@@ -176,7 +186,7 @@ def calculate_line_item_pricing(
                     tier_cost = units_in_bracket * t_price
                     accumulated_subtotal += tier_cost
                     remaining_qty -= units_in_bracket
-                    tier_logs.append(f"{units_in_bracket} units @ ₹{t_price}")
+                    tier_logs.append(f"{units_in_bracket} units @ {sym}{t_price}")
 
                 if remaining_qty <= 0:
                     break
@@ -191,7 +201,7 @@ def calculate_line_item_pricing(
         if not tiers:
             effective_unit_price = step_price
             subtotal_pre_discount = step_price * qty
-            tier_note = f"Package pricing (single default package rate): ₹{step_price} for {qty} units"
+            tier_note = f"Package pricing (single default package rate): {sym}{step_price} for {qty} units"
         else:
             # Parse package definitions
             parsed_packages = []
@@ -230,13 +240,13 @@ def calculate_line_item_pricing(
             if matched:
                 subtotal_pre_discount = matched[1]
                 effective_unit_price = round_money(matched[1] / qty) if qty > Decimal("0") else matched[1]
-                tier_note = f"Package option: exact {qty}-unit package @ ₹{matched[1]}"
+                tier_note = f"Package option: exact {qty}-unit package @ {sym}{matched[1]}"
             elif qty <= largest_size:
                 # Select the smallest package tier that accommodates the requested quantity
                 covering = next((p for p in sorted_packages if p[0] >= qty), sorted_packages[-1])
                 subtotal_pre_discount = covering[1]
                 effective_unit_price = round_money(covering[1] / qty) if qty > Decimal("0") else covering[1]
-                tier_note = f"Package option: {qty} units covered by {covering[0]}-unit package @ ₹{covering[1]}"
+                tier_note = f"Package option: {qty} units covered by {covering[0]}-unit package @ {sym}{covering[1]}"
             else:
                 # Quantity exceeds largest package: combine multiple largest packages + remainder package
                 num_large = int(qty // largest_size) if largest_size > Decimal("0") else int(qty)
@@ -250,7 +260,7 @@ def calculate_line_item_pricing(
 
                 subtotal_pre_discount = accum_pkg_cost
                 effective_unit_price = round_money(accum_pkg_cost / qty) if qty > Decimal("0") else largest_price
-                tier_note = f"Package option: {qty} units covered by {num_large}x {largest_size}-unit package(s){rem_note} @ ₹{accum_pkg_cost}"
+                tier_note = f"Package option: {qty} units covered by {num_large}x {largest_size}-unit package(s){rem_note} @ {sym}{accum_pkg_cost}"
 
     else:  # PER_UNIT default
         effective_unit_price = step_price

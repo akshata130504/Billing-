@@ -50,7 +50,7 @@ from backend.app.schemas.dunning import (
     DunningPolicyUpdate,
     ExpiringCardNoticeOut,
 )
-from backend.app.services import audit
+from backend.app.services import audit, invoice_service, payment_service, razorpay_gateway
 from backend.app.services.gateways.registry import get_gateway_adapter
 from backend.app.services.notification_service import dispatch_notification
 from backend.app.services.numbering import next_number
@@ -104,6 +104,49 @@ def _record_dunning_void_approval(
         },
     )
     db.add(approval)
+
+
+def D_(value) -> Decimal:
+    return Decimal(str(value or 0))
+
+
+# A gateway charge that has not been confirmed within this window is treated as failed.
+PENDING_CHARGE_TIMEOUT = timedelta(days=3)
+
+
+def _pending_charge_outcome(db: Session, case: DunningCase, invoice: Invoice, now: datetime) -> bool:
+    """Resolve the in-flight charge of a RETRYING case. Returns True while still waiting.
+
+    succeeded (webhook captured) -> invoice is paid; the caller's paid check recovers it next run.
+    failed / timed out           -> the attempt is failed and the case falls through to a new retry.
+    """
+    attempt = db.scalars(
+        select(PaymentAttempt)
+        .where(PaymentAttempt.invoice_id == invoice.id, PaymentAttempt.status == PaymentAttemptStatus.PENDING)
+        .order_by(desc(PaymentAttempt.created_at))
+    ).first()
+    payment = db.get(Payment, attempt.payment_id) if attempt is not None and attempt.payment_id else None
+    if payment is not None and payment.status == PaymentStatus.PENDING:
+        created = attempt.created_at
+        if created is not None and created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if created is None or now - created < PENDING_CHARGE_TIMEOUT:
+            case.next_retry_at = now + timedelta(days=1)
+            return True
+        payment_service.fail_gateway_payment(db, payment, reason="Gateway did not confirm the charge in time", actor_label=audit.SYSTEM_ACTOR)
+    if attempt is not None:
+        succeeded = payment is not None and payment.status in (PaymentStatus.SUCCEEDED, PaymentStatus.PARTIALLY_REFUNDED)
+        attempt.status = PaymentAttemptStatus.SUCCEEDED if succeeded else PaymentAttemptStatus.FAILED
+        if not succeeded:
+            attempt.failure_reason = (payment.failure_reason if payment is not None else None) or "Charge was not confirmed by the gateway."
+            attempt.failure_category = attempt.failure_category or "gateway_declined"
+    processing = next((a for a in case.attempts if a.status == DunningAttemptStatus.PROCESSING), None)
+    if processing is not None:
+        processing.status = DunningAttemptStatus.FAILED
+        processing.error_code = "gateway_declined"
+        processing.error_message = (payment.failure_reason if payment is not None else None) or "Charge was not confirmed by the gateway."
+    case.status = DunningCaseStatus.RETRY_SCHEDULED
+    return False
 
 
 def get_or_create_default_policy(db: Session, organization_id: str) -> DunningPolicy:
@@ -339,7 +382,10 @@ def trigger_dunning_for_failed_payment(
         if prior_invoices_count == 0:
             logger.warning("dunning.first_ach_failure.cancelling_subscription subscription_id=%s", sub.id)
             sub.status = SubscriptionStatus.CANCELLED
-            invoice.status = InvoiceStatus.VOID
+            if D_(invoice.amount_paid) <= 0 and invoice.status != InvoiceStatus.VOID:
+                invoice_service.void_invoice(
+                    db, None, invoice, f"First ACH payment failed: {reason}", actor_label=audit.SYSTEM_ACTOR, commit=False
+                )
 
             case = DunningCase(
                 organization_id=organization_id,
@@ -437,8 +483,13 @@ def execute_dunning_retries(db: Session, organization_id: str) -> Dict[str, Any]
             )
             .where(
                 DunningCase.organization_id == organization_id,
-                DunningCase.status.in_([DunningCaseStatus.OPEN, DunningCaseStatus.RETRY_SCHEDULED]),
+                DunningCase.status.in_(
+                    [DunningCaseStatus.OPEN, DunningCaseStatus.RETRY_SCHEDULED, DunningCaseStatus.RETRYING]
+                ),
             )
+            # Stable order so concurrent runs take the per-case row locks below in the
+            # same sequence (no lock-order deadlocks).
+            .order_by(DunningCase.id)
         ).unique().all()
     )
 
@@ -455,6 +506,25 @@ def execute_dunning_retries(db: Session, organization_id: str) -> Dict[str, Any]
         if not next_at or next_at > now:
             continue
 
+        # Serialise with any concurrent run (scheduler vs. "retry now" / double click)
+        # BEFORE charging: lock the case row and re-read it, so a run that waited sees
+        # the other run's committed outcome (recovered / charge in flight / rescheduled)
+        # instead of charging the customer's card a second time. No-op on SQLite.
+        if db.bind is not None and db.bind.dialect.name != "sqlite":
+            db.execute(select(DunningCase.id).where(DunningCase.id == case.id).with_for_update())
+            db.refresh(case)
+            if case.invoice is not None:
+                db.refresh(case.invoice)
+            if case.status not in (
+                DunningCaseStatus.OPEN, DunningCaseStatus.RETRY_SCHEDULED, DunningCaseStatus.RETRYING
+            ):
+                continue
+            next_at = case.next_retry_at
+            if next_at and next_at.tzinfo is None:
+                next_at = next_at.replace(tzinfo=timezone.utc)
+            if not next_at or next_at > now:
+                continue
+
         executed += 1
         invoice = case.invoice
         # Check if invoice was already paid offline / out of band
@@ -466,6 +536,14 @@ def execute_dunning_retries(db: Session, organization_id: str) -> Dict[str, Any]
             recovered += 1
             db.flush()
             continue
+
+        # A previous attempt's gateway charge is still awaiting confirmation (payment.captured /
+        # payment.failed webhook). Don't charge the card again while it is in flight.
+        if case.status == DunningCaseStatus.RETRYING:
+            waiting = _pending_charge_outcome(db, case, invoice, now)
+            if waiting:
+                db.flush()
+                continue
 
         # Look up customer's vault payment method
         pm = db.scalars(
@@ -498,15 +576,26 @@ def execute_dunning_retries(db: Session, organization_id: str) -> Dict[str, Any]
         # record, e.g. cash/cheque) cannot be auto-charged by an unattended retry; that
         # case falls through to "no chargeable method" below, same as no method at all.
         gateway_result = None
+        charge_amount = invoice.amount_due
         if pm is not None and pm.gateway != PaymentGateway.MANUAL:
             adapter = get_gateway_adapter(pm.gateway)
             gateway_result = adapter.charge(
-                amount=invoice.amount_due,
+                amount=charge_amount,
                 currency=invoice.currency or "INR",
                 customer_id=case.customer_id,
                 payment_method_token=pm.gateway_token,
-                notes={"dunning_case_id": case.id, "invoice_id": invoice.id, "attempt_number": attempt_num},
+                notes={
+                    "dunning_case_id": case.id,
+                    "invoice_id": invoice.id,
+                    "organization_id": organization_id,
+                    "attempt_number": attempt_num,
+                },
                 idempotency_key=f"dunning_{case.id}_{attempt_num}",
+                credentials=razorpay_gateway.credentials_for(db, organization_id),
+                gateway_customer_id=pm.gateway_customer_id,
+                email=case.customer.email if case.customer else None,
+                contact=case.customer.phone if case.customer else None,
+                description=f"Invoice {invoice.invoice_number}",
             )
 
         payment_attempt = PaymentAttempt(
@@ -515,13 +604,15 @@ def execute_dunning_retries(db: Session, organization_id: str) -> Dict[str, Any]
             customer_id=case.customer_id,
             customer_payment_method_id=pm.id if pm else None,
             gateway=(pm.gateway if pm is not None else PaymentGateway.RAZORPAY),
-            amount=invoice.amount_due,
+            amount=charge_amount,
             currency=invoice.currency or "INR",
             attempt_number=attempt_num,
         )
         db.add(payment_attempt)
 
-        charge_success = bool(gateway_result and gateway_result.success and gateway_result.gateway_payment_id)
+        charge_accepted = bool(gateway_result and gateway_result.success and gateway_result.gateway_payment_id)
+        charge_pending = bool(charge_accepted and getattr(gateway_result, "pending", False))
+        charge_success = charge_accepted and not charge_pending
 
         if gateway_result is None:
             payment_attempt.status = PaymentAttemptStatus.FAILED
@@ -529,6 +620,10 @@ def execute_dunning_retries(db: Session, organization_id: str) -> Dict[str, Any]
             payment_attempt.failure_reason = (
                 "No chargeable saved payment method on file (missing, inactive, or manual/offline only)."
             )
+        elif charge_pending:
+            payment_attempt.status = PaymentAttemptStatus.PENDING
+            payment_attempt.gateway_attempt_reference = gateway_result.gateway_payment_id
+            payment_attempt.payload = gateway_result.raw_payload
         elif charge_success:
             payment_attempt.status = PaymentAttemptStatus.SUCCEEDED
             payment_attempt.gateway_attempt_reference = gateway_result.gateway_payment_id
@@ -540,40 +635,47 @@ def execute_dunning_retries(db: Session, organization_id: str) -> Dict[str, Any]
             payment_attempt.payload = gateway_result.raw_payload
         db.flush()
 
-        if charge_success:
-            # Payment recovered! Reconciliation status reflects that this settles through
-            # the real gateway's async confirmation (webhook), not an offline record.
-            pay_num = next_number(db, organization_id, "payment")
-            payment = Payment(
-                organization_id=organization_id,
-                payment_number=pay_num,
-                customer_id=case.customer_id,
-                amount=invoice.amount_due,
-                currency=invoice.currency or "INR",
-                paid_at=now,
-                method=PaymentMethod.CARD,
+        if charge_pending:
+            # The gateway accepted the charge but confirms it asynchronously. Record a
+            # PENDING payment keyed on the order; the payment.captured webhook allocates
+            # it and marks the invoice paid, after which the next run marks the case
+            # recovered. Nothing is treated as collected yet.
+            pending_payment = payment_service.record_gateway_charge(
+                db,
+                invoice=invoice,
+                amount=charge_amount,
                 gateway=pm.gateway,
                 gateway_payment_id=gateway_result.gateway_payment_id,
-                status=PaymentStatus.SUCCEEDED,
-                reconciliation_status=ReconciliationStatus.AUTO_MATCHED
-                if pm.gateway == PaymentGateway.MANUAL
-                else ReconciliationStatus.MATCHED,
+                gateway_order_id=gateway_result.gateway_order_id,
+                pending=True,
+                payload=gateway_result.raw_payload,
+                notes=f"Dunning retry {attempt_num} for {invoice.invoice_number}",
+                actor_label=audit.SYSTEM_ACTOR,
             )
-            db.add(payment)
+            payment_attempt.payment_id = pending_payment.id
+            curr_attempt.status = DunningAttemptStatus.PROCESSING
+            case.status = DunningCaseStatus.RETRYING
+            case.attempt_count = attempt_num
+            case.next_retry_at = now + timedelta(days=1)
             db.flush()
-            payment_attempt.payment_id = payment.id
+            continue
 
-            alloc = PaymentAllocation(
-                organization_id=organization_id,
-                payment_id=payment.id,
-                invoice_id=invoice.id,
-                amount=invoice.amount_due,
+        if charge_success:
+            # Payment recovered: record it through payment_service so the allocation,
+            # reconciliation, invoice status and audit trail stay consistent.
+            payment = payment_service.record_gateway_charge(
+                db,
+                invoice=invoice,
+                amount=charge_amount,
+                gateway=pm.gateway,
+                gateway_payment_id=gateway_result.gateway_payment_id,
+                gateway_order_id=gateway_result.gateway_order_id,
+                pending=False,
+                payload=gateway_result.raw_payload,
+                notes=f"Dunning retry {attempt_num} for {invoice.invoice_number}",
+                actor_label=audit.SYSTEM_ACTOR,
             )
-            db.add(alloc)
-
-            invoice.amount_paid = (invoice.amount_paid or Decimal("0.00")) + invoice.amount_due
-            invoice.amount_due = Decimal("0.00")
-            invoice.status = InvoiceStatus.PAID
+            payment_attempt.payment_id = payment.id
 
             curr_attempt.status = DunningAttemptStatus.SUCCEEDED
             case.status = DunningCaseStatus.RECOVERED
@@ -655,16 +757,27 @@ def execute_dunning_retries(db: Session, organization_id: str) -> Dict[str, Any]
                 if final_action == DunningFinalAction.CANCEL_AND_VOID:
                     if case.subscription:
                         case.subscription.status = SubscriptionStatus.CANCELLED
-                    invoice.status = InvoiceStatus.VOID
                     case.status = DunningCaseStatus.FINALIZED
-                    case.final_action_taken = "cancel_and_void"
-                    _record_dunning_void_approval(
-                        db,
-                        organization_id=organization_id,
-                        case=case,
-                        invoice=invoice,
-                        justification=f"Dunning retries exhausted for case {case.case_number}. Applied policy final action cancel_and_void.",
+                    justification = (
+                        f"Dunning retries exhausted for case {case.case_number}. "
+                        "Applied policy final action cancel_and_void."
                     )
+                    if D_(invoice.amount_paid) > 0:
+                        # A partially paid invoice cannot be voided (the payments would be
+                        # orphaned); leave it open for finance to refund or write off.
+                        case.final_action_taken = "cancelled_invoice_kept_partially_paid"
+                    else:
+                        invoice_service.void_invoice(
+                            db, None, invoice, justification, actor_label=audit.SYSTEM_ACTOR, commit=False
+                        )
+                        case.final_action_taken = "cancel_and_void"
+                        _record_dunning_void_approval(
+                            db,
+                            organization_id=organization_id,
+                            case=case,
+                            invoice=invoice,
+                            justification=justification,
+                        )
                 elif final_action == DunningFinalAction.SUSPEND:
                     if case.subscription:
                         case.subscription.status = SubscriptionStatus.PAUSED
@@ -777,16 +890,23 @@ def stop_dunning_case(db: Session, case_id: str, organization_id: str, data: Dun
         if action == DunningFinalAction.CANCEL_AND_VOID:
             if case.subscription:
                 case.subscription.status = SubscriptionStatus.CANCELLED
-            case.invoice.status = InvoiceStatus.VOID
             case.status = DunningCaseStatus.FINALIZED
-            case.final_action_taken = "cancel_and_void"
-            _record_dunning_void_approval(
-                db,
-                organization_id=organization_id,
-                case=case,
-                invoice=case.invoice,
-                justification=f"Dunning stopped by operator ({case.stop_reason}). Applied final action cancel_and_void.",
-            )
+            justification = f"Dunning stopped by operator ({case.stop_reason}). Applied final action cancel_and_void."
+            if D_(case.invoice.amount_paid) > 0 or case.invoice.status == InvoiceStatus.VOID:
+                # Never void an invoice that carries payments; finance refunds/writes off instead.
+                case.final_action_taken = "cancelled_invoice_kept_partially_paid"
+            else:
+                invoice_service.void_invoice(
+                    db, None, case.invoice, justification, actor_label=audit.SYSTEM_ACTOR, commit=False
+                )
+                case.final_action_taken = "cancel_and_void"
+                _record_dunning_void_approval(
+                    db,
+                    organization_id=organization_id,
+                    case=case,
+                    invoice=case.invoice,
+                    justification=justification,
+                )
         elif action == DunningFinalAction.SUSPEND:
             if case.subscription:
                 case.subscription.status = SubscriptionStatus.PAUSED

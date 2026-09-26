@@ -114,9 +114,17 @@ class ExpenseRead(BaseModel):
     receipt_file_name: Optional[str] = None
     receipt_file_size: Optional[str] = None
     receipt_file_type: Optional[str] = None
+    has_receipt: bool = False
+    receipt_url: Optional[str] = None  # authenticated download endpoint
     notes: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+
+class ExpenseAddToInvoiceIn(BaseModel):
+    """Optional target draft invoice; when omitted a new draft is created for the customer."""
+
+    invoice_id: Optional[str] = None
 
 
 class ExpenseSummaryKPIs(BaseModel):

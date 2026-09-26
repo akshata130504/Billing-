@@ -37,7 +37,6 @@ from backend.app.schemas.integrations import (
     WebhookConfigureRequest,
     WebhookStatus,
 )
-from backend.app.services.customization_service import generate_webhook_signature
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +282,30 @@ def get_active_smtp_credentials(
 # SMTP Email Integration Logic
 # ---------------------------------------------------------------------------
 
+def assert_public_smtp_host(host: str, port: int) -> None:
+    """SSRF guard for tenant-supplied SMTP hosts: every resolved address must be public
+    (same policy as outbound webhooks, see core.network_security). In non-production
+    environments loopback/private hosts stay usable for local mail catchers."""
+    import socket
+
+    from backend.app.core.network_security import BLOCKED_HOSTNAMES, is_ip_address, is_safe_ip
+
+    if not settings.is_production:
+        return
+    cleaned = (host or "").strip().lower().rstrip(".")
+    if cleaned in BLOCKED_HOSTNAMES:
+        raise AppException(400, "SMTP host is not permitted (private, loopback or metadata address).")
+    if is_ip_address(cleaned):
+        addresses = [cleaned]
+    else:
+        try:
+            addresses = [info[4][0] for info in socket.getaddrinfo(cleaned, port, proto=socket.IPPROTO_TCP)]
+        except OSError:
+            raise AppException(400, f"SMTP host '{host}' could not be resolved.")
+    if not addresses or not all(is_safe_ip(addr) for addr in addresses):
+        raise AppException(400, "SMTP host is not permitted (private, loopback or metadata address).")
+
+
 def test_smtp_connection(
     host: str,
     port: int,
@@ -296,6 +319,7 @@ def test_smtp_connection(
     host = (host or "").strip()
     if not host:
         raise AppException(400, "SMTP host is required.")
+    assert_public_smtp_host(host, port)
 
     context = ssl.create_default_context()
     try:
@@ -364,6 +388,8 @@ def send_test_email(
         raise AppException(400, "No active SMTP configuration found to send test email.")
 
     port = int(cfg.get("port") or 587)
+    if override_config and override_config.get("host"):
+        assert_public_smtp_host(host, port)
     username = cfg.get("username")
     password = cfg.get("password")
     use_tls = bool(cfg.get("use_tls", True))
@@ -530,50 +556,69 @@ def get_smtp_status(db: Session, organization_id: str) -> SMTPStatus:
 # ---------------------------------------------------------------------------
 
 def test_webhook_endpoint(url: str, signing_secret: Optional[str], event_type: str = "test.ping") -> Dict[str, Any]:
-    """Sends a signed test ping to destination URL using existing generate_webhook_signature."""
-    url = (url or "").strip()
-    if not url.startswith("http://") and not url.startswith("https://"):
-        raise AppException(400, "Webhook URL must start with http:// or https://")
+    """Sends a signed test ping (same signing/SSRF policy as real deliveries)."""
+    from backend.app.core.network_security import assert_safe_url
+    from backend.app.services.customization_service import send_signed_webhook
 
-    secret = (signing_secret or "").strip() or "rooman_test_secret"
+    url = assert_safe_url(url, "url")
+    secret = (signing_secret or "").strip()
+    if not secret:
+        raise AppException(400, "A signing secret is required to send a signed test ping.")
     payload = {
-        "event": event_type,
-        "timestamp": utcnow().isoformat(),
-        "source": "rooman_billing",
+        "id": f"evt_test_{int(utcnow().timestamp())}",
+        "type": event_type,
+        "created_at": utcnow().isoformat(),
         "data": {
             "message": "This is a test webhook verification event.",
             "test": True,
         },
     }
-    signature = generate_webhook_signature(payload, secret)
-
-    headers = {
-        "Content-Type": "application/json",
-        "X-Rooman-Signature": f"sha256={signature}",
-        "X-Rooman-Event": event_type,
-        "User-Agent": "Rooman-Billing-Webhooks/1.0",
-    }
-
     try:
-        with httpx.Client(timeout=8.0) as client:
-            resp = client.post(url, json=payload, headers=headers)
-            if 200 <= resp.status_code < 300:
-                return {
-                    "success": True,
-                    "message": f"Endpoint responded with HTTP {resp.status_code} OK.",
-                    "details": {"status_code": resp.status_code},
-                }
-            else:
-                raise AppException(400, f"Webhook endpoint returned HTTP {resp.status_code}: {resp.text[:200]}")
+        status_code, text = send_signed_webhook(url, payload, secret, event_type, timeout=8.0)
     except httpx.RequestError as exc:
         raise AppException(502, f"Could not reach webhook endpoint: {exc}")
+    if 200 <= status_code < 300:
+        return {
+            "success": True,
+            "message": f"Endpoint responded with HTTP {status_code} OK.",
+            "details": {"status_code": status_code},
+        }
+    raise AppException(400, f"Webhook endpoint returned HTTP {status_code}: {(text or '')[:200]}")
+
+
+def get_webhook_config(db: Session, organization_id: str, only_enabled: bool = False) -> Optional[Dict[str, Any]]:
+    """Returns the decrypted outbound webhook config (url, signing_secret, events, is_enabled).
+
+    This single Integrations endpoint is what ``outbox_processor`` fans subscribed domain
+    events out to. With ``only_enabled`` returns None unless it is connected and enabled.
+    """
+    row = _get_org_integration(db, organization_id, "webhook")
+    if not row or not row.encrypted_config:
+        return None
+    cfg = decrypt_config(row.encrypted_config)
+    if only_enabled and not (row.is_connected and cfg.get("is_enabled", True)):
+        return None
+    return cfg
 
 
 def save_webhook_config(db: Session, organization_id: str, data: WebhookConfigureRequest) -> WebhookStatus:
-    """Saves outbound webhook configuration (signing secret encrypted at rest)."""
+    """Saves outbound webhook configuration (signing secret encrypted at rest).
+
+    When no secret is supplied the existing one is kept; if there is none a random secret is
+    generated and returned once in ``generated_signing_secret``.
+    """
+    from backend.app.core.network_security import assert_safe_url
+    from backend.app.services.customization_service import generate_webhook_secret
+
+    clean_url = assert_safe_url(data.url, "url")
+    existing = get_webhook_config(db, organization_id) or {}
+    secret = (data.signing_secret or "").strip() or (existing.get("signing_secret") or "").strip()
+    generated: Optional[str] = None
+    if not secret:
+        secret = generated = generate_webhook_secret()
     payload = {
-        "url": data.url.strip(),
-        "signing_secret": (data.signing_secret or "").strip(),
+        "url": clean_url,
+        "signing_secret": secret,
         "events": data.events,
         "is_enabled": data.is_enabled,
     }
@@ -586,7 +631,10 @@ def save_webhook_config(db: Session, organization_id: str, data: WebhookConfigur
         status_message="Connected" if data.is_enabled else "Disabled",
     )
     db.commit()
-    return get_webhook_status(db, organization_id)
+    status = get_webhook_status(db, organization_id)
+    if generated:
+        status.generated_signing_secret = generated
+    return status
 
 
 def disconnect_webhook(db: Session, organization_id: str) -> WebhookStatus:

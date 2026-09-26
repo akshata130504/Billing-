@@ -150,11 +150,22 @@ def get_webhook(
 def test_webhook(
     data: WebhookTestRequest,
     ctx: CurrentContext = Depends(require_admin),
+    db: Session = Depends(get_db),
 ) -> TestResultResponse:
-    """Dispatches a test event ping signed with HMAC-SHA256 to destination URL."""
+    """Dispatches a test event ping signed with HMAC-SHA256 to destination URL.
+
+    Without an explicit secret the saved endpoint secret (or the organization's derived
+    fallback) is used, so receivers can verify the ping exactly like real deliveries.
+    """
+    from backend.app.services.customization_service import derive_org_webhook_secret
+
+    secret = (data.signing_secret or "").strip()
+    if not secret:
+        saved = integrations_service.get_webhook_config(db, ctx.organization_id) or {}
+        secret = (saved.get("signing_secret") or "").strip() or derive_org_webhook_secret(ctx.organization_id)
     result = integrations_service.test_webhook_endpoint(
         url=data.url,
-        signing_secret=data.signing_secret,
+        signing_secret=secret,
         event_type=data.event_type,
     )
     return TestResultResponse(

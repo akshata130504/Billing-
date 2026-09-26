@@ -87,6 +87,15 @@ function shortRef(token: string): string {
 
 type Tab = 'sessions' | 'templates';
 
+/**
+ * Purposes a hosted link can actually settle. Plan changes go through the subscription's
+ * change flow (proration + invoice), and cards are saved while paying an invoice checkout,
+ * so the server rejects those purposes at creation.
+ */
+const CREATABLE_PURPOSES: CheckoutPurpose[] = CHECKOUT_PURPOSES.filter(
+  (p) => p !== 'update_subscription' && p !== 'update_card' && p !== 'add_payment_method'
+);
+
 const NEW_SESSION_DEFAULTS: CheckoutSessionCreate = {
   purpose: 'invoice_payment',
   template_id: null,
@@ -321,6 +330,11 @@ export function HostedPaymentPagesPage() {
       title: 'Actions',
       align: 'right',
       render: (s) => {
+        // The raw token only exists in the create response; listings carry a
+        // display reference, so there is no link to copy after the fact.
+        if (!s.checkout_url) {
+          return <span className="text-[11px] text-slate-400">Link shown once at creation</span>;
+        }
         const url = checkoutService.publicUrl(s.token);
         return (
           <div className="flex items-center justify-end gap-1.5">
@@ -794,8 +808,8 @@ function NewSessionModal({
             </div>
             <p className="mt-2 text-[11px] text-slate-500 leading-relaxed flex items-start gap-1.5">
               <Info className="w-3.5 h-3.5 shrink-0 mt-px" />
-              This is the customer-facing token. The sessions table shows a hashed reference; links copied from
-              there also open the same page.
+              Copy this link now; it is shown only once. The sessions table shows a reference, not the link.
+              If it is lost, create a new session.
             </p>
           </div>
 
@@ -824,7 +838,7 @@ function NewSessionModal({
           required
           value={purpose}
           onChange={(e) => changePurpose(e.target.value as CheckoutPurpose)}
-          options={CHECKOUT_PURPOSES.map((p) => ({ value: p, label: PURPOSE_LABELS[p] }))}
+          options={CREATABLE_PURPOSES.map((p) => ({ value: p, label: PURPOSE_LABELS[p] }))}
         />
 
         {pickerError && (

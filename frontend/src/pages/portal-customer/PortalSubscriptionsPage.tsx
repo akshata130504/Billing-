@@ -1,3 +1,4 @@
+import { toApiError } from '../../services/apiClient';
 import React, { useState, useEffect } from 'react';
 import { Repeat } from 'lucide-react';
 import {
@@ -22,8 +23,8 @@ export const PortalSubscriptionsPage: React.FC = () => {
       setError(null);
       const data = await portalCustomerService.getSubscriptions();
       setSubscriptions(data);
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || err?.message || 'Failed to load subscriptions.');
+    } catch (err) {
+      setError(toApiError(err).message || 'Failed to load subscriptions.');
     } finally {
       setLoading(false);
     }

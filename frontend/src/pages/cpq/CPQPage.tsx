@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Calculator,
   Plus,
@@ -16,18 +16,35 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../../components/common/Button';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { LoadingState } from '../../components/common/LoadingState';
+import { ErrorState } from '../../components/common/ErrorState';
+import { Pagination } from '../../components/common/Pagination';
+import { useToast } from '../../components/common/Toast';
+import { useAuth } from '../../hooks/useAuth';
+import { toApiError } from '../../services/apiClient';
 import { catalogCpqService } from '../../services/catalogCpqService';
 import { customerService } from '../../services/customerService';
 import type { CPQDealOut, OfferingOut, PriceBookOut, PriceSimulationResponse } from '../../types/catalog_cpq';
 import type { CustomerOut } from '../../types/api';
 
+const PAGE_SIZE = 20;
+
 export function CPQPage() {
   const navigate = useNavigate();
+  const { showToast } = useToast();
+  const { hasRole } = useAuth();
+  const canEdit = hasRole('finance');
+
   const [deals, setDeals] = useState<CPQDealOut[]>([]);
+  const [dealsTotal, setDealsTotal] = useState(0);
+  const [dealCounts, setDealCounts] = useState({ total: 0, pending: 0, approved: 0, converted: 0 });
+  const [page, setPage] = useState(1);
+  // Customer search results for the wizard (queried from the server as the user types).
   const [customers, setCustomers] = useState<CustomerOut[]>([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerOut | null>(null);
   const [offerings, setOfferings] = useState<OfferingOut[]>([]);
   const [priceBooks, setPriceBooks] = useState<PriceBookOut[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Deal Builder Wizard State
   const [isWizardOpen, setIsWizardOpen] = useState(false);
@@ -50,29 +67,63 @@ export function CPQPage() {
   const [isConverting, setIsConverting] = useState(false);
 
   // Load existing deals and prerequisites
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const [dealData, custData, offeringData, pbData] = await Promise.all([
-        catalogCpqService.listDeals(),
-        customerService.list({ page_size: 100 }),
-        catalogCpqService.listOfferings({ is_active: true }),
-        catalogCpqService.listPriceBooks({ status: 'active' }),
-      ]);
+      setLoadError(null);
+      const count = (status?: string) =>
+        catalogCpqService.listDeals({ status, page: 1, page_size: 1 }).then((r) => r.total ?? 0);
+      const [dealData, offeringData, pbData, total, pending, approved, configured, converted] =
+        await Promise.all([
+          catalogCpqService.listDeals({ page, page_size: PAGE_SIZE }),
+          catalogCpqService.listOfferings({ is_active: true, page_size: 100 }),
+          catalogCpqService.listPriceBooks({ status: 'active', page_size: 100 }),
+          count(),
+          count('pending_approval'),
+          count('approved'),
+          count('configured'),
+          count('converted'),
+        ]);
       setDeals(dealData.items || []);
-      setCustomers(custData.items || []);
+      setDealsTotal(dealData.total ?? 0);
+      setDealCounts({ total, pending, approved: approved + configured, converted });
       setOfferings(offeringData.items || []);
       setPriceBooks(pbData.items || []);
     } catch (err) {
-      console.error('Failed to load CPQ data:', err);
+      setLoadError(toApiError(err).message);
     } finally {
       setLoading(false);
     }
-  };
+  }, [page]);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    void loadData();
+  }, [loadData]);
+
+  // Server-side customer search for the wizard, so every customer is findable.
+  const selectedCustomerLabel = selectedCustomer
+    ? `${selectedCustomer.display_name} (${selectedCustomer.customer_number})`
+    : '';
+  useEffect(() => {
+    if (!isWizardOpen || !isCustomerDropdownOpen) return;
+    const text = customerSearchText.trim();
+    const search = text && text !== selectedCustomerLabel ? text : undefined;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      customerService
+        .list({ search, page: 1, page_size: 20 })
+        .then((res) => {
+          if (!cancelled) setCustomers(res.items || []);
+        })
+        .catch((err) => {
+          if (!cancelled) showToast('error', 'Could not search customers', toApiError(err).message);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isWizardOpen, isCustomerDropdownOpen, customerSearchText, selectedCustomerLabel, showToast]);
 
   // Run simulation whenever items or price book changes in Step 3 / 4
   const triggerSimulation = async () => {
@@ -90,7 +141,7 @@ export function CPQPage() {
       });
       setSimulation(res);
     } catch (err) {
-      console.error('Simulation calculation failed:', err);
+      showToast('error', 'Price simulation failed', toApiError(err).message);
     }
   };
 
@@ -113,7 +164,7 @@ export function CPQPage() {
     try {
       setIsSubmitting(true);
       await catalogCpqService.createDeal({
-        title: dealTitle || `Deal for ${customers.find((c) => c.id === selectedCustomerId)?.display_name}`,
+        title: dealTitle || `Deal for ${selectedCustomer?.display_name ?? 'customer'}`,
         customer_id: selectedCustomerId,
         price_book_id: selectedPriceBookId || undefined,
         discount_pct: dealDiscountPct,
@@ -121,23 +172,17 @@ export function CPQPage() {
       });
       setIsWizardOpen(false);
       resetWizard();
+      showToast('success', 'Deal created');
       await loadData();
-    } catch (err: any) {
-      alert(err?.response?.data?.error?.message || err?.message || 'Failed to create deal.');
+    } catch (err) {
+      showToast('error', 'Failed to create deal', toApiError(err).message);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const filteredCustomers = customers.filter((c) => {
-    if (!customerSearchText.trim()) return true;
-    const query = customerSearchText.toLowerCase();
-    return (
-      c.display_name.toLowerCase().includes(query) ||
-      c.customer_number.toLowerCase().includes(query) ||
-      (c.email && c.email.toLowerCase().includes(query))
-    );
-  });
+  // Results are already filtered by the server-side search above.
+  const filteredCustomers = customers;
 
   const handleQuickCreateCustomer = async () => {
     if (!newCustomerName.trim()) return;
@@ -148,17 +193,16 @@ export function CPQPage() {
         email: newCustomerEmail.trim() || undefined,
         currency: 'INR',
       });
-      // Refresh customers list
-      const refreshed = await customerService.list({ page_size: 100 });
-      setCustomers(refreshed.items || []);
       // Select the newly created customer
+      setCustomers((prev) => [created, ...prev]);
+      setSelectedCustomer(created);
       setSelectedCustomerId(created.id);
       setCustomerSearchText(`${created.display_name} (${created.customer_number})`);
       setShowQuickCreateCustomer(false);
       setNewCustomerName('');
       setNewCustomerEmail('');
-    } catch (err: any) {
-      alert(err?.response?.data?.error?.message || err?.message || 'Failed to create customer.');
+    } catch (err) {
+      showToast('error', 'Failed to create customer', toApiError(err).message);
     } finally {
       setIsCreatingCustomer(false);
     }
@@ -168,6 +212,7 @@ export function CPQPage() {
     setWizardStep(1);
     setDealTitle('');
     setSelectedCustomerId('');
+    setSelectedCustomer(null);
     setCustomerSearchText('');
     setIsCustomerDropdownOpen(false);
     setShowQuickCreateCustomer(false);
@@ -190,16 +235,21 @@ export function CPQPage() {
       const quote = await catalogCpqService.convertToQuote(dealToConvert);
       setDealToConvert(null);
       navigate(`/quotes/${quote.id}`);
-    } catch (err: any) {
-      console.error('Failed to convert deal to quote:', err);
+    } catch (err) {
+      showToast('error', 'Failed to convert deal to quote', toApiError(err).message);
     } finally {
       setIsConverting(false);
     }
   };
 
   const handleApproveDeal = async (dealId: string) => {
-    await catalogCpqService.approveDeal(dealId);
-    await loadData();
+    try {
+      await catalogCpqService.approveDeal(dealId);
+      showToast('success', 'Deal approved');
+      await loadData();
+    } catch (err) {
+      showToast('error', 'Failed to approve deal', toApiError(err).message);
+    }
   };
 
   return (
@@ -218,56 +268,61 @@ export function CPQPage() {
           </p>
         </div>
 
-        <div className="shrink-0">
-          <Button
-            variant="primary"
-            size="sm"
-            leadingIcon={<Plus className="w-4 h-4" />}
-            onClick={() => {
-              resetWizard();
-              setIsWizardOpen(true);
-            }}
-            className="whitespace-nowrap px-4 py-2 font-semibold shadow-xs"
-          >
-            Start New Deal
-          </Button>
-        </div>
+        {canEdit && (
+          <div className="shrink-0">
+            <Button
+              variant="primary"
+              size="sm"
+              leadingIcon={<Plus className="w-4 h-4" />}
+              onClick={() => {
+                resetWizard();
+                setIsWizardOpen(true);
+              }}
+              className="whitespace-nowrap px-4 py-2 font-semibold shadow-xs"
+            >
+              Start New Deal
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
         <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
           <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Total Deals Built</p>
-          <p className="text-xl font-bold text-slate-900 mt-1">{deals.length}</p>
+          <p className="text-xl font-bold text-slate-900 mt-1">{dealCounts.total}</p>
         </div>
         <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
           <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Pending Approval</p>
           <p className="text-xl font-bold text-amber-600 mt-1">
-            {deals.filter((d) => d.status === 'pending_approval').length}
+            {dealCounts.pending}
           </p>
         </div>
         <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
           <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Approved Deals</p>
           <p className="text-xl font-bold text-emerald-600 mt-1">
-            {deals.filter((d) => d.status === 'approved' || d.status === 'configured').length}
+            {dealCounts.approved}
           </p>
         </div>
         <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
           <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Converted to Quotes</p>
           <p className="text-xl font-bold text-brand-600 mt-1">
-            {deals.filter((d) => d.status === 'converted').length}
+            {dealCounts.converted}
           </p>
         </div>
       </div>
 
       {/* Deals List */}
-      {loading ? (
+      {loadError ? (
+        <ErrorState title="Couldn't load CPQ deals" message={loadError} onRetry={() => void loadData()} />
+      ) : loading ? (
         <div className="py-12 bg-white rounded-xl border border-slate-200/80 flex items-center justify-center">
           <LoadingState message="Loading configured deals..." />
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden">
-          <table className="w-full text-left text-xs text-slate-600 border-collapse">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-slate-600 border-collapse">
             <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
               <tr>
                 <th className="px-4 py-3">Deal Number & Title</th>
@@ -323,7 +378,7 @@ export function CPQPage() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        {deal.status === 'pending_approval' && (
+                        {canEdit && deal.status === 'pending_approval' && (
                           <Button
                             variant="outline"
                             size="sm"
@@ -334,6 +389,7 @@ export function CPQPage() {
                           </Button>
                         )}
                         {deal.status !== 'converted' ? (
+                          canEdit ? (
                           <Button
                             variant="primary"
                             size="sm"
@@ -342,6 +398,9 @@ export function CPQPage() {
                           >
                             <FileText className="w-3.5 h-3.5" /> Convert to Quote
                           </Button>
+                          ) : (
+                            <span className="text-[11px] text-slate-400">View only</span>
+                          )
                         ) : (
                           <span className="text-[11px] font-semibold text-blue-600 flex items-center gap-1">
                             <CheckCircle2 className="w-3.5 h-3.5" /> Quote Generated
@@ -354,6 +413,8 @@ export function CPQPage() {
               )}
             </tbody>
           </table>
+          </div>
+          <Pagination page={page} pageSize={PAGE_SIZE} total={dealsTotal} onPageChange={setPage} itemLabel="deals" />
         </div>
       )}
 
@@ -481,6 +542,7 @@ export function CPQPage() {
                               onClick={() => {
                                 setCustomerSearchText('');
                                 setSelectedCustomerId('');
+                                setSelectedCustomer(null);
                                 setIsCustomerDropdownOpen(false);
                               }}
                               className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
@@ -514,6 +576,7 @@ export function CPQPage() {
                                   key={c.id}
                                   onClick={() => {
                                     setSelectedCustomerId(c.id);
+                                    setSelectedCustomer(c);
                                     setCustomerSearchText(`${c.display_name} (${c.customer_number})`);
                                     setIsCustomerDropdownOpen(false);
                                   }}
@@ -742,12 +805,20 @@ export function CPQPage() {
                       <span>Subtotal:</span>
                       <span className="font-semibold">₹{simulation.subtotal}</span>
                     </div>
-                    {Number(simulation.discount_amount) > 0 && (
-                      <div className="flex justify-between text-red-600 font-medium">
-                        <span>Total Discounts ({simulation.discount_pct}%):</span>
-                        <span>-₹{simulation.discount_amount}</span>
-                      </div>
-                    )}
+                    {Number(simulation.discount_amount) > 0 && (() => {
+                      const subtotalNum = Number(simulation.subtotal) || 0;
+                      const discountNum = Number(simulation.discount_amount) || 0;
+                      const calculatedPct = subtotalNum > 0 ? (discountNum / subtotalNum) * 100 : (Number(simulation.discount_pct) || 0);
+                      const displayPct = Number.isInteger(calculatedPct)
+                        ? calculatedPct.toString()
+                        : calculatedPct.toFixed(1).replace(/\.0$/, '');
+                      return (
+                        <div className="flex justify-between text-red-600 font-medium">
+                          <span>Total Discounts ({displayPct}%):</span>
+                          <span>-₹{simulation.discount_amount}</span>
+                        </div>
+                      );
+                    })()}
                     <div className="flex justify-between text-slate-600">
                       <span>Tax (GST):</span>
                       <span className="font-semibold">+₹{simulation.tax_amount}</span>
@@ -775,11 +846,11 @@ export function CPQPage() {
                   size="sm"
                   onClick={async () => {
                     if (wizardStep === 1 && !selectedCustomerId) {
-                      alert('Please select a customer.');
+                      showToast('warning', 'Please select a customer.');
                       return;
                     }
                     if (wizardStep === 2 && dealItems.length === 0) {
-                      alert('Please select at least one offering.');
+                      showToast('warning', 'Please select at least one offering.');
                       return;
                     }
                     if (wizardStep === 3) {

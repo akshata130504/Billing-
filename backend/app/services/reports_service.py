@@ -127,7 +127,8 @@ def _empty_buckets(r: ReportRange, granularity: str) -> Dict[str, Decimal]:
 def _invoiced_query(organization_id: str, r: ReportRange):
     return select(Invoice).where(
         Invoice.organization_id == organization_id,
-        Invoice.status != InvoiceStatus.DRAFT,
+        # Drafts were never issued and voided invoices were cancelled: neither is revenue.
+        Invoice.status.not_in([InvoiceStatus.DRAFT, InvoiceStatus.VOID]),
         Invoice.issue_date >= r.start,
         Invoice.issue_date <= r.end,
     )

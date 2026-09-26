@@ -492,24 +492,25 @@ def _get_or_create_conversation(
     conversation_id: Optional[str] = None,
     title: Optional[str] = None,
 ) -> AIConversation:
-    """Finds or creates a tenant-scoped conversation.
+    """Finds or creates a conversation scoped to the tenant AND the calling user.
 
-    Guarantees strict tenant isolation: an ID belonging to another organization
-    is never returned or hijacked; instead a fresh conversation is generated.
+    Guarantees strict isolation: an ID belonging to another organization or to another
+    member of the same organization is never returned or hijacked (conversation history
+    is private to its author); instead a fresh conversation is generated.
     """
     if conversation_id:
         existing = db.scalars(
             select(AIConversation).where(
                 AIConversation.id == conversation_id,
                 AIConversation.organization_id == organization_id,
+                AIConversation.user_id == user_id,
             )
         ).first()
         if existing:
             return existing
 
-        # If this ID exists under another organization, generate a fresh ID for tenant isolation
-        other_tenant = db.get(AIConversation, conversation_id)
-        if other_tenant and other_tenant.organization_id != organization_id:
+        # ID owned by another tenant or another user: generate a fresh ID instead.
+        if db.get(AIConversation, conversation_id) is not None:
             conversation_id = str(uuid.uuid4())
 
     new_id = conversation_id or str(uuid.uuid4())
@@ -530,14 +531,18 @@ def _get_conversation_turns(
     organization_id: str,
     request_history: Optional[List[ChatMessage]] = None,
     limit: int = 6,
+    user_id: Optional[str] = None,
 ) -> List[Dict[str, str]]:
-    """Retrieves previous conversation turns for multi-turn LLM context."""
+    """Retrieves previous conversation turns (of the calling user) for multi-turn LLM context."""
+    filters = [
+        AIRequest.conversation_id == conversation_id,
+        AIRequest.organization_id == organization_id,
+    ]
+    if user_id is not None:
+        filters.append(AIRequest.user_id == user_id)
     db_requests = db.scalars(
         select(AIRequest)
-        .where(
-            AIRequest.conversation_id == conversation_id,
-            AIRequest.organization_id == organization_id,
-        )
+        .where(*filters)
         .order_by(AIRequest.created_at.desc())
         .limit(limit)
     ).all()
@@ -610,7 +615,9 @@ def _call_gemini(
 
     model = getattr(settings, "GEMINI_MODEL", "gemini-2.5-flash")
     timeout = getattr(settings, "GEMINI_TIMEOUT_SECONDS", 10.0)
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    # The API key travels in a header (never the URL) so it cannot leak into proxy/access logs.
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    request_headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
 
     role_name = ctx.role.value if hasattr(ctx.role, "value") else str(ctx.role)
     system_instruction_text = (
@@ -652,7 +659,7 @@ def _call_gemini(
 
     try:
         with httpx.Client(timeout=timeout) as client:
-            resp = client.post(url, json=payload)
+            resp = client.post(url, json=payload, headers=request_headers)
             if resp.status_code == 200:
                 data = resp.json()
                 candidates = data.get("candidates", [])
@@ -693,7 +700,7 @@ def process_chat(
         title=user_prompt[:50],
     )
     conv_id = conv.id
-    history_turns = _get_conversation_turns(db, conv_id, ctx.organization_id, request.history)
+    history_turns = _get_conversation_turns(db, conv_id, ctx.organization_id, request.history, user_id=ctx.user_id)
     metrics = _get_tenant_billing_metrics(db, ctx.organization_id)
 
     used_llm = False

@@ -99,8 +99,8 @@ export interface CheckoutSessionCreate {
 /**
  * GET/POST /checkout/sessions → CheckoutSessionOut.
  * NOTE: `token` is the raw, shareable token ONLY on the POST (create) response.
- * The list endpoint returns the stored SHA-256 hash instead; the public lookup
- * accepts that hash too, so links built from the list still resolve.
+ * The list endpoint returns a non-secret display reference (`ref_…`) and
+ * `checkout_url: null` — the link cannot be recovered after creation.
  */
 export interface CheckoutSession {
   id: string;
@@ -164,6 +164,12 @@ export interface PublicCheckoutView {
   gateway_order_id: string | null;
   /** Razorpay public key id when the gateway is configured. */
   gateway_key_id: string | null;
+  /** Razorpay customer id; pass to Checkout with `save: 1` so the card can be saved. */
+  gateway_customer_id?: string | null;
+  /** True when an online payment can be made for this link right now. */
+  gateway_available?: boolean;
+  /** Customer-facing explanation when online payment is unavailable. */
+  gateway_message?: string | null;
 }
 
 export type CheckoutPaymentMethodType = 'card' | 'upi' | 'netbanking';
@@ -171,8 +177,8 @@ export type CheckoutPaymentMethodType = 'card' | 'upi' | 'netbanking';
 /** POST /checkout/public/{token}/confirm body → CheckoutConfirmIn */
 export interface CheckoutConfirmIn {
   payment_method_type?: CheckoutPaymentMethodType;
-  /** "razorpay" (default) or "manual" — manual uses the offline adapter. */
-  gateway?: 'razorpay' | 'manual';
+  /** Only "razorpay" is accepted; the public endpoint rejects "manual" with 400. */
+  gateway?: 'razorpay';
   razorpay_payment_id?: string | null;
   razorpay_order_id?: string | null;
   razorpay_signature?: string | null;

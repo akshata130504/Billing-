@@ -60,7 +60,9 @@ export function PublicCheckoutPage() {
   const primaryColor = branding.primary_color || '#2563eb';
   const buttonLabel = branding.button_text || 'Pay Now';
   const amountNumber = useMemo(() => Number(view?.amount ?? 0), [view]);
-  const canPayOnline = Boolean(view?.gateway_key_id && view?.gateway_order_id && amountNumber > 0);
+  const canPayOnline = Boolean(
+    (view?.gateway_available ?? true) && view?.gateway_key_id && view?.gateway_order_id && amountNumber > 0
+  );
 
   const confirm = useCallback(
     async (body: CheckoutConfirmIn) => {
@@ -81,9 +83,12 @@ export function PublicCheckoutPage() {
     setPaying(true);
     try {
       if (!canPayOnline) {
-        // No gateway configured for this session: the backend's manual adapter
-        // records the intent so the finance team can reconcile it offline.
-        await confirm({ gateway: 'manual', save_payment_method: savePaymentMethod });
+        // Never "confirm" without a gateway payment: an unauthenticated page must not
+        // be able to mark anything paid. The customer is told to contact the merchant.
+        setPayError(
+          view.gateway_message ||
+            `Online payment is currently unavailable for this link. Please contact ${view.organization_name} to complete your payment.`
+        );
         return;
       }
       const Razorpay = await loadRazorpayCheckout();
@@ -94,6 +99,7 @@ export function PublicCheckoutPage() {
         name: view.organization_name,
         description: view.item_description || PURPOSE_LABELS[view.purpose] || 'Payment',
         order_id: view.gateway_order_id as string,
+        ...(savePaymentMethod && view.gateway_customer_id ? { customer_id: view.gateway_customer_id, save: 1 as const } : {}),
         image: branding.logo_url || undefined,
         prefill: {
           name: view.customer_name || undefined,
@@ -240,8 +246,8 @@ export function PublicCheckoutPage() {
 
           {!canPayOnline && (
             <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-              Online card payment is not configured for this link. Confirming below records your intent to pay
-              and notifies {view.organization_name} to reconcile the payment offline.
+              {view.gateway_message ||
+                `Online payment is currently unavailable for this link. Please contact ${view.organization_name} to complete your payment.`}
             </div>
           )}
 
@@ -256,11 +262,12 @@ export function PublicCheckoutPage() {
             className="mt-5 w-full"
             size="lg"
             isLoading={paying}
+            disabled={!canPayOnline}
             onClick={() => void handlePay()}
             leadingIcon={canPayOnline ? <CreditCard className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
             style={{ backgroundColor: primaryColor, borderColor: primaryColor }}
           >
-            {canPayOnline ? `${buttonLabel} ${formatMoney(view.amount, view.currency)}` : 'Confirm payment intent'}
+            {canPayOnline ? `${buttonLabel} ${formatMoney(view.amount, view.currency)}` : 'Online payment unavailable'}
           </Button>
 
           <div className="mt-4 flex items-center justify-center gap-1.5 text-[11px] text-slate-400">

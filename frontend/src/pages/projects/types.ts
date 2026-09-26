@@ -61,6 +61,8 @@ export interface ProjectTransaction {
 export interface Project {
   id: string;
   name: string;
+  /** Linked customer record (who the project bills). */
+  customerId?: string;
   customer: string;
   description: string;
   status: ProjectStatus;

@@ -10,11 +10,14 @@ from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
 from sqlalchemy import Select, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, object_session, selectinload
 
 from backend.app.api.deps import CurrentContext
 from backend.app.core.exceptions import (
+    ConflictAppError,
     EntityNotFoundError,
+    GatewayError,
     GatewayNotConfiguredError,
     InvalidStateError,
     ValidationAppError,
@@ -43,6 +46,7 @@ from backend.app.services.invoice_service import (
     SETTLED_PAYMENT_STATUSES,
     get_customer,
     get_invoice,
+    lock_invoice,
     recompute_invoice,
 )
 from backend.app.services.money import D, q2
@@ -87,8 +91,18 @@ def allocated_amount(payment: Payment) -> Decimal:
 
 
 def effective_amount(payment: Payment) -> Decimal:
-    """Money that is still ours after refunds."""
+    """Money that is still ours after (processed) refunds."""
     return q2(D(payment.amount) - D(payment.amount_refunded))
+
+
+def pending_refund_amount(payment: Payment) -> Decimal:
+    """Refunds accepted by the gateway but not yet confirmed (refund.processed pending)."""
+    return q2(sum((D(r.amount) for r in payment.refunds if r.status == RefundStatus.PENDING), Decimal("0")))
+
+
+def refundable_amount(payment: Payment) -> Decimal:
+    """What can still be refunded: effective amount minus refunds already in flight."""
+    return q2(max(Decimal("0"), effective_amount(payment) - pending_refund_amount(payment)))
 
 
 def serialize_payment(payment: Payment) -> Dict[str, Any]:
@@ -145,6 +159,26 @@ def serialize_payment(payment: Payment) -> Dict[str, Any]:
 # --- queries -------------------------------------------------------------------------------------------
 
 
+def _emit_payment_event(db: Session, payment: Payment, event_type: str, **extra: Any) -> None:
+    """Queue a domain event (automation rules + outbound webhooks) in the caller's transaction."""
+    from backend.app.services.outbox_processor import emit_event
+
+    emit_event(
+        db,
+        payment.organization_id,
+        event_type,
+        {
+            "payment_id": payment.id,
+            "payment_number": payment.payment_number,
+            "customer_id": payment.customer_id,
+            "amount": str(payment.amount),
+            "currency": payment.currency,
+            "status": payment.status.value if hasattr(payment.status, "value") else str(payment.status),
+            **extra,
+        },
+    )
+
+
 def _base_query() -> Select:
     return select(Payment).options(
         selectinload(Payment.customer),
@@ -169,6 +203,27 @@ def find_by_order_id(db: Session, gateway_order_id: str, organization_id: Option
 
 def find_by_gateway_payment_id(db: Session, gateway_payment_id: str) -> Optional[Payment]:
     return db.scalars(_base_query().where(Payment.gateway_payment_id == gateway_payment_id)).first()
+
+
+def _supports_row_locks(db: Session) -> bool:
+    return db.bind is not None and db.bind.dialect.name != "sqlite"
+
+
+def lock_payment(db: Session, payment: Payment) -> Payment:
+    """Re-read `payment` under SELECT ... FOR UPDATE so concurrent settlement paths
+    (browser verify vs. webhook, or two webhook deliveries) serialise on the row
+    and each sees the other's committed status. No-op locking on SQLite."""
+    stmt = _base_query().where(Payment.id == payment.id).execution_options(populate_existing=True)
+    if _supports_row_locks(db):
+        stmt = stmt.with_for_update(of=Payment)
+    return db.scalars(stmt).first() or payment
+
+
+def find_refund_by_gateway_id(db: Session, gateway_refund_id: str, *, lock: bool = False) -> Optional[Refund]:
+    stmt = select(Refund).where(Refund.gateway_refund_id == gateway_refund_id)
+    if lock and _supports_row_locks(db):
+        stmt = stmt.with_for_update()
+    return db.scalars(stmt).first()
 
 
 def _day_bounds(date_from: Optional[date], date_to: Optional[date]):
@@ -348,6 +403,7 @@ def _validate_allocations(
             continue
         seen.add(alloc.invoice_id)
         invoice = get_invoice(db, organization_id, alloc.invoice_id)  # 404 for other tenants
+        lock_invoice(db, invoice)  # serialise with concurrent allocations before reading amount_due
         amount = q2(alloc.amount)
         if invoice.status not in OPEN_INVOICE_STATUSES:
             fields[f"allocations.{idx}.invoice_id"] = f"invoice {invoice.invoice_number} is {invoice.status.value}, not open"
@@ -376,10 +432,14 @@ def _reload(db: Session, payment: Payment) -> Payment:
 def create_payment(db: Session, ctx: CurrentContext, data: PaymentCreate) -> Payment:
     customer = get_customer(db, ctx.organization_id, data.customer_id)
     amount = q2(data.amount)
+    # Number first (organization lock), then the invoice locks inside validation:
+    # the same org -> invoice order every other allocation path uses. A validation
+    # failure rolls the reserved number back with the transaction.
+    payment_number = next_number(db, ctx.organization_id, "payment")
     pairs = _validate_allocations(db, ctx.organization_id, amount, data.allocations or [])
     payment = Payment(
         organization_id=ctx.organization_id,
-        payment_number=next_number(db, ctx.organization_id, "payment"),
+        payment_number=payment_number,
         customer_id=customer.id,
         amount=amount,
         currency=customer.currency or ctx.organization.default_currency or "INR",
@@ -421,12 +481,17 @@ def create_payment(db: Session, ctx: CurrentContext, data: PaymentCreate) -> Pay
             ctx=ctx,
             after={"allocations": [{"invoice_id": i.id, "invoice_number": i.invoice_number, "amount": a} for i, a in pairs]},
         )
+    _emit_payment_event(db, payment, "payment.created")
     db.commit()
     return _reload(db, payment)
 
 
 def record_invoice_payment(db: Session, ctx: CurrentContext, invoice: Invoice, data: RecordPaymentIn) -> Payment:
     """POST /invoices/{id}/record-payment: manual payment fully allocated to one invoice."""
+    # Organization (numbering) lock, then the invoice lock, before amount_due is read, so
+    # two different payments recorded at once cannot both take the full balance.
+    payment_number = next_number(db, ctx.organization_id, "payment")
+    lock_invoice(db, invoice)
     if invoice.status == InvoiceStatus.DRAFT:
         invoice.status = InvoiceStatus.SENT
         invoice.sent_at = utcnow()
@@ -441,7 +506,7 @@ def record_invoice_payment(db: Session, ctx: CurrentContext, invoice: Invoice, d
         )
     payment = Payment(
         organization_id=ctx.organization_id,
-        payment_number=next_number(db, ctx.organization_id, "payment"),
+        payment_number=payment_number,
         customer_id=invoice.customer_id,
         amount=amount,
         currency=invoice.currency,
@@ -469,6 +534,7 @@ def record_invoice_payment(db: Session, ctx: CurrentContext, invoice: Invoice, d
         ctx=ctx,
         after={**snapshot(payment), "invoice_id": invoice.id, "invoice_number": invoice.invoice_number},
     )
+    _emit_payment_event(db, payment, "payment.created")
     db.commit()
     return _reload(db, payment)
 
@@ -559,19 +625,15 @@ def _reverse_allocations(db: Session, payment: Payment, refund_amount: Decimal, 
     return affected
 
 
-def apply_refund(
+def _apply_refund_amounts(
     db: Session,
     payment: Payment,
     amount: Decimal,
     *,
-    reason: Optional[str] = None,
-    gateway_refund_id: Optional[str] = None,
-    refund_status: RefundStatus = RefundStatus.PROCESSED,
     ctx: Optional[CurrentContext] = None,
     actor_label: Optional[str] = None,
-) -> Refund:
-    """Persist a refund, update the payment, reverse allocations and re-open invoices. No commit."""
-    amount = q2(amount)
+) -> Dict[str, Any]:
+    """Book a confirmed refund: payment totals, allocation reversal, invoice re-open. Returns the before-snapshot."""
     remaining = effective_amount(payment)
     if amount <= 0 or amount > remaining:
         raise ValidationAppError(
@@ -579,16 +641,6 @@ def apply_refund(
             {"fields": {"amount": "exceeds refundable amount"}},
         )
     before = snapshot(payment)
-    refund = Refund(
-        organization_id=payment.organization_id,
-        payment_id=payment.id,
-        amount=amount,
-        status=refund_status,
-        gateway_refund_id=gateway_refund_id,
-        reason=reason,
-        created_by_id=ctx.user.id if ctx else None,
-    )
-    db.add(refund)
     payment.amount_refunded = q2(D(payment.amount_refunded) + amount)
     payment.status = PaymentStatus.REFUNDED if q2(payment.amount_refunded) >= q2(payment.amount) else PaymentStatus.PARTIALLY_REFUNDED
     payment.updated_at = utcnow()
@@ -602,6 +654,68 @@ def apply_refund(
             continue
         seen.add(invoice.id)
         recompute_invoice(db, invoice, ctx=ctx, actor_label=actor_label)
+    _emit_payment_event(db, payment, "payment.refunded", refund_amount=str(amount))
+    return before
+
+
+def apply_refund(
+    db: Session,
+    payment: Payment,
+    amount: Decimal,
+    *,
+    reason: Optional[str] = None,
+    gateway_refund_id: Optional[str] = None,
+    refund_status: RefundStatus = RefundStatus.PROCESSED,
+    ctx: Optional[CurrentContext] = None,
+    actor_label: Optional[str] = None,
+) -> Refund:
+    """Persist a refund. No commit.
+
+    PROCESSED: the payment is updated, allocations reversed and invoices re-opened now.
+    PENDING: only the Refund row is stored (money has not left yet); the
+    refund.processed webhook books it via `settle_pending_refund`, refund.failed
+    discards it via `fail_refund`.
+    FAILED: never booked - rejected here so a failed gateway refund cannot
+    reduce what the customer owes.
+    """
+    amount = q2(amount)
+    if refund_status == RefundStatus.FAILED:
+        raise InvalidStateError("The gateway reported this refund as failed; nothing was refunded.")
+    if gateway_refund_id:
+        existing = find_refund_by_gateway_id(db, gateway_refund_id)
+        if existing is not None:
+            return existing  # idempotent on the gateway refund id
+    refundable = refundable_amount(payment)
+    if amount <= 0 or amount > refundable:
+        raise ValidationAppError(
+            f"Refund amount must be between 0.01 and {refundable} (amount not yet refunded).",
+            {"fields": {"amount": "exceeds refundable amount"}},
+        )
+    refund = Refund(
+        organization_id=payment.organization_id,
+        payment_id=payment.id,
+        amount=amount,
+        status=refund_status,
+        gateway_refund_id=gateway_refund_id,
+        reason=reason,
+        created_by_id=ctx.user.id if ctx else None,
+    )
+    db.add(refund)
+    db.flush()
+    if refund_status == RefundStatus.PENDING:
+        audit.record(
+            db,
+            action="PAYMENT_REFUND_PENDING",
+            entity_type="payment",
+            entity_id=payment.id,
+            entity_label=payment.payment_number,
+            organization_id=payment.organization_id,
+            ctx=ctx,
+            actor_label=actor_label,
+            after={"refund": {"id": refund.id, "amount": amount, "reason": reason, "gateway_refund_id": gateway_refund_id}},
+        )
+        return refund
+    before = _apply_refund_amounts(db, payment, amount, ctx=ctx, actor_label=actor_label)
     audit.record(
         db,
         action="PAYMENT_REFUNDED",
@@ -617,11 +731,75 @@ def apply_refund(
     return refund
 
 
+def settle_pending_refund(db: Session, refund: Refund, *, actor_label: Optional[str] = None) -> Refund:
+    """refund.processed for a refund stored as PENDING: book it now. Idempotent. No commit."""
+    if refund.status != RefundStatus.PENDING:
+        return refund
+    payment = lock_payment(db, refund.payment or db.get(Payment, refund.payment_id))
+    db.refresh(refund)
+    if refund.status != RefundStatus.PENDING:
+        return refund
+    refund.status = RefundStatus.PROCESSED
+    refund.updated_at = utcnow()
+    db.flush()
+    before = _apply_refund_amounts(db, payment, q2(refund.amount), actor_label=actor_label)
+    audit.record(
+        db,
+        action="PAYMENT_REFUNDED",
+        entity_type="payment",
+        entity_id=payment.id,
+        entity_label=payment.payment_number,
+        organization_id=payment.organization_id,
+        actor_label=actor_label,
+        before=before,
+        after={**snapshot(payment), "refund": {"id": refund.id, "amount": refund.amount, "gateway_refund_id": refund.gateway_refund_id}},
+    )
+    return refund
+
+
+def fail_refund(db: Session, refund: Refund, *, reason: Optional[str] = None, actor_label: Optional[str] = None) -> Refund:
+    """refund.failed: a PENDING refund is discarded. A refund already booked as
+    processed is un-booked on the payment and flagged EXCEPTION for finance (the
+    allocations it reversed cannot be re-created automatically). No commit."""
+    if refund.status == RefundStatus.FAILED:
+        return refund
+    payment = lock_payment(db, refund.payment or db.get(Payment, refund.payment_id))
+    was_processed = refund.status == RefundStatus.PROCESSED
+    refund.status = RefundStatus.FAILED
+    refund.updated_at = utcnow()
+    if was_processed:
+        payment.amount_refunded = q2(max(Decimal("0"), D(payment.amount_refunded) - D(refund.amount)))
+        if q2(payment.amount_refunded) == 0:
+            payment.status = PaymentStatus.SUCCEEDED
+        elif q2(payment.amount_refunded) < q2(payment.amount):
+            payment.status = PaymentStatus.PARTIALLY_REFUNDED
+        payment.reconciliation_status = ReconciliationStatus.EXCEPTION
+        payment.updated_at = utcnow()
+    db.flush()
+    audit.record(
+        db,
+        action="PAYMENT_REFUND_FAILED",
+        entity_type="payment",
+        entity_id=payment.id,
+        entity_label=payment.payment_number,
+        organization_id=payment.organization_id,
+        actor_label=actor_label,
+        after={
+            "refund": {"id": refund.id, "amount": refund.amount, "gateway_refund_id": refund.gateway_refund_id},
+            "reason": reason,
+            "needs_review": was_processed,
+        },
+        status=audit.AuditStatus.WARNING,
+    )
+    return refund
+
+
 def refund_payment(db: Session, ctx: CurrentContext, payment: Payment, amount: Decimal, reason: Optional[str]) -> Payment:
+    payment = lock_payment(db, payment)
     if payment.status not in (PaymentStatus.SUCCEEDED, PaymentStatus.PARTIALLY_REFUNDED):
         raise InvalidStateError(f"Only succeeded payments can be refunded; this payment is {payment.status.value}.")
     amount = q2(amount)
-    remaining = effective_amount(payment)
+    remaining = refundable_amount(payment)
     if amount > remaining:
         raise ValidationAppError(
             f"Refund amount {amount} exceeds the refundable amount ({remaining}).",
@@ -630,7 +808,8 @@ def refund_payment(db: Session, ctx: CurrentContext, payment: Payment, amount: D
     gateway_refund_id = None
     refund_status = RefundStatus.PROCESSED
     if payment.gateway == PaymentGateway.RAZORPAY:
-        if not razorpay_gateway.is_configured():
+        creds = razorpay_gateway.credentials_for(db, payment.organization_id)
+        if not razorpay_gateway.is_configured(creds):
             raise GatewayNotConfiguredError("razorpay")
         if not payment.gateway_payment_id:
             raise InvalidStateError("This online payment has no gateway payment id and cannot be refunded through Razorpay.")
@@ -638,10 +817,24 @@ def refund_payment(db: Session, ctx: CurrentContext, payment: Payment, amount: D
             payment.gateway_payment_id,
             to_paise(amount),
             {"payment_number": payment.payment_number, "reason": reason or "", "organization_id": payment.organization_id},
+            creds=creds,
         )
         gateway_refund_id = result.get("id")
         gw_status = str(result.get("status") or "processed").lower()
-        refund_status = {"pending": RefundStatus.PENDING, "failed": RefundStatus.FAILED}.get(gw_status, RefundStatus.PROCESSED)
+        if gw_status == "failed":
+            audit.record(
+                db,
+                action="PAYMENT_REFUND_FAILED",
+                entity_type="payment",
+                entity_id=payment.id,
+                entity_label=payment.payment_number,
+                ctx=ctx,
+                after={"amount": amount, "gateway_refund_id": gateway_refund_id, "reason": reason},
+                status=audit.AuditStatus.WARNING,
+            )
+            db.commit()
+            raise GatewayError("Razorpay reported the refund as failed; nothing was refunded.")
+        refund_status = RefundStatus.PENDING if gw_status == "pending" else RefundStatus.PROCESSED
     apply_refund(db, payment, amount, reason=reason, gateway_refund_id=gateway_refund_id, refund_status=refund_status, ctx=ctx)
     db.commit()
     return _reload(db, payment)
@@ -685,19 +878,35 @@ def execute_refund(db: Session, *, approval, ctx: CurrentContext) -> Payment:
 def capture_gateway_payment(
     db: Session,
     payment: Payment,
-    invoice: Invoice,
+    invoice: Optional[Invoice],
     *,
     gateway_payment_id: str,
     payload: Optional[Dict[str, Any]] = None,
     signature_verified: bool = True,
     actor_label: str = audit.CUSTOMER_ACTOR,
+    lock: bool = True,
 ) -> Payment:
-    """Mark a pending gateway payment as captured and allocate it to `invoice`. Idempotent. No commit."""
+    """Mark a pending (or previously failed) gateway payment as captured and allocate it
+    to `invoice`. Idempotent and safe against concurrent settlement: the payment row
+    is locked and re-read first, so browser verify and webhook never both allocate.
+    No commit.
+
+    A FAILED payment may still be captured: Razorpay can deliver payment.failed for
+    one attempt and payment.captured for a later successful retry on the same order.
+    """
+    if lock:
+        payment = lock_payment(db, payment)
     if payment.status == PaymentStatus.SUCCEEDED or payment.status in (PaymentStatus.REFUNDED, PaymentStatus.PARTIALLY_REFUNDED):
         return payment
+    if gateway_payment_id:
+        other = db.scalars(
+            select(Payment.id).where(Payment.gateway_payment_id == gateway_payment_id, Payment.id != payment.id)
+        ).first()
+        if other is not None:
+            raise ConflictAppError("This gateway payment has already been recorded against another payment.")
     before = snapshot(payment)
     payment.status = PaymentStatus.SUCCEEDED
-    payment.gateway_payment_id = gateway_payment_id
+    payment.gateway_payment_id = gateway_payment_id or payment.gateway_payment_id
     payment.gateway_signature_verified = bool(signature_verified)
     payment.paid_at = utcnow()
     payment.failure_reason = None
@@ -706,15 +915,24 @@ def capture_gateway_payment(
         merged["capture"] = payload
         payment.gateway_payload = merged
     payment.updated_at = utcnow()
-    db.flush()
-    if invoice.status in OPEN_INVOICE_STATUSES:
+    try:
+        with db.begin_nested():
+            db.flush()
+    except IntegrityError as exc:  # unique gateway_payment_id raced with another capture
+        raise ConflictAppError("This gateway payment has already been recorded.") from exc
+    if invoice is not None:
+        # Re-read the invoice under its row lock: another payment may have settled it
+        # meanwhile, in which case this one stays captured but unallocated.
+        lock_invoice(db, invoice)
+    if invoice is not None and invoice.status in OPEN_INVOICE_STATUSES:
         alloc_amount = min(q2(payment.amount), q2(invoice.amount_due))
         if alloc_amount > 0:
             db.add(PaymentAllocation(organization_id=payment.organization_id, payment_id=payment.id, invoice_id=invoice.id, amount=alloc_amount))
             db.flush()
     db.refresh(payment)
     refresh_reconciliation(payment, auto=True)
-    recompute_invoice(db, invoice, actor_label=actor_label)
+    if invoice is not None:
+        recompute_invoice(db, invoice, actor_label=actor_label)
     audit.record(
         db,
         action="PAYMENT_CAPTURED",
@@ -724,9 +942,138 @@ def capture_gateway_payment(
         organization_id=payment.organization_id,
         actor_label=actor_label,
         before=before,
-        after={**snapshot(payment), "invoice_id": invoice.id, "invoice_number": invoice.invoice_number},
+        after={
+            **snapshot(payment),
+            "invoice_id": invoice.id if invoice is not None else None,
+            "invoice_number": invoice.invoice_number if invoice is not None else None,
+        },
     )
+    _emit_payment_event(db, payment, "payment.captured", invoice_id=invoice.id if invoice is not None else None)
     return payment
+
+
+def allocate_captured_payment(db: Session, payment: Payment, invoice: Invoice, *, actor_label: str = audit.SYSTEM_ACTOR) -> Payment:
+    """Allocate an already-captured, still-unallocated payment to `invoice` (e.g. the tax
+    invoice a checkout builds after the money arrived). Idempotent. No commit."""
+    if payment.status not in (PaymentStatus.SUCCEEDED, PaymentStatus.PARTIALLY_REFUNDED):
+        return payment
+    if any(a.invoice_id == invoice.id for a in payment.allocations):
+        return payment
+    headroom = q2(effective_amount(payment) - allocated_amount(payment))
+    alloc_amount = min(headroom, q2(invoice.amount_due)) if invoice.status in OPEN_INVOICE_STATUSES else Decimal("0")
+    if alloc_amount > 0:
+        db.add(PaymentAllocation(organization_id=payment.organization_id, payment_id=payment.id, invoice_id=invoice.id, amount=alloc_amount))
+        db.flush()
+        db.refresh(payment)
+        refresh_reconciliation(payment, auto=True)
+        recompute_invoice(db, invoice, actor_label=actor_label)
+        audit.record(
+            db,
+            action="PAYMENT_ALLOCATED",
+            entity_type="payment",
+            entity_id=payment.id,
+            entity_label=payment.payment_number,
+            organization_id=payment.organization_id,
+            actor_label=actor_label,
+            after={"allocations": [{"invoice_id": invoice.id, "invoice_number": invoice.invoice_number, "amount": alloc_amount}]},
+        )
+    return payment
+
+def create_pending_gateway_payment(
+    db: Session,
+    *,
+    organization_id: str,
+    customer_id: Optional[str],
+    amount: Decimal,
+    currency: str,
+    gateway_order_id: Optional[str] = None,
+    method: PaymentMethod = PaymentMethod.RAZORPAY,
+    gateway: PaymentGateway = PaymentGateway.RAZORPAY,
+    notes: Optional[str] = None,
+    gateway_payload: Optional[Dict[str, Any]] = None,
+) -> Payment:
+    """A PENDING online payment keyed on its gateway order, awaiting capture (verify or webhook). No commit."""
+    payment = Payment(
+        organization_id=organization_id,
+        payment_number=next_number(db, organization_id, "payment"),
+        customer_id=customer_id,
+        amount=q2(amount),
+        currency=currency or "INR",
+        method=method,
+        gateway=gateway,
+        status=PaymentStatus.PENDING,
+        reconciliation_status=ReconciliationStatus.UNMATCHED,
+        gateway_signature_verified=False,
+        gateway_order_id=gateway_order_id,
+        gateway_payload=gateway_payload,
+        notes=notes,
+        amount_refunded=Decimal("0.00"),
+    )
+    db.add(payment)
+    db.flush()
+    return payment
+
+
+def record_gateway_charge(
+    db: Session,
+    *,
+    invoice: Invoice,
+    amount: Decimal,
+    gateway: PaymentGateway,
+    gateway_payment_id: Optional[str],
+    gateway_order_id: Optional[str] = None,
+    pending: bool = False,
+    method: PaymentMethod = PaymentMethod.CARD,
+    payload: Optional[Dict[str, Any]] = None,
+    notes: Optional[str] = None,
+    actor_label: str = audit.SYSTEM_ACTOR,
+) -> Payment:
+    """Record a server-initiated gateway charge (saved card / dunning / trial) against `invoice`.
+
+    `pending=True` leaves the payment PENDING (keyed on the order id, with the
+    invoice id in its notes) for the payment.captured webhook to settle; otherwise
+    it is captured and allocated immediately through `capture_gateway_payment`, so
+    allocations, reconciliation, invoice status and audit stay consistent. No commit.
+    """
+    payment = create_pending_gateway_payment(
+        db,
+        organization_id=invoice.organization_id,
+        customer_id=invoice.customer_id,
+        amount=amount,
+        currency=invoice.currency or "INR",
+        gateway_order_id=gateway_order_id,
+        method=method,
+        gateway=gateway,
+        notes=notes,
+        gateway_payload={
+            "notes": {"invoice_id": invoice.id, "organization_id": invoice.organization_id},
+            "charge": payload,
+            "pending_gateway_payment_id": gateway_payment_id,
+        },
+    )
+    if pending:
+        audit.record(
+            db,
+            action="PAYMENT_PENDING",
+            entity_type="payment",
+            entity_id=payment.id,
+            entity_label=payment.payment_number,
+            organization_id=payment.organization_id,
+            actor_label=actor_label,
+            after={**snapshot(payment), "invoice_id": invoice.id, "gateway_payment_id": gateway_payment_id},
+        )
+        return payment
+    return capture_gateway_payment(
+        db,
+        payment,
+        invoice,
+        gateway_payment_id=gateway_payment_id or "",
+        payload=payload,
+        signature_verified=False,
+        actor_label=actor_label,
+        lock=False,
+    )
+
 
 
 def fail_gateway_payment(
@@ -763,6 +1110,7 @@ def fail_gateway_payment(
         after=snapshot(payment),
         status=status,
     )
+    _emit_payment_event(db, payment, "payment.failed", reason=payment.failure_reason)
     return payment
 
 
@@ -779,6 +1127,13 @@ __all__ = [
     "reconciliation_summary",
     "capture_gateway_payment",
     "fail_gateway_payment",
+    "create_pending_gateway_payment",
+    "record_gateway_charge",
+    "allocate_captured_payment",
+    "settle_pending_refund",
+    "fail_refund",
+    "lock_payment",
+    "refundable_amount",
     "find_by_order_id",
     "find_by_gateway_payment_id",
     "refresh_reconciliation",

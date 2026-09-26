@@ -68,3 +68,13 @@ Thumbs.db
 # Runtime upload artifacts (user avatars, etc.) must not be versioned.
 backend/uploads/
 !backend/uploads/.gitkeep
+
+# Scratch / local artefacts that must never be committed
+scratch/
+/*.pdf
+pin_to_pin_audit_results.json
+# Deploy poller state and pre-deploy dumps on the server checkout
+.deploy/
+
+# Private uploads (expense receipts)
+backend/private_uploads/

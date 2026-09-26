@@ -1,12 +1,22 @@
 name: Deploy
 
-# Builds and pushes production images to GitHub Container Registry whenever CI
-# passes on main (or on manual dispatch). It never tries to reach the production
-# server directly — the server pulls these images on its own schedule via
-# deploy/deploy-poll.sh, since it sits on a private network with no inbound path
-# from GitHub's hosted runners. This also means no self-hosted runner or repo
-# Admin access is required: pushing to GHCR only needs the default GITHUB_TOKEN
-# with `packages: write`, which any collaborator's workflow run already has.
+# Builds and pushes production images to GitHub Container Registry once CI has
+# passed for a commit on main. It never reaches the production server directly -
+# the server pulls on its own schedule via deploy/deploy-poll.sh (private network,
+# no inbound path from GitHub's hosted runners). Pushing to GHCR only needs the
+# default GITHUB_TOKEN with `packages: write`.
+#
+# Gates
+#   * workflow_run: only a successful CI run triggered by a *push* to main (a PR from
+#     a fork whose branch happens to be called "main" does not count).
+#   * workflow_dispatch: only from main, and only if CI already succeeded for that
+#     exact commit (checked below). Use it to re-publish a commit, never to bypass CI.
+#
+# Tags / labels
+#   <image>:<sha>   immutable, what the server actually deploys (IMAGE_TAG=<sha>)
+#   <image>:latest  moved to <sha>; the poller reads its revision label to learn which
+#                   SHA to deploy and fetches docker-compose.prod.yml at that SHA
+#   label org.opencontainers.image.revision=<sha>
 on:
   workflow_run:
     workflows: ["CI"]
@@ -16,29 +26,49 @@ on:
 
 concurrency:
   group: deploy-images
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
   API_IMAGE: ghcr.io/${{ github.repository_owner }}/rooman-billing-api
   WEB_IMAGE: ghcr.io/${{ github.repository_owner }}/rooman-billing-web
+  # The commit CI tested: head_sha for workflow_run, the dispatched ref's sha otherwise.
+  DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
 
 jobs:
   build-and-push:
     name: Build & push production images
     runs-on: ubuntu-latest
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     permissions:
       contents: read
       packages: write
+      actions: read   # to verify CI status on manual dispatch
     timeout-minutes: 30
 
     steps:
+      - name: Require a successful CI run for this commit (manual dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ok=$(gh run list --workflow ci.yml --commit "$DEPLOY_SHA" --status success --json databaseId --jq 'length')
+          if [ "${ok:-0}" -lt 1 ]; then
+            echo "::error::No successful CI run for $DEPLOY_SHA - refusing to publish images."
+            exit 1
+          fi
+          echo "CI passed for $DEPLOY_SHA ($ok run(s))."
+
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ env.DEPLOY_SHA }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -54,7 +84,10 @@ jobs:
           context: .
           file: backend/Dockerfile
           push: true
-          tags: ${{ env.API_IMAGE }}:latest,${{ env.API_IMAGE }}:${{ github.sha }}
+          tags: ${{ env.API_IMAGE }}:${{ env.DEPLOY_SHA }}
+          labels: |
+            org.opencontainers.image.revision=${{ env.DEPLOY_SHA }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           cache-from: type=gha,scope=api
           cache-to: type=gha,scope=api,mode=max
 
@@ -64,6 +97,16 @@ jobs:
           context: ./frontend
           file: frontend/Dockerfile
           push: true
-          tags: ${{ env.WEB_IMAGE }}:latest,${{ env.WEB_IMAGE }}:${{ github.sha }}
+          tags: ${{ env.WEB_IMAGE }}:${{ env.DEPLOY_SHA }}
+          labels: |
+            org.opencontainers.image.revision=${{ env.DEPLOY_SHA }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
+
+      # Move :latest only after BOTH sha-tagged images exist, web first: the poller reads
+      # api:latest to pick the release, so it must never see a SHA whose web image is missing.
+      - name: Promote :latest to ${{ env.DEPLOY_SHA }}
+        run: |
+          docker buildx imagetools create -t "$WEB_IMAGE:latest" "$WEB_IMAGE:$DEPLOY_SHA"
+          docker buildx imagetools create -t "$API_IMAGE:latest" "$API_IMAGE:$DEPLOY_SHA"

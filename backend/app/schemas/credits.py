@@ -15,7 +15,8 @@ class CreditNoteLineIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     description: str = Field(..., min_length=1, max_length=255)
-    amount: Decimal = Field(..., gt=0)
+    amount: Decimal = Field(..., gt=0, description="Pre-tax line amount")
+    tax_rate_pct: Decimal = Field(default=Decimal("0"), ge=0, le=100)
     product_id: Optional[str] = None
     plan_id: Optional[str] = None
 
@@ -40,6 +41,8 @@ class CreditNoteCreateIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     customer_id: str
+    # The invoice being corrected; its frozen GST treatment is applied to the credit note.
+    invoice_id: Optional[str] = None
     reason: Optional[str] = Field(default=None, max_length=500)
     reference: Optional[str] = Field(default=None, max_length=120)
     currency: str = Field(default="INR", max_length=3)
@@ -60,7 +63,14 @@ class CreditNoteOut(BaseModel):
     customer: Optional[CustomerRef] = None
     status: CreditNoteStatus
     currency: str
+    invoice_id: Optional[str] = None
     subtotal: str
+    tax_amount: str = "0.00"
+    cgst_amount: str = "0.00"
+    sgst_amount: str = "0.00"
+    igst_amount: str = "0.00"
+    supply_type: Optional[str] = None
+    place_of_supply_name: Optional[str] = None
     total: str
     balance_remaining: str
     reason: Optional[str] = None

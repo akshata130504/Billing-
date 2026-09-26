@@ -5,12 +5,15 @@ import { Button } from '../../../components/common/Button';
 import { Input } from '../../../components/common/Input';
 import { Select } from '../../../components/common/Select';
 import { validateSensibleName, validateNonNegativeMoney, validateDateNotBefore, parseStrictNumber } from '../../../utils/validation';
+import { CustomerCombobox } from '../../../components/common/CustomerCombobox';
 
 interface ProjectFormModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (data: {
     name: string;
+    /** Linked customer record: the project bills this customer. */
+    customerId: string;
     customer: string;
     description: string;
     status: ProjectStatus;
@@ -21,7 +24,8 @@ interface ProjectFormModalProps {
     notes?: string;
   }) => void;
   initialProject?: Project | null;
-  customerSuggestions: string[];
+  /** Deprecated: customers are now picked from the customer records. Kept for callers. */
+  customerSuggestions?: string[];
 }
 
 export function ProjectFormModal({
@@ -29,11 +33,11 @@ export function ProjectFormModal({
   onClose,
   onSubmit,
   initialProject,
-  customerSuggestions,
 }: ProjectFormModalProps) {
   const isEditing = Boolean(initialProject);
 
   const [name, setName] = useState('');
+  const [customerId, setCustomerId] = useState('');
   const [customer, setCustomer] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState<ProjectStatus>('active');
@@ -48,6 +52,7 @@ export function ProjectFormModal({
   useEffect(() => {
     if (initialProject) {
       setName(initialProject.name);
+      setCustomerId(initialProject.customerId || '');
       setCustomer(initialProject.customer);
       setDescription(initialProject.description || '');
       setStatus(initialProject.status);
@@ -58,6 +63,7 @@ export function ProjectFormModal({
       setNotes(initialProject.notes || '');
     } else {
       setName('');
+      setCustomerId('');
       setCustomer('');
       setDescription('');
       setStatus('active');
@@ -82,8 +88,10 @@ export function ProjectFormModal({
       newErrors.name = nameError;
     }
 
-    if (!customer.trim()) {
-      newErrors.customer = 'Customer name is required';
+    if (!customerId) {
+      newErrors.customer = initialProject && !initialProject.customerId && customer
+        ? `Link "${customer}" to a customer record so the project can be invoiced`
+        : 'Customer is required';
     }
 
     const budgetError = validateNonNegativeMoney(budget, 'Budget');
@@ -104,6 +112,7 @@ export function ProjectFormModal({
 
     onSubmit({
       name: name.trim(),
+      customerId,
       customer: customer.trim(),
       description: description.trim(),
       status,
@@ -158,26 +167,16 @@ export function ProjectFormModal({
 
           {/* Customer */}
           <div>
-            <label className="block text-xs font-medium text-slate-700 mb-1.5">
-              Customer <span className="text-rose-500">*</span>
-            </label>
-            <input
-              type="text"
-              list="customer-datalist"
+            <CustomerCombobox
+              label="Customer"
               required
-              placeholder="Select or enter customer..."
-              value={customer}
-              onChange={(e) => setCustomer(e.target.value)}
-              className="block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors"
+              value={customerId}
+              error={errors.customer}
+              onChange={(id, cust) => {
+                setCustomerId(id);
+                setCustomer(cust?.display_name || '');
+              }}
             />
-            <datalist id="customer-datalist">
-              {customerSuggestions.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
-            {errors.customer && (
-              <p className="mt-1 text-xs text-rose-600 font-medium">{errors.customer}</p>
-            )}
           </div>
 
           {/* Billing Method */}

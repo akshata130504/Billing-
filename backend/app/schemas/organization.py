@@ -170,7 +170,7 @@ class TeamMember(BaseModel):
 
 
 class TeamMemberInvited(TeamMember):
-    invite_url: Optional[str] = Field(default=None, description="Only present when SMTP is not configured or email delivery failed.")
+    invite_url: Optional[str] = Field(default=None, description="Development only: present when the email could not be sent and the invitee is a brand-new (password-less) user.")
     email_delivered: Optional[bool] = Field(default=None, description="True if invitation email was delivered via SMTP.")
 
 

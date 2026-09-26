@@ -6,6 +6,11 @@ from typing import Iterable, List, Optional, Sequence
 TWO_PLACES = Decimal("0.01")
 ZERO = Decimal("0.00")
 
+# Exports/overseas supplies are zero-rated by default. Set True only for a supplier
+# that exports on payment of IGST (then the tax would need an IGST head; not
+# supported by the split today, which is why the default is False).
+ZERO_RATE_EXPORTS_WITH_TAX = False
+
 
 def D(value) -> Decimal:
     """Coerce str/int/float/Decimal/None to a Decimal (None -> 0)."""
@@ -113,6 +118,10 @@ def compute_totals(lines: Iterable[LineInput], discount_pct=0, supply=None) -> T
             raise ValueError(f"Line {idx + 1}: tax rate must be between 0 and 100")
         amount = q2(qty * price)
         taxable = amount - q2(amount * disc / 100)
+        if supply is not None and getattr(supply, "is_export", False) and not ZERO_RATE_EXPORTS_WITH_TAX:
+            # Exports are zero-rated (supply under LUT): no GST is charged, so the
+            # document total and its (empty) CGST/SGST/IGST heads always agree.
+            rate = Decimal("0")
         line_tax = q2(taxable * rate / 100)
         tax_total += line_tax
         subtotal += amount

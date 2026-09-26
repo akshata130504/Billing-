@@ -6,7 +6,8 @@ export interface CustomerHealthWidgetProps {
   health: DashboardCustomerHealth;
 }
 
-type HealthKey = keyof DashboardCustomerHealth;
+// Subscription-status buckets only (churn fields are rates/derived, not buckets).
+type HealthKey = 'active' | 'trialing' | 'past_due' | 'paused' | 'cancelled_this_period';
 
 const BUCKETS: { key: HealthKey; label: string; dot: string; bg: string; text: string; bar: string }[] = [
   { key: 'active', label: 'Active', dot: 'bg-emerald-500', bg: 'bg-emerald-50/50 border-emerald-100/80', text: 'text-emerald-900', bar: 'bg-emerald-500' },

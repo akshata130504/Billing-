@@ -161,3 +161,37 @@ def test_too_many_rows_rejected(client, auth_headers):
     resp = _upload(client, auth_headers, "customers", csv_text)
     assert resp.status_code == 422
     assert "5,000" in json.dumps(resp.json())
+
+
+def test_import_customer_field_bounds(client, auth_headers):
+    long_phone = "9" * 41
+    csv_text = "\n".join(
+        [
+            "display_name,phone,company_name",
+            f"Long Phone,{long_phone},",
+            "Bad Phone,call-me-maybe!,",
+            f"Long Company,,{'C' * 201}",
+            "Fine,+91 98765 43210,Acme",
+        ]
+    )
+    resp = _upload(client, auth_headers, "customers", csv_text, name="customers.csv")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["imported_rows"] == 1
+    assert body["failed_rows"] == 3
+
+
+def test_import_plan_amount_bounds(client, tenant, auth_headers):
+    sku = f"SKU-{uuid.uuid4().hex[:6]}"
+    assert _upload(client, auth_headers, "products", f"name,sku\nWidget,{sku}\n").status_code == 200
+    csv_text = "\n".join(
+        [
+            "product_sku,name,code,billing_interval,unit_amount",
+            f"{sku},Huge,HUGE-{sku},monthly,99999999999999",
+            f"{sku},NaN,NAN-{sku},monthly,NaN",
+            f"{sku},Ok,OK-{sku},monthly,100",
+        ]
+    )
+    body = _upload(client, auth_headers, "plans", csv_text).json()
+    assert body["imported_rows"] == 1
+    assert body["failed_rows"] == 2

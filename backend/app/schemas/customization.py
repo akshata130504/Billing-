@@ -1,7 +1,7 @@
 """Pydantic schemas for Customization and Automation: number series, document templates, reporting tags, web tabs, workflows, logs, and schedules."""
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from backend.app.models.customization import (
     AutomationActionType,
@@ -199,6 +199,14 @@ class AutomationActionCreate(AutomationActionBase):
     pass
 
 
+def mask_secret(value: Any) -> Optional[str]:
+    """Masks a signing secret for display, keeping only the last 4 characters."""
+    if not value:
+        return None
+    text = str(value)
+    return "••••" + text[-4:] if len(text) > 4 else "••••"
+
+
 class AutomationActionOut(AutomationActionBase):
     id: str
     rule_id: str
@@ -207,6 +215,15 @@ class AutomationActionOut(AutomationActionBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("configuration")
+    def _mask_configuration_secrets(self, configuration: Dict[str, Any]) -> Dict[str, Any]:
+        """Webhook signing secrets are never returned after creation (see revealed_signing_secrets)."""
+        config = dict(configuration or {})
+        if config.get("secret"):
+            config["secret"] = mask_secret(config["secret"])
+            config["has_secret"] = True
+        return config
 
 
 class AutomationRuleBase(BaseModel):
@@ -237,6 +254,8 @@ class AutomationRuleOut(AutomationRuleBase):
     actions: List[AutomationActionOut] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+    # action_id -> signing secret; populated ONLY in the create response (shown once).
+    revealed_signing_secrets: Optional[Dict[str, str]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -264,6 +283,7 @@ class OutboundWebhookDeliveryOut(BaseModel):
     payload: Dict[str, Any]
     status: str
     response_status_code: Optional[int] = None
+    # Receiver response (truncated to 1KB); only returned to admins/owners.
     response_body: Optional[str] = None
     error_message: Optional[str] = None
     attempt_count: int

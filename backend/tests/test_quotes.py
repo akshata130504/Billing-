@@ -277,3 +277,124 @@ def test_actions_on_draft_are_invalid_state(client, tenant, auth_headers, path):
     resp = client.post(f"{BASE}/{quote['id']}/{path}", json={}, headers=auth_headers)
     assert resp.status_code == 409
     assert resp.json()["error"]["code"] == "INVALID_STATE"
+
+
+# --- hardening: approval bypass, viewed quotes, double conversion, email flag ------------------
+
+
+def _admin_headers(tenant, db):
+    reviewer = tenant.add_member(f"reviewer-{uuid.uuid4().hex[:6]}", MemberRole.ADMIN)
+    db.commit()
+    return tenant.headers(reviewer, MemberRole.ADMIN)
+
+
+def test_discount_cannot_be_raised_after_approval(client, tenant, auth_headers, db):
+    customer = tenant.customer()
+    quote = _create(client, auth_headers, customer, discount_pct="25")
+    pending = client.post(f"{BASE}/{quote['id']}/send", headers=auth_headers).json()
+    assert pending["status"] == "pending_approval"
+
+    # Editing the discount while pending drops the quote back to draft and supersedes the request
+    resp = client.patch(f"{BASE}/{quote['id']}", json={"discount_pct": "60"}, headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "draft"
+    old = db.get(ApprovalRequest, pending["approval_request_id"])
+    db.refresh(old)
+    assert old.status.value == "rejected"
+    assert old.payload.get("superseded") is True
+
+    # Sending again needs a fresh approval for the new, higher discount
+    again = client.post(f"{BASE}/{quote['id']}/send", headers=auth_headers).json()
+    assert again["status"] == "pending_approval"
+    assert again["approval_request_id"] != pending["approval_request_id"]
+
+
+def test_approved_discount_is_an_upper_bound(client, tenant, auth_headers, db):
+    customer = tenant.customer()
+    quote = _create(client, auth_headers, customer, discount_pct="25")
+    pending = client.post(f"{BASE}/{quote['id']}/send", headers=auth_headers).json()
+    admin = _admin_headers(tenant, db)
+    approved = client.post(f"{BASE}/{quote['id']}/approve", json={}, headers=admin)
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == "sent"
+    approval = db.get(ApprovalRequest, pending["approval_request_id"])
+    db.refresh(approval)
+    assert approval.payload["approved_discount_pct"] == "25.00"
+    assert approval.reviewed_by_id is not None
+
+
+def test_quote_approve_endpoint_enforces_approval_guards(client, tenant, auth_headers, db):
+    customer = tenant.customer()
+    quote = _create(client, auth_headers, customer, discount_pct="25")
+    client.post(f"{BASE}/{quote['id']}/send", headers=auth_headers)
+    # finance cannot decide; the requester (owner) cannot approve their own request
+    finance = tenant.headers_for_role(MemberRole.FINANCE)
+    assert client.post(f"{BASE}/{quote['id']}/approve", json={}, headers=finance).status_code == 403
+    assert client.post(f"{BASE}/{quote['id']}/approve", json={}, headers=auth_headers).status_code == 403
+    admin = _admin_headers(tenant, db)
+    rejected = client.post(f"{BASE}/{quote['id']}/reject", json={"reason": "too much"}, headers=admin)
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["status"] == "draft"
+
+
+def test_viewed_quotes_can_be_accepted_publicly_and_expire(client, tenant, auth_headers, db):
+    customer = tenant.customer()
+    quote = _sent_quote(client, auth_headers, customer)
+    token = quote["public_url"].rsplit("/", 1)[1]
+    # Opening the hosted page marks it viewed
+    assert client.get(f"{PUBLIC}/{token}").json()["status"] == "viewed"
+    assert client.get(f"{BASE}/{quote['id']}", headers=auth_headers).json()["status"] == "viewed"
+    resp = client.post(f"{PUBLIC}/{token}/accept", json={"accepted_by_name": "Viewer"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"status": "accepted"}
+
+    # A viewed quote past its expiry date is expired and cannot be accepted by staff
+    stale = _sent_quote(client, auth_headers, customer)
+    stale_token = stale["public_url"].rsplit("/", 1)[1]
+    client.get(f"{PUBLIC}/{stale_token}")
+    row = db.get(Quote, stale["id"])
+    db.refresh(row)
+    row.expiry_date = date.today() - timedelta(days=1)
+    db.commit()
+    assert client.post(f"{BASE}/{stale['id']}/mark-accepted", json={}, headers=auth_headers).status_code == 409
+    assert client.get(f"{BASE}/{stale['id']}", headers=auth_headers).json()["status"] == "expired"
+
+
+def test_convert_is_single_shot(client, tenant, auth_headers, db):
+    customer = tenant.customer()
+    quote = _sent_quote(client, auth_headers, customer)
+    client.post(f"{BASE}/{quote['id']}/mark-accepted", json={}, headers=auth_headers)
+    first = client.post(f"{BASE}/{quote['id']}/convert", json={}, headers=auth_headers)
+    assert first.status_code == 201, first.text
+    second = client.post(f"{BASE}/{quote['id']}/convert", json={}, headers=auth_headers)
+    assert second.status_code == 409
+    assert db.query(Invoice).filter_by(quote_id=quote["id"]).count() == 1
+
+
+def test_send_reports_email_delivery_and_escapes_html(client, tenant, auth_headers, monkeypatch):
+    from backend.app.services import quote_service
+
+    sent = {}
+
+    def fake_send(to, subject, text, html_body=None, **kwargs):
+        sent["html"] = html_body
+        return True
+
+    monkeypatch.setattr(quote_service, "send_email", fake_send)
+    customer = tenant.customer(display_name="<b>Evil</b> & Co")
+    quote = _create(client, auth_headers, customer, title="<script>x</script>")
+    resp = client.post(f"{BASE}/{quote['id']}/send", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["email_sent"] is True
+    assert "<script>" not in sent["html"]
+    assert "&lt;b&gt;Evil&lt;/b&gt; &amp; Co" in sent["html"]
+
+    def failing_send(*args, **kwargs):
+        raise OSError("smtp down")
+
+    monkeypatch.setattr(quote_service, "send_email", failing_send)
+    other = _create(client, auth_headers, customer)
+    resp = client.post(f"{BASE}/{other['id']}/send", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "sent"
+    assert resp.json()["email_sent"] is False

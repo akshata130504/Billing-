@@ -19,19 +19,25 @@ import type { InvoiceLineItemIn } from '../../types/invoices';
 import type { PlanPricingItem } from '../../types/plans_pricing';
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
+import { ConfirmDialog } from '../../components/common/ConfirmDialog';
+import { loadPreferences } from '../settings/PreferencesTab';
+import { PhoneInput } from '../../components/common/PhoneInput';
+import { CustomerCombobox } from '../../components/common/CustomerCombobox';
+import { useToast } from '../../components/common/Toast';
+import { toApiError } from '../../services/apiClient';
 import { validateDateNotBefore, validateNonNegativeMoney, validatePercentage, validatePositiveQuantity } from '../../utils/validation';
 
 export const InvoiceFormPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const isEdit = Boolean(id);
   const navigate = useNavigate();
+  const { showToast } = useToast();
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSendConfirm, setShowSendConfirm] = useState(false);
 
   // Reference data
-  const [customers, setCustomers] = useState<any[]>([]);
-  const [customerSearch, setCustomerSearch] = useState('');
   const [plans, setPlans] = useState<PlanPricingItem[]>([]);
   const [catalogItems, setCatalogItems] = useState<any[]>([]);
 
@@ -45,6 +51,8 @@ export const InvoiceFormPage: React.FC = () => {
 
   // Form State
   const [customerId, setCustomerId] = useState('');
+  // Read-only: the backend assigns the number from the organization's number
+  // series when the invoice is created/issued.
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState(() => {
@@ -81,12 +89,10 @@ export const InvoiceFormPage: React.FC = () => {
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      const [custRes, planRes, catRes] = await Promise.all([
-        customerService.list({ page_size: 100 }),
+      const [planRes, catRes] = await Promise.all([
         planPricingService.getPlans({ page_size: 100 }),
         catalogCpqService.listOfferings({ page_size: 100 }),
       ]);
-      setCustomers(custRes.items || []);
       setPlans(planRes.items || []);
       setCatalogItems(catRes.items || []);
 
@@ -119,12 +125,9 @@ export const InvoiceFormPage: React.FC = () => {
             }))
           );
         }
-      } else {
-        const genNum = `INV-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-        setInvoiceNumber(genNum);
       }
-    } catch (err: any) {
-      setError(err.message || 'Failed to load form data');
+    } catch (err) {
+      setError(toApiError(err).message || 'Failed to load form data');
     } finally {
       setLoading(false);
     }
@@ -157,7 +160,7 @@ export const InvoiceFormPage: React.FC = () => {
       };
       setItems(updated);
     } catch (err) {
-      console.error('Pricing calculation failed:', err);
+      showToast('warning', 'Could not calculate price', toApiError(err).message);
     }
   };
 
@@ -285,22 +288,32 @@ export const InvoiceFormPage: React.FC = () => {
         phone: newCustPhone.trim() || undefined,
         currency: 'INR',
       });
-      setCustomers([created, ...customers]);
       setCustomerId(created.id);
+      showToast('success', 'Customer created', created.display_name);
       setShowCustomerModal(false);
       setNewCustName('');
       setNewCustEmail('');
       setNewCustPhone('');
       setNewCustCompany('');
-    } catch (err: any) {
-      alert(err.response?.data?.detail || err.message || 'Failed to create customer');
+    } catch (err) {
+      showToast('error', 'Failed to create customer', toApiError(err).message);
     } finally {
       setCreatingCustomer(false);
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent, sendAfter: boolean = false) => {
+  const handleSaveAndSendClick = (e: React.MouseEvent) => {
     e.preventDefault();
+    const prefs = loadPreferences();
+    if (prefs.confirmBeforeSendInvoice) {
+      setShowSendConfirm(true);
+    } else {
+      void handleSubmit(e, true);
+    }
+  };
+
+  const handleSubmit = async (e?: React.FormEvent, sendAfter: boolean = false) => {
+    if (e) e.preventDefault();
     if (!customerId) {
       setError('Please select a customer');
       return;
@@ -372,24 +385,29 @@ export const InvoiceFormPage: React.FC = () => {
       }
 
       if (sendAfter && result?.id) {
-        await invoiceService.sendInvoice(result.id);
+        const sent = await invoiceService.sendInvoice(result.id);
+        if (sent.email_delivery_failed) {
+          showToast(
+            'warning',
+            'Email not delivered',
+            'Invoice marked as sent, but the email could not be delivered. Check your SMTP settings under Settings > Integrations.',
+            8000
+          );
+        } else {
+          showToast('success', 'Invoice sent');
+        }
+      } else {
+        showToast('success', isEdit ? 'Invoice updated' : 'Invoice saved as draft');
       }
 
       navigate(`/invoices/${result.id}`);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || 'Failed to save invoice');
+    } catch (err) {
+      setError(toApiError(err).message || 'Failed to save invoice');
     } finally {
       setLoading(false);
     }
   };
 
-  const filteredCustomers = customers.filter(
-    (c) =>
-      c.displayName?.toLowerCase().includes(customerSearch.toLowerCase()) ||
-      c.display_name?.toLowerCase().includes(customerSearch.toLowerCase()) ||
-      c.name?.toLowerCase().includes(customerSearch.toLowerCase()) ||
-      c.email?.toLowerCase().includes(customerSearch.toLowerCase())
-  );
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-12">
@@ -405,7 +423,7 @@ export const InvoiceFormPage: React.FC = () => {
           </button>
           <div>
             <h1 className="text-2xl font-bold text-gray-900">
-              {isEdit ? `Edit Invoice (${invoiceNumber})` : 'New Invoice'}
+              {isEdit ? `Edit Invoice${invoiceNumber ? ` (${invoiceNumber})` : ''}` : 'New Invoice'}
             </h1>
             <p className="text-sm text-gray-500">Generate an invoice with centralized pricing & tax computation</p>
           </div>
@@ -437,47 +455,25 @@ export const InvoiceFormPage: React.FC = () => {
                   <UserPlus className="w-3.5 h-3.5" /> + Create Customer
                 </button>
               </div>
-              <div className="space-y-2">
-                <input
-                  type="text"
-                  placeholder="Type to filter customers..."
-                  value={customerSearch}
-                  onChange={(e) => setCustomerSearch(e.target.value)}
-                  className="w-full px-3 py-1.5 border border-gray-200 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                />
-                <select
-                  value={customerId}
-                  onChange={(e) => setCustomerId(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white"
-                >
-                  <option value="">-- Select Customer --</option>
-                  {filteredCustomers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.display_name || c.displayName || c.name} {c.email ? `(${c.email})` : ''}
-                    </option>
-                  ))}
-                </select>
-                {filteredCustomers.length === 0 && (
-                  <p className="text-xs text-amber-600">
-                    No customer matches "{customerSearch}". Click <strong>+ Create Customer</strong> above to add one.
-                  </p>
-                )}
-              </div>
+              <CustomerCombobox
+                required
+                value={customerId}
+                onChange={(nextId) => setCustomerId(nextId)}
+                placeholder="Search customers by name or email..."
+              />
             </div>
 
             {/* Invoice Number & Reference */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Invoice Number <span className="text-red-500">*</span>
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Invoice Number</label>
                 <input
                   type="text"
-                  value={invoiceNumber}
-                  onChange={(e) => setInvoiceNumber(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  value={invoiceNumber || 'Assigned automatically when issued'}
+                  readOnly
+                  aria-readonly="true"
+                  tabIndex={-1}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-500 cursor-not-allowed focus:outline-none"
                 />
               </div>
               <div>
@@ -753,7 +749,7 @@ export const InvoiceFormPage: React.FC = () => {
         </div>
 
         {/* Actions bar */}
-        <div className="flex justify-end items-center gap-3 pt-4">
+        <div className="flex flex-wrap justify-end items-center gap-3 pt-4">
           <Button type="button" variant="secondary" onClick={() => navigate('/invoices')}>
             Cancel
           </Button>
@@ -763,7 +759,7 @@ export const InvoiceFormPage: React.FC = () => {
           <Button
             type="button"
             variant="primary"
-            onClick={(e: React.MouseEvent) => handleSubmit(e, true)}
+            onClick={handleSaveAndSendClick}
             disabled={loading}
           >
             <Send className="w-4 h-4 mr-1.5" /> Save & Send
@@ -816,14 +812,7 @@ export const InvoiceFormPage: React.FC = () => {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-              <input
-                type="tel"
-                placeholder="+91 98765 43210"
-                value={newCustPhone}
-                onChange={(e) => setNewCustPhone(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-              />
+              <PhoneInput label="Phone" value={newCustPhone} onChange={setNewCustPhone} />
             </div>
           </div>
 
@@ -842,6 +831,20 @@ export const InvoiceFormPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+
+      {/* Send Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showSendConfirm}
+        onClose={() => setShowSendConfirm(false)}
+        onConfirm={async () => {
+          setShowSendConfirm(false);
+          await handleSubmit(undefined, true);
+        }}
+        title="Save & Send Invoice"
+        description="Are you sure you want to save and immediately dispatch this invoice to the customer?"
+        confirmLabel="Send Invoice"
+        isLoading={loading}
+      />
     </div>
   );
 };

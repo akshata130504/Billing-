@@ -44,7 +44,6 @@ class CustomerPortalSettingsUpdate(BaseModel):
         return validate_slug_format(v, "Portal URL slug")
     banner_message: Optional[str] = None
     auto_invite_enabled: Optional[bool] = None
-    mfa_enabled: Optional[bool] = None
     prevent_duplicate_payments: Optional[bool] = None
     allow_self_signup: Optional[bool] = None
     allow_document_upload: Optional[bool] = None
@@ -143,3 +142,25 @@ class PortalDashboardOut(BaseModel):
     recent_invoices: List[Dict[str, Any]] = Field(default_factory=list)
     subscriptions: List[Dict[str, Any]] = Field(default_factory=list)
     saved_payment_methods: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class PortalProfileUpdateIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    display_name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(default=None, max_length=30)
+    website: Optional[str] = Field(default=None, max_length=255)
+    billing_address_line1: Optional[str] = Field(default=None, max_length=255)
+    billing_address_line2: Optional[str] = Field(default=None, max_length=255)
+    billing_city: Optional[str] = Field(default=None, max_length=100)
+    billing_state: Optional[str] = Field(default=None, max_length=100)
+    billing_postal_code: Optional[str] = Field(default=None, max_length=20)
+    billing_country: Optional[str] = Field(default=None, max_length=100)
+    shipping_address_line1: Optional[str] = Field(default=None, max_length=255)
+    shipping_address_line2: Optional[str] = Field(default=None, max_length=255)
+    shipping_city: Optional[str] = Field(default=None, max_length=100)
+    shipping_state: Optional[str] = Field(default=None, max_length=100)
+    shipping_postal_code: Optional[str] = Field(default=None, max_length=20)
+    shipping_country: Optional[str] = Field(default=None, max_length=100)
+    user_display_name: Optional[str] = Field(default=None, min_length=1, max_length=120)

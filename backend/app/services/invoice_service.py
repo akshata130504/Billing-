@@ -41,7 +41,7 @@ from backend.app.services import audit
 from backend.app.services.email import frontend_url, send_email
 from backend.app.services.money import D, LineInput, compute_totals, q2
 from backend.app.services import gst
-from backend.app.services.numbering import next_number
+from backend.app.services.numbering import next_number, release_number_if_latest
 from backend.app.services.pagination import PageParams, apply_sort, paginate
 
 INVOICE_SNAPSHOT_FIELDS = (
@@ -183,11 +183,34 @@ def serialize_invoice(invoice: Invoice, include_payments: bool = True) -> Dict[s
         "period_start": invoice.period_start,
         "period_end": invoice.period_end,
         "days_overdue": days_overdue(invoice),
+        "email_delivery_failed": getattr(invoice, "_email_delivery_failed", None),
         "payments": invoice_payment_refs(invoice) if include_payments else [],
+        "approval_request_id": None,
+        "is_pending_approval": False,
         "created_by": user_ref(_user(session, invoice.created_by_id)),
         "created_at": iso_dt(invoice.created_at),
         "updated_at": iso_dt(invoice.updated_at),
     }
+
+    if session is not None:
+        try:
+            from backend.app.models.governance import ApprovalRequest, ApprovalStatus, ApprovalType
+            pending_req = (
+                session.query(ApprovalRequest)
+                .filter(
+                    ApprovalRequest.organization_id == invoice.organization_id,
+                    ApprovalRequest.type == ApprovalType.INVOICE_DISCOUNT,
+                    ApprovalRequest.entity_id == invoice.id,
+                    ApprovalRequest.status == ApprovalStatus.PENDING,
+                )
+                .first()
+            )
+            if pending_req:
+                data["approval_request_id"] = pending_req.id
+                data["is_pending_approval"] = True
+        except Exception:
+            pass
+
     return data
 
 
@@ -244,7 +267,7 @@ def list_invoices(
         )
     if status:
         try:
-            stmt = stmt.where(Invoice.status == InvoiceStatus(status))
+            stmt = stmt.where(Invoice.status == InvoiceStatus(status.strip().lower()))
         except ValueError:
             raise ValidationAppError("Unknown invoice status.", {"fields": {"status": "invalid"}})
     if customer_id:
@@ -385,7 +408,33 @@ def create_invoice_record(
         )
     db.add(invoice)
     db.flush()
+    if status == InvoiceStatus.SENT:
+        _emit_invoice_event(db, invoice, "invoice.issued")
     return invoice
+
+
+def _approved_invoice_discount_request_exists(db: Session, invoice: Invoice) -> bool:
+    from backend.app.models.governance import ApprovalRequest, ApprovalStatus, ApprovalType
+
+    stmt = select(ApprovalRequest.id).where(
+        ApprovalRequest.organization_id == invoice.organization_id,
+        ApprovalRequest.type == ApprovalType.INVOICE_DISCOUNT,
+        ApprovalRequest.entity_id == invoice.id,
+        ApprovalRequest.status == ApprovalStatus.APPROVED,
+    )
+    return db.scalars(stmt).first() is not None
+
+
+def _pending_invoice_discount_request_exists(db: Session, invoice: Invoice) -> bool:
+    from backend.app.models.governance import ApprovalRequest, ApprovalStatus, ApprovalType
+
+    stmt = select(ApprovalRequest.id).where(
+        ApprovalRequest.organization_id == invoice.organization_id,
+        ApprovalRequest.type == ApprovalType.INVOICE_DISCOUNT,
+        ApprovalRequest.entity_id == invoice.id,
+        ApprovalRequest.status == ApprovalStatus.PENDING,
+    )
+    return db.scalars(stmt).first() is not None
 
 
 def create_invoice(db: Session, ctx: CurrentContext, data: InvoiceCreate) -> Invoice:
@@ -403,6 +452,33 @@ def create_invoice(db: Session, ctx: CurrentContext, data: InvoiceCreate) -> Inv
         terms=data.terms,
         created_by_id=ctx.user.id,
     )
+
+    threshold = D(ctx.organization.discount_approval_threshold_pct or Decimal("20"))
+    if D(data.discount_pct or 0) > threshold:
+        from backend.app.models.governance import ApprovalRequest, ApprovalStatus, ApprovalType
+
+        customer_name = customer.display_name if customer else ""
+        discount = money_str(data.discount_pct)
+        req = ApprovalRequest(
+            organization_id=ctx.organization_id,
+            type=ApprovalType.INVOICE_DISCOUNT,
+            status=ApprovalStatus.PENDING,
+            entity_type="invoice",
+            entity_id=invoice.id,
+            title=f"{discount}% discount on {invoice.invoice_number} for {customer_name}",
+            payload={
+                "invoice_number": invoice.invoice_number,
+                "customer_name": customer_name,
+                "discount_pct": discount,
+                "threshold_pct": money_str(threshold),
+                "subtotal": money_str(invoice.subtotal),
+                "total": money_str(invoice.total),
+            },
+            requested_by_id=ctx.user.id,
+        )
+        db.add(req)
+        db.flush()
+
     audit.record(
         db,
         action="INVOICE_CREATED",
@@ -496,6 +572,34 @@ def update_invoice(db: Session, ctx: CurrentContext, invoice: Invoice, data: Inv
         invoice.total = totals.total
         invoice.amount_due = q2(totals.total - D(invoice.amount_paid))
 
+        threshold = D(ctx.organization.discount_approval_threshold_pct or Decimal("20"))
+        if D(invoice.discount_pct or 0) > threshold and not _approved_invoice_discount_request_exists(db, invoice):
+            if not _pending_invoice_discount_request_exists(db, invoice):
+                from backend.app.models.governance import ApprovalRequest, ApprovalStatus, ApprovalType
+
+                cust = db.get(Customer, invoice.customer_id)
+                cust_name = cust.display_name if cust else ""
+                disc = money_str(invoice.discount_pct)
+                req = ApprovalRequest(
+                    organization_id=ctx.organization_id,
+                    type=ApprovalType.INVOICE_DISCOUNT,
+                    status=ApprovalStatus.PENDING,
+                    entity_type="invoice",
+                    entity_id=invoice.id,
+                    title=f"{disc}% discount on {invoice.invoice_number} for {cust_name}",
+                    payload={
+                        "invoice_number": invoice.invoice_number,
+                        "customer_name": cust_name,
+                        "discount_pct": disc,
+                        "threshold_pct": money_str(threshold),
+                        "subtotal": money_str(invoice.subtotal),
+                        "total": money_str(invoice.total),
+                    },
+                    requested_by_id=ctx.user.id,
+                )
+                db.add(req)
+                db.flush()
+
     invoice.updated_at = utcnow()
     db.flush()
     audit.record(
@@ -513,7 +617,20 @@ def update_invoice(db: Session, ctx: CurrentContext, invoice: Invoice, data: Inv
 
 
 def delete_invoice(db: Session, ctx: CurrentContext, invoice: Invoice) -> None:
+    """Delete a draft invoice without leaving a hole in the GST invoice series.
+
+    Invoice numbers are reserved when the document is created (drafts included), and
+    GST requires a continuous series. So a draft may only be deleted when its number
+    is the most recently issued one - the counter is then rolled back and the number
+    re-used by the next invoice. Any other draft must be voided instead (a void keeps
+    its number and is reported as cancelled).
+    """
     _ensure_draft(invoice, "deleted")
+    if not release_number_if_latest(db, invoice.organization_id, "invoice", invoice.invoice_number):
+        raise InvalidStateError(
+            f"Draft {invoice.invoice_number} cannot be deleted because later invoice numbers have already "
+            "been issued; deleting it would leave a gap in the GST invoice series. Void it instead."
+        )
     audit.record(
         db,
         action="INVOICE_DELETED",
@@ -523,17 +640,84 @@ def delete_invoice(db: Session, ctx: CurrentContext, invoice: Invoice) -> None:
         ctx=ctx,
         before=snapshot(invoice),
     )
+    _release_billed_sources(db, invoice)
     db.delete(invoice)
     db.commit()
+
+
+def _release_billed_sources(db: Session, invoice: Invoice) -> None:
+    """Hand time entries and expenses billed on this invoice back so they can be re-billed.
+    No commit - runs inside the caller's void/delete transaction."""
+    from backend.app.services import expense_service, timesheet_service
+
+    timesheet_service.release_time_entries_for_invoice(db, invoice.id, invoice.organization_id)
+    expense_service.release_expenses_for_invoice(db, invoice.id, invoice.organization_id)
+
+
+def _emit_invoice_event(db: Session, invoice: Invoice, event_type: str) -> None:
+    """Queue a domain event (automation rules + outbound webhooks) in the caller's transaction."""
+    from backend.app.services.outbox_processor import emit_event
+
+    emit_event(
+        db,
+        invoice.organization_id,
+        event_type,
+        {
+            "invoice_id": invoice.id,
+            "invoice_number": invoice.invoice_number,
+            "customer_id": invoice.customer_id,
+            "status": invoice.status.value if hasattr(invoice.status, "value") else str(invoice.status),
+            "total": str(invoice.total),
+            "amount_due": str(invoice.amount_due),
+            "currency": invoice.currency,
+        },
+    )
 
 
 # --- lifecycle -------------------------------------------------------------------------------------------------------
 
 
-def _invoice_email(invoice: Invoice, organization: Organization, *, reminder: bool = False) -> tuple[str, str]:
+def _invoice_email(
+    invoice: Invoice,
+    organization: Organization,
+    *,
+    reminder: bool = False,
+    db: Optional[Session] = None,
+) -> tuple[str, str, Optional[str]]:
     pay_url = public_url_for(invoice)
     org_name = organization.legal_name or organization.name
-    due = invoice.due_date.strftime("%d %b %Y")
+    due = invoice.due_date.strftime("%d %b %Y") if invoice.due_date else ""
+    cust_name = invoice.customer.display_name if invoice.customer else "Valued Customer"
+
+    if db is not None:
+        try:
+            from backend.app.services.notification_service import (
+                get_active_template,
+                html_to_plain_text,
+                render_template_string,
+            )
+
+            code = "payment_reminder" if reminder else "invoice_sent"
+            tmpl = get_active_template(db, invoice.organization_id, code)
+            if tmpl and tmpl.is_active:
+                ctx = {
+                    "customer_name": cust_name,
+                    "company_name": org_name,
+                    "invoice_number": invoice.invoice_number,
+                    "invoice_date": invoice.issue_date.strftime("%d %b %Y") if invoice.issue_date else "",
+                    "due_date": due,
+                    "invoice_total": f"{invoice.currency} {q2(invoice.total):,.2f}",
+                    "amount_due": f"{invoice.currency} {q2(invoice.amount_due):,.2f}",
+                    "payment_link": pay_url,
+                }
+                subject = render_template_string(tmpl.subject_template or "", ctx)
+                body_raw = render_template_string(tmpl.body_template, ctx)
+                if "<" in body_raw:
+                    return subject, html_to_plain_text(body_raw), body_raw
+                return subject, body_raw, None
+        except Exception as exc:
+            logger.warning("Failed rendering notification template for invoice %s: %s", invoice.invoice_number, exc)
+
     if reminder:
         subject = f"Payment reminder: invoice {invoice.invoice_number} from {org_name}"
         intro = (
@@ -547,11 +731,62 @@ def _invoice_email(invoice: Invoice, organization: Organization, *, reminder: bo
             f"{invoice.currency} {q2(invoice.total):,.2f}, due on {due}."
         )
     body = (
-        f"Dear {invoice.customer.display_name},\n\n{intro}\n\n"
+        f"Dear {cust_name},\n\n{intro}\n\n"
         f"You can view and pay the invoice online here:\n{pay_url}\n\n"
         f"Thank you,\n{org_name}"
     )
-    return subject, body
+
+    amount_str = f"{invoice.currency} {q2(invoice.amount_due):,.2f}"
+    html_body = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b; }}
+    .card {{ max-width: 540px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }}
+    .header {{ border-bottom: 1px solid #f1f5f9; padding-bottom: 16px; margin-bottom: 20px; }}
+    .title {{ font-size: 20px; font-weight: 700; color: #0f172a; margin: 0 0 4px 0; }}
+    .org-name {{ font-size: 14px; font-weight: 600; color: #4f46e5; }}
+    .amount-box {{ text-align: center; margin: 24px 0; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; }}
+    .amount-label {{ font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }}
+    .amount-val {{ font-size: 28px; font-weight: 800; color: #0f172a; margin-top: 4px; }}
+    .details {{ width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }}
+    .details td {{ padding: 8px 0; border-bottom: 1px solid #f1f5f9; }}
+    .details td:last-child {{ text-align: right; font-weight: 600; color: #0f172a; }}
+    .details td:first-child {{ color: #64748b; }}
+    .btn {{ display: inline-block; background-color: #4f46e5; color: #ffffff !important; text-decoration: none; padding: 12px 28px; border-radius: 8px; font-weight: 600; font-size: 14px; text-align: center; }}
+    .btn-container {{ text-align: center; margin: 24px 0; }}
+    .footer {{ font-size: 12px; color: #94a3b8; text-align: center; margin-top: 24px; border-top: 1px solid #f1f5f9; padding-top: 16px; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="org-name">{org_name}</div>
+      <h1 class="title">Invoice {invoice.invoice_number}</h1>
+    </div>
+    <p>Dear {cust_name},</p>
+    <p>{intro}</p>
+    <div class="amount-box">
+      <div class="amount-label">Amount Due</div>
+      <div class="amount-val">{amount_str}</div>
+    </div>
+    <table class="details">
+      <tr><td>Invoice Number</td><td>{invoice.invoice_number}</td></tr>
+      <tr><td>Due Date</td><td>{due}</td></tr>
+      <tr><td>Status</td><td>Pending Payment</td></tr>
+    </table>
+    <div class="btn-container">
+      <a href="{pay_url}" class="btn" style="color: #ffffff;">View & Pay Invoice</a>
+    </div>
+    <p style="font-size: 13px; color: #64748b; text-align: center;">The official tax invoice PDF has been attached to this email for your records.</p>
+    <div class="footer">
+      &copy; {org_name}. All rights reserved.
+    </div>
+  </div>
+</body>
+</html>"""
+    return subject, body, html_body
 
 
 def _render_pdf_safe(invoice: Invoice, organization: Organization) -> Optional[bytes]:
@@ -570,7 +805,7 @@ def email_invoice(db: Session, invoice: Invoice, *, reminder: bool = False, atta
     recipient = invoice.customer.email if invoice.customer else None
     if not recipient or organization is None:
         return False
-    subject, body = _invoice_email(invoice, organization, reminder=reminder)
+    subject, body, html_body = _invoice_email(invoice, organization, reminder=reminder, db=db)
 
     smtp_cfg = None
     try:
@@ -590,6 +825,7 @@ def email_invoice(db: Session, invoice: Invoice, *, reminder: bool = False, atta
             recipient,
             subject,
             body,
+            html_body=html_body,
             attachments=attachments,
             reply_to=organization.email,
             smtp_config=smtp_cfg,
@@ -599,15 +835,65 @@ def email_invoice(db: Session, invoice: Invoice, *, reminder: bool = False, atta
         return False
 
 
+def _email_and_flag_failure(db: Session, invoice: Invoice, *, reminder: bool = False) -> bool:
+    """Sends the invoice email; returns True only if the org has SMTP configured
+    but the send still didn't go out (a real failure worth surfacing), as
+    opposed to orgs that run without email configured by choice."""
+    if email_invoice(db, invoice, reminder=reminder):
+        return False
+    try:
+        from backend.app.services.integrations_service import get_active_smtp_credentials
+        cfg = get_active_smtp_credentials(db, invoice.organization_id)
+    except Exception:
+        cfg = None
+    return bool(cfg and cfg.get("host"))
+
+
 def send_invoice(db: Session, ctx: CurrentContext, invoice: Invoice) -> Invoice:
     if invoice.status != InvoiceStatus.DRAFT:
         raise InvalidStateError(f"Only draft invoices can be sent; this invoice is {invoice.status.value}.")
+
+    threshold = D(ctx.organization.discount_approval_threshold_pct or Decimal("20"))
+    if _pending_invoice_discount_request_exists(db, invoice):
+        raise InvalidStateError("Invoice is awaiting discount approval and cannot be issued.")
+
+    if D(invoice.discount_pct or 0) > threshold and not _approved_invoice_discount_request_exists(db, invoice):
+        customer = db.get(Customer, invoice.customer_id)
+        customer_name = customer.display_name if customer else ""
+        discount = money_str(invoice.discount_pct)
+        from backend.app.models.governance import ApprovalRequest, ApprovalStatus, ApprovalType
+
+        req = ApprovalRequest(
+            organization_id=ctx.organization_id,
+            type=ApprovalType.INVOICE_DISCOUNT,
+            status=ApprovalStatus.PENDING,
+            entity_type="invoice",
+            entity_id=invoice.id,
+            title=f"{discount}% discount on {invoice.invoice_number} for {customer_name}",
+            payload={
+                "invoice_number": invoice.invoice_number,
+                "customer_name": customer_name,
+                "discount_pct": discount,
+                "threshold_pct": money_str(threshold),
+                "subtotal": money_str(invoice.subtotal),
+                "total": money_str(invoice.total),
+            },
+            requested_by_id=ctx.user.id,
+        )
+        db.add(req)
+        db.flush()
+        db.commit()
+        raise InvalidStateError(
+            f"Invoice discount of {discount}% exceeds organization threshold ({threshold}%). Approval requested."
+        )
+
     before = snapshot(invoice)
     invoice.status = InvoiceStatus.SENT
     invoice.sent_at = utcnow()
     invoice.updated_at = utcnow()
     db.flush()
-    email_invoice(db, invoice)
+    _emit_invoice_event(db, invoice, "invoice.issued")
+    email_delivery_failed = _email_and_flag_failure(db, invoice)
     audit.record(
         db,
         action="INVOICE_SENT",
@@ -619,7 +905,9 @@ def send_invoice(db: Session, ctx: CurrentContext, invoice: Invoice) -> Invoice:
         after=snapshot(invoice),
     )
     db.commit()
-    return get_invoice(db, ctx.organization_id, invoice.id)
+    result = get_invoice(db, ctx.organization_id, invoice.id)
+    result._email_delivery_failed = email_delivery_failed
+    return result
 
 
 def send_reminder(
@@ -637,7 +925,7 @@ def send_reminder(
     invoice.last_reminder_at = utcnow()
     invoice.updated_at = utcnow()
     db.flush()
-    email_invoice(db, invoice, reminder=True)
+    email_delivery_failed = _email_and_flag_failure(db, invoice, reminder=True)
     audit.record(
         db,
         action="INVOICE_REMINDER_SENT",
@@ -652,7 +940,10 @@ def send_reminder(
     )
     if commit:
         db.commit()
-        return get_invoice(db, invoice.organization_id, invoice.id)
+        result = get_invoice(db, invoice.organization_id, invoice.id)
+        result._email_delivery_failed = email_delivery_failed
+        return result
+    invoice._email_delivery_failed = email_delivery_failed
     return invoice
 
 
@@ -663,7 +954,11 @@ def void_invoice(
     reason: Optional[str] = None,
     *,
     approval: Optional[ApprovalRequest] = None,
+    actor_label: Optional[str] = None,
+    commit: bool = True,
 ) -> Invoice:
+    """Void an unpaid invoice. `commit=False` lets background callers (dunning) void
+    inside their own transaction; the invoice is returned without re-loading."""
     if approval is not None:
         invoice = db.get(Invoice, approval.entity_id)
         if invoice is None:
@@ -675,7 +970,7 @@ def void_invoice(
     if invoice.status == InvoiceStatus.VOID:
         raise InvalidStateError("This invoice is already void.")
     if D(invoice.amount_paid) > 0:
-        raise InvalidStateError("An invoice with recorded payments cannot be voided. Refund the payments first.")
+        raise InvalidStateError("An invoice with recorded payments or applied credits cannot be voided. Refund the payments first.")
 
     before = snapshot(invoice)
     invoice.status = InvoiceStatus.VOID
@@ -683,9 +978,11 @@ def void_invoice(
     invoice.void_reason = (reason or "Voided").strip()
     invoice.amount_due = Decimal("0.00")
     invoice.updated_at = utcnow()
+    _release_billed_sources(db, invoice)
     db.flush()
+    _emit_invoice_event(db, invoice, "invoice.voided")
 
-    actor_label = ctx.user.full_name if ctx and ctx.user else audit.SYSTEM_ACTOR
+    actor_label = actor_label or (ctx.user.full_name if ctx and ctx.user else audit.SYSTEM_ACTOR)
     audit.record(
         db,
         action="INVOICE_VOIDED",
@@ -694,9 +991,12 @@ def void_invoice(
         entity_label=invoice.invoice_number,
         ctx=ctx,
         actor_label=actor_label,
+        organization_id=invoice.organization_id,
         before=before,
         after=snapshot(invoice),
     )
+    if not commit:
+        return invoice
     db.commit()
     org_id = ctx.organization_id if ctx else invoice.organization_id
     return get_invoice(db, org_id, invoice.id)
@@ -709,6 +1009,7 @@ def mark_overdue(db: Session, invoice: Invoice, *, actor_label: str = audit.SYST
     before = snapshot(invoice)
     invoice.status = InvoiceStatus.OVERDUE
     invoice.updated_at = utcnow()
+    _emit_invoice_event(db, invoice, "invoice.overdue")
     audit.record(
         db,
         action="INVOICE_MARKED_OVERDUE",
@@ -755,6 +1056,34 @@ def allocated_total(db: Session, invoice_id: str) -> Decimal:
     return q2(value or 0)
 
 
+def credited_total(db: Session, invoice_id: str) -> Decimal:
+    """Credit-note amounts applied to the invoice (they settle it just like payments)."""
+    from backend.app.models.credits import CreditApplication
+
+    db.flush()
+    value = db.scalar(
+        select(func.coalesce(func.sum(CreditApplication.amount), 0)).where(CreditApplication.invoice_id == invoice_id)
+    )
+    return q2(value or 0)
+
+
+def lock_invoice(db: Session, invoice: Invoice) -> Invoice:
+    """SELECT ... FOR UPDATE on the invoice row, then reload it (no-op locking on SQLite).
+
+    Every path that allocates money or credit to an invoice takes this lock before it
+    reads amount_due, so two different payments / credit notes settling the same
+    invoice at once serialise and the second sees the first's allocation instead of
+    over-applying. Lock order: organization (numbering) -> payment / credit note /
+    checkout session -> invoice.
+    """
+    if db.bind is not None and db.bind.dialect.name != "sqlite":
+        db.execute(select(Invoice.id).where(Invoice.id == invoice.id).with_for_update())
+    if db.is_modified(invoice):
+        db.flush()  # never let the reload discard this transaction's pending changes
+    db.refresh(invoice)
+    return invoice
+
+
 def recompute_invoice(
     db: Session,
     invoice: Invoice,
@@ -762,12 +1091,13 @@ def recompute_invoice(
     ctx: Optional[CurrentContext] = None,
     actor_label: Optional[str] = None,
 ) -> Invoice:
-    """Re-derive amount_paid/amount_due/status from allocations. Writes INVOICE_PAID when it becomes paid. No commit."""
+    """Re-derive amount_paid/amount_due/status from payment allocations plus applied
+    credit notes. Writes INVOICE_PAID when it becomes paid. No commit."""
     if invoice.status in (InvoiceStatus.DRAFT, InvoiceStatus.VOID):
         return invoice
     before = snapshot(invoice)
     previous_status = invoice.status
-    paid = allocated_total(db, invoice.id)
+    paid = q2(allocated_total(db, invoice.id) + credited_total(db, invoice.id))
     total = q2(invoice.total)
     invoice.amount_paid = paid
     invoice.amount_due = q2(max(Decimal("0"), total - paid))
@@ -786,6 +1116,10 @@ def recompute_invoice(
     invoice.updated_at = utcnow()
     db.flush()
 
+    if invoice.status != previous_status and invoice.status in (InvoiceStatus.PAID, InvoiceStatus.PARTIALLY_PAID):
+        _emit_invoice_event(
+            db, invoice, "invoice.paid" if invoice.status == InvoiceStatus.PAID else "invoice.partially_paid"
+        )
     if invoice.status == InvoiceStatus.PAID and previous_status != InvoiceStatus.PAID:
         audit.record(
             db,
@@ -899,6 +1233,7 @@ def get_invoices_summary(db: Session, organization_id: str) -> Dict[str, Any]:
 __all__ = [
     "serialize_invoice",
     "recompute_invoice",
+    "credited_total",
     "create_invoice_record",
     "create_invoice",
     "update_invoice",

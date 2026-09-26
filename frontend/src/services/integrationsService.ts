@@ -33,6 +33,8 @@ export interface WebhookStatus {
   has_signing_secret: boolean;
   last_tested_at: string | null;
   status_message: string | null;
+  /** Only in the save response, when the server generated the signing secret (shown once). */
+  generated_signing_secret?: string | null;
 }
 
 export interface StubIntegrationStatus {

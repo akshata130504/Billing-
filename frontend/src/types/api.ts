@@ -47,7 +47,9 @@ export type SearchCategory =
   | 'quotes'
   | 'products'
   | 'subscriptions'
-  | 'payments';
+  | 'payments'
+  | 'projects'
+  | 'expenses';
 
 // ---------------------------------------------------------------------------
 // Envelope / shared
@@ -154,6 +156,7 @@ export interface MeUser {
   avatar_url?: string | null;
   last_login_at: string | null;
   created_at: string;
+  two_factor_enabled: boolean;
 }
 
 export interface MeMembership {
@@ -177,14 +180,33 @@ export interface MeResponse {
   organizations: MeOrganizationSummary[];
 }
 
-export interface SignupRequest {
+export type SignupResponse = AuthTokens & { me: MeResponse };
+
+export interface SignupVerificationRequest {
   organization_name: string;
   full_name: string;
   email: string;
   password: string;
 }
 
-export type SignupResponse = AuthTokens & { me: MeResponse };
+export interface SignupVerifyOtpRequest {
+  email: string;
+  otp: string;
+  /** Must match the password submitted with request-verification. */
+  password: string;
+}
+
+export interface ResendOtpRequest {
+  email: string;
+}
+
+export interface SignupVerificationResponse {
+  message: string;
+  email: string;
+  expires_in_seconds: number;
+  resend_cooldown_seconds: number;
+}
+
 
 export interface LoginRequest {
   email: string;
@@ -193,7 +215,6 @@ export interface LoginRequest {
 
 export interface ForgotPasswordResponse {
   message: string;
-  reset_url?: string;
 }
 
 export interface InvitationDetails {
@@ -208,7 +229,10 @@ export interface InvitationDetails {
 export interface AcceptInvitationRequest {
   token: string;
   full_name?: string;
+  /** New accounts: the password to set. Existing accounts: their current password. */
   password?: string;
+  /** Existing accounts with two-factor authentication on. */
+  totp_code?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -654,6 +678,8 @@ export interface InvoiceOut {
   period_start: string | null;
   period_end: string | null;
   days_overdue: number;
+  /** Only set right after /send or /send-reminder; null on a plain fetch. */
+  email_delivery_failed: boolean | null;
   /** Omitted on list rows. */
   payments?: InvoicePaymentRef[];
   created_by: UserRef | null;
@@ -923,6 +949,10 @@ export interface DashboardRevenue {
   mrr: string;
   arr: string;
   mrr_change_pct: string | null;
+  /** Currency of `mrr`/`arr` (the org's base currency). */
+  mrr_currency?: string | null;
+  /** MRR from subscriptions billed in other currencies, per currency (not summed into `mrr`). */
+  mrr_other_currencies?: Record<string, string>;
   /** Last 12 months. */
   trend: RevenueTrendPoint[];
 }
@@ -946,6 +976,11 @@ export interface DashboardCustomerHealth {
   past_due: number;
   paused: number;
   cancelled_this_period: number;
+  /** Logo churn for the selected range: customers lost / customers billing at period start. */
+  churned_customers?: number;
+  customers_at_period_start?: number;
+  /** Percentage string, null when there were no customers at period start. */
+  churn_rate?: string | null;
 }
 
 export interface DashboardRecovery {
@@ -1118,13 +1153,6 @@ export interface ImportResult {
   errors: ImportRowError[];
   /** First 10 parsed rows. */
   preview: Record<string, unknown>[];
-}
-
-export interface RunJobsResult {
-  renewals: number;
-  trials_converted: number;
-  marked_overdue: number;
-  reminders_sent: number;
 }
 
 // ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import CurrentContext
-from backend.app.core.exceptions import NotFoundAppError, ValidationAppError
+from backend.app.core.exceptions import AppException, NotFoundAppError, ValidationAppError
 from backend.app.core.security import decode_access_token
 from backend.app.models.base import utcnow
 from backend.app.models.devices import Device, DeviceTrustStatus
@@ -91,6 +91,13 @@ def get_device(db: Session, device_id: str, organization_id: str, user_id: str) 
 
 
 def revoke_device(db: Session, device_id: str, organization_id: str, user_id: str) -> Device:
+    """Mark the device revoked and drop its push token.
+
+    Devices are not linked to refresh tokens (there is no device_id on refresh_tokens), so
+    this cannot sign the device's session out by itself. Clients should also end the session
+    via DELETE /auth/sessions/{id} (the Security settings "Active sessions" list), which
+    revokes both the refresh token and its access token.
+    """
     device = get_device(db, device_id, organization_id, user_id)
     if device.trust_status == DeviceTrustStatus.REVOKED:
         raise ValidationAppError("Device is already revoked.")
@@ -117,6 +124,15 @@ def exchange_native_credentials(
     and a trusted device record.
     """
     tokens = auth_service.login(db, email, password, ip, user_agent)
+    if isinstance(tokens, auth_service.MfaChallenge):
+        # Two-factor accounts: finish with POST /auth/login/mfa, then register the device
+        # with the resulting session.
+        raise AppException(
+            message="Two-factor authentication is required. Complete sign-in with /auth/login/mfa.",
+            code="MFA_REQUIRED",
+            status_code=401,
+            details=tokens.as_dict(),
+        )
     payload = decode_access_token(tokens.access_token)
     user_id = payload["sub"]
     organization_id = payload["org"]

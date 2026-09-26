@@ -16,6 +16,8 @@ from backend.app.api.deps import (
 from backend.app.schemas.projects import (
     ProjectCreate,
     ProjectDetail,
+    ProjectInvoiceCreate,
+    ProjectInvoiceOut,
     ProjectRead,
     ProjectSummaryKPIs,
     ProjectUpdate,
@@ -85,3 +87,18 @@ def delete_project(
     db: Session = Depends(get_db),
 ):
     project_service.delete_project(db, ctx.organization_id, project_id)
+
+
+@router.post(
+    "/{project_id}/invoices",
+    response_model=ProjectInvoiceOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a draft invoice for the project's customer",
+)
+def create_project_invoice(
+    project_id: str,
+    data: ProjectInvoiceCreate,
+    ctx: CurrentContext = Depends(require_finance),
+    db: Session = Depends(get_db),
+):
+    return project_service.create_project_invoice(db, ctx, project_id, data)

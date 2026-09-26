@@ -1,3 +1,4 @@
+import { toApiError } from '../../services/apiClient';
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -14,10 +15,12 @@ import {
   type PortalDashboardData,
 } from '../../services/portalCustomerService';
 import { LoadingState } from '../../components/common/LoadingState';
+import { useToast } from '../../components/common/Toast';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 
 export const PortalDashboardPage: React.FC = () => {
+  const { showToast } = useToast();
   const [data, setData] = useState<PortalDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -33,8 +36,8 @@ export const PortalDashboardPage: React.FC = () => {
       setError(null);
       const res = await portalCustomerService.getDashboard();
       setData(res);
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || err?.message || 'Failed to load dashboard.');
+    } catch (err) {
+      setError(toApiError(err).message || 'Failed to load dashboard.');
     } finally {
       setLoading(false);
     }
@@ -44,8 +47,8 @@ export const PortalDashboardPage: React.FC = () => {
     try {
       setDownloadingId(invoiceId);
       await portalCustomerService.downloadInvoicePdf(invoiceId, invoiceNumber);
-    } catch (err: any) {
-      alert(err?.message || 'Failed to download invoice PDF.');
+    } catch (err) {
+      showToast('error', 'Failed to download invoice PDF', toApiError(err).message);
     } finally {
       setDownloadingId(null);
     }

@@ -72,16 +72,12 @@ def ensure_customer_lifecycle(db: Session, organization_id: str, customer_id: st
     return lifecycle
 
 
-def list_customer_lifecycles(
-    db: Session,
-    ctx: CurrentContext,
-    stage: Optional[CustomerLifecycleStage] = None,
-    health: Optional[HealthStatus] = None,
-    search: Optional[str] = None,
-) -> List[CustomerLifecycleItem]:
-    """Returns all customers in the tenant with their lifecycle state and real aggregated metrics."""
-    org_id = ctx.organization.id
+# Invoices that count towards a customer's billed/due totals: issued documents only
+# (drafts are not owed yet, void ones never will be).
+BILLED_INVOICE_EXCLUDED_STATUSES = (InvoiceStatus.VOID, InvoiceStatus.DRAFT)
 
+
+def _customer_search_query(org_id: str, search: Optional[str]) -> Select:
     query = select(Customer).where(Customer.organization_id == org_id)
     if search:
         s = f"%{search.strip()}%"
@@ -93,7 +89,144 @@ def list_customer_lifecycles(
                 Customer.email.ilike(s),
             )
         )
-    customers = db.scalars(query.order_by(Customer.display_name)).all()
+    return query
+
+
+def _invoice_aggregate_subquery(org_id: str):
+    return (
+        select(
+            Invoice.customer_id.label("customer_id"),
+            func.count(Invoice.id).label("invoice_count"),
+            func.sum(Invoice.amount_paid).label("total_paid"),
+            func.sum(Invoice.amount_due).label("total_due"),
+        )
+        .where(
+            Invoice.organization_id == org_id,
+            Invoice.status.not_in(BILLED_INVOICE_EXCLUDED_STATUSES),
+        )
+        .group_by(Invoice.customer_id)
+        .subquery()
+    )
+
+
+def _active_subscription_subquery(org_id: str):
+    return (
+        select(
+            Subscription.customer_id.label("customer_id"),
+            func.count(Subscription.id).label("active_sub_count"),
+        )
+        .where(
+            Subscription.organization_id == org_id,
+            Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]),
+        )
+        .group_by(Subscription.customer_id)
+        .subquery()
+    )
+
+
+def _default_stage_and_health(created_at: Any, active_subs: int, inv_count: int, due_amount: Decimal, now: datetime):
+    """Smart default lifecycle for a customer without a stored lifecycle row."""
+    created_recent = (now - to_utc(created_at)).days <= 30 if created_at else False
+    if active_subs == 0 and inv_count == 0:
+        stage_val = CustomerLifecycleStage.ONBOARDING if created_recent else CustomerLifecycleStage.PROSPECT
+    else:
+        stage_val = CustomerLifecycleStage.ACTIVE
+    if due_amount > 0:
+        return stage_val, HealthStatus.AT_RISK, 60
+    return stage_val, HealthStatus.HEALTHY, 90
+
+
+def _lifecycle_state_rows(db: Session, org_id: str, search: Optional[str] = None):
+    """One lightweight row per customer: (customer_id, stage, health, amount_due).
+
+    A single aggregate query (customers LEFT JOIN lifecycle / invoice / subscription
+    aggregates) - no ORM objects - used for filtering and KPI counts.
+    """
+    inv_sq = _invoice_aggregate_subquery(org_id)
+    sub_sq = _active_subscription_subquery(org_id)
+    base = _customer_search_query(org_id, search).subquery()
+    rows = db.execute(
+        select(
+            base.c.id,
+            base.c.created_at,
+            base.c.display_name,
+            CustomerLifecycle.lifecycle_stage,
+            CustomerLifecycle.health_status,
+            func.coalesce(inv_sq.c.invoice_count, 0),
+            func.coalesce(inv_sq.c.total_due, 0),
+            func.coalesce(sub_sq.c.active_sub_count, 0),
+        )
+        .select_from(base)
+        .outerjoin(
+            CustomerLifecycle,
+            and_(CustomerLifecycle.customer_id == base.c.id, CustomerLifecycle.organization_id == org_id),
+        )
+        .outerjoin(inv_sq, inv_sq.c.customer_id == base.c.id)
+        .outerjoin(sub_sq, sub_sq.c.customer_id == base.c.id)
+        .order_by(base.c.display_name, base.c.id)
+    ).all()
+    now = to_utc(utcnow())
+    out = []
+    for cid, created_at, _name, stage_val, health_val, inv_count, total_due, active_subs in rows:
+        due = D(total_due or 0)
+        if stage_val is None:
+            stage_val, health_val, _score = _default_stage_and_health(
+                created_at, int(active_subs or 0), int(inv_count or 0), due, now
+            )
+        out.append((cid, stage_val, health_val, due))
+    return out
+
+
+def count_customer_lifecycles(
+    db: Session,
+    ctx: CurrentContext,
+    stage: Optional[CustomerLifecycleStage] = None,
+    health: Optional[HealthStatus] = None,
+    search: Optional[str] = None,
+) -> int:
+    return sum(
+        1
+        for _cid, st, hl, _due in _lifecycle_state_rows(db, ctx.organization.id, search)
+        if (stage is None or st == stage) and (health is None or hl == health)
+    )
+
+
+def list_customer_lifecycles(
+    db: Session,
+    ctx: CurrentContext,
+    stage: Optional[CustomerLifecycleStage] = None,
+    health: Optional[HealthStatus] = None,
+    search: Optional[str] = None,
+    page: Optional[int] = None,
+    page_size: Optional[int] = None,
+) -> List[CustomerLifecycleItem]:
+    """Returns customers in the tenant with their lifecycle state and real aggregated metrics.
+
+    With `page`/`page_size` only that page is materialised: the page's customer ids are
+    resolved first (via the lightweight state query when filtering by stage/health, else
+    straight SQL LIMIT/OFFSET) and metrics are aggregated for those customers only.
+    """
+    org_id = ctx.organization.id
+    paged = page is not None and page_size is not None
+    offset = (max(1, page) - 1) * page_size if paged else 0
+
+    if stage is not None or health is not None:
+        ids = [
+            cid
+            for cid, st, hl, _due in _lifecycle_state_rows(db, org_id, search)
+            if (stage is None or st == stage) and (health is None or hl == health)
+        ]
+        if paged:
+            ids = ids[offset: offset + page_size]
+        if not ids:
+            return []
+        by_id = {c.id: c for c in db.scalars(select(Customer).where(Customer.id.in_(ids))).all()}
+        customers = [by_id[i] for i in ids if i in by_id]
+    else:
+        query = _customer_search_query(org_id, search).order_by(Customer.display_name, Customer.id)
+        if paged:
+            query = query.offset(offset).limit(page_size)
+        customers = db.scalars(query).all()
     if not customers:
         return []
 
@@ -110,7 +243,7 @@ def list_customer_lifecycles(
         ).all()
     }
 
-    # Batch compute Invoice totals
+    # Batch compute Invoice totals (issued invoices only - drafts/void excluded)
     invoice_rows = db.execute(
         select(
             Invoice.customer_id,
@@ -121,7 +254,7 @@ def list_customer_lifecycles(
         .where(
             Invoice.organization_id == org_id,
             Invoice.customer_id.in_(customer_ids),
-            Invoice.status != InvoiceStatus.VOID,
+            Invoice.status.not_in(BILLED_INVOICE_EXCLUDED_STATUSES),
         )
         .group_by(Invoice.customer_id)
     ).all()
@@ -177,28 +310,16 @@ def list_customer_lifecycles(
     for c in customers:
         lc = lifecycles.get(c.id)
         c_created_dt = to_utc(c.created_at)
+        inv_stat = invoice_map.get(c.id)
 
         if not lc:
-            # Auto-assign smart default stage based on customer data
-            active_subs = sub_map.get(c.id, 0)
-            inv_stats = invoice_map.get(c.id)
-            inv_count = inv_stats.invoice_count if inv_stats else 0
-            created_recent = (now - c_created_dt).days <= 30 if c.created_at else False
-
-            if active_subs == 0 and inv_count == 0:
-                stage_val = CustomerLifecycleStage.ONBOARDING if created_recent else CustomerLifecycleStage.PROSPECT
-            else:
-                stage_val = CustomerLifecycleStage.ACTIVE
-
-            # Auto calculate health
-            due_amount = D(inv_stats.total_due if inv_stats and inv_stats.total_due else 0)
-            if due_amount > 0:
-                h_status = HealthStatus.AT_RISK
-                h_score = 60
-            else:
-                h_status = HealthStatus.HEALTHY
-                h_score = 90
-
+            stage_val, h_status, h_score = _default_stage_and_health(
+                c.created_at,
+                sub_map.get(c.id, 0),
+                inv_stat.invoice_count if inv_stat else 0,
+                D(inv_stat.total_due if inv_stat and inv_stat.total_due else 0),
+                now,
+            )
             lc = CustomerLifecycle(
                 id=f"lc_{c.id}",
                 organization_id=org_id,
@@ -216,7 +337,6 @@ def list_customer_lifecycles(
         if health and lc.health_status != health:
             continue
 
-        inv_stat = invoice_map.get(c.id)
         total_paid = q2(D(inv_stat.total_paid) if inv_stat and inv_stat.total_paid else Decimal("0.00"))
         amount_due = q2(D(inv_stat.total_due) if inv_stat and inv_stat.total_due else Decimal("0.00"))
         active_subs_count = sub_map.get(c.id, 0)
@@ -254,17 +374,21 @@ def list_customer_lifecycles(
 
 
 def get_lifecycle_kpis(db: Session, ctx: CurrentContext) -> LifecycleKPIs:
-    """Computes exact aggregated KPIs across customers in the organization."""
-    org_id = ctx.organization.id
-    items = list_customer_lifecycles(db, ctx)
+    """Computes exact aggregated KPIs across customers from one aggregate query
+    (no per-customer ORM objects or metric serialisation)."""
+    rows = _lifecycle_state_rows(db, ctx.organization.id)
 
-    total_customers = len(items)
-    onboarding_count = sum(1 for i in items if i.lifecycle_stage in (CustomerLifecycleStage.ONBOARDING, CustomerLifecycleStage.PROSPECT))
-    active_count = sum(1 for i in items if i.lifecycle_stage == CustomerLifecycleStage.ACTIVE)
-    renewal_due_count = sum(1 for i in items if i.lifecycle_stage == CustomerLifecycleStage.RENEWAL_DUE)
-    at_risk_count = sum(1 for i in items if i.lifecycle_stage == CustomerLifecycleStage.AT_RISK or i.health_status in (HealthStatus.AT_RISK, HealthStatus.CRITICAL) or i.amount_due > 0)
-    churned_count = sum(1 for i in items if i.lifecycle_stage == CustomerLifecycleStage.CHURNED)
-    expansion_count = sum(1 for i in items if i.lifecycle_stage == CustomerLifecycleStage.EXPANSION)
+    total_customers = len(rows)
+    onboarding_count = sum(1 for _c, st, _h, _d in rows if st in (CustomerLifecycleStage.ONBOARDING, CustomerLifecycleStage.PROSPECT))
+    active_count = sum(1 for _c, st, _h, _d in rows if st == CustomerLifecycleStage.ACTIVE)
+    renewal_due_count = sum(1 for _c, st, _h, _d in rows if st == CustomerLifecycleStage.RENEWAL_DUE)
+    at_risk_count = sum(
+        1
+        for _c, st, hl, due in rows
+        if st == CustomerLifecycleStage.AT_RISK or hl in (HealthStatus.AT_RISK, HealthStatus.CRITICAL) or due > 0
+    )
+    churned_count = sum(1 for _c, st, _h, _d in rows if st == CustomerLifecycleStage.CHURNED)
+    expansion_count = sum(1 for _c, st, _h, _d in rows if st == CustomerLifecycleStage.EXPANSION)
 
     return LifecycleKPIs(
         total_customers=total_customers,

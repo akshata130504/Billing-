@@ -47,7 +47,7 @@ export function applyTheme(theme: 'light' | 'dark' | 'system') {
   }
 }
 
-function loadPreferences(): AccountPreferences {
+export function loadPreferences(): AccountPreferences {
   try {
     const raw = localStorage.getItem(PREFERENCES_STORAGE_KEY);
     return raw ? { ...DEFAULT_PREFERENCES, ...JSON.parse(raw) } : DEFAULT_PREFERENCES;

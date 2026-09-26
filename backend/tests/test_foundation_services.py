@@ -166,9 +166,88 @@ def test_notification_service_and_templates(tenant, db):
             "due_date": "2026-10-01",
         },
     )
-    assert delivery.status == NotificationDeliveryStatus.SENT
+    # No SMTP configured anywhere: never reported as SENT.
+    assert delivery.status == NotificationDeliveryStatus.FAILED
+    assert delivery.error == "smtp_not_configured"
     assert delivery.subject == "Invoice INV-0042 has been generated"
     assert "Dear Acme, please pay ₹1,200 by 2026-10-01." in delivery.body
+
+
+def test_email_notification_is_queued_then_sent_by_outbox(tenant, db, monkeypatch):
+    from backend.app.core.config import settings
+    from backend.app.services import email as email_module
+    from backend.app.services.outbox_processor import process_pending_outbox
+
+    org_id = tenant.organization.id
+    monkeypatch.setattr(settings, "SMTP_HOST", "smtp.provider.example")
+    sent = []
+
+    def fake_send_email(**kwargs):
+        sent.append(kwargs)
+        return True
+
+    monkeypatch.setattr(email_module, "send_email", fake_send_email)
+
+    delivery = dispatch_notification(
+        db,
+        organization_id=org_id,
+        channel=NotificationChannel.EMAIL,
+        recipient="cust@acme.example",
+        subject="Hello",
+        body="<p>Hi <b>there</b></p>",
+    )
+    db.commit()
+    assert delivery.status == NotificationDeliveryStatus.PENDING
+    assert sent == []
+
+    process_pending_outbox(db, organization_id=org_id)
+    db.refresh(delivery)
+    assert delivery.status == NotificationDeliveryStatus.SENT
+    assert sent[0]["to"] == ["cust@acme.example"]
+    assert sent[0]["html_body"] == "<p>Hi <b>there</b></p>"
+    assert "Hi there" in sent[0]["text_body"]
+
+
+def test_email_notification_smtp_errors_retry_then_fail(tenant, db, monkeypatch):
+    from backend.app.core.config import settings
+    from backend.app.services import email as email_module
+    from backend.app.services.outbox_processor import process_pending_outbox
+
+    org_id = tenant.organization.id
+    monkeypatch.setattr(settings, "SMTP_HOST", "smtp.provider.example")
+
+    def broken_send_email(**kwargs):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(email_module, "send_email", broken_send_email)
+    delivery = dispatch_notification(
+        db, organization_id=org_id, channel=NotificationChannel.EMAIL, recipient="x@acme.example", subject="S", body="B"
+    )
+    db.commit()
+    process_pending_outbox(db, organization_id=org_id, max_attempts=1)
+    db.refresh(delivery)
+    assert delivery.status == NotificationDeliveryStatus.FAILED
+    assert "connection refused" in delivery.error
+
+
+def test_sms_and_blocked_webhook_notifications_are_not_marked_sent(tenant, db):
+    org_id = tenant.organization.id
+    sms = dispatch_notification(db, organization_id=org_id, channel=NotificationChannel.SMS, recipient="+911234567890", body="hi")
+    assert sms.status == NotificationDeliveryStatus.FAILED
+    assert sms.error == "sms_not_supported"
+    hook = dispatch_notification(
+        db, organization_id=org_id, channel=NotificationChannel.WEBHOOK, recipient="http://127.0.0.1/hook", body="{}"
+    )
+    assert hook.status == NotificationDeliveryStatus.FAILED
+    assert hook.error == "webhook_destination_blocked"
+    db.rollback()
+
+
+def test_render_template_string_escapes_values_in_html_templates():
+    html_out = render_template_string("<p>Dear {{ name }}</p>", {"name": "<script>x</script>"})
+    assert html_out == "<p>Dear &lt;script&gt;x&lt;/script&gt;</p>"
+    subject = render_template_string("Invoice for {{ name }}", {"name": "A & B"})
+    assert subject == "Invoice for A & B"
 
 
 def test_idempotency_key_reused_with_mismatched_payload_raises_conflict(tenant, db):
@@ -236,3 +315,107 @@ def test_outbox_processor_claim_and_publish(tenant, db):
     assert e2.status == OutboxStatus.PUBLISHED
     assert e2.published_at is not None
     clear_outbox_handlers()
+
+
+def test_outbox_failed_event_backs_off_and_eventually_fails(tenant, db):
+    from backend.app.services.outbox_processor import (
+        clear_outbox_handlers,
+        process_pending_outbox,
+        register_outbox_handler,
+    )
+
+    org_id = tenant.organization.id
+    clear_outbox_handlers()
+    calls = []
+
+    def flaky(session, event):
+        calls.append(event.id)
+        raise RuntimeError("downstream unavailable")
+
+    register_outbox_handler("test.flaky", flaky)
+    try:
+        event = OutboxEvent(
+            organization_id=org_id,
+            event_type="test.flaky",
+            aggregate_type="test",
+            aggregate_id="agg-f",
+            payload={},
+            status=OutboxStatus.PENDING,
+        )
+        db.add(event)
+        db.commit()
+
+        assert process_pending_outbox(db, organization_id=org_id, max_attempts=2) == 0
+        db.refresh(event)
+        assert event.status == OutboxStatus.PENDING
+        assert event.retry_count == 1
+        assert "downstream unavailable" in event.last_error
+        next_at = event.next_attempt_at if event.next_attempt_at.tzinfo else event.next_attempt_at.replace(tzinfo=timezone.utc)
+        assert next_at > datetime.now(timezone.utc)
+
+        # Backoff respected: not re-attempted immediately.
+        process_pending_outbox(db, organization_id=org_id, max_attempts=2)
+        assert len(calls) == 1
+
+        event.next_attempt_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+        process_pending_outbox(db, organization_id=org_id, max_attempts=2)
+        db.refresh(event)
+        assert event.status == OutboxStatus.FAILED
+        assert event.retry_count == 2
+    finally:
+        clear_outbox_handlers()
+
+
+def test_outbox_reclaims_events_stuck_in_processing(tenant, db):
+    from backend.app.services.outbox_processor import process_pending_outbox
+
+    org_id = tenant.organization.id
+    stuck = OutboxEvent(
+        organization_id=org_id,
+        event_type="test.stuck",
+        aggregate_type="test",
+        aggregate_id="agg-s",
+        payload={},
+        status=OutboxStatus.PROCESSING,
+        locked_at=datetime.now(timezone.utc) - timedelta(hours=1),
+    )
+    fresh = OutboxEvent(
+        organization_id=org_id,
+        event_type="test.stuck",
+        aggregate_type="test",
+        aggregate_id="agg-p",
+        payload={},
+        status=OutboxStatus.PROCESSING,
+        locked_at=datetime.now(timezone.utc),
+    )
+    db.add_all([stuck, fresh])
+    db.commit()
+
+    process_pending_outbox(db, organization_id=org_id)
+    db.refresh(stuck)
+    db.refresh(fresh)
+    assert stuck.status == OutboxStatus.PUBLISHED
+    assert fresh.status == OutboxStatus.PROCESSING  # still within its lease
+
+
+def test_process_due_jobs_runs_only_registered_job_types(tenant, db):
+    from backend.app.services.outbox_processor import clear_job_handlers, process_due_jobs, register_job_handler
+
+    org_id = tenant.organization.id
+    clear_job_handlers()
+    handled = []
+    known = enqueue_job(db, org_id, "cust.test.known", {"n": 1})
+    unknown = enqueue_job(db, org_id, "cust.test.unknown", {"n": 2})
+    db.commit()
+    try:
+        assert process_due_jobs(db) == 0  # nothing registered, nothing claimed
+        register_job_handler("cust.test.known", lambda session, job: handled.append(job.payload["n"]))
+        assert process_due_jobs(db) >= 1
+        db.refresh(known)
+        db.refresh(unknown)
+        assert known.status == JobStatus.COMPLETED
+        assert unknown.status == JobStatus.PENDING and unknown.attempts == 0
+        assert handled == [1]
+    finally:
+        clear_job_handlers()

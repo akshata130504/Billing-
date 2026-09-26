@@ -27,6 +27,9 @@ interface RazorpayCheckoutOptions {
   description?: string;
   image?: string;
   order_id: string;
+  /** Razorpay customer (cust_...) — with `save: 1` lets the customer save the card as a reusable token. */
+  customer_id?: string;
+  save?: 0 | 1;
   prefill?: RazorpayCheckoutPrefill;
   notes?: Record<string, string>;
   theme?: { color?: string };

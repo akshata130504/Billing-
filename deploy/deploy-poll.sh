@@ -1,116 +1,289 @@
 #!/bin/sh
-# Polls GHCR for newer production images and rolls them out.
+# Polls GHCR for a newer production release and rolls it out, with a pre-deploy
+# database backup and automatic rollback when the new release does not become ready.
 #
 # This runs ON the production server itself (see rooman-billing-poll.timer), pulling
-# images that .github/workflows/deploy.yml already built and pushed to GHCR on the
-# last successful CI run on main. The server is behind a private/LAN network with no
-# inbound path from GitHub's hosted runners, so it pulls on its own schedule instead
-# of GitHub pushing/SSHing into it.
+# images that .github/workflows/deploy.yml built and pushed to GHCR after CI passed on
+# main. The server is behind a private/LAN network with no inbound path from GitHub's
+# hosted runners, so it pulls on its own schedule instead of GitHub pushing into it.
+#
+# How a release is identified
+#   deploy.yml pushes <image>:<git-sha> and moves <image>:latest to it, and stamps the
+#   image with the label org.opencontainers.image.revision=<git-sha>. This script pulls
+#   api:latest only to READ that label, then deploys the immutable tag IMAGE_TAG=<sha>
+#   and fetches docker-compose.prod.yml / deploy/backup.sh / this script from the repo
+#   AT THAT SAME SHA - never from the tip of main, which may not have passed CI.
+#
+# Flow per run (nothing happens when the release SHA equals .deploy/deployed_sha):
+#   1. resolve target SHA from api:latest's revision label
+#   2. save current compose file + tag the running images as :previous
+#   3. sync orchestration files at the target SHA (needs GITHUB_PAT)
+#   4. pull backend+frontend images at IMAGE_TAG=<sha>
+#   5. pg_dump pre-deploy backup to ./backups/predeploy/ (abort deploy if it fails)
+#   6. docker compose up -d with IMAGE_TAG=<sha>; poll READINESS_URL
+#   7. ready -> record .deploy/deployed_sha.  not ready -> redeploy :previous with the
+#      previous compose file, record .deploy/failed_sha (so it is not retried every
+#      2 minutes), alert ALERT_WEBHOOK_URL, exit 1.
+#
+# Migrations are forward-only: the new backend container runs `alembic upgrade head`
+# on start, and the rollback only swaps the application image back. That is safe as
+# long as migrations are backward compatible (expand/contract). If a migration broke
+# the old code, restore the pre-deploy dump - see docs/operations.md "Rollback".
 #
 # One-time setup on this server, before the first run:
 #   docker login ghcr.io -u <your-github-username>
-#   (password: a GitHub PAT with the `read:packages` scope - any collaborator can
-#   create one for themselves, no repo Admin access needed)
+#   (password: a GitHub PAT with the `read:packages` scope)
+# Recommended: GITHUB_PAT=<fine-grained PAT, this repo, Contents: Read-only> in
+# .env.production so orchestration files follow the release. Without it only images
+# are updated and a warning is logged.
 #
-# Optional but recommended - keep this script and docker-compose.prod.yml in sync
-# with the repo automatically (not just the images): add a line
-#   GITHUB_PAT=<a token with read access to this repo's contents>
-# to .env.production. A fine-grained PAT scoped to just this one repo with
-# "Contents: Read-only" is the safest choice; a classic PAT needs the `repo` scope.
-# Without this set, the sync step below is skipped and only images are updated.
+# Settings (read from the environment first, then .env.production):
+#   READINESS_URL      default derived from FRONTEND_BIND, e.g. http://127.0.0.1:80/api/v1/health/ready
+#   ALERT_WEBHOOK_URL  optional; receives {"text": "..."} on rollback / failure
+#   READINESS_TIMEOUT  seconds to wait for readiness (default 180)
+#   PREDEPLOY_BACKUP_KEEP  number of pre-deploy dumps kept (default 10)
+#   GITHUB_REPO        default rooman-itsd/Rooman-Billing
+#   API_IMAGE / WEB_IMAGE  default ghcr.io/rooman-itsd/rooman-billing-{api,web}
 #
-# Expected to run with its working directory set to the same directory that holds
+# Expected to run with its working directory set to the directory that holds
 # docker-compose.prod.yml and .env.production (normally /opt/rooman-billing).
 set -eu
 
-REPO_RAW_BASE="https://raw.githubusercontent.com/rooman-itsd/Rooman-Billing/main"
-COMPOSE="docker compose --env-file .env.production -f docker-compose.prod.yml"
+ENV_FILE=".env.production"
+COMPOSE_FILE="docker-compose.prod.yml"
+STATE_DIR=".deploy"
 LOG_PREFIX="[deploy-poll $(date -Iseconds)]"
 
-# --- Keep orchestration files in sync with the repo, not just the images ------------
-# Without this, a fix to docker-compose.prod.yml or this script itself would silently
-# require someone to manually re-paste it on the server forever.
-GITHUB_PAT="$(grep -E '^GITHUB_PAT=' .env.production 2>/dev/null | head -n1 | cut -d '=' -f2-)"
+log() { echo "$LOG_PREFIX $*"; }
+err() { echo "$LOG_PREFIX $*" >&2; }
 
+# Value from the environment, else from .env.production (first match, quotes stripped).
+env_get() {
+    eval "cur=\${$1:-}"
+    if [ -n "$cur" ]; then
+        printf '%s' "$cur"
+        return
+    fi
+    grep -E "^$1=" "$ENV_FILE" 2>/dev/null | head -n1 | cut -d '=' -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
+}
+
+GITHUB_PAT="$(env_get GITHUB_PAT)"
+GITHUB_REPO="$(env_get GITHUB_REPO)"; GITHUB_REPO="${GITHUB_REPO:-rooman-itsd/Rooman-Billing}"
+API_IMAGE="$(env_get API_IMAGE)"; API_IMAGE="${API_IMAGE:-ghcr.io/rooman-itsd/rooman-billing-api}"
+WEB_IMAGE="$(env_get WEB_IMAGE)"; WEB_IMAGE="${WEB_IMAGE:-ghcr.io/rooman-itsd/rooman-billing-web}"
+ALERT_WEBHOOK_URL="$(env_get ALERT_WEBHOOK_URL)"
+READINESS_TIMEOUT="$(env_get READINESS_TIMEOUT)"; READINESS_TIMEOUT="${READINESS_TIMEOUT:-180}"
+PREDEPLOY_BACKUP_KEEP="$(env_get PREDEPLOY_BACKUP_KEEP)"; PREDEPLOY_BACKUP_KEEP="${PREDEPLOY_BACKUP_KEEP:-10}"
+READINESS_URL="$(env_get READINESS_URL)"
+if [ -z "$READINESS_URL" ]; then
+    bind="$(env_get FRONTEND_BIND)"; bind="${bind:-80}"
+    case "$bind" in
+        *:*) READINESS_URL="http://${bind}/api/v1/health/ready" ;;
+        *)   READINESS_URL="http://127.0.0.1:${bind}/api/v1/health/ready" ;;
+    esac
+fi
+
+alert() {
+    err "ALERT: $1"
+    [ -n "$ALERT_WEBHOOK_URL" ] || return 0
+    esc=$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    curl -fsS -m 15 -X POST -H 'Content-Type: application/json' \
+        -d "{\"text\": \"[rooman-billing deploy @ $(hostname)] ${esc}\"}" \
+        "$ALERT_WEBHOOK_URL" >/dev/null 2>&1 || err "WARNING: alert webhook POST failed"
+}
+
+# compose with an explicit image tag and (optionally) a different compose file
+compose_tag() {
+    tag="$1"; file="$2"; shift 2
+    IMAGE_TAG="$tag" docker compose --env-file "$ENV_FILE" -f "$file" "$@"
+}
+
+mkdir -p "$STATE_DIR"
+
+# --- 1. Resolve the release to deploy -------------------------------------------------
+log "Checking $API_IMAGE:latest for a new release..."
+if ! docker pull -q "$API_IMAGE:latest" >/dev/null; then
+    err "ERROR: could not pull $API_IMAGE:latest (registry login expired? network?)"
+    exit 1
+fi
+TARGET_SHA="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$API_IMAGE:latest" 2>/dev/null || true)"
+case "$TARGET_SHA" in
+    ''|'<no value>')
+        err "ERROR: $API_IMAGE:latest has no org.opencontainers.image.revision label; refusing to deploy an unidentified image."
+        exit 1 ;;
+esac
+
+DEPLOYED_SHA="$(cat "$STATE_DIR/deployed_sha" 2>/dev/null || true)"
+FAILED_SHA="$(cat "$STATE_DIR/failed_sha" 2>/dev/null || true)"
+
+if [ "$TARGET_SHA" = "$DEPLOYED_SHA" ]; then
+    # Keep containers converged (e.g. after a manual stop) without a new release.
+    compose_tag "$TARGET_SHA" "$COMPOSE_FILE" up -d --remove-orphans --no-build >/dev/null 2>&1 || true
+    log "Up to date at $TARGET_SHA."
+    exit 0
+fi
+if [ "$TARGET_SHA" = "$FAILED_SHA" ]; then
+    log "Release $TARGET_SHA previously failed readiness and was rolled back - skipping. Delete $STATE_DIR/failed_sha to retry."
+    exit 0
+fi
+
+log "New release $TARGET_SHA (currently deployed: ${DEPLOYED_SHA:-unknown})."
+
+# --- 2. Remember what is running now, for rollback ----------------------------------------
+PREV_AVAILABLE=0
+backend_cid="$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps -q backend 2>/dev/null || true)"
+frontend_cid="$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps -q frontend 2>/dev/null || true)"
+if [ -n "$backend_cid" ] && [ -n "$frontend_cid" ]; then
+    prev_api_img="$(docker inspect --format '{{.Image}}' "$backend_cid")"
+    prev_web_img="$(docker inspect --format '{{.Image}}' "$frontend_cid")"
+    docker tag "$prev_api_img" "$API_IMAGE:previous"
+    docker tag "$prev_web_img" "$WEB_IMAGE:previous"
+    cp "$COMPOSE_FILE" "$STATE_DIR/docker-compose.prod.yml.previous"
+    rm -f "$STATE_DIR/backup.sh.previous"
+    if [ -f deploy/backup.sh ]; then cp deploy/backup.sh "$STATE_DIR/backup.sh.previous"; fi
+    printf '%s\n' "${DEPLOYED_SHA:-unknown}" > "$STATE_DIR/previous_sha"
+    PREV_AVAILABLE=1
+    log "Tagged running images as :previous (release ${DEPLOYED_SHA:-unknown})."
+else
+    log "No running backend/frontend found - first deploy, rollback unavailable."
+fi
+
+# --- 3. Sync orchestration files at the release SHA ------------------------------------
 sync_from_repo() {
     # $1 = path in the repo, $2 = local file to update if it changed
     repo_path="$1"
     local_path="$2"
-    # Same directory as the destination, so the `mv` below is always an atomic
-    # same-filesystem rename - a temp dir like /tmp could be a different filesystem,
-    # which would silently degrade `mv` to a non-atomic copy+unlink.
+    mkdir -p "$(dirname "$local_path")"
+    # If a bind mount was started before the file existed, docker created an empty
+    # directory in its place - remove it so the real file can land.
+    if [ -d "$local_path" ]; then
+        rmdir "$local_path" 2>/dev/null || { err "ERROR: $local_path is a non-empty directory"; return 1; }
+    fi
+    # Same directory as the destination, so `mv` is an atomic same-filesystem rename.
     tmp="$(mktemp "${local_path}.XXXXXX")"
-    if curl -fsSL -H "Authorization: token $GITHUB_PAT" "$REPO_RAW_BASE/$repo_path" -o "$tmp" 2>/dev/null; then
+    if curl -fsSL -H "Authorization: token $GITHUB_PAT" \
+            "https://raw.githubusercontent.com/$GITHUB_REPO/$TARGET_SHA/$repo_path" -o "$tmp" 2>/dev/null; then
         if [ ! -f "$local_path" ] || ! cmp -s "$tmp" "$local_path"; then
             mv "$tmp" "$local_path"
-            echo "$LOG_PREFIX Updated $local_path from repo."
+            SYNC_CHANGED="$SYNC_CHANGED $repo_path"
+            log "Updated $local_path from repo @ $TARGET_SHA."
         else
             rm -f "$tmp"
         fi
-    else
-        echo "$LOG_PREFIX WARNING: could not fetch $repo_path from repo, keeping existing $local_path" >&2
-        rm -f "$tmp"
+        return 0
     fi
+    rm -f "$tmp"
+    return 1
 }
 
+SYNC_CHANGED=""
 if [ -n "$GITHUB_PAT" ]; then
-    echo "$LOG_PREFIX Syncing orchestration files from repo..."
-    sync_from_repo "docker-compose.prod.yml" "docker-compose.prod.yml"
-    # Self-update: replacing this file via `mv` (atomic rename) is safe even while it's
-    # running - this process already holds the old file's data open. The new version
-    # only takes effect on the *next* scheduled run, which keeps this simple and avoids
-    # any self-modifying-script hazards.
-    sync_from_repo "deploy/deploy-poll.sh" "$0"
-    chmod +x "$0" 2>/dev/null || true
+    log "Syncing orchestration files @ $TARGET_SHA..."
+    sync_ok=1
+    sync_from_repo "docker-compose.prod.yml" "$COMPOSE_FILE" || sync_ok=0
+    sync_from_repo "deploy/backup.sh" "deploy/backup.sh" || sync_ok=0
+    if [ "$sync_ok" -ne 1 ]; then
+        # Deploying new images with a stale compose file is how config drift starts.
+        err "ERROR: could not fetch orchestration files @ $TARGET_SHA - not deploying."
+        alert "could not fetch docker-compose.prod.yml/backup.sh @ $TARGET_SHA from GitHub (PAT expired?); deploy skipped"
+        exit 1
+    fi
+    # Self-update: the atomic rename is safe while running (this process holds the old
+    # file open); the new version takes effect on the next scheduled run.
+    sync_from_repo "deploy/alert.sh" "deploy/alert.sh" || err "WARNING: could not sync deploy/alert.sh"
+    if sync_from_repo "deploy/deploy-poll.sh" "$0"; then
+        chmod +x "$0" 2>/dev/null || true
+    else
+        err "WARNING: could not self-update deploy-poll.sh; continuing with the current version."
+    fi
 else
-    echo "$LOG_PREFIX GITHUB_PAT not set in .env.production - skipping repo file sync (images only)."
+    err "WARNING: GITHUB_PAT not set in $ENV_FILE - images only; docker-compose.prod.yml may drift from the release."
 fi
 
-# --- Pull and roll out any new images -------------------------------------------------
-echo "$LOG_PREFIX Checking for new images..."
-
-# Pull one service at a time and prune (never -a, that would also remove images other
-# things on this host still need) after each. This way a disk-full failure partway
-# through never leaves some services on new images and others silently stuck on old
-# ones - we only cut over once every pull has succeeded.
+# --- 4. Pull the release images -----------------------------------------------------
 failed=0
 for service in backend frontend; do
-    echo "$LOG_PREFIX Pulling $service..."
-    if $COMPOSE pull "$service"; then
-        docker image prune -f >/dev/null 2>&1 || true
-    else
-        echo "$LOG_PREFIX ERROR: pull failed for $service" >&2
+    log "Pulling $service @ $TARGET_SHA..."
+    if ! compose_tag "$TARGET_SHA" "$COMPOSE_FILE" pull "$service"; then
+        err "ERROR: pull failed for $service"
         failed=1
     fi
 done
-
 if [ "$failed" -ne 0 ]; then
-    echo "$LOG_PREFIX One or more pulls failed - NOT restarting services (staying on current images)." >&2
+    err "One or more pulls failed - NOT restarting services (staying on current release)."
     exit 1
 fi
 
-echo "$LOG_PREFIX All pulls succeeded. Rolling out..."
-$COMPOSE up -d --remove-orphans --no-build
-
-# Confirm the rollout actually came up healthy rather than assuming `up -d` succeeding
-# means the app is serving traffic - `docker compose up` only waits for depends_on
-# conditions on (re)started containers, it doesn't itself verify the public endpoint.
-echo "$LOG_PREFIX Waiting for the service to report ready..."
-ready=0
-for i in $(seq 1 30); do
-    code=$(curl -s -o /dev/null -w "%{http_code}" https://billing.futureacad.ae/api/v1/health/ready || true)
-    if [ "$code" = "200" ]; then
-        echo "$LOG_PREFIX Service is ready."
-        ready=1
-        break
+# --- 5. Pre-deploy database backup ------------------------------------------------
+# The new backend runs migrations on start; this dump is the way back if one of them
+# turns out to be destructive.
+if docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps --status running -q db 2>/dev/null | grep -q .; then
+    mkdir -p backups/predeploy
+    dump="backups/predeploy/predeploy_$(date +%Y%m%d_%H%M%S)_from_${DEPLOYED_SHA:-unknown}.dump"
+    log "Pre-deploy backup -> $dump"
+    if docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T db \
+            sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --format=custom' > "$dump.partial" \
+            && [ -s "$dump.partial" ]; then
+        mv "$dump.partial" "$dump"
+        chmod 600 "$dump" 2>/dev/null || true
+        # keep the newest N
+        ls -1t backups/predeploy/predeploy_*.dump 2>/dev/null | tail -n +"$((PREDEPLOY_BACKUP_KEEP + 1))" | while read -r old; do rm -f "$old"; done
+    else
+        rm -f "$dump.partial"
+        alert "pre-deploy pg_dump failed; release $TARGET_SHA NOT deployed"
+        exit 1
     fi
-    echo "$LOG_PREFIX Waiting for readiness (attempt $i, got $code)..."
-    sleep 5
-done
+else
+    log "db not running yet - skipping pre-deploy backup (first deploy)."
+fi
 
-if [ "$ready" -ne 1 ]; then
-    echo "$LOG_PREFIX ERROR: service did not become ready in time after rollout." >&2
+# --- 6. Roll out + readiness gate ------------------------------------------------------
+log "Rolling out $TARGET_SHA..."
+rollout_ok=1
+compose_tag "$TARGET_SHA" "$COMPOSE_FILE" up -d --remove-orphans --no-build || rollout_ok=0
+case "$SYNC_CHANGED" in
+    *deploy/backup.sh*)
+        # A replaced bind-mounted file is a new inode; running containers keep the old one.
+        log "backup.sh changed - recreating the backup container."
+        compose_tag "$TARGET_SHA" "$COMPOSE_FILE" up -d --no-deps --force-recreate backup || true ;;
+esac
+
+wait_ready() {
+    deadline=$(( $(date +%s) + READINESS_TIMEOUT ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+        code=$(curl -s -o /dev/null -m 5 -w "%{http_code}" "$READINESS_URL" || true)
+        if [ "$code" = "200" ]; then
+            return 0
+        fi
+        log "Waiting for readiness at $READINESS_URL (got $code)..."
+        sleep 5
+    done
+    return 1
+}
+
+if [ "$rollout_ok" -eq 1 ] && wait_ready; then
+    printf '%s\n' "$TARGET_SHA" > "$STATE_DIR/deployed_sha"
+    rm -f "$STATE_DIR/failed_sha"
+    docker image prune -f >/dev/null 2>&1 || true
+    log "Release $TARGET_SHA is ready. Done."
+    exit 0
+fi
+
+# --- 7. Rollback ---------------------------------------------------------------------
+err "ERROR: release $TARGET_SHA did not become ready within ${READINESS_TIMEOUT}s."
+printf '%s\n' "$TARGET_SHA" > "$STATE_DIR/failed_sha"
+
+if [ "$PREV_AVAILABLE" -ne 1 ]; then
+    alert "release $TARGET_SHA failed readiness at $READINESS_URL and no previous release is available to roll back to"
     exit 1
 fi
 
-echo "$LOG_PREFIX Done."
+log "Rolling back to previous release (${DEPLOYED_SHA:-unknown})..."
+cp "$STATE_DIR/docker-compose.prod.yml.previous" "$COMPOSE_FILE"
+[ -f "$STATE_DIR/backup.sh.previous" ] && cp "$STATE_DIR/backup.sh.previous" deploy/backup.sh
+if compose_tag previous "$COMPOSE_FILE" up -d --remove-orphans --no-build && wait_ready; then
+    alert "release $TARGET_SHA failed readiness; ROLLED BACK to ${DEPLOYED_SHA:-previous}. Migrations run by the failed release are NOT reverted - check logs; pre-deploy dump is in backups/predeploy/"
+else
+    alert "release $TARGET_SHA failed readiness AND rollback to ${DEPLOYED_SHA:-previous} is not ready either - manual intervention required (pre-deploy dump in backups/predeploy/)"
+fi
+exit 1

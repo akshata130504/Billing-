@@ -1,7 +1,7 @@
 """Authentication request/response models (contract §2)."""
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 from backend.app.models import MemberRole, MembershipStatus
 from backend.app.schemas.organization import EmailAddress, OrganizationOut, UTCDateTime
@@ -11,16 +11,23 @@ from backend.app.schemas.validators import validate_phone_number, validate_sensi
 # --- requests ------------------------------------------------------------------------
 
 
-class SignupRequest(BaseModel):
-    organization_name: str = Field(min_length=1, max_length=200)
-    full_name: str = Field(min_length=1, max_length=200)
-    email: EmailAddress
-    password: str = Field(min_length=1, max_length=256)
-
-
 class LoginRequest(BaseModel):
     email: EmailAddress
     password: str = Field(min_length=1, max_length=256)
+
+
+class MfaLoginRequest(BaseModel):
+    mfa_token: str = Field(min_length=1, max_length=2048)
+    code: str = Field(min_length=6, max_length=8)
+
+
+class TotpEnableRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=8)
+
+
+class TotpDisableRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=256)
+    code: str = Field(min_length=6, max_length=8)
 
 
 class RefreshRequest(BaseModel):
@@ -55,7 +62,10 @@ class ResetPasswordRequest(BaseModel):
 class AcceptInvitationRequest(BaseModel):
     token: str = Field(min_length=1, max_length=512)
     full_name: Optional[str] = Field(default=None, max_length=200)
+    # New accounts: the password to set. Existing accounts: their current password (required).
     password: Optional[str] = Field(default=None, max_length=256)
+    # Existing accounts with two-factor authentication on.
+    totp_code: Optional[str] = Field(default=None, max_length=8)
 
 
 # --- responses -----------------------------------------------------------------------
@@ -68,6 +78,33 @@ class AuthTokens(BaseModel):
     expires_in: int = Field(description="Access token lifetime in seconds")
 
 
+class LoginResponse(BaseModel):
+    """Either a token pair, or (two-factor accounts) an MFA challenge for POST /auth/login/mfa."""
+
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
+    token_type: Optional[str] = None
+    expires_in: Optional[int] = Field(default=None, description="Access token (or MFA token) lifetime in seconds")
+    mfa_required: bool = False
+    mfa_token: Optional[str] = None
+
+
+class TotpSetupResponse(BaseModel):
+    secret: str = Field(description="Base32 seed to type into an authenticator app")
+    otpauth_uri: str = Field(description="otpauth:// URI (render as a QR code)")
+
+
+class SessionOut(BaseModel):
+    id: str
+    organization_id: Optional[str] = None
+    created_at: UTCDateTime
+    last_active_at: UTCDateTime
+    expires_at: UTCDateTime
+    user_agent: Optional[str] = None
+    ip_address: Optional[str] = None
+    current: bool = False
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -78,6 +115,12 @@ class UserOut(BaseModel):
     avatar_url: Optional[str] = None
     last_login_at: Optional[UTCDateTime] = None
     created_at: UTCDateTime
+    totp_enabled_at: Optional[UTCDateTime] = Field(default=None, exclude=True)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def two_factor_enabled(self) -> bool:
+        return self.totp_enabled_at is not None
 
 
 class UserProfileUpdate(BaseModel):
@@ -130,7 +173,6 @@ class SignupResponse(AuthTokens):
 
 class ForgotPasswordResponse(BaseModel):
     message: str
-    reset_url: Optional[str] = Field(default=None, description="Only present when SMTP is not configured.")
 
 
 class InvitationOut(BaseModel):
@@ -140,3 +182,29 @@ class InvitationOut(BaseModel):
     invited_by: str
     expires_at: UTCDateTime
     user_exists: bool
+
+
+class SignupVerificationRequest(BaseModel):
+    organization_name: str = Field(min_length=1, max_length=200)
+    full_name: str = Field(min_length=1, max_length=200)
+    email: EmailAddress
+    password: str = Field(min_length=1, max_length=256)
+
+
+class SignupVerifyOtpRequest(BaseModel):
+    email: EmailAddress
+    otp: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+    # Must match the password submitted with request-verification.
+    password: str = Field(min_length=1, max_length=256)
+
+
+class ResendOtpRequest(BaseModel):
+    email: EmailAddress
+
+
+class SignupVerificationResponse(BaseModel):
+    message: str
+    email: str
+    expires_in_seconds: int = 600
+    resend_cooldown_seconds: int = 60
+

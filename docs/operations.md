@@ -11,38 +11,70 @@ alias rb='docker compose --env-file .env.production -f docker-compose.prod.yml'
 
 ## 1. Backups
 
-The database is the only stateful component. PDFs are rendered on demand, webhook events and
-audit logs are tables, and there are no uploaded files.
+Stateful data: the **database** and the **`uploads_data` volume** (organisation logos, avatars,
+attachments). PDFs are rendered on demand; webhook events and audit logs are tables.
 
-### Daily logical backup
+> `rb` in this guide runs against whatever `IMAGE_TAG` resolves to. On a host managed by
+> `deploy/deploy-poll.sh`, prefix commands with the deployed SHA so compose does not try to
+> recreate containers on `:latest`:
+> `alias rb='IMAGE_TAG=$(cat .deploy/deployed_sha) docker compose --env-file .env.production -f docker-compose.prod.yml'`
+> (`make` targets do this automatically).
+
+### Automatic nightly backup (`backup` service)
+
+The `backup` container (script: `deploy/backup.sh`) runs at `BACKUP_CRON` (default `15 1 * * *`,
+UTC) and once at container start:
+
+1. `pg_dump --format=custom` -> `rooman_<YYYYmmdd_HHMMSS>.dump` (verified with `pg_restore --list`)
+2. `tar czf` of the uploads volume (mounted read-only) -> `uploads_<YYYYmmdd_HHMMSS>.tar.gz`
+3. deletes local files older than `BACKUP_RETENTION_DAYS` (30) from the `backup_data` volume
+4. if `OFFSITE_BACKUP_REMOTE` is set, `rclone copy` of both files to it, then optional offsite
+   retention (`OFFSITE_RETENTION_DAYS`)
+5. writes `last_success`; the container healthcheck turns **unhealthy** when no run succeeded in
+   `BACKUP_MAX_AGE_MINUTES` (26 h)
+
+Any failure POSTs `{"text": ...}` to `ALERT_WEBHOOK_URL` and exits non-zero. Output is in
+`rb logs backup`. Run it on demand with `make backup-now`
+(`rb exec backup sh /usr/local/bin/backup-job.sh`).
+
+**Offsite (do this - without it backups die with the host).** In `.env.production`:
 
 ```bash
-rb exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --format=custom' \
-  > /var/backups/rooman/rooman_$(date +%F).dump
+OFFSITE_BACKUP_REMOTE=offsite:my-billing-backups/prod      # rclone remote "offsite" + bucket/prefix
+OFFSITE_S3_PROVIDER=AWS            # or Cloudflare / Wasabi / Minio / Other ... (rclone s3 providers)
+OFFSITE_S3_REGION=ap-south-1
+OFFSITE_S3_ENDPOINT=               # required for non-AWS, e.g. https://s3.eu-central-003.backblazeb2.com
+OFFSITE_S3_ACCESS_KEY_ID=...
+OFFSITE_S3_SECRET_ACCESS_KEY=...
 ```
 
-`--format=custom` allows selective and parallel restores with `pg_restore`; `make backup` produces
-a gzipped plain-SQL variant instead. Suggested schedule (cron, as the deploy user):
+Use credentials that can only write to that bucket, turn on bucket versioning / object lock, and
+use lifecycle rules for long-term retention (GST: keep year-end copies for 6+ years).
+`OFFSITE_BACKUP_COMMAND` (a free-form `eval`) is no longer supported. Check the upload:
+`rb exec backup rclone ls "$OFFSITE_BACKUP_REMOTE" | tail`.
 
+Listing / copying local backups off the volume:
+
+```bash
+rb exec backup ls -lh /var/backups/rooman
+docker cp "$(rb ps -q backup)":/var/backups/rooman/rooman_20260901_011500.dump ./
 ```
-15 1 * * * cd /opt/rooman-billing && docker compose --env-file .env.production -f docker-compose.prod.yml exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --format=custom' > /var/backups/rooman/rooman_$(date +\%F).dump && find /var/backups/rooman -name '*.dump' -mtime +30 -delete
-```
 
-Copy the directory off-host (object storage, `rclone`, `restic`). Keep 30 daily and 12 monthly
-copies; billing data has statutory retention requirements (GST: 6 years), so also archive year-end
-dumps permanently.
+### Pre-deploy backups
 
-Always take a dump before upgrading or running manual SQL.
+`deploy/deploy-poll.sh` takes a `pg_dump` into `backups/predeploy/` on the host (newest
+`PREDEPLOY_BACKUP_KEEP`, default 10) **before** every rollout; a failed dump aborts the deploy.
+Take one manually before running manual SQL: `make backup`.
 
-### Restore
+### Restore - database
 
-Restoring replaces the whole database; stop the API first so nothing writes during the restore.
+Restoring replaces the whole database; stop the writers first.
 
 ```bash
 rb stop backend scheduler
 rb exec -T db sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "DROP DATABASE IF EXISTS \"$POSTGRES_DB\";" -c "CREATE DATABASE \"$POSTGRES_DB\" OWNER \"$POSTGRES_USER\";"'
-# custom-format dump
-rb exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner' < /var/backups/rooman/rooman_2026-09-01.dump
+# custom-format dump (nightly, pre-deploy, or downloaded from offsite with rclone copy)
+rb exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner' < rooman_20260901_011500.dump
 # plain SQL (.sql.gz from make backup)
 gunzip -c backups/rooman_billing_20260901_011500.sql.gz | rb exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 rb start backend scheduler
@@ -51,14 +83,51 @@ rb start backend scheduler
 Starting `backend` runs `alembic upgrade head`, so a dump from an older release is migrated
 forward automatically. Restoring a dump from a **newer** release onto older code is not supported.
 
-Test the restore quarterly on a scratch host: `rb up -d db`, restore, `rb up -d backend`, check
-that `/api/v1/health/ready` reports `ready: true` with `migrations.status: at_head`, and log in.
-See the pre-launch checklist (section 9) for the full drill.
+Fetching from offsite on a fresh host: `rb run --rm --no-deps backup sh -c 'apk add -q rclone && rclone copy "$OFFSITE_BACKUP_REMOTE/rooman_20260901_011500.dump" /var/backups/rooman/'`,
+then restore from the `backup_data` volume as above.
+
+### Restore - uploads
+
+```bash
+rb stop backend scheduler
+# the uploads volume is mounted read-only in `backup`; use a throwaway container for the write
+docker run --rm -v rooman-billing_uploads_data:/uploads -v "$PWD":/in alpine   sh -c 'rm -rf /uploads/* && tar xzf /in/uploads_20260901_011500.tar.gz -C /uploads && chown -R 10001:10001 /uploads'
+rb start backend scheduler
+```
+
+(10001 is the API image's `app` user.) Restore the uploads archive from the **same** run as the
+database dump so file references match.
+
+### Restore drill
+
+Quarterly, on a scratch host: `rb up -d db`, restore the latest **offsite** dump and uploads
+tarball, `rb up -d backend`, check `/api/v1/health/ready` reports `ready: true` with
+`migrations.status: at_head`, log in and open an invoice with a logo. See section 9.
 
 ### Volume snapshot (alternative)
 
 Stopping the stack and snapshotting the `postgres_data` volume (or the host disk) is also
 consistent. Never snapshot a running Postgres data directory without `pg_start_backup` semantics.
+
+### Rollback of a release
+
+`deploy/deploy-poll.sh` deploys immutable image tags (`IMAGE_TAG=<git sha>`). If the new release
+does not return 200 from `READINESS_URL` within `READINESS_TIMEOUT`, it re-deploys the previous
+images (tagged locally as `:previous`) with the previous compose file, records the bad SHA in
+`.deploy/failed_sha` (not retried; delete the file to retry), and alerts.
+
+**Migrations are forward-only.** The rollback swaps the application image only; migrations the
+failed release applied stay applied. That is safe when migrations are backward compatible
+(add columns/tables, never drop/rename in the same release as the code change). If a migration
+broke the old code: `rb stop backend scheduler`, restore the newest `backups/predeploy/*.dump`
+(procedure above), start again. Manual rollback to any published SHA:
+
+```bash
+IMAGE_TAG=<good-sha> docker compose --env-file .env.production -f docker-compose.prod.yml up -d --no-build
+echo <good-sha> > .deploy/deployed_sha
+```
+
+(The poller will move forward again when a newer SHA is published as `:latest`.)
 
 ## 2. Logs
 
@@ -170,6 +239,13 @@ none of this:
 - trial expiry and conversion
 - marking invoices `overdue`
 - dunning reminder emails
+
+**Heartbeat.** `GET /api/v1/health/ready` reports `features.scheduler_heartbeat`
+(`ok` / `stale` / `missing` / `unavailable` when the build has no heartbeat support) with the age
+of the last heartbeat; stale = older than 3 x `SCHEDULER_INTERVAL_MINUTES` (min 15 min). It never
+makes the API unready. The `scheduler` container's healthcheck
+(`backend/docker/scheduler_healthcheck.py`) uses the same check, so `rb ps` shows it `unhealthy`
+when jobs stop running - alert on that.
 
 `docker-compose.prod.yml` gets this right: `backend` sets `SCHEDULER_ENABLED=false`, the dedicated
 `scheduler` service sets it to `true`. **Exactly one process may have it enabled** - two means

@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 import pytest
 
+from backend.app.models import MemberRole
 from backend.app.models.catalog_cpq import OfferingType, OfferingPricingModel
 
 CATALOG_OFFERINGS = "/api/v1/catalog/offerings"
@@ -235,7 +236,7 @@ def test_pricing_engine_all_models_and_boundaries(client, auth_headers):
         calculate_line_item_pricing(mock_off, Decimal("-1"))
 
 
-def test_cpq_rules_and_approval_workflow(client, auth_headers):
+def test_cpq_rules_and_approval_workflow(client, tenant, auth_headers, db):
     # 1. Create Offerings A and B
     off_a = client.post(CATALOG_OFFERINGS, json=_offering(name="Firewall Appliance"), headers=auth_headers).json()
     off_b = client.post(CATALOG_OFFERINGS, json=_offering(name="Security License"), headers=auth_headers).json()
@@ -282,11 +283,31 @@ def test_cpq_rules_and_approval_workflow(client, auth_headers):
     assert deal["approval_required"] is True
     assert deal["status"] == "pending_approval"
 
-    # 6. Approve the deal
-    appr_resp = client.post(f"{CPQ_DEALS}/{deal['id']}/approve", headers=auth_headers)
-    assert appr_resp.status_code == 200
+    # 6. Pending deals cannot be converted yet
+    assert client.post(f"{CPQ_DEALS}/{deal['id']}/convert-quote", headers=auth_headers).status_code == 409
+
+    # 7. The requester cannot approve their own deal; finance cannot decide at all
+    self_appr = client.post(f"{CPQ_DEALS}/{deal['id']}/approve", headers=auth_headers)
+    assert self_appr.status_code == 403
+    finance = tenant.headers_for_role(MemberRole.FINANCE)
+    assert client.post(f"{CPQ_DEALS}/{deal['id']}/approve", headers=finance).status_code == 403
+
+    # 8. Another admin approves
+    reviewer = tenant.add_member(f"reviewer-{uuid.uuid4().hex[:6]}", MemberRole.ADMIN)
+    db.commit()
+    admin = tenant.headers(reviewer, MemberRole.ADMIN)
+    appr_resp = client.post(f"{CPQ_DEALS}/{deal['id']}/approve", headers=admin)
+    assert appr_resp.status_code == 200, appr_resp.text
     assert appr_resp.json()["status"] == "approved"
     assert appr_resp.json()["approval_status"] == "approved"
+    # deciding twice is an invalid state
+    assert client.post(f"{CPQ_DEALS}/{deal['id']}/reject", headers=admin).status_code == 409
+
+    # 9. Convert exactly once
+    conv = client.post(f"{CPQ_DEALS}/{deal['id']}/convert-quote", headers=auth_headers)
+    assert conv.status_code == 200, conv.text
+    again = client.post(f"{CPQ_DEALS}/{deal['id']}/convert-quote", headers=auth_headers)
+    assert again.status_code == 409
 
 
 def test_tenant_isolation_and_security(client, tenant, db):
@@ -368,6 +389,19 @@ def test_price_book_and_cpq_deal_flow(client, auth_headers):
     assert quote["customer"]["id"] == customer_id
     assert len(quote["items"]) == 1
     assert quote["items"][0]["unit_price"] == "9000.00"
+    assert quote["items"][0]["offering_id"] == offering_id
+    assert Decimal(quote["tax_amount"]) > 0
+    assert Decimal(quote["cgst_amount"]) > 0 or Decimal(quote["igst_amount"]) > 0
+
+    # 6. Verify Quote reload persists offering_id and GST breakdown
+    reload_resp = client.get(f"/api/v1/quotes/{quote['id']}", headers=auth_headers)
+    assert reload_resp.status_code == 200
+    reloaded = reload_resp.json()
+    assert reloaded["items"][0]["offering_id"] == offering_id
+    assert reloaded["tax_amount"] == quote["tax_amount"]
+    assert reloaded["cgst_amount"] == quote["cgst_amount"]
+    assert reloaded["sgst_amount"] == quote["sgst_amount"]
+    assert reloaded["igst_amount"] == quote["igst_amount"]
 
 
 def test_package_pricing_model_and_boundary_cases(client, auth_headers):

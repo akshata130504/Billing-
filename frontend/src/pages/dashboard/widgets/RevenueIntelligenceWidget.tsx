@@ -88,7 +88,7 @@ export function RevenueIntelligenceWidget({ revenue, currency }: RevenueIntellig
             MRR
           </span>
           <span className="text-sm font-bold text-slate-900 tabular-nums block mt-0.5">
-            {formatMoney(revenue.mrr, currency)}
+            {formatMoney(revenue.mrr, revenue.mrr_currency || currency)}
           </span>
           {mrrChangePct !== null && (
             <span
@@ -107,7 +107,7 @@ export function RevenueIntelligenceWidget({ revenue, currency }: RevenueIntellig
             ARR
           </span>
           <span className="text-sm font-bold text-slate-900 tabular-nums block mt-0.5">
-            {formatMoney(revenue.arr, currency)}
+            {formatMoney(revenue.arr, revenue.mrr_currency || currency)}
           </span>
           <span className="text-[10px] text-slate-500 font-medium block mt-0.5">
             12 &times; current MRR

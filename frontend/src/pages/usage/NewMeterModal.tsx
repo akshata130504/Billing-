@@ -32,6 +32,7 @@ export function NewMeterModal({ isOpen, onClose, onCreated }: NewMeterModalProps
   const [unitName, setUnitName] = useState('unit');
   const [aggregation, setAggregation] = useState<AggregationType>('sum');
   const [description, setDescription] = useState('');
+  const [unitPrice, setUnitPrice] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
@@ -43,6 +44,7 @@ export function NewMeterModal({ isOpen, onClose, onCreated }: NewMeterModalProps
     setUnitName('unit');
     setAggregation('sum');
     setDescription('');
+    setUnitPrice('');
     setErrors({});
   }, [isOpen]);
 
@@ -64,6 +66,9 @@ export function NewMeterModal({ isOpen, onClose, onCreated }: NewMeterModalProps
     if (!unitName.trim()) next.unit_name = 'Unit is required.';
     else if (unitName.trim().length > 40) next.unit_name = 'Unit must be 40 characters or fewer.';
     if (description.trim().length > 300) next.description = 'Description must be 300 characters or fewer.';
+    if (unitPrice.trim() && !/^\d{1,14}(\.\d{1,4})?$/.test(unitPrice.trim())) {
+      next.unit_price = 'Enter a non-negative amount with up to 4 decimals.';
+    }
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -79,6 +84,7 @@ export function NewMeterModal({ isOpen, onClose, onCreated }: NewMeterModalProps
         unit_name: unitName.trim(),
         aggregation_type: aggregation,
         description: description.trim() || null,
+        unit_price: unitPrice.trim() || null,
       });
       showToast('success', 'Meter created', `${meter.name} (${meter.code}) is ready to receive usage.`);
       onCreated(meter);
@@ -143,6 +149,15 @@ export function NewMeterModal({ isOpen, onClose, onCreated }: NewMeterModalProps
             helperText={AGGREGATION_LABELS[aggregation].hint}
           />
         </div>
+        <Input
+          label="Price per unit"
+          placeholder="e.g. 0.50"
+          inputMode="decimal"
+          value={unitPrice}
+          onChange={(e) => setUnitPrice(e.target.value)}
+          error={errors.unit_price}
+          helperText="Usage on this meter is billed at this flat rate. Leave empty for an unpriced (tracked-only) meter: its usage rates at 0."
+        />
         <div>
           <label className="block text-xs font-medium text-slate-700 mb-1.5">Description</label>
           <textarea

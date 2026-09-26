@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Project, ProjectExpense } from '../types';
-import { formatINR } from '../mockProjects';
+import { formatINR } from '../format';
 import { formatDate } from './ProjectTable';
 import { AddExpenseModal } from './AddExpenseModal';
 import { Button } from '../../../components/common/Button';
@@ -9,7 +9,7 @@ import { Plus, Receipt } from 'lucide-react';
 
 interface ProjectExpensesProps {
   project: Project;
-  onAddExpense: (expense: Omit<ProjectExpense, 'id' | 'projectId'>) => void;
+  onAddExpense: (expense: Omit<ProjectExpense, 'id' | 'projectId'>) => Promise<boolean> | boolean | void;
 }
 
 export function ProjectExpenses({ project, onAddExpense }: ProjectExpensesProps) {

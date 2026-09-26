@@ -17,6 +17,8 @@ export interface UsageMeterOut {
   aggregation_type: AggregationType;
   description: string | null;
   is_active: boolean;
+  /** Flat per-unit usage rate (decimal string); null = unpriced, usage rates at 0. */
+  unit_price?: string | number | null;
   created_at: string;
 }
 
@@ -26,6 +28,27 @@ export interface UsageMeterCreateIn {
   unit_name?: string;
   aggregation_type?: AggregationType;
   description?: string | null;
+  unit_price?: string | null;
+}
+
+export interface UsageMeterUpdateIn {
+  name?: string;
+  unit_name?: string;
+  description?: string | null;
+  unit_price?: string | null;
+  is_active?: boolean;
+}
+
+export interface BillingCycleOut {
+  id: string;
+  subscription_id: string;
+  cycle_number: number;
+  period_start: string;
+  period_end: string;
+  /** open | finalized | invoiced | cancelled */
+  status: string;
+  invoice_id: string | null;
+  finalized_at: string | null;
 }
 
 export interface UsageEventIn {

@@ -1,4 +1,5 @@
 """Organization settings and team management."""
+import html
 import re
 from decimal import Decimal
 from functools import lru_cache
@@ -283,6 +284,8 @@ def invite_member(
     membership: Optional[Membership] = None
     reinvited = False
     if user is None:
+        # Password-less placeholder. It does not block the mailbox owner from signing up on
+        # their own: the OTP signup flow claims such rows (auth_service._ensure_email_claimable).
         user = User(
             email=email,
             full_name=(full_name or "").strip() or email.split("@", 1)[0],
@@ -316,14 +319,12 @@ def invite_member(
 
     link = frontend_url(f"accept-invitation?token={raw}")
     org_name = ctx.organization.name
+    safe_name = html.escape(user.full_name)
+    safe_inviter = html.escape(ctx.user.full_name)
+    safe_org = html.escape(org_name)
 
-    smtp_cfg = None
-    try:
-        from backend.app.services.integrations_service import get_active_smtp_credentials
-        smtp_cfg = get_active_smtp_credentials(db, ctx.organization_id)
-    except Exception as exc:
-        logger.debug("Could not get organization SMTP credentials: %s", exc)
-
+    # Always the platform SMTP (settings), never the organization's own SMTP integration:
+    # invitation links are credentials and must not pass through tenant-controlled servers.
     delivered = False
     try:
         delivered = send_email(
@@ -335,12 +336,11 @@ def invite_member(
                 f"Accept the invitation within {settings.INVITE_TOKEN_EXPIRE_HOURS} hours:\n\n{link}\n"
             ),
             html_body=(
-                f"<p>Hello {user.full_name},</p>"
-                f"<p><strong>{ctx.user.full_name}</strong> has invited you to join <strong>{org_name}</strong> "
+                f"<p>Hello {safe_name},</p>"
+                f"<p><strong>{safe_inviter}</strong> has invited you to join <strong>{safe_org}</strong> "
                 f"on Rooman Billing as <strong>{role.value}</strong>.</p>"
-                f'<p><a href="{link}">Accept the invitation</a> (valid for {settings.INVITE_TOKEN_EXPIRE_HOURS} hours)</p>'
+                f'<p><a href="{html.escape(link)}">Accept the invitation</a> (valid for {settings.INVITE_TOKEN_EXPIRE_HOURS} hours)</p>'
             ),
-            smtp_config=smtp_cfg,
         )
     except Exception as exc:  # delivery problems must not lose the invitation
         logger.error("Invitation email to %s failed: %s", user.email, exc)
@@ -360,7 +360,10 @@ def invite_member(
     db.refresh(membership)
 
     data = serialize_member(membership, user, ctx.user)
-    if not delivered:
+    # The link is a credential. It is only ever handed to the inviting admin in development
+    # (no SMTP) and only for brand-new, password-less users; accepting on behalf of an existing
+    # account additionally needs that account's password (auth_service.accept_invitation).
+    if not delivered and user.hashed_password is None and not settings.is_production:
         data["invite_url"] = link
     data["email_delivered"] = delivered
     return TeamMemberInvited.model_validate(data)

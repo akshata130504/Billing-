@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import html
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -21,7 +22,7 @@ from backend.app.core.security import hash_password, validate_password_strength,
 from backend.app.models.base import utcnow
 from backend.app.models.customers import Customer, CustomerContact
 from backend.app.models.identity import Organization, User
-from backend.app.models.invoices import Invoice, InvoiceStatus
+from backend.app.models.invoices import OPEN_INVOICE_STATUSES, Invoice, InvoiceStatus
 from backend.app.models.payments import CustomerPaymentMethod, CustomerPaymentMethodStatus
 from backend.app.models.portal import (
     CustomerPortalInvitation,
@@ -43,7 +44,7 @@ from backend.app.schemas.portal import (
     PortalUserOut,
 )
 from backend.app.services import audit
-from backend.app.services.email import send_email
+from backend.app.services.email import resolve_smtp_config, send_email
 
 
 def aware(dt: Optional[datetime]) -> Optional[datetime]:
@@ -130,6 +131,8 @@ def update_portal_settings(
     """Updates organizational customer portal settings."""
     settings = get_or_create_portal_settings(db, organization_id)
     updates = data.model_dump(exclude_unset=True)
+    # Portal MFA is not implemented; the flag is not user-settable so it cannot imply protection.
+    updates.pop("mfa_enabled", None)
     for key, value in updates.items():
         setattr(settings, key, value)
     settings.updated_at = utcnow()
@@ -279,6 +282,84 @@ def get_customer_portal_access(
     )
 
 
+def _send_portal_invitation_email(
+    db: Session,
+    organization_id: str,
+    target_email: str,
+    invite_url: str,
+    org_name: str,
+    inviter_name: Optional[str],
+) -> bool:
+    """Sends the activation email via the organization's SMTP settings.
+
+    Synchronous on purpose: the admin UI shows the activation link as a fallback when this
+    returns False. User-controlled values are HTML-escaped in the HTML part.
+    """
+    inviter = inviter_name or org_name
+    e_inviter, e_org, e_url = html.escape(inviter), html.escape(org_name), html.escape(invite_url, quote=True)
+    try:
+        return send_email(
+            to=target_email,
+            subject=f"Access your Customer Billing Portal at {org_name}",
+            text_body=(
+                "Hello,\n\n"
+                f"You have been invited by {inviter} ({org_name}) to access your Customer Billing Portal.\n\n"
+                f"Set up your password and access your portal here:\n{invite_url}\n\n"
+                "This link is secure and will expire in 48 hours.\n"
+            ),
+            html_body=(
+                "<p>Hello,</p>"
+                f"<p>You have been invited by <strong>{e_inviter}</strong> ({e_org}) to access your Customer Billing Portal.</p>"
+                f'<p><a href="{e_url}" style="display:inline-block;background:#4f46e5;color:#ffffff;padding:10px 20px;text-decoration:none;border-radius:6px;">Activate Portal Account</a></p>'
+                f"<p>Or copy this link: <br><code>{e_url}</code></p>"
+                "<p>This link is secure and will expire in 48 hours.</p>"
+            ),
+            smtp_config=resolve_smtp_config(db, organization_id),
+        )
+    except Exception as exc:  # delivery problems must not lose the invitation
+        logger.error("Portal invitation email to %s failed: %s", target_email, exc)
+        return False
+
+
+def portal_trial_extension_denial(db: Session, subscription: Subscription) -> Optional[str]:
+    """Enforces the portal trial settings for customer self-service extensions.
+
+    Returns a human-readable reason when the extension is not allowed, else None.
+    """
+    portal_settings = get_or_create_portal_settings(db, subscription.organization_id)
+    if not portal_settings.trials_allow_customer_extension:
+        return "Self-service trial extensions are disabled for this portal."
+    from backend.app.models.trials import TrialPeriod
+
+    tp = db.scalars(
+        select(TrialPeriod).where(
+            TrialPeriod.organization_id == subscription.organization_id,
+            TrialPeriod.subscription_id == subscription.id,
+        )
+    ).first()
+    used = tp.extension_count if tp else 0
+    if used >= (portal_settings.trials_max_extensions or 0):
+        return f"Maximum self-service trial extensions ({portal_settings.trials_max_extensions}) reached."
+    return None
+
+
+def maybe_auto_invite_customer(db: Session, ctx: CurrentContext, customer: Customer) -> Optional[CustomerPortalInvitationOut]:
+    """Sends a portal invitation for a newly created customer when the portal's
+    ``auto_invite_enabled`` setting is on and the customer has an email address.
+
+    Call from customer creation (customer_service) after the customer row is flushed.
+    Never raises: auto-invite problems must not block customer creation.
+    """
+    try:
+        portal_settings = get_or_create_portal_settings(db, ctx.organization_id)
+        if not portal_settings.auto_invite_enabled or not (customer.email or "").strip():
+            return None
+        return create_customer_portal_invitation(db, ctx, customer.id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Auto portal invite for customer %s failed: %s", customer.id, exc)
+        return None
+
+
 def create_customer_portal_invitation(
     db: Session,
     ctx: CurrentContext,
@@ -345,27 +426,7 @@ def create_customer_portal_invitation(
     invite_url = f"{settings.FRONTEND_URL.rstrip('/')}/portal/activate?token={raw_token}"
     org_name = ctx.organization.name if ctx.organization else "our organization"
 
-    # Send invitation email
-    try:
-        send_email(
-            to=target_email,
-            subject=f"Access your Customer Billing Portal at {org_name}",
-            text_body=(
-                f"Hello,\n\n"
-                f"You have been invited by {ctx.user.full_name} ({org_name}) to access your Customer Billing Portal.\n\n"
-                f"Set up your password and access your portal here:\n{invite_url}\n\n"
-                f"This link is secure and will expire in 48 hours.\n"
-            ),
-            html_body=(
-                f"<p>Hello,</p>"
-                f"<p>You have been invited by <strong>{ctx.user.full_name}</strong> ({org_name}) to access your Customer Billing Portal.</p>"
-                f"<p><a href=\"{invite_url}\" style=\"display:inline-block;background:#4f46e5;color:#ffffff;padding:10px 20px;text-decoration:none;border-radius:6px;\">Activate Portal Account</a></p>"
-                f"<p>Or copy this link: <br><code>{invite_url}</code></p>"
-                f"<p>This link is secure and will expire in 48 hours.</p>"
-            ),
-        )
-    except Exception as exc:  # delivery problems must not lose the invitation
-        logger.error("Portal invitation email to %s failed: %s", target_email, exc)
+    _send_portal_invitation_email(db, ctx.organization_id, target_email, invite_url, org_name, ctx.user.full_name)
 
     audit.record(
         db,
@@ -672,11 +733,12 @@ def get_customer_dashboard(db: Session, portal_user: CustomerPortalUser) -> Port
             .where(
                 Invoice.organization_id == org_id,
                 Invoice.customer_id == customer.id,
+                Invoice.status != InvoiceStatus.DRAFT,  # drafts are never customer-visible
             )
             .order_by(desc(Invoice.issue_date))
         ).all()
     )
-    open_invoices = [inv for inv in invoices if inv.status not in (InvoiceStatus.PAID, InvoiceStatus.VOID)]
+    open_invoices = [inv for inv in invoices if inv.status in OPEN_INVOICE_STATUSES]
     total_due = sum((inv.amount_due or Decimal("0.00")) for inv in open_invoices)
 
     # Payment methods scoped to tenant AND customer

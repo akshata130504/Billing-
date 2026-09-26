@@ -1,5 +1,5 @@
 import { useExpenses } from '../ExpensesContext';
-import { formatINR } from '../mockExpenses';
+import { formatINR } from '../format';
 import { Repeat, Calendar, CheckCircle2, IndianRupee } from 'lucide-react';
 
 export function RecurringSummary() {

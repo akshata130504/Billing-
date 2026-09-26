@@ -107,6 +107,9 @@ class QuoteOut(BaseModel):
     declined_at: Optional[datetime] = None
     converted_invoice_id: Optional[str] = None
     approval_request_id: Optional[str] = None
+    # Only set on the send response: True when the customer email was handed to SMTP,
+    # False when it could not be delivered (no email on file, SMTP off or failing).
+    email_sent: Optional[bool] = None
     created_by: Optional[UserRef] = None
     created_at: datetime
     updated_at: datetime

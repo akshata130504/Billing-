@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { Mail, Lock, Eye, EyeOff, ArrowRight } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck } from 'lucide-react';
 import { Input } from '../../components/common/Input';
 import { useToast } from '../../components/common/Toast';
 import { LoadingState } from '../../components/common/LoadingState';
@@ -14,7 +14,7 @@ interface LocationState {
 }
 
 export function LoginPage() {
-  const { login, isAuthenticated, isLoading } = useAuth();
+  const { login, completeMfaLogin, isAuthenticated, isLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const { showToast } = useToast();
@@ -25,6 +25,9 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
+  // Two-factor step: set once the password is accepted for an account with 2FA enabled.
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
+  const [mfaCode, setMfaCode] = useState('');
 
   const from = (location.state as LocationState | null)?.from;
   const redirectTo = from?.pathname ? `${from.pathname}${from.search ?? ''}` : '/dashboard';
@@ -38,8 +41,20 @@ export function LoginPage() {
     setErrors({});
     setFormError(null);
     try {
-      const me = await login({ email: email.trim(), password });
-      showToast('success', 'Signed in', `Welcome back, ${me.user.full_name}.`);
+      if (mfaToken) {
+        const me = await completeMfaLogin(mfaToken, mfaCode.replace(/\s+/g, ''));
+        showToast('success', 'Signed in', `Welcome back, ${me.user.full_name}.`);
+        navigate(redirectTo, { replace: true });
+        return;
+      }
+      const outcome = await login({ email: email.trim(), password });
+      if (outcome.status === 'mfa_required') {
+        setMfaToken(outcome.mfaToken);
+        setMfaCode('');
+        setPassword('');
+        return;
+      }
+      showToast('success', 'Signed in', `Welcome back, ${outcome.me.user.full_name}.`);
       navigate(redirectTo, { replace: true });
     } catch (err) {
       const apiError = toApiError(err);
@@ -158,6 +173,39 @@ export function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-4" noValidate>
             <FormErrorBanner message={formError} />
 
+            {mfaToken ? (
+              <>
+                <div className="flex items-start gap-2 rounded-xl bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600">
+                  <ShieldCheck className="w-4 h-4 text-[#3F51C9] shrink-0 mt-0.5" />
+                  <span>Two-factor authentication is on. Enter the 6-digit code from your authenticator app.</span>
+                </div>
+                <Input
+                  label="Authentication code"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  autoFocus
+                  required
+                  maxLength={8}
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value)}
+                  error={errors.code}
+                  placeholder="123456"
+                  className="bg-white border-slate-200 focus:border-[#3F51C9] rounded-xl text-sm tracking-widest"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMfaToken(null);
+                    setMfaCode('');
+                    setFormError(null);
+                  }}
+                  className="text-xs font-semibold text-[#3F51C9] hover:text-[#25247A]"
+                >
+                  Use a different account
+                </button>
+              </>
+            ) : (
+            <>
             <div>
               <Input
                 label="Email"
@@ -205,6 +253,8 @@ export function LoginPage() {
                 </Link>
               </div>
             </div>
+            </>
+            )}
 
             {/* Gradient Action Button */}
             <button
@@ -213,10 +263,10 @@ export function LoginPage() {
               className="w-full mt-2 py-3.5 px-4 rounded-xl text-white font-semibold text-sm flex items-center justify-center gap-2 bg-gradient-to-r from-[#11194F] via-[#25247A] to-[#E83E8C] hover:opacity-95 shadow-md hover:shadow-lg active:scale-[0.99] transition-all disabled:opacity-50 cursor-pointer"
             >
               {submitting ? (
-                <span>Signing in...</span>
+                <span>{mfaToken ? 'Verifying...' : 'Signing in...'}</span>
               ) : (
                 <>
-                  <span>Sign in</span>
+                  <span>{mfaToken ? 'Verify and sign in' : 'Sign in'}</span>
                   <ArrowRight className="w-4 h-4 ml-0.5" />
                 </>
               )}

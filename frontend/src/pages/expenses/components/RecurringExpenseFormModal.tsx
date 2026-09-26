@@ -6,8 +6,10 @@ import {
   InvoiceTreatment,
   PaymentMethod,
 } from '../types';
-import { mockCustomers, mockProjectsByCustomer } from '../mockExpenses';
 import { X, CheckCircle, Repeat } from 'lucide-react';
+import { CustomerCombobox } from '../../../components/common/CustomerCombobox';
+import { useAuth } from '../../../hooks/useAuth';
+import { useCustomerProjects } from '../useCustomerProjects';
 import { validateSensibleName, validatePositiveMoney, validateNonNegativeMoney, validateDateNotBefore, parseStrictNumber } from '../../../utils/validation';
 
 interface RecurringExpenseFormModalProps {
@@ -55,14 +57,19 @@ export function RecurringExpenseFormModal({
   const [neverEnds, setNeverEnds] = useState(true);
   const [endDate, setEndDate] = useState('');
 
+  const { user } = useAuth();
+  const defaultPaidBy = user?.full_name || '';
+
   // Billing
   const [billable, setBillable] = useState(false);
-  const [customer, setCustomer] = useState(mockCustomers[0]);
+  const [customerId, setCustomerId] = useState('');
+  const [customer, setCustomer] = useState('');
+  const [projectId, setProjectId] = useState('');
   const [project, setProject] = useState('');
   const [billableAmount, setBillableAmount] = useState('');
   const [invoiceTreatment, setInvoiceTreatment] = useState<InvoiceTreatment>('add_to_next_invoice');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Corporate Card');
-  const [paidBy, setPaidBy] = useState('Operations Lead');
+  const [paidBy, setPaidBy] = useState(defaultPaidBy);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -78,7 +85,9 @@ export function RecurringExpenseFormModal({
       setNeverEnds(editingExpense.neverEnds);
       setEndDate(editingExpense.endDate || '');
       setBillable(editingExpense.billable);
-      setCustomer(editingExpense.customer || mockCustomers[0]);
+      setCustomerId(editingExpense.customerId || '');
+      setCustomer(editingExpense.customer || '');
+      setProjectId(editingExpense.projectId || '');
       setProject(editingExpense.project || '');
       setBillableAmount(editingExpense.billableAmount ? String(editingExpense.billableAmount) : String(editingExpense.amount));
       setInvoiceTreatment(editingExpense.invoiceTreatment || 'add_to_next_invoice');
@@ -95,17 +104,19 @@ export function RecurringExpenseFormModal({
       setNeverEnds(true);
       setEndDate('');
       setBillable(false);
-      setCustomer(mockCustomers[0]);
+      setCustomerId('');
+      setCustomer('');
+      setProjectId('');
       setProject('');
       setBillableAmount('');
       setInvoiceTreatment('add_to_next_invoice');
       setPaymentMethod('Corporate Card');
-      setPaidBy('Operations Lead');
+      setPaidBy(defaultPaidBy);
     }
     setErrors({});
-  }, [editingExpense, isOpen]);
+  }, [editingExpense, isOpen, defaultPaidBy]);
 
-  const availableProjects = customer ? (mockProjectsByCustomer[customer] || []) : [];
+  const { projects: availableProjects, loading: projectsLoading } = useCustomerProjects(customerId || undefined);
 
   const calculateNextRun = (start: string, freq: RecurringExpenseFrequency): string => {
     try {
@@ -135,11 +146,8 @@ export function RecurringExpenseFormModal({
       if (dateError) errs.endDate = dateError;
     }
     if (billable) {
-      if (!customer || customer === 'Internal') {
+      if (!customerId) {
         errs.customer = 'Please select a customer for billable expense';
-      }
-      if (!project || project === '—') {
-        errs.project = 'Please select a project';
       }
       if (billableAmount.trim() !== '') {
         const billableAmountError = validateNonNegativeMoney(billableAmount, 'Billable amount');
@@ -172,12 +180,14 @@ export function RecurringExpenseFormModal({
       neverEnds,
       nextRun,
       billable,
-      customer: billable ? customer : 'Internal',
-      project: billable ? project : '—',
+      customerId: billable ? customerId : '',
+      customer: billable ? customer : '',
+      projectId: billable ? projectId : '',
+      project: billable ? project : '',
       billableAmount: numBillable,
       invoiceTreatment: billable ? invoiceTreatment : undefined,
       paymentMethod,
-      paidBy: paidBy.trim() || 'Operations Lead',
+      paidBy: paidBy.trim() || defaultPaidBy || 'Self',
       status: editingExpense ? editingExpense.status : 'active',
       lastRun: editingExpense?.lastRun,
     });
@@ -375,50 +385,43 @@ export function RecurringExpenseFormModal({
               <div className="p-3 bg-emerald-50/50 rounded-xl border border-emerald-100/80 space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Customer <span className="text-rose-500">*</span>
-                    </label>
-                    <select
-                      value={customer}
-                      onChange={(e) => {
-                        setCustomer(e.target.value);
-                        const projects = mockProjectsByCustomer[e.target.value] || [];
-                        setProject(projects.length > 0 ? projects[0].name : '');
+                    <CustomerCombobox
+                      label="Customer"
+                      required
+                      value={customerId}
+                      error={errors.customer}
+                      onChange={(id, cust) => {
+                        setCustomerId(id);
+                        setCustomer(cust?.display_name || '');
+                        setProjectId('');
+                        setProject('');
                       }}
-                      className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                    >
-                      {mockCustomers
-                        .filter((c) => c !== 'Internal')
-                        .map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                    </select>
-                    {errors.customer && (
-                      <p className="text-[11px] text-rose-500 mt-1">{errors.customer}</p>
-                    )}
+                    />
                   </div>
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Project <span className="text-rose-500">*</span>
+                      Project
                     </label>
                     <select
-                      value={project}
-                      onChange={(e) => setProject(e.target.value)}
-                      className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      value={projectId}
+                      disabled={!customerId}
+                      onChange={(e) => {
+                        const selected = availableProjects.find((p) => p.id === e.target.value);
+                        setProjectId(selected?.id || '');
+                        setProject(selected?.name || '');
+                      }}
+                      className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:bg-slate-50"
                     >
-                      <option value="">Select Project</option>
+                      <option value="">
+                        {!customerId ? 'Select a customer first' : projectsLoading ? 'Loading projects…' : 'No project'}
+                      </option>
                       {availableProjects.map((p) => (
-                        <option key={p.id} value={p.name}>
+                        <option key={p.id} value={p.id}>
                           {p.name}
                         </option>
                       ))}
                     </select>
-                    {errors.project && (
-                      <p className="text-[11px] text-rose-500 mt-1">{errors.project}</p>
-                    )}
                   </div>
                 </div>
               </div>

@@ -1,0 +1,8 @@
+# Minimal lint gate for CI: only rules that indicate real bugs (syntax errors, invalid
+# comparisons/`is` with literals, misplaced return/yield/break, undefined names).
+# Widen gradually (e.g. add "F401", "E711") once the codebase is cleaned up.
+target-version = "py312"
+extend-exclude = ["alembic/versions/__pycache__", "venv", "uploads"]
+
+[lint]
+select = ["E9", "F63", "F7", "F82"]

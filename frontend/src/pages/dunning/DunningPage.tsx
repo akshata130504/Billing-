@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -137,24 +137,34 @@ export function DunningPage() {
     }
   }, [cardDays]);
 
-  // Customer names are not part of the case list payload; enrich from the customer directory (non-blocking).
-  const loadCustomerNames = useCallback(async () => {
-    try {
-      const res = await customerService.list({ page: 1, page_size: 100 });
-      const map: Record<string, string> = {};
-      res.items.forEach((c) => {
-        map[c.id] = c.display_name;
-      });
-      setCustomerNames(map);
-    } catch {
-      // Table falls back to customer IDs.
-    }
-  }, []);
-
   useEffect(() => {
     loadMetrics();
-    loadCustomerNames();
-  }, [loadMetrics, loadCustomerNames]);
+  }, [loadMetrics]);
+
+  // Customer names are not part of the case/card payloads. Resolve exactly the
+  // customers on screen (instead of preloading the first 100 of the directory,
+  // which missed everyone else). Non-blocking: the table falls back to IDs.
+  const requestedCustomerIds = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const ids = new Set<string>();
+    cases.data.forEach((c) => c.customer_id && ids.add(c.customer_id));
+    cards.data.forEach((card) => card.customer_id && ids.add(card.customer_id));
+    const missing = [...ids].filter((cid) => !requestedCustomerIds.current.has(cid)).slice(0, 50);
+    if (missing.length === 0) return;
+    missing.forEach((cid) => requestedCustomerIds.current.add(cid));
+    let cancelled = false;
+    void Promise.allSettled(missing.map((cid) => customerService.get(cid))).then((results) => {
+      if (cancelled) return;
+      const found: Record<string, string> = {};
+      results.forEach((r) => {
+        if (r.status === 'fulfilled') found[r.value.id] = r.value.display_name;
+      });
+      if (Object.keys(found).length > 0) setCustomerNames((prev) => ({ ...prev, ...found }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cases.data, cards.data]);
 
   useEffect(() => {
     loadCases();

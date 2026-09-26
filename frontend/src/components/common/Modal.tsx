@@ -1,6 +1,9 @@
-import React, { useEffect, useId } from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import { cn } from '../../utils/cn';
 import { X } from 'lucide-react';
+
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export interface ModalProps {
   isOpen: boolean;
@@ -22,12 +25,39 @@ export function Modal({
   size = 'md',
 }: ModalProps) {
   const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Move focus into the dialog on open, and restore it to whatever was
+  // focused before opening once the dialog closes.
+  useEffect(() => {
+    if (!isOpen) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    dialogRef.current?.focus();
+    return () => {
+      previouslyFocused?.focus?.();
+    };
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onClose();
+        return;
+      }
+      if (e.key === 'Tab' && dialogRef.current) {
+        const focusable = dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const atStart = document.activeElement === first || document.activeElement === dialogRef.current;
+        if (e.shiftKey && atStart) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -64,11 +94,13 @@ export function Modal({
 
       {/* Modal Dialog Card */}
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        tabIndex={-1}
         className={cn(
-          'relative w-full bg-white rounded-xl shadow-modal border border-slate-200 z-10 overflow-hidden transform transition-all',
+          'relative w-full bg-white rounded-xl shadow-modal border border-slate-200 z-10 overflow-hidden transform transition-all focus:outline-none',
           sizeClasses[size]
         )}
       >

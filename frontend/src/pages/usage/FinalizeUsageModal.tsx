@@ -1,14 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Info } from 'lucide-react';
 import { Button } from '../../components/common/Button';
-import { Input } from '../../components/common/Input';
 import { Select } from '../../components/common/Select';
 import { Modal } from '../../components/common/Modal';
 import { useToast } from '../../components/common/Toast';
 import { meterService } from '../../services/meterService';
 import { subscriptionService } from '../../services/subscriptionService';
 import type { SubscriptionOut } from '../../types/api';
-import type { UsageAggregateOut, UsageMeterOut } from '../../types/meters';
+import type { BillingCycleOut, UsageAggregateOut, UsageMeterOut } from '../../types/meters';
 import { formatDate, formatMoney, humanize } from '../../utils/format';
 import { formatQuantity } from './usageUtils';
 
@@ -25,6 +24,8 @@ export function FinalizeUsageModal({ isOpen, onClose, meters, onFinalized }: Fin
   const [subsLoading, setSubsLoading] = useState(false);
   const [subscriptionId, setSubscriptionId] = useState('');
   const [cycleId, setCycleId] = useState('');
+  const [cycles, setCycles] = useState<BillingCycleOut[]>([]);
+  const [cyclesLoading, setCyclesLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<UsageAggregateOut[] | null>(null);
@@ -58,11 +59,37 @@ export function FinalizeUsageModal({ isOpen, onClose, meters, onFinalized }: Fin
     };
   }, [isOpen, showToast]);
 
+  // Load the chosen subscription's billing cycles for the picker (no raw UUID entry).
+  useEffect(() => {
+    setCycleId('');
+    setCycles([]);
+    if (!subscriptionId) return;
+    let cancelled = false;
+    setCyclesLoading(true);
+    meterService
+      .listBillingCycles(subscriptionId)
+      .then((rows) => {
+        if (cancelled) return;
+        setCycles(rows);
+        const firstOpen = rows.find((c) => c.status !== 'finalized');
+        if (firstOpen) setCycleId(firstOpen.id);
+      })
+      .catch((err: any) => {
+        if (!cancelled) showToast('error', err?.message || 'Failed to load billing cycles');
+      })
+      .finally(() => {
+        if (!cancelled) setCyclesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [subscriptionId, showToast]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const next: Record<string, string> = {};
     if (!subscriptionId) next.subscription_id = 'Choose a subscription.';
-    if (!cycleId.trim()) next.cycle_id = 'Enter the billing cycle id.';
+    if (!cycleId.trim()) next.cycle_id = 'Choose a billing cycle.';
     setErrors(next);
     if (Object.keys(next).length) return;
     try {
@@ -159,15 +186,28 @@ export function FinalizeUsageModal({ isOpen, onClose, meters, onFinalized }: Fin
                 : undefined
             }
           />
-          <Input
-            label="Billing cycle ID"
+          <Select
+            label="Billing cycle"
             required
-            placeholder="UUID of the billing cycle to finalise"
             value={cycleId}
             onChange={(e) => setCycleId(e.target.value)}
+            disabled={!subscriptionId || cyclesLoading}
+            placeholder={
+              !subscriptionId
+                ? 'Select a subscription first'
+                : cyclesLoading
+                  ? 'Loading billing cycles…'
+                  : cycles.length
+                    ? 'Select a billing cycle'
+                    : 'No billing cycles yet'
+            }
+            options={cycles.map((c) => ({
+              value: c.id,
+              label: `#${c.cycle_number} · ${formatDate(c.period_start)} – ${formatDate(c.period_end)} · ${humanize(c.status)}`,
+              disabled: c.status === 'finalized',
+            }))}
             error={errors.cycle_id}
-            className="font-mono text-xs"
-            helperText="Billing cycles are not yet exposed by the subscription API, so the cycle id must be entered manually."
+            helperText="Usage is aggregated over [period start, period end). Finalized cycles are frozen. The scheduler also finalizes usage automatically at each renewal."
           />
 
           <div className="flex items-start gap-3 rounded-lg border border-blue-100 bg-blue-50/70 px-4 py-3 text-xs text-slate-700 leading-relaxed">

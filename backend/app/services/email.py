@@ -3,12 +3,20 @@
 When SMTP is not configured (`settings.email_enabled` is False) sending is a
 no-op that returns False; callers then surface links (invite / reset / pay) to
 the administrator instead so every flow still completes.
+
+Two delivery paths:
+- ``send_email``: synchronous, for callers that need an immediate result (SMTP
+  test, interactive flows that surface a fallback link).
+- ``enqueue_email``: durable, writes an ``email.send`` outbox event in the
+  caller's transaction; ``outbox_processor.process_pending_outbox`` sends it
+  with the organization's SMTP settings and retries with backoff.
 """
 import smtplib
 import ssl
+import uuid
 from email.message import EmailMessage
 from email.utils import formataddr
-from typing import Iterable, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
 
 from backend.app.core.config import settings
 from backend.app.core.logging import logger
@@ -78,6 +86,68 @@ def send_email(
             pass
     logger.info("Email '%s' sent to %s", subject, recipients)
     return True
+
+
+EMAIL_SEND_EVENT = "email.send"
+
+
+def resolve_smtp_config(db, organization_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Returns the organization's SMTP settings (tenant integration -> env fallback), or None."""
+    if not organization_id:
+        return None
+    try:
+        from backend.app.services.integrations_service import get_active_smtp_credentials
+
+        return get_active_smtp_credentials(db, organization_id)
+    except Exception as exc:  # noqa: BLE001 - fall back to env settings in send_email
+        logger.warning("Could not resolve SMTP settings for organization %s: %s", organization_id, exc)
+        return None
+
+
+def smtp_available(db, organization_id: Optional[str]) -> bool:
+    """True when either the organization or the server has an SMTP host configured."""
+    cfg = resolve_smtp_config(db, organization_id)
+    return bool((cfg or {}).get("host") or settings.SMTP_HOST)
+
+
+def enqueue_email(
+    db,
+    organization_id: str,
+    to: Sequence[str] | str,
+    subject: str,
+    text_body: str,
+    html_body: Optional[str] = None,
+    reply_to: Optional[str] = None,
+    notification_delivery_id: Optional[str] = None,
+):
+    """Queues an email for durable delivery via the transactional outbox.
+
+    The event is committed together with the caller's transaction and sent by
+    ``outbox_processor.process_pending_outbox`` using the organization's SMTP
+    configuration, with retry/backoff on SMTP errors. Attachments are not
+    supported on this path (use ``send_email`` directly).
+    """
+    from backend.app.models.events import OutboxEvent, OutboxStatus
+
+    recipients = [to] if isinstance(to, str) else [r for r in to if r]
+    event = OutboxEvent(
+        organization_id=organization_id,
+        event_type=EMAIL_SEND_EVENT,
+        aggregate_type="notification_delivery" if notification_delivery_id else "email",
+        aggregate_id=notification_delivery_id or str(uuid.uuid4()),
+        payload={
+            "to": recipients,
+            "subject": subject,
+            "text_body": text_body,
+            "html_body": html_body,
+            "reply_to": reply_to,
+            "notification_delivery_id": notification_delivery_id,
+        },
+        status=OutboxStatus.PENDING,
+    )
+    db.add(event)
+    db.flush()
+    return event
 
 
 def frontend_url(path: str) -> str:

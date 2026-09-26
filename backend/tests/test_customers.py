@@ -46,7 +46,7 @@ def test_create_customer_assigns_number_and_portal_url(client, auth_headers, db)
     assert body["currency"] == "INR"
     assert body["payment_terms_days"] == 15
     assert body["status"] == "active"
-    assert body["portal_url"].endswith(f"/portal/{db.get(Customer, body['id']).portal_token}")
+    assert body["portal_url"].endswith("/portal")
     assert len(body["contacts"]) == 2
     assert body["contacts"][0]["is_primary"] is True
     assert body["stats"] is None
@@ -249,3 +249,35 @@ def test_delete_customer_guards(client, tenant, db):
     assert resp.status_code == 204
     assert client.get(f"{BASE}/{free.id}", headers=admin_headers).status_code == 404
     assert db.query(AuditLog).filter_by(entity_id=free.id, action="CUSTOMER_DELETED").count() == 1
+
+
+def test_delete_blocked_by_credit_notes_and_currency_locked_after_billing(client, tenant, db):
+    from backend.app.models.credits import CreditNote, CreditNoteStatus
+
+    admin_headers = tenant.headers_for_role(MemberRole.ADMIN)
+    customer = tenant.customer()
+    db.add(
+        CreditNote(
+            organization_id=tenant.organization.id,
+            credit_note_number=f"CN-{customer.id[:6]}",
+            customer_id=customer.id,
+            status=CreditNoteStatus.ISSUED,
+            issue_date=date.today(),
+            currency="INR",
+            subtotal=Decimal("10.00"),
+            tax_amount=Decimal("0.00"),
+            total=Decimal("10.00"),
+            balance_remaining=Decimal("10.00"),
+        )
+    )
+    db.commit()
+    resp = client.delete(f"{BASE}/{customer.id}", headers=admin_headers)
+    assert resp.status_code == 409
+    assert "credit notes" in resp.json()["error"]["details"]["references"]
+
+    billed = tenant.customer()
+    tenant.invoice(billed)
+    resp = client.patch(f"{BASE}/{billed.id}", json={"currency": "USD"}, headers=admin_headers)
+    assert resp.status_code == 409, resp.text
+    fresh = tenant.customer()
+    assert client.patch(f"{BASE}/{fresh.id}", json={"currency": "USD"}, headers=admin_headers).status_code == 200

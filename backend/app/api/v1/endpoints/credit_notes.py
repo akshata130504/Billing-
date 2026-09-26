@@ -52,6 +52,7 @@ def create_credit_note(
         customer_id=body.customer_id,
         lines=[line.model_dump() for line in body.lines],
         reason=body.reason,
+        invoice_id=body.invoice_id,
         currency=body.currency,
     )
     # Refresh to load relationships
