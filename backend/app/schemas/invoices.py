@@ -121,7 +121,14 @@ class InvoiceOut(BaseModel):
     period_start: Optional[date] = None
     period_end: Optional[date] = None
     days_overdue: int
+    # Only set (True/False) right after a /send or /send-reminder call whose
+    # org has an SMTP integration configured; None on a plain fetch. Lets the
+    # frontend warn when the status flips to "sent" but the email itself
+    # didn't actually go out, instead of implying delivery succeeded.
+    email_delivery_failed: Optional[bool] = None
     payments: List[InvoicePaymentRef] = []
+    approval_request_id: Optional[str] = None
+    is_pending_approval: bool = False
     created_by: Optional[UserRef] = None
     created_at: datetime
     updated_at: datetime

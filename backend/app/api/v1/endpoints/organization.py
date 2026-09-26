@@ -1,7 +1,7 @@
 """Organization settings and team endpoints (contract §3). Mounted with an empty prefix."""
 from typing import List
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, File, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import CurrentContext, get_db, require_admin, require_viewer
@@ -77,3 +77,26 @@ def deactivate_member(
 ) -> Response:
     organization_service.deactivate_member(db, ctx, membership_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/organization/logo", summary="Upload organization logo")
+async def upload_org_logo(
+    file: UploadFile = File(...),
+    ctx: CurrentContext = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    from backend.app.services import logo_service
+    logo_url = await logo_service.save_organization_logo(db, ctx.organization, file)
+    db.commit()
+    return {"logo_url": logo_url}
+
+
+@router.delete("/organization/logo", summary="Remove organization logo")
+def delete_org_logo(
+    ctx: CurrentContext = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    from backend.app.services import logo_service
+    logo_service.delete_organization_logo(db, ctx.organization)
+    db.commit()
+    return {"status": "success", "logo_url": None}

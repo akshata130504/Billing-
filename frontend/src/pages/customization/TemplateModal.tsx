@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { Eye } from 'lucide-react';
+import React, { useEffect, useState, useRef } from 'react';
+import { Eye, Upload, X } from 'lucide-react';
+import { organizationService } from '../../services/organizationService';
 import { Modal } from '../../components/common/Modal';
 import { Button } from '../../components/common/Button';
 import { Input } from '../../components/common/Input';
@@ -90,6 +91,24 @@ export function TemplateModal({ isOpen, template, onClose, onSaved, onPreview }:
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsUploadingLogo(true);
+      const res = await organizationService.uploadLogo(file);
+      set('logo_url', res.logo_url);
+      showToast('success', 'Logo uploaded', 'Logo was uploaded successfully.');
+    } catch (err: any) {
+      showToast('error', 'Upload failed', err?.response?.data?.detail || err.message || 'Could not upload logo.');
+    } finally {
+      setIsUploadingLogo(false);
+      if (logoInputRef.current) logoInputRef.current.value = '';
+    }
+  };
   const isEdit = !!template;
 
   useEffect(() => {
@@ -106,8 +125,8 @@ export function TemplateModal({ isOpen, template, onClose, onSaved, onPreview }:
     if (!form.name.trim()) next.name = 'Template name is required';
     if (!/^#[0-9a-fA-F]{6}$/.test(form.primary_color)) next.primary_color = 'Use a 6-digit hex colour, e.g. #1F2937';
     if (!/^#[0-9a-fA-F]{6}$/.test(form.accent_color)) next.accent_color = 'Use a 6-digit hex colour, e.g. #3B82F6';
-    if (form.logo_url.trim() && !/^https?:\/\//i.test(form.logo_url.trim())) {
-      next.logo_url = 'Logo URL must start with http:// or https://';
+    if (form.logo_url.trim() && !/^https?:\/\//i.test(form.logo_url.trim()) && !form.logo_url.trim().startsWith('/uploads/')) {
+      next.logo_url = 'Logo URL must start with http:// or https:// or /uploads/';
     }
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -249,16 +268,63 @@ export function TemplateModal({ isOpen, template, onClose, onSaved, onPreview }:
               </datalist>
             </div>
           </div>
-          <Input
-            label="Logo URL"
-            type="url"
-            value={form.logo_url}
-            maxLength={500}
-            placeholder="https://…/logo.png"
-            onChange={(e) => set('logo_url', e.target.value)}
-            error={errors.logo_url}
-            helperText="Public image URL. Leave blank to use the organization logo."
-          />
+          <div className="space-y-2">
+            <div className="flex items-end gap-3">
+              <div className="flex-1">
+                <Input
+                  label="Logo URL"
+                  type="text"
+                  value={form.logo_url}
+                  maxLength={500}
+                  placeholder="https://…/logo.png or upload a file"
+                  onChange={(e) => set('logo_url', e.target.value)}
+                  error={errors.logo_url}
+                  helperText="Public image URL or upload an image file. Leave blank to use the organization logo."
+                />
+              </div>
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={handleLogoUpload}
+                disabled={saving || isUploadingLogo}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mb-1"
+                onClick={() => logoInputRef.current?.click()}
+                disabled={saving || isUploadingLogo}
+                isLoading={isUploadingLogo}
+                leadingIcon={<Upload className="w-3.5 h-3.5" />}
+              >
+                Upload File
+              </Button>
+            </div>
+            {form.logo_url && (
+              <div className="flex items-center gap-3 p-2 border border-slate-200 rounded-lg bg-slate-50 w-fit">
+                <img
+                  src={form.logo_url}
+                  alt="Logo preview"
+                  className="max-h-8 max-w-[120px] object-contain"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-red-600 hover:text-red-700 h-7 px-2"
+                  onClick={() => set('logo_url', '')}
+                >
+                  <X className="w-3.5 h-3.5 mr-1" /> Remove
+                </Button>
+              </div>
+            )}
+          </div>
         </fieldset>
 
         {/* Content */}

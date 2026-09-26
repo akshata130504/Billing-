@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, FormEvent } from 'react';
+import { useState, useEffect, useRef, useMemo, useId, FormEvent } from 'react';
 import { usePayments, RecordPaymentInput } from '../PaymentsContext';
 import { PaymentType, PaymentMethod, InvoiceAllocation } from '../types';
 import {
@@ -25,6 +25,9 @@ interface RecordPaymentModalProps {
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 /** Half a paise: anything smaller is float noise, not a real overage. */
 const CENT_TOLERANCE = 0.005;
+
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 const PAYMENT_METHODS: PaymentMethod[] = [
   'UPI',
@@ -86,6 +89,61 @@ export function RecordPaymentModal({
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+
+  // Focus management: move focus into the dialog on open, restore it on close,
+  // trap Tab/Shift+Tab within whichever layer (main dialog or nested create-customer
+  // dialog) is currently on top, and let Escape close the topmost layer only.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const createCustomerDialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const createCustomerTitleId = useId();
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    dialogRef.current?.focus();
+    return () => {
+      previouslyFocused?.focus?.();
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        if (isCreateCustomerModalOpen) {
+          setIsCreateCustomerModalOpen(false);
+        } else {
+          onClose();
+        }
+        return;
+      }
+      if (e.key === 'Tab') {
+        const container = isCreateCustomerModalOpen
+          ? createCustomerDialogRef.current
+          : dialogRef.current;
+        if (!container) return;
+        const focusable = container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const atStart = document.activeElement === first || document.activeElement === container;
+        if (e.shiftKey && atStart) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isCreateCustomerModalOpen, onClose]);
+
+  // No initial-focus effect needed for the nested create-customer dialog:
+  // its name input already carries autoFocus.
 
   const selectedCustomer = customers.find((c) => c.id === customerId);
   const outstandingInvoices = selectedCustomer?.outstandingInvoices || [];
@@ -350,7 +408,14 @@ export function RecordPaymentModal({
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col focus:outline-none"
+      >
         {/* Modal Header */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50/50">
           <div className="flex items-center gap-2.5">
@@ -358,7 +423,7 @@ export function RecordPaymentModal({
               <CreditCard className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900">Record Payment</h3>
+              <h3 id={titleId} className="text-base font-bold text-slate-900">Record Payment</h3>
               <p className="text-xs text-slate-500">
                 Log a received customer payment, settle outstanding invoices or record advance credit.
               </p>
@@ -817,13 +882,20 @@ export function RecordPaymentModal({
       {/* Create New Customer Modal */}
       {isCreateCustomerModalOpen && (
         <div className="fixed inset-0 z-60 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          <div
+            ref={createCustomerDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={createCustomerTitleId}
+            tabIndex={-1}
+            className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150 focus:outline-none"
+          >
             <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center shrink-0">
                   <UserPlus className="w-4 h-4" />
                 </div>
-                <h4 className="text-sm font-bold text-slate-900">Create New Customer</h4>
+                <h4 id={createCustomerTitleId} className="text-sm font-bold text-slate-900">Create New Customer</h4>
               </div>
               <button
                 type="button"

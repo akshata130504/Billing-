@@ -55,6 +55,19 @@ export const customizationService = {
     return data;
   },
 
+  uploadTemplateLogo: async (id: string, file: File): Promise<{ logo_url: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const { data } = await apiClient.post<{ logo_url: string }>(`/templates/${id}/logo`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
+
+  deleteTemplateLogo: async (id: string): Promise<void> => {
+    await apiClient.delete(`/templates/${id}/logo`);
+  },
+
   // -------------------------------------------------------------------------
   // Reporting tags
   // -------------------------------------------------------------------------

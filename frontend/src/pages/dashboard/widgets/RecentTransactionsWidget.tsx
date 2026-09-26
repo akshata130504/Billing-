@@ -23,7 +23,7 @@ export function RecentTransactionsWidget({ transactions }: RecentTransactionsWid
       </div>
 
       {transactions.length === 0 ? (
-        <p className="text-xs text-slate-400 py-8 text-center">No payments recorded yet.</p>
+        <p className="text-xs text-slate-500 py-8 text-center">No payments recorded yet.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">

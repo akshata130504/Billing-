@@ -124,6 +124,8 @@ export interface Invoice {
   public_url?: string;
   public_token?: string;
   pdf_url?: string;
+  /** Only set right after /send or /send-reminder; absent on a plain fetch. */
+  email_delivery_failed?: boolean | null;
   created_at: string;
   updated_at: string;
 }

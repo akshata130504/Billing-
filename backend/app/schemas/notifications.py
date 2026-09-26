@@ -24,6 +24,33 @@ class NotificationTemplateCreateIn(BaseModel):
     is_active: bool = True
 
 
+class NotificationTemplateUpdateIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    subject_template: Optional[str] = Field(default=None, max_length=255)
+    body_template: Optional[str] = Field(default=None, min_length=1)
+    description: Optional[str] = Field(default=None, max_length=300)
+    is_active: Optional[bool] = None
+
+
+class NotificationTemplatePreviewIn(BaseModel):
+    subject_template: Optional[str] = None
+    body_template: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None
+
+
+class NotificationTemplatePreviewOut(BaseModel):
+    subject: str
+    body_html: str
+    body_text: str
+
+
+class NotificationTemplateTestSendIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    recipient: str = Field(..., min_length=3, max_length=255)
+
+
 class NotificationTemplateOut(BaseModel):
     id: str
     name: str
@@ -35,6 +62,7 @@ class NotificationTemplateOut(BaseModel):
     is_active: bool
     version: int
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
 
 class NotificationDispatchIn(BaseModel):

@@ -129,7 +129,7 @@ export function TemplatePreviewModal({ template, onClose }: TemplatePreviewModal
               <div className="rounded-xl border border-slate-200 bg-slate-100 p-3">
                 <iframe
                   title={`Preview of ${template.name}`}
-                  sandbox=""
+                  sandbox="allow-same-origin"
                   srcDoc={preview.rendered_html}
                   className="w-full h-[520px] bg-white rounded-lg border border-slate-200 shadow-card"
                 />

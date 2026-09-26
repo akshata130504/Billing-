@@ -1,6 +1,6 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, useRef, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Save } from 'lucide-react';
+import { Save, Upload, X } from 'lucide-react';
 import { Input } from '../../components/common/Input';
 import { PhoneInput } from '../../components/common/PhoneInput';
 import { Select } from '../../components/common/Select';
@@ -120,6 +120,34 @@ export function OrganizationTab({ organization, canEdit }: { organization: Organ
   const { refreshMe } = useAuth();
   const [values, setValues] = useState<FormValues>(() => toForm(organization));
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsUploadingLogo(true);
+      const res = await organizationService.uploadLogo(file);
+      setValues((prev) => ({ ...prev, logo_url: res.logo_url }));
+      showToast('success', 'Logo uploaded', 'Organization logo was uploaded successfully.');
+    } catch (err: any) {
+      showToast('error', 'Upload failed', err?.response?.data?.detail || err.message || 'Could not upload logo.');
+    } finally {
+      setIsUploadingLogo(false);
+      if (logoInputRef.current) logoInputRef.current.value = '';
+    }
+  };
+
+  const handleLogoRemove = async () => {
+    try {
+      await organizationService.deleteLogo();
+      setValues((prev) => ({ ...prev, logo_url: '' }));
+      showToast('success', 'Logo removed', 'Organization logo was removed.');
+    } catch (err: any) {
+      setValues((prev) => ({ ...prev, logo_url: '' }));
+    }
+  };
 
   useEffect(() => {
     setValues(toForm(organization));
@@ -182,7 +210,55 @@ export function OrganizationTab({ organization, canEdit }: { organization: Organ
           <Input label="Billing email" type="email" value={values.email} onChange={set('email')} error={errors.email} disabled={disabled} />
           <PhoneInput label="Phone" value={values.phone} onChange={(v) => setValues((prev) => ({ ...prev, phone: v }))} error={errors.phone} disabled={disabled} />
           <Input label="Website" type="url" placeholder="https://" value={values.website} onChange={set('website')} error={errors.website} disabled={disabled} />
-          <Input label="Logo URL" type="url" placeholder="https://" value={values.logo_url} onChange={set('logo_url')} error={errors.logo_url} disabled={disabled} helperText="Public image URL used on documents." />
+          <div className="space-y-2 sm:col-span-2">
+            <div className="flex items-end gap-3">
+              <div className="flex-1">
+                <Input label="Logo URL" type="url" placeholder="https://" value={values.logo_url} onChange={set('logo_url')} error={errors.logo_url} disabled={disabled} helperText="Public image URL or upload an image file." />
+              </div>
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={handleLogoUpload}
+                disabled={disabled || isUploadingLogo}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mb-1"
+                onClick={() => logoInputRef.current?.click()}
+                disabled={disabled || isUploadingLogo}
+                isLoading={isUploadingLogo}
+                leadingIcon={<Upload className="w-3.5 h-3.5" />}
+              >
+                Upload File
+              </Button>
+            </div>
+            {values.logo_url && (
+              <div className="flex items-center gap-3 p-2 border border-slate-200 rounded-lg bg-slate-50 w-fit">
+                <img
+                  src={values.logo_url}
+                  alt="Logo preview"
+                  className="max-h-8 max-w-[120px] object-contain"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-red-600 hover:text-red-700 h-7 px-2"
+                  onClick={handleLogoRemove}
+                  disabled={disabled}
+                >
+                  <X className="w-3.5 h-3.5 mr-1" /> Remove
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-3 text-xs text-slate-500">
           <span className="font-medium text-slate-600">Slug</span>

@@ -63,6 +63,8 @@ def test_send_and_access_public_invoice(client, tenant, auth_headers):
     sent_inv = send_resp.json()
     assert sent_inv["status"] == "sent"
     assert sent_inv["public_url"] is not None
+    # No SMTP configured for this org (test default) - nothing to warn about.
+    assert sent_inv["email_delivery_failed"] is False
 
     # Public token access (without auth)
     public_token = sent_inv["public_url"].split("/")[-1]
@@ -71,6 +73,68 @@ def test_send_and_access_public_invoice(client, tenant, auth_headers):
     pub_data = pub_resp.json()
     assert pub_data["invoice_number"] == sent_inv["invoice_number"]
     assert pub_data["total"] == sent_inv["total"]
+
+
+def test_send_invoice_flags_email_delivery_failure_when_smtp_configured(client, tenant, auth_headers, db):
+    """The invoice still transitions to SENT even if the email itself fails, but the
+    response must say so instead of implying delivery succeeded (see email_delivery_failed)."""
+    from unittest.mock import patch
+    from backend.app.schemas.integrations import SMTPConfigureRequest
+    from backend.app.services import integrations_service
+
+    with patch.object(integrations_service, "test_smtp_connection", return_value={"success": True, "message": "OK"}):
+        integrations_service.save_smtp_config(
+            db,
+            tenant.organization.id,
+            SMTPConfigureRequest(
+                host="smtp.example.com",
+                port=587,
+                username="apikey",
+                password="secret",
+                from_email="billing@example.com",
+            ),
+        )
+
+    customer = tenant.customer()
+    inv = _create_draft_invoice(client, auth_headers, customer)
+
+    with patch("backend.app.services.invoice_service.send_email", side_effect=OSError("connection refused")):
+        send_resp = client.post(f"{BASE}/{inv['id']}/send", headers=auth_headers)
+
+    assert send_resp.status_code == 200, send_resp.text
+    sent_inv = send_resp.json()
+    assert sent_inv["status"] == "sent"
+    assert sent_inv["email_delivery_failed"] is True
+
+
+def test_send_invoice_email_delivery_ok_when_smtp_configured_and_succeeds(client, tenant, auth_headers, db):
+    from unittest.mock import patch
+    from backend.app.schemas.integrations import SMTPConfigureRequest
+    from backend.app.services import integrations_service
+
+    with patch.object(integrations_service, "test_smtp_connection", return_value={"success": True, "message": "OK"}):
+        integrations_service.save_smtp_config(
+            db,
+            tenant.organization.id,
+            SMTPConfigureRequest(
+                host="smtp.example.com",
+                port=587,
+                username="apikey",
+                password="secret",
+                from_email="billing@example.com",
+            ),
+        )
+
+    customer = tenant.customer()
+    inv = _create_draft_invoice(client, auth_headers, customer)
+
+    with patch("backend.app.services.invoice_service.send_email", return_value=True):
+        send_resp = client.post(f"{BASE}/{inv['id']}/send", headers=auth_headers)
+
+    assert send_resp.status_code == 200, send_resp.text
+    sent_inv = send_resp.json()
+    assert sent_inv["status"] == "sent"
+    assert sent_inv["email_delivery_failed"] is False
 
 
 def test_record_offline_payment_and_pay_in_full(client, tenant, auth_headers):

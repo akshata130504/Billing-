@@ -56,6 +56,7 @@ ROUTERS = [
     ("expenses", "/expenses", ["Expenses"]),
     ("webhooks", "/webhooks", ["Webhooks"]),
     ("integrations", "", ["Settings - Integrations"]),
+    ("notifications", "", ["Notifications & Email Templates"]),
 ]
 
 # In test, staging, and production environments, missing endpoints MUST fail fast.

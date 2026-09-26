@@ -208,7 +208,7 @@ export function RoomiChatbot() {
         <div className="relative group">
           {/* Subtle Hover Tooltip */}
           <div
-            className="absolute -top-10 right-1/2 translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none whitespace-nowrap bg-slate-900/90 backdrop-blur-sm text-white text-xs font-medium px-3 py-1 rounded-full shadow-lg border border-slate-700/50 flex items-center gap-1.5"
+            className="absolute -top-10 right-0 opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none whitespace-nowrap bg-slate-900/90 backdrop-blur-sm text-white text-xs font-medium px-3 py-1 rounded-full shadow-lg border border-slate-700/50 flex items-center gap-1.5"
             role="tooltip"
           >
             <Sparkles className="w-3 h-3 text-purple-300" />

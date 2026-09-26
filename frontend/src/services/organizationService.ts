@@ -37,4 +37,17 @@ export const organizationService = {
   deactivateMember: async (membershipId: string): Promise<void> => {
     await apiClient.delete(`/team/${membershipId}`);
   },
+
+  uploadLogo: async (file: File): Promise<{ logo_url: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const { data } = await apiClient.post<{ logo_url: string }>('/organization/logo', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
+
+  deleteLogo: async (): Promise<void> => {
+    await apiClient.delete('/organization/logo');
+  },
 };
