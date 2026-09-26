@@ -16,6 +16,9 @@ else:
     engine_kwargs["pool_pre_ping"] = True
     engine_kwargs["pool_size"] = settings.DB_POOL_SIZE
     engine_kwargs["max_overflow"] = settings.DB_MAX_OVERFLOW
+    # Pin the session to UTC so timestamptz values come back in UTC (API renders "...Z")
+    # and SQL-side date/time comparisons don't depend on the database server's timezone.
+    engine_kwargs["connect_args"] = {"options": "-c timezone=UTC"}
 
 engine = create_engine(database_url, **engine_kwargs)
 
@@ -53,9 +56,11 @@ def check_db_health() -> Dict[str, Any]:
             "url_masked": str(engine.url).split("@")[-1] if "@" in str(engine.url) else str(engine.url),
         }
     except Exception as exc:
+        # Log the driver error (may contain host names / usernames) but never return it to
+        # unauthenticated callers of the health endpoints.
         logger.warning("Database healthcheck connection failed: %s", str(exc))
         return {
             "status": "disconnected",
             "dialect": engine.dialect.name,
-            "error": str(exc),
+            "error": "database unreachable",
         }

@@ -23,7 +23,7 @@ os.environ["AUTH_RATE_LIMIT"] = "1000/minute"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-from sqlalchemy.orm import Session  # noqa: E402
+from sqlalchemy.orm import Session, close_all_sessions  # noqa: E402
 
 from backend.app.core.database import Base, SessionLocal, engine  # noqa: E402
 from backend.app.core.security import create_access_token, hash_password  # noqa: E402
@@ -36,6 +36,10 @@ def _create_schema():
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     yield
+    # A session left open by any test would hold row/table locks and make DROP TABLE wait
+    # forever on PostgreSQL; close every ORM session and return pooled connections first.
+    close_all_sessions()
+    engine.dispose()
     Base.metadata.drop_all(bind=engine)
     engine.dispose()
     if _TEST_DB_PATH.exists():
