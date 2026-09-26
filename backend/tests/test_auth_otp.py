@@ -335,8 +335,10 @@ def test_smtp_failure_handled_safely(client, db):
                 "password": PASSWORD,
             },
         )
-        assert r.status_code == 422
-        assert "Could not deliver verification email" in r.text
+        # A clear 503 with a reason category (was a generic 422); never a hung request -> proxy 502.
+        assert r.status_code == 503, r.text
+        assert r.json()["error"]["code"] == "EMAIL_DELIVERY_FAILED"
+        assert "verification code" in r.json()["error"]["message"]
 
     # No pending record committed if email delivery failed
     pending = db.scalars(select(PendingSignup).where(PendingSignup.email == email)).first()

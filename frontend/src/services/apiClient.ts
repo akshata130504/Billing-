@@ -102,6 +102,19 @@ export function toApiError(error: unknown): ApiError {
         message: 'Unable to reach the server. Check your connection and try again.',
       };
     }
+    // No JSON error envelope: the reply came from the reverse proxy (nginx/Caddy), not the API -
+    // typically the backend was restarting, crashed, or timed out. Say so instead of
+    // "Request failed with status code 502".
+    if (status === 502 || status === 503 || status === 504) {
+      return {
+        code: status === 504 ? 'GATEWAY_TIMEOUT' : 'SERVICE_UNAVAILABLE',
+        message:
+          status === 504
+            ? 'The server took too long to respond. Please try again in a moment.'
+            : 'The service is temporarily unavailable. Please try again in a moment.',
+        status,
+      };
+    }
     return {
       code: `HTTP_${status}`,
       message: axiosError.message || 'An unexpected error occurred.',

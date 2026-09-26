@@ -57,7 +57,9 @@ def test_email_sending_success_with_text_and_html():
             )
 
             assert delivered is True
-            mock_smtp.assert_called_once_with("smtp.sendgrid.net", 587, timeout=20)
+            # Constructed unconnected with the per-step timeout, then connected via the bounded hook.
+            mock_smtp.assert_called_once_with(timeout=settings.SMTP_TIMEOUT_SECONDS)
+            server_instance.connect.assert_called_once_with("smtp.sendgrid.net", 587)
             server_instance.starttls.assert_called_once()
             server_instance.login.assert_called_once_with("apikey", "secret_key_123")
             server_instance.send_message.assert_called_once()
@@ -149,7 +151,8 @@ def test_smtp_failure_handling():
              patch.object(settings, "SMTP_USERNAME", "user"), \
              patch.object(settings, "SMTP_PASSWORD", "super_secret_password"):
 
-            with pytest.raises(smtplib.SMTPAuthenticationError) as exc_info:
+            # Wrapped in EmailDeliveryError (an SMTPException) with a secret-free reason category.
+            with pytest.raises(smtplib.SMTPException) as exc_info:
                 email.send_email(
                     to="user@test.com",
                     subject="Fail",
@@ -157,6 +160,7 @@ def test_smtp_failure_handling():
                 )
             # Ensure the secret password is not part of the exception string
             assert "super_secret_password" not in str(exc_info.value)
+            assert isinstance(exc_info.value, email.EmailDeliveryError) and exc_info.value.reason == "auth"
 
 
 def test_smtp_configuration_validation():

@@ -443,3 +443,30 @@ describe('apiClient interceptors', () => {
     expect(tokenStorage.getAccessToken()).toBe('acc-1');
   });
 });
+
+
+describe('toApiError: proxy errors without a JSON envelope', () => {
+  it('turns an nginx 502 HTML page into a readable message instead of "Request failed with status code 502"', () => {
+    const err = toApiError(axiosErrorWithResponse(502, '<html>502 Bad Gateway</html>', 'Request failed with status code 502'));
+    expect(err.status).toBe(502);
+    expect(err.code).toBe('SERVICE_UNAVAILABLE');
+    expect(err.message).not.toContain('status code');
+    expect(err.message).toMatch(/temporarily unavailable/i);
+  });
+
+  it('maps 504 to a timeout message', () => {
+    const err = toApiError(axiosErrorWithResponse(504, '', 'Request failed with status code 504'));
+    expect(err.code).toBe('GATEWAY_TIMEOUT');
+    expect(err.message).toMatch(/too long/i);
+  });
+
+  it('still prefers the backend envelope message (e.g. the signup 503 EMAIL_DELIVERY_FAILED)', () => {
+    const err = toApiError(
+      axiosErrorWithResponse(503, {
+        error: { code: 'EMAIL_DELIVERY_FAILED', message: "We couldn't reach the email server to send your verification code.", details: { reason: 'unreachable' } },
+      })
+    );
+    expect(err.code).toBe('EMAIL_DELIVERY_FAILED');
+    expect(err.message).toContain('verification code');
+  });
+});
