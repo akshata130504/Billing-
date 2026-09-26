@@ -24,7 +24,7 @@ from backend.app.schemas.trials import (
     TrialPeriodOut,
     TrialReportsOut,
 )
-from backend.app.services import subscription_service, trial_service
+from backend.app.services import subscription_service, timezones, trial_service
 from backend.app.services.pagination import PageParams, page_params, paginate
 
 router = APIRouter()
@@ -74,7 +74,7 @@ def list_trials(
         query = query.where(TrialPeriod.status == status_)
 
     if expiring_soon:
-        today = date.today()
+        today = timezones.org_today(ctx.organization)
         query = query.where(
             TrialPeriod.status == TrialPeriodStatus.ACTIVE,
             TrialPeriod.trial_end_date <= today + timedelta(days=7),

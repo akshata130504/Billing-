@@ -36,3 +36,16 @@ describe('quoteService PDF export', () => {
     );
   });
 });
+
+describe('quoteService.convertToSubscription', () => {
+  it('posts the options to the convert-to-subscription endpoint and returns the subscription', async () => {
+    const { apiClient } = await import('./apiClient');
+    const post = vi
+      .spyOn(apiClient, 'post')
+      .mockResolvedValue({ data: { id: 'sub-1', subscription_number: 'SUB-000001' } } as never);
+    const sub = await quoteService.convertToSubscription('q-1', { trial_days: 7 });
+    expect(post).toHaveBeenCalledWith('/quotes/q-1/convert-to-subscription', { trial_days: 7 });
+    expect(sub.id).toBe('sub-1');
+    post.mockRestore();
+  });
+});

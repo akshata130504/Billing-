@@ -82,6 +82,16 @@ class OfferingCreate(BaseModel):
     def _hsn_sac(cls, v):
         return validate_hsn_sac(v)
 
+    @field_validator("pricing_tiers")
+    @classmethod
+    def _validate_tier_brackets(cls, v):
+        # Reject overlapping / inverted / negative brackets and a non-final open-ended bracket
+        # at save time (same bracket semantics the pricing engine uses when billing).
+        from backend.app.services.pricing_engine import validate_pricing_tiers
+
+        validate_pricing_tiers(v)
+        return v
+
 
 class OfferingUpdate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
@@ -116,6 +126,16 @@ class OfferingUpdate(BaseModel):
     @classmethod
     def _hsn_sac(cls, v):
         return validate_hsn_sac(v)
+
+    @field_validator("pricing_tiers")
+    @classmethod
+    def _validate_tier_brackets(cls, v):
+        # Reject overlapping / inverted / negative brackets and a non-final open-ended bracket
+        # at save time (same bracket semantics the pricing engine uses when billing).
+        from backend.app.services.pricing_engine import validate_pricing_tiers
+
+        validate_pricing_tiers(v)
+        return v
 
 
 class OfferingOut(BaseModel):

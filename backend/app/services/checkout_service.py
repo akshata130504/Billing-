@@ -56,7 +56,7 @@ from backend.app.schemas.checkout import (
     CheckoutSessionCreate,
     PublicCheckoutView,
 )
-from backend.app.services import audit, gst, invoice_service, payment_service, razorpay_gateway
+from backend.app.services import audit, gst, invoice_service, payment_service, razorpay_gateway, timezones
 from backend.app.services.gateways.registry import get_gateway_adapter
 from backend.app.services.money import D, LineInput, compute_totals, q2
 from backend.app.services.numbering import next_number
@@ -779,7 +779,7 @@ def _fulfill_session(
             plan = session.plan or db.get(Plan, session.plan_id)
             if plan is None:
                 raise ValidationAppError("The plan for this checkout no longer exists.")
-            today = date.today()
+            today = timezones.org_today_for_id(db, session.organization_id)
             period_start = today
             period_end = period_end_for(today, plan, today.day)
             subscription = Subscription(

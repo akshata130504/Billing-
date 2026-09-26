@@ -32,6 +32,15 @@ export interface QuoteCustomerRef {
   phone?: string;
 }
 
+export interface QuoteToSubscriptionInput {
+  start_date?: string;
+  /** Omit to use the plan's default trial. */
+  trial_days?: number;
+  auto_renewal?: boolean;
+  generate_first_invoice?: boolean;
+  notes?: string;
+}
+
 export interface QuoteItemOut {
   id: string;
   offering_id?: string;
@@ -100,6 +109,8 @@ export interface Quote {
   accepted_at?: string;
   declined_at?: string;
   converted_invoice_id?: string;
+  /** Set when the accepted quote was converted into a subscription. */
+  converted_subscription_id?: string | null;
   approval_request_id?: string;
   /** Only set on the send response: false when the customer email could not be delivered. */
   email_sent?: boolean | null;

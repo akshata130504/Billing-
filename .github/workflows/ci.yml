@@ -21,7 +21,7 @@ jobs:
   backend:
     name: Backend (pytest + migrations on PostgreSQL 16)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     services:
       postgres:
@@ -43,7 +43,7 @@ jobs:
       # while still exercising real settings paths.
       ENVIRONMENT: test
       DEBUG: "false"
-      SECRET_KEY: ci-only-secret-key-0123456789abcdef0123456789abcdef
+      SECRET_KEY: ci-only-secret-key-0123456789abcdef0123456789abcdef  # gitleaks:allow (throwaway CI value)
       SCHEDULER_ENABLED: "false"
       PGPASSWORD: postgres
 
@@ -70,32 +70,38 @@ jobs:
         run: ruff check backend
 
       - name: Dependency vulnerability audit (pip-audit)
-        # NON-BLOCKING for now (continue-on-error) so a newly published CVE does not
-        # stop unrelated work. Review the output; flip to blocking once the baseline is clean.
-        continue-on-error: true
+        # BLOCKING: any known vulnerability in a pinned runtime dependency fails the build.
         run: pip-audit -r backend/requirements.txt --progress-spinner off
 
-      - name: Apply Alembic migrations against a fresh database
+      - name: Validate Alembic migrations (upgrade, drift check, downgrade -1, re-upgrade)
         # Separate database from the test suite so drop_all/create_all in
         # conftest.py never interferes with what the migrations create.
+        # Every command is BLOCKING (bash -e): a failing migration, a broken downgrade of
+        # the newest revision, or model/migration drift (`alembic check`) fails the build.
         env:
           DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/rooman_migrate
         run: |
-          psql -h localhost -U postgres -d postgres -c 'CREATE DATABASE rooman_migrate;'
+          set -euo pipefail
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE rooman_migrate;'
           alembic -c backend/alembic.ini upgrade head
           alembic -c backend/alembic.ini current --verbose
-          # Drift check. Still a WARNING: 5 known index differences (indexes created by
-          # migrations under custom names but not declared in the models:
-          # ix_subscriptions_org_status, ix_org_integrations_org_id/_provider vs the
-          # model's auto-named ix_organization_integrations_*). Once the models declare
-          # them, drop the `|| echo` so drift fails the build.
-          alembic -c backend/alembic.ini check || echo "::warning title=Alembic drift::Models differ from the migrations; run 'alembic revision --autogenerate'"
+          alembic -c backend/alembic.ini check
+          alembic -c backend/alembic.ini downgrade -1
+          alembic -c backend/alembic.ini upgrade head
+          alembic -c backend/alembic.ini check
 
+      - name: Security test suite on PostgreSQL (explicit gate)
+        # Run the security-critical tests on their own so a failure is unmistakable in the
+        # log (they also run again as part of the full suite below).
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/rooman_test
+        run: |
+          pytest -q             backend/tests/test_security_audit_remediation.py             backend/tests/test_auth*.py             backend/tests/test_payments_hardening.py             backend/tests/test_hosted_checkout_payments.py             backend/tests/test_webhooks.py             backend/tests/test_postgres_concurrency.py             backend/tests/test_config_security.py
 
       - name: Run test suite on PostgreSQL
-        # Includes backend/tests/test_migrations.py::test_postgres_enums_match_python_enums,
-        # which runs `alembic upgrade head` into a scratch database and compares every
-        # Postgres enum type with the Python enum the models use.
+        # Includes backend/tests/test_migrations.py::test_postgres_enums_match_python_enums
+        # and ::test_postgres_migrated_schema_matches_models, which run `alembic upgrade head`
+        # into scratch databases and compare enum labels / the whole schema with the models.
         env:
           TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/rooman_test
         run: pytest -q
@@ -126,9 +132,11 @@ jobs:
       - name: Unit tests (vitest)
         run: npm test
 
-      - name: Dependency vulnerability audit (npm audit)
-        # NON-BLOCKING for now (continue-on-error); high/critical advisories show up in
-        # the log. Flip to blocking once the baseline is clean.
+      - name: Dependency vulnerability audit - production deps (npm audit, BLOCKING)
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Dependency vulnerability audit - all deps incl. dev tooling (informational)
+        # NON-BLOCKING: dev-only tooling (vite, vitest...) never ships to users; review the log.
         continue-on-error: true
         run: npm audit --audit-level=high
 
@@ -144,11 +152,34 @@ jobs:
           path: frontend/dist
           retention-days: 7
 
+  secret-scan:
+    name: Secret scanning (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so gitleaks can scan every commit in the pushed / PR range.
+          fetch-depth: 0
+
+      - name: Scan for committed secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          # Automatic per-run token (no repository secret needs to be configured); used
+          # only to read PR commits. Findings are redacted in the log.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+          GITLEAKS_ENABLE_COMMENTS: "false"
+
   docker:
     name: Docker images (build only)
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [backend, frontend]
+    needs: [backend, frontend, secret-scan]
 
     steps:
       - uses: actions/checkout@v4

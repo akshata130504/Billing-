@@ -25,7 +25,7 @@ from backend.app.models.billing_cycles import BillingCycle, BillingCycleStatus, 
 from backend.app.services import audit
 from backend.app.services.invoice_service import mark_overdue, send_reminder
 from backend.app.services.subscription_service import renew_subscription
-from backend.app.services.timezones import today_in, tz_for
+from backend.app.services import timezones
 
 _scheduler = None
 
@@ -51,9 +51,40 @@ def _load_invoice(db: Session, invoice_id: str) -> Optional[Invoice]:
 def _org_todays(db: Session, today: Optional[date]) -> Dict[str, date]:
     """Each organization's current local date (its `timezone`), or the forced `today`."""
     return {
-        org.id: (today or today_in(tz_for(org)))
+        org.id: (today or timezones.org_today(org))
         for org in db.scalars(select(Organization)).all()
     }
+
+
+def _alert(event: str, summary: str, details: Dict[str, Any], dedup_key: str) -> None:
+    """Operational alert (core/alerts: never raises, dedupes). Details carry ids and the
+    exception type only - never messages/payloads that could hold secrets or PII."""
+    try:
+        from backend.app.core import alerts
+
+        alerts.send_alert(event, summary, details, severity="error", dedup_key=dedup_key)
+    except Exception:  # pragma: no cover - alerting must never break the scheduler
+        logger.warning("Scheduler: could not send alert %s", event)
+
+
+def _step_failed(step: str, exc: BaseException, **ids: Any) -> None:
+    details: Dict[str, Any] = {"job": JOB_NAME, "step": step, "error_type": type(exc).__name__}
+    details.update({k: v for k, v in ids.items() if v is not None})
+    _alert(
+        "scheduler.step_failed",
+        f"Scheduler step '{step}' failed",
+        details,
+        dedup_key=f"scheduler.step_failed:{step}",
+    )
+
+
+def _run_failed(exc: BaseException, phase: str) -> None:
+    _alert(
+        "scheduler.run_failed",
+        "Billing scheduler run failed",
+        {"job": JOB_NAME, "phase": phase, "error_type": type(exc).__name__},
+        dedup_key="scheduler.run_failed",
+    )
 
 
 def _run_step(db: Session, name: str, fn: Callable[[], Any]) -> tuple[Any, int]:
@@ -62,9 +93,10 @@ def _run_step(db: Session, name: str, fn: Callable[[], Any]) -> tuple[Any, int]:
         result = fn()
         db.commit()
         return result, 0
-    except Exception:
+    except Exception as exc:
         logger.exception("Scheduler: step '%s' failed", name)
         db.rollback()
+        _step_failed(name, exc)
         return None, 1
 
 
@@ -160,10 +192,13 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
     org_today = _org_todays(db, today)
     # The latest local date across organizations bounds the candidate queries; each
     # row is then checked against its own organization's local date.
-    horizon = max(org_today.values()) if org_today else (today or date.today())
+    horizon = max(org_today.values()) if org_today else (today or timezones.utc_today())
 
     def local_today(org_id: str) -> date:
-        return org_today.get(org_id) or today or date.today()
+        day = org_today.get(org_id) or today
+        if day is None:  # organization created during the run
+            day = org_today[org_id] = timezones.org_today_for_id(db, org_id)
+        return day
 
     counts: Dict[str, int] = {"renewals": 0, "trials_converted": 0, "marked_overdue": 0, "reminders_sent": 0}
     ended = errors = 0
@@ -178,10 +213,11 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
             applied = execute_due_scheduled_changes(db, organization_id=oid, today=day)
             scheduled_changes_applied += len(applied)
             db.commit()
-        except Exception:
+        except Exception as exc:
             errors += 1
             logger.exception("Scheduler: applying scheduled subscription changes failed for organization %s", oid)
             db.rollback()
+            _step_failed("scheduled_subscription_changes", exc, organization_id=oid)
     counts["scheduled_changes_applied"] = scheduled_changes_applied
 
     # (b) trials: conversion/charging, fallback plans, cancel-at-period-end and expiry
@@ -195,10 +231,11 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
             db.commit()
             for key, value in stats.items():
                 trial_stats[key] = trial_stats.get(key, 0) + int(value or 0)
-        except Exception:
+        except Exception as exc:
             errors += 1
             logger.exception("Scheduler: trial evaluation failed for organization %s", oid)
             db.rollback()
+            _step_failed("trial_evaluation", exc, organization_id=oid)
     counts["trials_converted"] = trial_stats.get("converted", 0)
     counts["trials_fallback"] = trial_stats.get("fallback", 0)
     counts["trials_cancelled"] = trial_stats.get("cancelled", 0)
@@ -227,10 +264,11 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
             try:
                 if _finalize_usage_before_renewal(db, sub):
                     usage_finalized += 1
-            except Exception:
+            except Exception as exc:
                 errors += 1
                 logger.exception("Scheduler: usage finalization failed for subscription %s", sid)
                 db.rollback()
+                _step_failed("usage_finalization", exc, subscription_id=sid)
                 sub = _load_subscription(db, sid)
                 if sub is None:
                     continue
@@ -240,10 +278,11 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
                 counts["renewals"] += 1
             elif outcome == "ended":
                 ended += 1
-        except Exception:
+        except Exception as exc:
             errors += 1
             logger.exception("Scheduler: renewal failed for subscription %s", sid)
             db.rollback()
+            _step_failed("renewal", exc, subscription_id=sid)
     counts["usage_finalized"] = usage_finalized
 
     # (d) open invoices past due -> overdue (+ owning subscription past_due)
@@ -257,14 +296,16 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
     for iid in overdue_ids:
         try:
             inv = _load_invoice(db, iid)
-            if inv is not None and inv.due_date < local_today(inv.organization_id):
-                if mark_overdue(db, inv, actor_label=audit.SYSTEM_ACTOR):
+            day = local_today(inv.organization_id) if inv is not None else None
+            if inv is not None and inv.due_date < day:
+                if mark_overdue(db, inv, actor_label=audit.SYSTEM_ACTOR, today=day):
                     counts["marked_overdue"] += 1
             db.commit()
-        except Exception:
+        except Exception as exc:
             errors += 1
             logger.exception("Scheduler: overdue marking failed for invoice %s", iid)
             db.rollback()
+            _step_failed("overdue_marking", exc, invoice_id=iid)
 
     # (e) dunning reminders for overdue invoices
     cutoff = datetime.now(timezone.utc) - timedelta(days=settings.DUNNING_REMINDER_INTERVAL_DAYS)
@@ -284,10 +325,11 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
                 send_reminder(db, inv, actor_label=audit.SYSTEM_ACTOR, commit=False)
                 counts["reminders_sent"] += 1
             db.commit()
-        except Exception:
+        except Exception as exc:
             errors += 1
             logger.exception("Scheduler: reminder failed for invoice %s", iid)
             db.rollback()
+            _step_failed("dunning_reminder", exc, invoice_id=iid)
 
     # (f) dunning recovery retries across organizations
     dunning_recovered = 0
@@ -298,23 +340,26 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
             res = execute_dunning_retries(db, oid)
             dunning_recovered += res.get("recovered_count", 0)
             db.commit()
-        except Exception:
+        except Exception as exc:
             errors += 1
             logger.exception("Scheduler: dunning retry execution failed for organization %s", oid)
             db.rollback()
+            _step_failed("dunning_retries", exc, organization_id=oid)
     counts["dunning_recovered"] = dunning_recovered
 
     # (g) recurring expenses due today
     recurring_expenses_processed = 0
-    try:
-        from backend.app.services.expense_service import process_due_recurring_expenses
+    for oid, day in org_today.items():
+        try:
+            from backend.app.services.expense_service import process_due_recurring_expenses
 
-        recurring_expenses_processed = process_due_recurring_expenses(db, today=today or horizon)
-        db.commit()
-    except Exception:
-        errors += 1
-        logger.exception("Scheduler: processing due recurring expenses failed")
-        db.rollback()
+            recurring_expenses_processed += process_due_recurring_expenses(db, today=day, organization_id=oid)
+            db.commit()
+        except Exception as exc:
+            errors += 1
+            logger.exception("Scheduler: processing due recurring expenses failed for organization %s", oid)
+            db.rollback()
+            _step_failed("recurring_expenses", exc, organization_id=oid)
     counts["recurring_expenses_processed"] = recurring_expenses_processed
 
     # (h) housekeeping owned by other services - independent, failure-isolated steps
@@ -436,7 +481,11 @@ def run_billing_jobs(db: Session, *, today: Optional[date] = None) -> Dict[str, 
     organization is processed on its own local date (Organization.timezone).
     """
     started_at = datetime.now(timezone.utc)
-    acquired, lock_conn = _acquire_run_lock(db)
+    try:
+        acquired, lock_conn = _acquire_run_lock(db)
+    except Exception as exc:
+        _run_failed(exc, "acquire_lock")
+        raise
     if not acquired:
         logger.info("Billing jobs skipped: another run holds the scheduler lock")
         return {
@@ -447,7 +496,11 @@ def run_billing_jobs(db: Session, *, today: Optional[date] = None) -> Dict[str, 
             "skipped_locked": 1,
         }
     try:
-        counts, errors = _run_billing_jobs_unlocked(db, today)
+        try:
+            counts, errors = _run_billing_jobs_unlocked(db, today)
+        except Exception as exc:
+            _run_failed(exc, "run")
+            raise
         counts["errors"] = errors
         _record_heartbeat(db, started_at=started_at, counts=counts, errors=errors)
         return counts

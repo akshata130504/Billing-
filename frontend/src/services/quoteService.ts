@@ -1,6 +1,13 @@
 import { apiClient } from './apiClient';
 import { downloadAuthenticated } from './download';
-import type { Quote, QuoteCreateInput, QuoteUpdateInput, QuoteConvertInput } from '../types/quotes';
+import type {
+  Quote,
+  QuoteCreateInput,
+  QuoteUpdateInput,
+  QuoteConvertInput,
+  QuoteToSubscriptionInput,
+} from '../types/quotes';
+import type { SubscriptionOut } from '../types/api';
 
 export const quoteService = {
   async listQuotes(params?: {
@@ -94,6 +101,15 @@ export const quoteService = {
 
   async convertToInvoice(id: string, data?: QuoteConvertInput): Promise<any> {
     const res = await apiClient.post<any>(`/quotes/${id}/convert`, data || {});
+    return res.data;
+  },
+
+  /**
+   * Convert an accepted quote with recurring lines into a subscription. Idempotent:
+   * repeating the call returns the subscription created the first time.
+   */
+  async convertToSubscription(id: string, data?: QuoteToSubscriptionInput): Promise<SubscriptionOut> {
+    const res = await apiClient.post<SubscriptionOut>(`/quotes/${id}/convert-to-subscription`, data || {});
     return res.data;
   },
 

@@ -160,7 +160,7 @@ def simulate_pricing(
     offering_id = body.offering_id or body.plan_id
     if not offering_id:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail="offering_id or plan_id must be provided",
         )
 

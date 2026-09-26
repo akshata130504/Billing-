@@ -10,15 +10,13 @@ database_url = settings.sync_database_url
 
 # Configure connection pooling appropriately
 engine_kwargs: Dict[str, Any] = {}
-if database_url.startswith("sqlite"):
-    engine_kwargs["connect_args"] = {"check_same_thread": False}
-else:
+# SQLite: check_same_thread=False. PostgreSQL: "-c timezone=UTC" (sessions pinned to UTC so
+# timestamptz values come back in UTC) plus POSTGRES_SSLMODE/SSLROOTCERT/SSLCERT/SSLKEY.
+engine_kwargs["connect_args"] = settings.db_connect_args(database_url)
+if not database_url.startswith("sqlite"):
     engine_kwargs["pool_pre_ping"] = True
     engine_kwargs["pool_size"] = settings.DB_POOL_SIZE
     engine_kwargs["max_overflow"] = settings.DB_MAX_OVERFLOW
-    # Pin the session to UTC so timestamptz values come back in UTC (API renders "...Z")
-    # and SQL-side date/time comparisons don't depend on the database server's timezone.
-    engine_kwargs["connect_args"] = {"options": "-c timezone=UTC"}
 
 engine = create_engine(database_url, **engine_kwargs)
 

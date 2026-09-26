@@ -31,6 +31,27 @@ from backend.app.main import app  # noqa: E402
 from backend.app.models import Customer, Invoice, InvoiceStatus, Membership, MemberRole, MembershipStatus, Organization, Plan, Product, User  # noqa: E402
 
 
+def _local_iana_timezone() -> str:
+    """An IANA zone whose current offset equals this machine's, so tests that build dates with
+    date.today() agree with services that use the organization's local date (orgs default to
+    Asia/Kolkata, which differs from a UTC CI runner for 5.5 hours a day)."""
+    from datetime import datetime, timezone as dt_timezone
+    from zoneinfo import ZoneInfo, available_timezones
+
+    now = datetime.now(dt_timezone.utc)
+    local_offset = now.astimezone().utcoffset()
+    for name in ("UTC", "Asia/Kolkata", "Europe/London", "America/New_York", *sorted(available_timezones())):
+        try:
+            if now.astimezone(ZoneInfo(name)).utcoffset() == local_offset:
+                return name
+        except Exception:  # pragma: no cover - broken tzdata entry
+            continue
+    return "UTC"
+
+
+TEST_ORG_TIMEZONE = _local_iana_timezone()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _create_schema():
     Base.metadata.drop_all(bind=engine)
@@ -70,7 +91,7 @@ class Tenant:
     def __init__(self, db: Session, suffix: str):
         self.db = db
         self.suffix = suffix
-        self.organization = Organization(name=f"Test Org {suffix}", slug=f"test-org-{suffix}")
+        self.organization = Organization(name=f"Test Org {suffix}", slug=f"test-org-{suffix}", timezone=TEST_ORG_TIMEZONE)
         db.add(self.organization)
         db.flush()
         self.owner = self.add_member("owner", MemberRole.OWNER)

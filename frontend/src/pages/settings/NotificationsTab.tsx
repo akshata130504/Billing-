@@ -1,52 +1,27 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Save, Mail, Edit3, Eye, Send, CheckCircle2, XCircle } from 'lucide-react';
+import { Save, Mail, Edit3, Eye, Send, CheckCircle2, XCircle, Webhook, MessageSquareOff } from 'lucide-react';
 import { Button } from '../../components/common/Button';
 import { Input } from '../../components/common/Input';
 import { Modal } from '../../components/common/Modal';
 import { useToast } from '../../components/common/Toast';
 import { cn } from '../../utils/cn';
+import { useAuth } from '../../hooks/useAuth';
+import { toApiError } from '../../services/apiClient';
 import { SettingsSection } from './settingsShared';
 import {
   notificationService,
   type NotificationTemplate,
   type NotificationTemplateUpdate,
   type NotificationTemplatePreview,
+  type NotificationPreferences,
+  NOTIFICATION_CHANNEL_LABELS,
+  SMS_NOT_AVAILABLE_MESSAGE,
+  isChannelSupported,
+  notificationQueryKeys,
 } from '../../services/notificationService';
 
-const NOTIFICATIONS_STORAGE_KEY = 'rooman_notification_preferences';
-
-export interface NotificationPreferences {
-  // Billing
-  paymentReceived: boolean;
-  paymentFailed: boolean;
-  invoiceCreated: boolean;
-  invoiceOverdue: boolean;
-  invoicePaid: boolean;
-  refundProcessed: boolean;
-
-  // Subscription
-  subscriptionCreated: boolean;
-  subscriptionUpgraded: boolean;
-  subscriptionDowngraded: boolean;
-  subscriptionCancelled: boolean;
-  trialEnding: boolean;
-  trialExpired: boolean;
-
-  // Customer Activity
-  newCustomer: boolean;
-  customerPortalActivity: boolean;
-  paymentMethodChanges: boolean;
-
-  // System
-  systemAlerts: boolean;
-  serviceNotifications: boolean;
-  securityAlerts: boolean;
-
-  // Delivery channels
-  emailNotifications: boolean;
-  inAppNotifications: boolean;
-}
+export type { NotificationPreferences };
 
 const DEFAULT_NOTIFICATIONS: NotificationPreferences = {
   paymentReceived: true,
@@ -75,36 +50,15 @@ const DEFAULT_NOTIFICATIONS: NotificationPreferences = {
   inAppNotifications: true,
 };
 
-function loadNotifications(): NotificationPreferences {
-  try {
-    const raw = localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
-    return raw ? { ...DEFAULT_NOTIFICATIONS, ...JSON.parse(raw) } : DEFAULT_NOTIFICATIONS;
-  } catch {
-    return DEFAULT_NOTIFICATIONS;
-  }
-}
-
-/**
- * There is no backend endpoint for per-user notification preferences yet, so
- * these are stored in this browser only. Returns false if storage is blocked.
- */
-function saveNotifications(prefs: NotificationPreferences): boolean {
-  try {
-    localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(prefs));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 interface ToggleItemProps {
   label: string;
   description: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
+  disabled?: boolean;
 }
 
-function ToggleItem({ label, description, checked, onChange }: ToggleItemProps) {
+function ToggleItem({ label, description, checked, onChange, disabled = false }: ToggleItemProps) {
   return (
     <div className="flex items-start justify-between gap-4 py-2.5 border-b border-slate-100 last:border-0">
       <div className="space-y-0.5">
@@ -115,9 +69,11 @@ function ToggleItem({ label, description, checked, onChange }: ToggleItemProps) 
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-label={label}
+        disabled={disabled}
         onClick={() => onChange(!checked)}
         className={cn(
-          'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+          'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
           checked ? 'bg-primary-600' : 'bg-slate-200'
         )}
       >
@@ -150,7 +106,31 @@ const AVAILABLE_PLACEHOLDERS = [
 export function NotificationsTab() {
   const { showToast } = useToast();
   const queryClient = useQueryClient();
-  const [prefs, setPrefs] = useState<NotificationPreferences>(loadNotifications);
+  const { user, organization } = useAuth();
+  const prefsQueryKey = notificationQueryKeys.preferences(user?.id, organization?.id);
+  const [prefs, setPrefs] = useState<NotificationPreferences>(DEFAULT_NOTIFICATIONS);
+
+  // Preferences are stored server-side per user + organization, so they follow the user across
+  // browsers and devices.
+  const prefsQuery = useQuery({
+    queryKey: prefsQueryKey,
+    queryFn: () => notificationService.getPreferences(),
+    enabled: Boolean(user?.id && organization?.id),
+  });
+  useEffect(() => {
+    if (prefsQuery.data) setPrefs({ ...DEFAULT_NOTIFICATIONS, ...prefsQuery.data.preferences });
+  }, [prefsQuery.data]);
+
+  const savePrefsMutation = useMutation({
+    mutationFn: (next: NotificationPreferences) => notificationService.updatePreferences(next),
+    onSuccess: (data) => {
+      queryClient.setQueryData(prefsQueryKey, data);
+      showToast('success', 'Notification preferences saved', 'They apply wherever you sign in to this organization.');
+    },
+    onError: (err) => {
+      showToast('error', 'Could not save preferences', toApiError(err).message);
+    },
+  });
 
   // Template state
   const [editingTemplate, setEditingTemplate] = useState<NotificationTemplate | null>(null);
@@ -174,8 +154,8 @@ export function NotificationsTab() {
       showToast('success', 'Notification template updated successfully');
       setEditingTemplate(null);
     },
-    onError: () => {
-      showToast('error', 'Failed to update notification template');
+    onError: (err) => {
+      showToast('error', 'Failed to update notification template', toApiError(err).message);
     },
   });
 
@@ -185,12 +165,9 @@ export function NotificationsTab() {
 
   const handleSavePreferences = (e: React.FormEvent) => {
     e.preventDefault();
-    if (saveNotifications(prefs)) {
-      showToast('success', 'Preferences saved on this device', 'They apply to this browser only.');
-    } else {
-      showToast('error', 'Could not save preferences', 'Browser storage is unavailable.');
-    }
+    savePrefsMutation.mutate(prefs);
   };
+  const prefsDisabled = prefsQuery.isLoading || savePrefsMutation.isPending;
 
   const handleOpenEdit = (template: NotificationTemplate) => {
     setEditingTemplate(template);
@@ -261,16 +238,29 @@ export function NotificationsTab() {
           <div className="py-6 text-center text-xs text-slate-400">Loading templates...</div>
         ) : (
           <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white overflow-hidden">
-            {templates.map((tpl) => (
+            {templates.map((tpl) => {
+              const channelSupported = tpl.channel_supported ?? isChannelSupported(tpl.channel);
+              const ChannelIcon = tpl.channel === 'webhook' ? Webhook : tpl.channel === 'sms' ? MessageSquareOff : Mail;
+              return (
               <div key={tpl.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="space-y-1 max-w-xl">
-                  <div className="flex items-center gap-2">
-                    <Mail className="w-4 h-4 text-primary-600" />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <ChannelIcon className={cn('w-4 h-4', channelSupported ? 'text-primary-600' : 'text-slate-400')} />
                     <span className="text-xs font-semibold text-slate-800">{tpl.name}</span>
                     <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
                       {tpl.code}
                     </span>
-                    {tpl.is_active ? (
+                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                      {NOTIFICATION_CHANNEL_LABELS[tpl.channel] ?? tpl.channel}
+                    </span>
+                    {!channelSupported ? (
+                      <span
+                        className="inline-flex items-center gap-1 text-[10px] text-slate-600 font-medium bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full"
+                        title={SMS_NOT_AVAILABLE_MESSAGE}
+                      >
+                        <XCircle className="w-3 h-3" /> Not available
+                      </span>
+                    ) : tpl.is_active ? (
                       <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 font-medium bg-emerald-50 px-2 py-0.5 rounded-full">
                         <CheckCircle2 className="w-3 h-3" /> Active
                       </span>
@@ -281,6 +271,9 @@ export function NotificationsTab() {
                     )}
                   </div>
                   <p className="text-[11px] text-slate-500">{tpl.description || 'Configured notification template.'}</p>
+                  {!channelSupported && (
+                    <p className="text-[11px] text-amber-700">{SMS_NOT_AVAILABLE_MESSAGE}. This template is never sent.</p>
+                  )}
                   <p className="text-[11px] text-slate-400 truncate">
                     <span className="font-medium text-slate-600">Subject:</span> {tpl.subject_template || '(None)'}
                   </p>
@@ -288,6 +281,8 @@ export function NotificationsTab() {
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <button
                     type="button"
+                    disabled={!channelSupported && !tpl.is_active}
+                    title={!channelSupported && !tpl.is_active ? SMS_NOT_AVAILABLE_MESSAGE : undefined}
                     onClick={() =>
                       updateTemplateMutation.mutate({
                         id: tpl.id,
@@ -295,7 +290,7 @@ export function NotificationsTab() {
                       })
                     }
                     className={cn(
-                      'text-xs px-2.5 py-1 rounded border font-medium transition-colors',
+                      'text-xs px-2.5 py-1 rounded border font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
                       tpl.is_active
                         ? 'border-slate-200 text-slate-600 hover:bg-slate-50'
                         : 'border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
@@ -323,7 +318,8 @@ export function NotificationsTab() {
                   </Button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </SettingsSection>
@@ -385,6 +381,7 @@ export function NotificationsTab() {
               <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
                 <input
                   type="checkbox"
+                  disabled={!isChannelSupported(editingTemplate.channel) && !editingTemplate.is_active}
                   checked={editForm.is_active ?? true}
                   onChange={(e) => setEditForm((prev) => ({ ...prev, is_active: e.target.checked }))}
                   className="rounded border-slate-300 text-primary-600 focus:ring-primary-500"
@@ -475,36 +472,42 @@ export function NotificationsTab() {
               label="Payment Received"
               description="Alert when an online or manual payment is successfully recorded."
               checked={prefs.paymentReceived}
+              disabled={prefsDisabled}
               onChange={(c) => update('paymentReceived', c)}
             />
             <ToggleItem
               label="Payment Failed"
               description="Alert when a customer's online payment attempt is declined or fails."
               checked={prefs.paymentFailed}
+              disabled={prefsDisabled}
               onChange={(c) => update('paymentFailed', c)}
             />
             <ToggleItem
               label="Invoice Created"
               description="Notify when a new draft or issued invoice is generated."
               checked={prefs.invoiceCreated}
+              disabled={prefsDisabled}
               onChange={(c) => update('invoiceCreated', c)}
             />
             <ToggleItem
               label="Invoice Overdue"
               description="Notice when an issued invoice reaches its due date without payment."
               checked={prefs.invoiceOverdue}
+              disabled={prefsDisabled}
               onChange={(c) => update('invoiceOverdue', c)}
             />
             <ToggleItem
               label="Invoice Fully Paid"
               description="Confirmation when an invoice balance reaches zero."
               checked={prefs.invoicePaid}
+              disabled={prefsDisabled}
               onChange={(c) => update('invoicePaid', c)}
             />
             <ToggleItem
               label="Refund Processed"
               description="Alert when a payment refund or partial refund is processed."
               checked={prefs.refundProcessed}
+              disabled={prefsDisabled}
               onChange={(c) => update('refundProcessed', c)}
             />
           </div>
@@ -520,36 +523,42 @@ export function NotificationsTab() {
               label="Subscription Created"
               description="Alert when a new recurring subscription is activated."
               checked={prefs.subscriptionCreated}
+              disabled={prefsDisabled}
               onChange={(c) => update('subscriptionCreated', c)}
             />
             <ToggleItem
               label="Subscription Upgraded"
               description="Notice when a customer upgrades their tier or increases quantity."
               checked={prefs.subscriptionUpgraded}
+              disabled={prefsDisabled}
               onChange={(c) => update('subscriptionUpgraded', c)}
             />
             <ToggleItem
               label="Subscription Downgraded"
               description="Notice when a customer downgrades to a lower plan tier."
               checked={prefs.subscriptionDowngraded}
+              disabled={prefsDisabled}
               onChange={(c) => update('subscriptionDowngraded', c)}
             />
             <ToggleItem
               label="Subscription Cancelled"
               description="Immediate notification when a subscription is cancelled or scheduled to end."
               checked={prefs.subscriptionCancelled}
+              disabled={prefsDisabled}
               onChange={(c) => update('subscriptionCancelled', c)}
             />
             <ToggleItem
               label="Trial Ending Soon"
               description="Reminder 3 days before a customer's product trial expires."
               checked={prefs.trialEnding}
+              disabled={prefsDisabled}
               onChange={(c) => update('trialEnding', c)}
             />
             <ToggleItem
               label="Trial Expired"
               description="Alert when a trial finishes without an active payment conversion."
               checked={prefs.trialExpired}
+              disabled={prefsDisabled}
               onChange={(c) => update('trialExpired', c)}
             />
           </div>
@@ -565,18 +574,21 @@ export function NotificationsTab() {
               label="New Customer Created"
               description="Notice when a new customer profile or organization contact is added."
               checked={prefs.newCustomer}
+              disabled={prefsDisabled}
               onChange={(c) => update('newCustomer', c)}
             />
             <ToggleItem
               label="Customer Portal Activity"
               description="Alert when a client signs into their self-service portal or views quotes."
               checked={prefs.customerPortalActivity}
+              disabled={prefsDisabled}
               onChange={(c) => update('customerPortalActivity', c)}
             />
             <ToggleItem
               label="Payment Method Changes"
               description="Notice when a customer adds or removes a card/UPI method in their portal."
               checked={prefs.paymentMethodChanges}
+              disabled={prefsDisabled}
               onChange={(c) => update('paymentMethodChanges', c)}
             />
           </div>
@@ -592,18 +604,21 @@ export function NotificationsTab() {
               label="System Alerts"
               description="Background scheduler notices, webhook retries, and automated job failures."
               checked={prefs.systemAlerts}
+              disabled={prefsDisabled}
               onChange={(c) => update('systemAlerts', c)}
             />
             <ToggleItem
               label="Important Service Notifications"
               description="Planned platform maintenance, API rate updates, and service announcements."
               checked={prefs.serviceNotifications}
+              disabled={prefsDisabled}
               onChange={(c) => update('serviceNotifications', c)}
             />
             <ToggleItem
               label="Security Alerts"
               description="Account logins from unrecognized IPs, password changes, and permission shifts."
               checked={prefs.securityAlerts}
+              disabled={prefsDisabled}
               onChange={(c) => update('securityAlerts', c)}
             />
           </div>
@@ -611,11 +626,16 @@ export function NotificationsTab() {
 
         {/* Save Button */}
         <div className="flex items-center justify-end gap-3">
-          <p className="text-xs text-slate-500">Saved on this device only.</p>
+          {prefsQuery.isError ? (
+            <p className="text-xs text-rose-600">Could not load your saved preferences; showing defaults.</p>
+          ) : (
+            <p className="text-xs text-slate-500">Saved to your account for this organization.</p>
+          )}
           <Button
             type="submit"
             variant="primary"
-
+            isLoading={savePrefsMutation.isPending}
+            disabled={prefsQuery.isLoading}
             leadingIcon={<Save className="w-4 h-4" />}
           >
             Save Notification Preferences

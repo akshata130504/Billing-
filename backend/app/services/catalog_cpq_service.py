@@ -35,6 +35,8 @@ from backend.app.schemas.catalog_cpq import (
     PriceSimulationRequest,
 )
 from backend.app.schemas.common_refs import iso_dt, money_str
+from backend.app.services import audit, timezones
+from backend.app.services.offering_subscription_service import sync_offering_links
 from backend.app.services.pagination import Page, PageParams, apply_sort, paginate
 from backend.app.services.pricing_engine import (
     calculate_line_item_pricing,
@@ -193,6 +195,9 @@ def update_offering(db: Session, ctx: CurrentContext, offering_id: str, data: Of
             )
             db.add(b_item)
 
+    # Keep plans linked to this offering (subscriptions) in step: name, tax, HSN, price, active.
+    db.flush()
+    sync_offering_links(db, offering)
     db.commit()
     return get_offering_or_404(db, ctx.organization_id, offering_id)
 
@@ -200,6 +205,10 @@ def update_offering(db: Session, ctx: CurrentContext, offering_id: str, data: Of
 def archive_offering(db: Session, ctx: CurrentContext, offering_id: str) -> None:
     offering = get_offering_or_404(db, ctx.organization_id, offering_id)
     offering.is_active = False
+    # Archived offerings are no longer subscribable; their linked plans follow (existing
+    # subscriptions keep renewing on their frozen terms).
+    db.flush()
+    sync_offering_links(db, offering)
     db.commit()
 
 
@@ -694,6 +703,7 @@ def convert_deal_to_quote(db: Session, ctx: CurrentContext, deal_id: str) -> Quo
             raise InvalidStateError("This deal requires approval before converting to a Quote.")
         status = deal.status.value if hasattr(deal.status, "value") else str(deal.status)
         raise InvalidStateError(f"Deal in status '{status}' cannot be converted to a Quote.")
+    prior_status = deal.status.value if hasattr(deal.status, 'value') else str(deal.status)
     # Claim first so a double click cannot produce two quotes.
     if not _claim_deal(db, deal, allowed, CPQDealStatus.CONVERTED):
         raise InvalidStateError("This deal has already been converted to a quote.")
@@ -712,7 +722,7 @@ def convert_deal_to_quote(db: Session, ctx: CurrentContext, deal_id: str) -> Quo
         quote_number=quote_number,
         customer_id=deal.customer_id,
         status=QuoteStatus.DRAFT,
-        issue_date=datetime.now(timezone.utc).date(),
+        issue_date=timezones.org_today(ctx.organization),
         currency=deal.currency,
         subtotal=deal.subtotal,
         discount_pct=deal.discount_pct,
@@ -756,6 +766,19 @@ def convert_deal_to_quote(db: Session, ctx: CurrentContext, deal_id: str) -> Quo
         db.add(q_item)
 
     deal.converted_quote_id = quote.id
+    db.flush()
+    # Audited only here, after this request won the CONVERTED claim above: a concurrent
+    # or repeated conversion is rejected before reaching this point and records nothing.
+    audit.record(
+        db,
+        ctx=ctx,
+        action="CPQ_DEAL_CONVERTED",
+        entity_type="cpq_deal",
+        entity_id=deal.id,
+        entity_label=deal.deal_number,
+        before={"status": prior_status},
+        after={"status": "converted", "converted_quote_id": quote.id, "quote_number": quote.quote_number},
+    )
     db.commit()
 
     return quote

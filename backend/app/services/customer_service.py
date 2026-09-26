@@ -7,7 +7,7 @@ from datetime import date
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import Select, exists, func, or_, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, object_session, selectinload
 
 from backend.app.api.deps import CurrentContext
 from backend.app.core.config import settings
@@ -27,7 +27,7 @@ from backend.app.models import (
 )
 from backend.app.schemas.common_refs import customer_ref, enum_value, iso_dt, money_str
 from backend.app.schemas.customers import ContactIn, CustomerCreate, CustomerUpdate
-from backend.app.services import audit
+from backend.app.services import audit, timezones
 from backend.app.services.numbering import next_number
 from backend.app.services.pagination import Page, PageParams, apply_sort, paginate
 
@@ -398,8 +398,10 @@ def serialize_customer(customer: Customer, stats: Optional[Dict[str, Any]] = Non
 
 
 def _days_overdue(invoice: Invoice) -> int:
-    if enum_value(invoice.status) in ("sent", "partially_paid", "overdue") and invoice.due_date and invoice.due_date < date.today():
-        return (date.today() - invoice.due_date).days
+    session = object_session(invoice)
+    today = timezones.org_today_for_id(session, invoice.organization_id) if session is not None else timezones.utc_today()
+    if enum_value(invoice.status) in ("sent", "partially_paid", "overdue") and invoice.due_date and invoice.due_date < today:
+        return (today - invoice.due_date).days
     return 0
 
 

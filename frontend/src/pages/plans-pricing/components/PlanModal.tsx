@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2, Calculator, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Button } from '../../../components/common/Button';
 import { validateSensibleName, validateSku, validatePercentage, validateNonNegativeMoney } from '../../../utils/validation';
+import { calculatePricePreview } from './planPricePreview';
 import type {
   PlanPricingItem,
   CreatePlanPricingInput,
@@ -93,84 +94,8 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
     setTiers(updated);
   };
 
-  // Compute live price preview
-  const calculatePreviewPrice = (qty: number): { subtotal: number; tax: number; total: number; note: string } => {
-    let subtotal = 0;
-    let note = '';
-
-    if (pricingModel === 'flat') {
-      subtotal = basePrice;
-      note = `Fixed ₹${basePrice.toLocaleString('en-IN')} regardless of quantity (${qty} units)`;
-    } else if (pricingModel === 'per_unit') {
-      subtotal = basePrice * qty;
-      note = `${qty} units × ₹${basePrice.toLocaleString('en-IN')}`;
-    } else if (pricingModel === 'volume') {
-      let appliedPrice = basePrice;
-      let matched = false;
-      for (const t of tiers) {
-        const minQ = t.min_qty || 0;
-        const maxQ = t.max_qty;
-        if (qty >= minQ && (maxQ === undefined || maxQ === null || qty <= maxQ)) {
-          appliedPrice = t.unit_price ?? basePrice;
-          matched = true;
-          note = `Volume tier [${minQ} - ${maxQ || '∞'}]: All ${qty} units @ ₹${appliedPrice.toLocaleString('en-IN')}/unit`;
-          break;
-        }
-      }
-      if (!matched) {
-        note = `Base rate: All ${qty} units @ ₹${basePrice.toLocaleString('en-IN')}/unit`;
-      }
-      subtotal = appliedPrice * qty;
-    } else if (pricingModel === 'tiered') {
-      let remaining = qty;
-      let accum = 0;
-      const sorted = [...tiers].sort((a, b) => (a.min_qty || 0) - (b.min_qty || 0));
-      const logs: string[] = [];
-
-      for (const t of sorted) {
-        const minQ = t.min_qty || 0;
-        const maxQ = t.max_qty;
-        const tPrice = t.unit_price ?? basePrice;
-        const capacity = maxQ !== undefined && maxQ !== null ? (minQ === 0 ? maxQ : maxQ - minQ + 1) : remaining;
-        const inBracket = Math.min(remaining, capacity);
-        if (inBracket > 0) {
-          accum += inBracket * tPrice;
-          remaining -= inBracket;
-          logs.push(`${inBracket} @ ₹${tPrice}`);
-        }
-        if (remaining <= 0) break;
-      }
-      if (remaining > 0) {
-        accum += remaining * basePrice;
-        logs.push(`${remaining} @ ₹${basePrice} (base)`);
-      }
-      subtotal = accum;
-      note = `Graduated brackets: ${logs.join(' + ')}`;
-    } else if (pricingModel === 'package') {
-      const sorted = [...tiers].sort((a, b) => (a.package_qty || 0) - (b.package_qty || 0));
-      if (sorted.length === 0) {
-        subtotal = basePrice;
-        note = `Default package: ₹${basePrice}`;
-      } else {
-        let best = sorted[0];
-        for (const t of sorted) {
-          if ((t.package_qty || 0) >= qty) {
-            best = t;
-            break;
-          }
-          best = t;
-        }
-        subtotal = best.package_price ?? basePrice;
-        note = `Covered by package of ${best.package_qty} units for ₹${(best.package_price ?? 0).toLocaleString('en-IN')}`;
-      }
-    }
-
-    const tax = (subtotal * taxRatePct) / 100;
-    const total = subtotal + tax;
-    return { subtotal, tax, total, note };
-  };
-
-  const preview = calculatePreviewPrice(previewQty);
+  // Live price preview (same bracket semantics as backend pricing_engine).
+  const preview = calculatePricePreview({ pricingModel, basePrice, taxRatePct, tiers, quantity: previewQty });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

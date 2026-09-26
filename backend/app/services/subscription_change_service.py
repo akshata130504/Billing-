@@ -23,7 +23,7 @@ from backend.app.models.proration import (
     SubscriptionChangeType,
 )
 from backend.app.models.subscriptions import Subscription, SubscriptionStatus
-from backend.app.services import audit, credit_service
+from backend.app.services import audit, credit_service, timezones
 from backend.app.services.invoice_service import create_invoice_record
 from backend.app.services.money import LineInput
 from backend.app.services.proration_calculator import calculate_proration
@@ -33,6 +33,7 @@ from backend.app.services.subscription_service import (
     contracted_unit_price,
     interval_months,
     plan_tax_rate,
+    terms_for_quantity,
 )
 from backend.app.services.unit_of_work import UnitOfWork
 
@@ -61,6 +62,28 @@ def _whole_quantity(value: Any) -> Decimal:
             "Quantity must be a whole number.", {"fields": {"target_quantity": "must be a whole number"}}
         )
     return qty
+
+
+def resolve_target_plan_id(
+    db: Session,
+    organization_id: str,
+    target_plan_id: Optional[str],
+    target_offering_id: Optional[str],
+) -> Optional[str]:
+    """A change may target a legacy plan or a recurring Plans & Pricing offering. An
+    offering resolves to its linked plan (created on first use, tenant scoped; 422 when the
+    offering is inactive or not recurring)."""
+    if not target_offering_id:
+        return target_plan_id
+    if target_plan_id:
+        raise ValidationAppError(
+            "Provide either target_plan_id or target_offering_id, not both.",
+            {"fields": {"target_offering_id": "conflicts with target_plan_id"}},
+        )
+    from backend.app.services import offering_subscription_service as offering_svc
+
+    offering = offering_svc.get_subscribable_offering(db, organization_id, target_offering_id, field_name="target_offering_id")
+    return offering_svc.ensure_linked_plan(db, organization_id, offering).id
 
 
 def _resolve_change(
@@ -102,7 +125,10 @@ def _resolve_change(
     new_qty = _whole_quantity(target_quantity) if target_quantity is not None else old_qty
 
     old_price = contracted_unit_price(db, subscription, old_plan)
-    new_price = old_price if new_plan.id == old_plan.id else Decimal(str(new_plan.unit_amount))
+    # Legacy plans: contracted price for a same-plan change, list price otherwise.
+    # Offering-linked (Plans & Pricing) plans: priced by the pricing engine for the new
+    # quantity (volume/tiered/package/flat re-price; per-unit seats keep the contract).
+    new_price, _meta = terms_for_quantity(db, subscription, new_plan, new_qty, same_plan=new_plan.id == old_plan.id)
     return old_plan, new_plan, old_qty, new_qty, old_price, new_price
 
 
@@ -149,8 +175,9 @@ def preview_subscription_change(
         db, organization_id, subscription, target_plan_id, target_quantity
     )
 
-    change_date = effective_date or date.today()
-    period_start = subscription.current_period_start or date.today()
+    today = timezones.org_today_for_id(db, organization_id)
+    change_date = effective_date or today
+    period_start = subscription.current_period_start or today
     period_end = subscription.current_period_end or (period_start + timedelta(days=30))
 
     calc = _calculate(
@@ -359,8 +386,9 @@ def apply_subscription_change(
         db, ctx.organization_id, subscription, target_plan_id, target_quantity
     )
 
-    change_date = effective_date or date.today()
-    period_start = subscription.current_period_start or date.today()
+    today = timezones.org_today(ctx.organization)
+    change_date = effective_date or today
+    period_start = subscription.current_period_start or today
     period_end = subscription.current_period_end or (period_start + timedelta(days=30))
     is_trial = subscription.status == SubscriptionStatus.TRIALING
 
@@ -370,7 +398,7 @@ def apply_subscription_change(
     # and was applied (and prorated) today instead of on the requested date.
     # A SCHEDULED change dated today or in the past applies immediately.
     is_deferred = effective_type == ProrationEffectiveType.END_OF_TERM or (
-        effective_type == ProrationEffectiveType.SCHEDULED and change_date > date.today()
+        effective_type == ProrationEffectiveType.SCHEDULED and change_date > today
     )
     if is_deferred and effective_type == ProrationEffectiveType.END_OF_TERM:
         # Resolve to the period end *before* computing proration below - a true
@@ -445,7 +473,8 @@ def apply_subscription_change(
     # IMMEDIATE APPLICATION:
     # 1. Move the subscription, its primary item and a fresh price snapshot onto the new
     #    terms (renewals bill from the item/snapshot, so all three must change together).
-    apply_plan_terms(db, subscription, new_plan, int(new_qty), unit_price=new_price)
+    _price, new_meta = terms_for_quantity(db, subscription, new_plan, new_qty, same_plan=new_plan.id == old_plan.id)
+    apply_plan_terms(db, subscription, new_plan, int(new_qty), unit_price=new_price, metadata=new_meta)
     subscription.updated_by_id = ctx.user_id
 
     # 2. Record change
@@ -602,7 +631,9 @@ def execute_due_scheduled_changes(
     today: Optional[date] = None,
 ) -> List[SubscriptionChange]:
     """Applies scheduled subscription changes whose effective_date is on or before today."""
-    target_date = today or date.today()
+    target_date = today or (
+        timezones.org_today_for_id(db, organization_id) if organization_id else timezones.utc_today()
+    )
     query = (
         db.query(SubscriptionChange)
         .filter(
@@ -639,13 +670,11 @@ def execute_due_scheduled_changes(
 
             old_plan = db.query(Plan).filter(Plan.id == sub.plan_id).first()
             target_qty = int(Decimal(str(change.target_quantity or sub.quantity or 1)))
-            if old_plan is not None and new_plan.id == old_plan.id:
-                new_price = contracted_unit_price(db, sub, old_plan)
-            else:
-                new_price = Decimal(str(new_plan.unit_amount))
+            same_plan = old_plan is not None and new_plan.id == old_plan.id
+            new_price, new_meta = terms_for_quantity(db, sub, new_plan, target_qty, same_plan=same_plan)
 
             # Plan, quantity, primary item and a fresh price snapshot move together.
-            apply_plan_terms(db, sub, new_plan, target_qty, unit_price=new_price)
+            apply_plan_terms(db, sub, new_plan, target_qty, unit_price=new_price, metadata=new_meta)
 
             # Bill the already-computed, already-verified proration (a true
             # end-of-term change has prorated_credit == prorated_charge == 0,

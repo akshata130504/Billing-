@@ -28,7 +28,9 @@ from backend.app.core.exceptions import (
     UnauthorizedError,
     ValidationAppError,
 )
+from backend.app.core.alerts import send_alert
 from backend.app.core.logging import logger
+from backend.app.core.redaction import mask_email
 from backend.app.core.security import (
     constant_time_equals,
     create_access_token,
@@ -284,6 +286,18 @@ def throttle_register_failure(db: Session, scope: str, subject: str, ip: Optiona
         return True
     db.flush()
     return False
+
+
+def _alert_lockout(scope: str, subject_label: str, subject_key: str, ip: Optional[str]) -> None:
+    """Alert once per (scope, account, IP) lockout burst (send_alert dedupes and never raises).
+    Only a masked email / user id is included - never the submitted password or code."""
+    send_alert(
+        "auth.repeated_failures",
+        f"{scope} throttle tripped after {MAX_FAILED_LOGINS} failed attempts",
+        {"scope": scope, "account": subject_label, "client_ip": ip or "unknown", "locked_minutes": LOCKOUT_MINUTES},
+        severity="warning",
+        dedup_key=f"auth.repeated_failures:{scope}:{hash_token(subject_key)[:16]}:{ip or ''}",
+    )
 
 
 def throttle_clear(db: Session, scope: str, subject: str, ip: Optional[str] = None) -> None:
@@ -795,6 +809,8 @@ def check_password_throttled(
             reason = "throttled_after_failures" if blocked else "bad_password"
         _record_login_failure(db, email, user, reason, ip, user_agent)
         db.commit()
+        if blocked:
+            _alert_lockout("login", mask_email(email), email, ip)
         raise UnauthorizedError(TOO_MANY_ATTEMPTS if blocked else INVALID_CREDENTIALS)
 
     throttle_clear(db, "login", email, ip)
@@ -834,6 +850,8 @@ def _check_totp_code(db: Session, user: User, code: str, ip: Optional[str], user
         blocked = throttle_register_failure(db, "mfa", user.id, None)
         _record_login_failure(db, user.email, user, "bad_totp_code", ip, user_agent)
         db.commit()
+        if blocked:
+            _alert_lockout("mfa", f"user {user.id}", user.id, ip)
         raise UnauthorizedError(TOO_MANY_ATTEMPTS if blocked else INVALID_MFA_CODE)
     user.totp_last_used_step = step
     throttle_clear(db, "mfa", user.id)

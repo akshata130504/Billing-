@@ -136,7 +136,7 @@ def test_webhook_duplicate_event_idempotent(client, monkeypatch, db):
     # Second delivery with same event_id
     resp2 = client.post(BASE, content=raw_body, headers=headers)
     assert resp2.status_code == 200
-    assert resp2.json() == {"received": True}
+    assert resp2.json() == {"received": True, "status": "duplicate"}
 
     # Stored once
     assert db.query(WebhookEvent).filter_by(event_id=event_id).count() == 1

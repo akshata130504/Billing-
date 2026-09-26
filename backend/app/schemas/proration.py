@@ -18,6 +18,8 @@ class SubscriptionChangePreviewIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     target_plan_id: Optional[str] = None
+    # Move to a recurring Plans & Pricing offering instead of a legacy plan.
+    target_offering_id: Optional[str] = None
     target_quantity: Optional[Decimal] = Field(default=None, gt=0)
     effective_date: Optional[date] = None
 
@@ -51,6 +53,7 @@ class SubscriptionChangeApplyIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     target_plan_id: Optional[str] = None
+    target_offering_id: Optional[str] = None
     target_quantity: Optional[Decimal] = Field(default=None, gt=0)
     effective_type: ProrationEffectiveType = ProrationEffectiveType.IMMEDIATE
     effective_date: Optional[date] = None

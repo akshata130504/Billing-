@@ -22,7 +22,7 @@ from backend.app.models.invoices import Invoice, InvoiceStatus
 from backend.app.models.customers import Customer
 from backend.app.models.base import utcnow
 from backend.app.models.identity import Organization
-from backend.app.services import audit, gst
+from backend.app.services import audit, gst, timezones
 from backend.app.services.numbering import next_number
 from backend.app.services.unit_of_work import UnitOfWork
 
@@ -110,7 +110,7 @@ def create_credit_note(
         subscription_id=subscription_id,
         status=status,
         reason=reason,
-        issue_date=issue_date or date.today(),
+        issue_date=issue_date or timezones.org_today_for_id(db, org_id),
         currency=currency,
         created_by_id=created_by_id if created_by_id is not None else (ctx.user_id if ctx else None),
         supply_type=supply.supply_type,
@@ -406,6 +406,25 @@ def get_credit_note(db: Session, organization_id: str, credit_note_id: str) -> C
     return cn
 
 
+def _credit_note_filters(
+    organization_id: str,
+    customer_id: Optional[str] = None,
+    status_: Optional[CreditNoteStatus] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+) -> list:
+    conds = [CreditNote.organization_id == organization_id]
+    if customer_id:
+        conds.append(CreditNote.customer_id == customer_id)
+    if status_:
+        conds.append(CreditNote.status == status_)
+    if date_from:
+        conds.append(CreditNote.issue_date >= date_from)
+    if date_to:
+        conds.append(CreditNote.issue_date <= date_to)
+    return conds
+
+
 def list_credit_notes(
     db: Session,
     organization_id: str,
@@ -413,20 +432,130 @@ def list_credit_notes(
     status_: Optional[CreditNoteStatus] = None,
     limit: int = 50,
     offset: int = 0,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
 ) -> List[CreditNote]:
+    conds = _credit_note_filters(organization_id, customer_id, status_, date_from, date_to)
     query = (
         select(CreditNote)
         .options(selectinload(CreditNote.customer), selectinload(CreditNote.lines))
-        .where(CreditNote.organization_id == organization_id)
-        .order_by(desc(CreditNote.created_at))
+        .where(*conds)
+        .order_by(desc(CreditNote.created_at), desc(CreditNote.id))
         .limit(limit)
         .offset(offset)
     )
-    if customer_id:
-        query = query.where(CreditNote.customer_id == customer_id)
-    if status_:
-        query = query.where(CreditNote.status == status_)
     return list(db.scalars(query).all())
+
+
+def count_credit_notes(
+    db: Session,
+    organization_id: str,
+    customer_id: Optional[str] = None,
+    status_: Optional[CreditNoteStatus] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+) -> int:
+    """Total rows matching the list filters (independent of limit/offset)."""
+    conds = _credit_note_filters(organization_id, customer_id, status_, date_from, date_to)
+    return int(db.scalar(select(func.count(CreditNote.id)).where(*conds)) or 0)
+
+
+def credit_notes_summary(
+    db: Session,
+    organization_id: str,
+    customer_id: Optional[str] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+) -> Dict[str, Any]:
+    """Money totals for credit notes, grouped by currency (amounts in different
+    currencies are never added together).
+
+    Business rules (mirroring create/apply/void above):
+      * issued      = total of every non-draft, non-void note (ISSUED, PARTIALLY_APPLIED, APPLIED);
+      * applied     = sum of credit applications of those notes;
+      * remaining   = sum of balance_remaining of those notes (spendable credit);
+      * voided      = total of VOID notes (they never count as issued or remaining);
+      * draft       = total of DRAFT notes (not yet issued).
+    Filters: customer, issue_date between date_from and date_to (inclusive).
+    Two aggregate queries regardless of the number of notes.
+    """
+    conds = _credit_note_filters(organization_id, customer_id, None, date_from, date_to)
+    zero = Decimal("0.00")
+
+    rows = db.execute(
+        select(
+            CreditNote.currency,
+            CreditNote.status,
+            func.count(CreditNote.id),
+            func.coalesce(func.sum(CreditNote.total), 0),
+            func.coalesce(func.sum(CreditNote.balance_remaining), 0),
+        )
+        .where(*conds)
+        .group_by(CreditNote.currency, CreditNote.status)
+    ).all()
+
+    applied_rows = db.execute(
+        select(CreditNote.currency, func.coalesce(func.sum(CreditApplication.amount), 0))
+        .join(CreditApplication, CreditApplication.credit_note_id == CreditNote.id)
+        .where(
+            *conds,
+            CreditApplication.organization_id == organization_id,
+            CreditNote.status.notin_([CreditNoteStatus.VOID, CreditNoteStatus.DRAFT]),
+        )
+        .group_by(CreditNote.currency)
+    ).all()
+
+    def _money(v: Any) -> Decimal:
+        return Decimal(str(v or 0)).quantize(Decimal("0.01"))
+
+    count_by_status: Dict[str, int] = {s.value: 0 for s in CreditNoteStatus}
+    per_currency: Dict[str, Dict[str, Any]] = {}
+    for currency, status, count, total, remaining in rows:
+        cur = (currency or "INR").upper()
+        status_value = status.value if hasattr(status, "value") else str(status)
+        bucket = per_currency.setdefault(
+            cur,
+            {
+                "currency": cur,
+                "count": 0,
+                "issued_total": zero,
+                "applied_total": zero,
+                "remaining_balance": zero,
+                "voided_total": zero,
+                "draft_total": zero,
+                "count_by_status": {s.value: 0 for s in CreditNoteStatus},
+            },
+        )
+        bucket["count"] += int(count)
+        bucket["count_by_status"][status_value] += int(count)
+        count_by_status[status_value] += int(count)
+        if status_value == CreditNoteStatus.VOID.value:
+            bucket["voided_total"] += _money(total)
+        elif status_value == CreditNoteStatus.DRAFT.value:
+            bucket["draft_total"] += _money(total)
+        else:
+            bucket["issued_total"] += _money(total)
+            bucket["remaining_balance"] += _money(remaining)
+    for currency, applied in applied_rows:
+        cur = (currency or "INR").upper()
+        if cur in per_currency:
+            per_currency[cur]["applied_total"] += _money(applied)
+
+    currencies = []
+    for cur in sorted(per_currency):
+        b = per_currency[cur]
+        currencies.append({k: (str(v) if isinstance(v, Decimal) else v) for k, v in b.items()})
+
+    return {
+        "total_count": sum(count_by_status.values()),
+        "count_by_status": count_by_status,
+        "currencies": currencies,
+        "filters": {
+            "customer_id": customer_id,
+            "date_from": date_from.isoformat() if date_from else None,
+            "date_to": date_to.isoformat() if date_to else None,
+        },
+    }
 
 
 def serialize_credit_note(cn: CreditNote) -> Dict[str, Any]:

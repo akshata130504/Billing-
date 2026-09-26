@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -83,4 +83,31 @@ class CreditNoteOut(BaseModel):
 
 class CreditNoteListOut(BaseModel):
     items: List[CreditNoteOut]
+    # Number of credit notes matching the filters (not just this page).
     total: int
+    limit: Optional[int] = None
+    offset: Optional[int] = None
+
+
+class CreditNoteCurrencySummary(BaseModel):
+    currency: str
+    count: int
+    issued_total: str
+    applied_total: str
+    remaining_balance: str
+    voided_total: str
+    draft_total: str
+    count_by_status: Dict[str, int]
+
+
+class CreditNoteSummaryFilters(BaseModel):
+    customer_id: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+
+
+class CreditNoteSummaryOut(BaseModel):
+    total_count: int
+    count_by_status: Dict[str, int]
+    currencies: List[CreditNoteCurrencySummary]
+    filters: CreditNoteSummaryFilters

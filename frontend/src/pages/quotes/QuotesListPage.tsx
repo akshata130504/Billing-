@@ -21,6 +21,9 @@ import { useAuth } from '../../hooks/useAuth';
 import { toApiError } from '../../services/apiClient';
 import { loadPreferences } from '../settings/PreferencesTab';
 import { quoteService } from '../../services/quoteService';
+import { dashboardSummaryService, formatPerCurrency } from '../../services/dashboardSummaryService';
+import type { QuoteValueByCurrency } from '../../services/dashboardSummaryService';
+import { formatMoney } from '../../utils/format';
 import type { Quote, QuoteStatus } from '../../types/quotes';
 
 const PAGE_SIZE = 20;
@@ -51,6 +54,8 @@ export function QuotesListPage() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [totalQuotes, setTotalQuotes] = useState(0);
   const [counts, setCounts] = useState<QuoteCounts>(EMPTY_COUNTS);
+  const [valueByCurrency, setValueByCurrency] = useState<QuoteValueByCurrency[]>([]);
+  const [baseCurrency, setBaseCurrency] = useState('INR');
   const [page, setPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -79,27 +84,23 @@ export function QuotesListPage() {
         date_to: dateFilter || undefined,
       };
       const status = activeTab in TAB_STATUS ? TAB_STATUS[activeTab] : activeTab;
-      const count = (s?: string) =>
-        quoteService.listQuotes({ ...base, status: s, page: 1, page_size: 1 }).then((r) => r.total ?? 0);
-      const [res, total, draft, pendingApproval, sent, viewed, accepted, converted] = await Promise.all([
+      // One server-side summary replaces the per-status count() round trips. 'accepted'
+      // groups accepted / partially invoiced / invoiced / converted quotes.
+      const [res, summary] = await Promise.all([
         quoteService.listQuotes({ ...base, status, page, page_size: PAGE_SIZE }),
-        count(),
-        count('draft'),
-        count('pending_approval'),
-        count('sent'),
-        count('viewed'),
-        count('accepted'),
-        count('converted'),
+        dashboardSummaryService.quotes(base),
       ]);
       setQuotes(res.items);
       setTotalQuotes(res.total ?? res.items.length);
       setCounts({
-        total,
-        draft,
-        pendingApproval,
-        sent: sent + viewed,
-        accepted: accepted + converted,
+        total: summary.total_count,
+        draft: summary.groups.draft,
+        pendingApproval: summary.groups.pending_approval,
+        sent: summary.groups.sent,
+        accepted: summary.groups.accepted,
       });
+      setValueByCurrency(summary.value_by_currency || []);
+      setBaseCurrency(summary.base_currency || 'INR');
     } catch (err) {
       setLoadError(toApiError(err).message);
     } finally {
@@ -115,11 +116,12 @@ export function QuotesListPage() {
     setPage(1);
   }, [debouncedSearch, dateFilter, activeTab]);
 
-  // Dashboard KPIs: counts are organization-wide; value covers the loaded page only.
+  // Dashboard KPIs: counts and value come from the server summary (same search/date
+  // filters as the list, all statuses), value reported per currency — never summed across them.
   const kpis = useMemo(() => {
-    const totalValue = quotes.reduce((acc, q) => acc + Number(q.total || 0), 0);
+    const totalValue = formatPerCurrency(valueByCurrency, (r) => r.total, (a, c) => formatMoney(a, c), baseCurrency);
     return { ...counts, totalValue };
-  }, [quotes, counts]);
+  }, [counts, valueByCurrency, baseCurrency]);
 
   const filteredQuotes = quotes;
 
@@ -278,15 +280,15 @@ export function QuotesListPage() {
         </div>
 
         <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Accepted</p>
+          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Accepted / Invoiced</p>
           <p className="text-xl font-bold text-emerald-600 mt-1">{kpis.accepted}</p>
-          <p className="text-[10px] text-slate-400 mt-0.5">Ready for invoice</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">Incl. partially invoiced</p>
         </div>
 
         <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
           <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Total Value</p>
-          <p className="text-xl font-bold text-slate-900 mt-1">₹{Math.round(kpis.totalValue).toLocaleString('en-IN')}</p>
-          <p className="text-[10px] text-slate-400 mt-0.5">Quotes on this page</p>
+          <p className="text-xl font-bold text-slate-900 mt-1">{kpis.totalValue}</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">All matching quotes, per currency</p>
         </div>
       </div>
 

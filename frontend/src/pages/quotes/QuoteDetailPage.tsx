@@ -14,6 +14,7 @@ import {
   AlertCircle,
   HelpCircle,
   CreditCard,
+  Repeat,
 } from 'lucide-react';
 import { quoteService } from '../../services/quoteService';
 import type { Quote } from '../../types/quotes';
@@ -45,6 +46,8 @@ export const QuoteDetailPage = () => {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
   const [showConvertModal, setShowConvertModal] = useState(false);
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+  const [subTrialDays, setSubTrialDays] = useState('');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   useEffect(() => {
@@ -157,6 +160,22 @@ export const QuoteDetailPage = () => {
     }
   };
 
+  const handleConvertToSubscription = async () => {
+    if (!id) return;
+    try {
+      setActionLoading(true);
+      const trial = subTrialDays.trim() === '' ? undefined : Math.max(0, parseInt(subTrialDays, 10) || 0);
+      const subscription = await quoteService.convertToSubscription(id, { trial_days: trial });
+      setShowSubscriptionModal(false);
+      showToast('success', 'Subscription created', `Subscription ${subscription.subscription_number} created from this quote.`);
+      navigate(`/subscriptions/${subscription.id}`);
+    } catch (err) {
+      showToast('error', 'Conversion failed', toApiError(err).message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!id) return;
     try {
@@ -238,6 +257,10 @@ export const QuoteDetailPage = () => {
   }
 
   const upperStatus = quote.status.toUpperCase();
+  // Only quotes whose lines reference a plan / catalog plan can become a subscription
+  // (the server re-validates that each one is recurring and active).
+  const hasRecurringLines =
+    (quote.items || []).length > 0 && (quote.items || []).every((item) => Boolean(item.plan_id || item.offering_id));
 
   return (
     <div className="space-y-6">
@@ -364,6 +387,16 @@ export const QuoteDetailPage = () => {
           {canEdit && (upperStatus === 'ACCEPTED' || upperStatus === 'PARTIALLY_INVOICED') && (
             <Button variant="primary" onClick={() => setShowConvertModal(true)} disabled={actionLoading}>
               <CreditCard className="w-4 h-4 mr-1.5" /> Convert to Invoice
+            </Button>
+          )}
+          {canEdit && upperStatus === 'ACCEPTED' && hasRecurringLines && (
+            <Button variant="secondary" onClick={() => setShowSubscriptionModal(true)} disabled={actionLoading}>
+              <Repeat className="w-4 h-4 mr-1.5" /> Convert to Subscription
+            </Button>
+          )}
+          {quote.converted_subscription_id && (
+            <Button variant="secondary" onClick={() => navigate(`/subscriptions/${quote.converted_subscription_id}`)}>
+              <Repeat className="w-4 h-4 mr-1.5" /> View Subscription
             </Button>
           )}
         </div>
@@ -641,6 +674,38 @@ export const QuoteDetailPage = () => {
             <Button variant="secondary" onClick={() => setShowConvertModal(false)}>Cancel</Button>
             <Button variant="primary" onClick={handleConvertToInvoice} disabled={actionLoading}>
               Create Invoice Now
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Convert to Subscription Modal */}
+      <Modal
+        isOpen={showSubscriptionModal}
+        onClose={() => setShowSubscriptionModal(false)}
+        title="Convert Quote to Subscription"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Creates a recurring subscription from this quote's plan lines at the approved prices, discount, GST and
+            currency. Every line must be a recurring plan (legacy plan or Plans &amp; Pricing plan); the first period
+            is invoiced immediately unless a trial applies.
+          </p>
+          <label className="block text-sm">
+            <span className="text-gray-700 font-medium">Trial days (optional)</span>
+            <input
+              type="number"
+              min={0}
+              value={subTrialDays}
+              onChange={(e) => setSubTrialDays(e.target.value)}
+              placeholder="Plan default"
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+            />
+          </label>
+          <div className="flex justify-end gap-2 pt-4">
+            <Button variant="secondary" onClick={() => setShowSubscriptionModal(false)}>Cancel</Button>
+            <Button variant="primary" onClick={handleConvertToSubscription} disabled={actionLoading}>
+              Create Subscription
             </Button>
           </div>
         </div>

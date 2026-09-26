@@ -36,6 +36,7 @@ from backend.app.schemas.collections import CollectionActivityIn, PromiseToPayIn
 from backend.app.schemas.common_refs import customer_ref, iso_dt, money_str, user_ref
 from backend.app.services import audit
 from backend.app.services import invoice_service
+from backend.app.services import timezones
 from backend.app.services.money import D, q2
 from backend.app.services.pagination import MAX_PAGE_SIZE, PageParams
 
@@ -57,15 +58,30 @@ def aging_bucket(days_overdue: int) -> str:
     return "90_plus"
 
 
-def effective_status(invoice: Invoice, collection: Optional[InvoiceCollection]) -> CollectionStatus:
+def _invoice_today(invoice: Invoice, today: Optional[date]) -> date:
+    """The invoice's organization-local business day (callers pass it once per request)."""
+    if today is not None:
+        return today
+    from sqlalchemy.orm import object_session
+
+    session = object_session(invoice)
+    if session is not None:
+        return timezones.org_today_for_id(session, invoice.organization_id)
+    return timezones.org_today(None)
+
+
+def effective_status(
+    invoice: Invoice, collection: Optional[InvoiceCollection], today: Optional[date] = None
+) -> CollectionStatus:
     if invoice.status == InvoiceStatus.PAID:
         return CollectionStatus.COLLECTED
     if collection is not None and collection.manual_status in MANUAL_COLLECTION_STATUSES:
         return collection.manual_status
-    days = invoice_service.days_overdue(invoice)
+    today = _invoice_today(invoice, today)
+    days = invoice_service.days_overdue(invoice, today)
     if days > 0:
         return CollectionStatus.OVERDUE
-    if invoice.due_date and (invoice.due_date - date.today()).days <= 7:
+    if invoice.due_date and (invoice.due_date - today).days <= 7:
         return CollectionStatus.DUE_SOON
     return CollectionStatus.CURRENT
 
@@ -95,8 +111,11 @@ def _get_invoice(db: Session, organization_id: str, invoice_id: str) -> Invoice:
     return invoice
 
 
-def serialize_collection_invoice(invoice: Invoice, collection: Optional[InvoiceCollection]) -> Dict[str, Any]:
-    days = invoice_service.days_overdue(invoice)
+def serialize_collection_invoice(
+    invoice: Invoice, collection: Optional[InvoiceCollection], today: Optional[date] = None
+) -> Dict[str, Any]:
+    today = _invoice_today(invoice, today)
+    days = invoice_service.days_overdue(invoice, today)
     return {
         "id": invoice.id,
         "invoice_number": invoice.invoice_number,
@@ -109,7 +128,7 @@ def serialize_collection_invoice(invoice: Invoice, collection: Optional[InvoiceC
         "amount_due": money_str(invoice.amount_due),
         "days_overdue": days,
         "aging_bucket": aging_bucket(days),
-        "collection_status": effective_status(invoice, collection),
+        "collection_status": effective_status(invoice, collection, today),
         "last_contact_at": iso_dt(collection.last_contact_at) if collection else None,
         "next_follow_up_at": iso_dt(collection.next_follow_up_at) if collection else None,
     }
@@ -214,6 +233,7 @@ def list_invoices(
     stmt = stmt.order_by(column.desc() if desc else column.asc())
 
     all_invoices = list(db.scalars(stmt).unique().all())
+    today = timezones.org_today_for_id(db, organization_id)
 
     # Status/aging filters need the derived collection status, computed per-row after fetch.
     if status or aging_bucket_filter:
@@ -221,9 +241,9 @@ def list_invoices(
         filtered = []
         for inv in all_invoices:
             coll = collections.get(inv.id)
-            if status and effective_status(inv, coll).value != status:
+            if status and effective_status(inv, coll, today).value != status:
                 continue
-            days = invoice_service.days_overdue(inv)
+            days = invoice_service.days_overdue(inv, today)
             if aging_bucket_filter and aging_bucket(days) != aging_bucket_filter:
                 continue
             filtered.append(inv)
@@ -235,7 +255,7 @@ def list_invoices(
     page_size = min(params.page_size, MAX_PAGE_SIZE)
     offset = (params.page - 1) * page_size
     page_items = all_invoices[offset : offset + page_size]
-    items = [serialize_collection_invoice(inv, collections.get(inv.id)) for inv in page_items]
+    items = [serialize_collection_invoice(inv, collections.get(inv.id), today) for inv in page_items]
     total_pages = max(1, -(-total // page_size)) if total else 0
     return {"items": items, "total": total, "page": params.page, "page_size": page_size, "total_pages": total_pages}
 
@@ -243,7 +263,7 @@ def list_invoices(
 def get_invoice_detail(db: Session, organization_id: str, invoice_id: str) -> Dict[str, Any]:
     invoice = _get_invoice(db, organization_id, invoice_id)
     collection = get_or_create_collection(db, organization_id, invoice_id)
-    data = serialize_collection_invoice(invoice, collection)
+    data = serialize_collection_invoice(invoice, collection, timezones.org_today_for_id(db, organization_id))
     activities = db.scalars(
         select(CollectionActivity)
         .options(selectinload(CollectionActivity.created_by))
@@ -360,7 +380,11 @@ def update_promise_status(db: Session, ctx: CurrentContext, promise_id: str, sta
         if status == PromiseToPayStatus.KEPT:
             collection.manual_status = None  # let it fall back to the auto-derived status
         elif status == PromiseToPayStatus.BROKEN:
-            collection.manual_status = CollectionStatus.OVERDUE if invoice_service.days_overdue(invoice) > 0 else None
+            collection.manual_status = (
+                CollectionStatus.OVERDUE
+                if invoice_service.days_overdue(invoice, timezones.org_today_for_id(db, ctx.organization_id)) > 0
+                else None
+            )
         collection.updated_at = utcnow()
 
     db.flush()
@@ -434,7 +458,7 @@ def send_reminder(db: Session, ctx: CurrentContext, invoice_id: str):
 
 
 def dashboard(db: Session, organization_id: str) -> Dict[str, Any]:
-    today = date.today()
+    today = timezones.org_today_for_id(db, organization_id)
 
     open_invoices = list(
         db.scalars(
@@ -461,12 +485,12 @@ def dashboard(db: Session, organization_id: str) -> Dict[str, Any]:
     for inv in open_invoices:
         due = q2(inv.amount_due)
         total_outstanding += due
-        days = invoice_service.days_overdue(inv)
+        days = invoice_service.days_overdue(inv, today)
         bucket = aging_bucket(days)
         bucket_totals[bucket]["count"] += 1
         bucket_totals[bucket]["amount"] += due
 
-        status = effective_status(inv, collections.get(inv.id))
+        status = effective_status(inv, collections.get(inv.id), today)
         entry = pipeline_totals.setdefault(status, {"count": 0, "amount": Decimal("0")})
         entry["count"] += 1
         entry["amount"] += due

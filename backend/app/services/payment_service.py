@@ -41,7 +41,7 @@ from backend.app.models import (
 from backend.app.schemas.common_refs import customer_ref, iso_dt, money_str, user_ref
 from backend.app.schemas.invoices import RecordPaymentIn
 from backend.app.schemas.payments import AllocationIn, PaymentCreate, PaymentUpdate
-from backend.app.services import audit, razorpay_gateway
+from backend.app.services import audit, razorpay_gateway, timezones
 from backend.app.services.invoice_service import (
     SETTLED_PAYMENT_STATUSES,
     get_customer,
@@ -226,10 +226,9 @@ def find_refund_by_gateway_id(db: Session, gateway_refund_id: str, *, lock: bool
     return db.scalars(stmt).first()
 
 
-def _day_bounds(date_from: Optional[date], date_to: Optional[date]):
-    start = datetime.combine(date_from, time.min, tzinfo=timezone.utc) if date_from else None
-    end = datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=timezone.utc) if date_to else None
-    return start, end
+def _day_bounds(date_from: Optional[date], date_to: Optional[date], tz: Any = None):
+    """Inclusive organization-local dates -> half-open UTC instants (UTC when tz is None)."""
+    return timezones.range_bounds_utc(date_from, date_to, tz if tz is not None else timezone.utc)
 
 
 def _apply_filters(
@@ -244,6 +243,7 @@ def _apply_filters(
     customer_id: Optional[str] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
+    tz: Any = None,
 ) -> Select:
     """Shared WHERE clauses so the list and the summary always describe the same rows."""
     stmt = stmt.where(Payment.organization_id == organization_id)
@@ -283,7 +283,7 @@ def _apply_filters(
         raise ValidationAppError("Unknown filter value.", {"fields": fields})
     if customer_id:
         stmt = stmt.where(Payment.customer_id == customer_id)
-    start, end = _day_bounds(date_from, date_to)
+    start, end = _day_bounds(date_from, date_to, tz)
     if start:
         stmt = stmt.where(func.coalesce(Payment.paid_at, Payment.created_at) >= start)
     if end:
@@ -297,7 +297,7 @@ def list_payments(
     params: PageParams,
     **filters,
 ):
-    stmt = _apply_filters(_base_query(), organization_id, **filters)
+    stmt = _apply_filters(_base_query(), organization_id, tz=timezones.org_tz_for_id(db, organization_id), **filters)
     stmt = apply_sort(stmt, Payment, params.sort, PAYMENT_SORT_FIELDS, "-created_at")
     return paginate(db, stmt, params)
 
@@ -308,7 +308,9 @@ def payments_summary(db: Session, organization_id: str, **filters) -> Dict[str, 
     Computed in SQL so the figures cover every matching payment, not just the
     page the client happens to be showing.
     """
-    ids_stmt = _apply_filters(select(Payment.id), organization_id, **filters).subquery()
+    ids_stmt = _apply_filters(
+        select(Payment.id), organization_id, tz=timezones.org_tz_for_id(db, organization_id), **filters
+    ).subquery()
     matching = select(ids_stmt.c.id)
 
     def _sum(column, *conditions):
@@ -1111,7 +1113,39 @@ def fail_gateway_payment(
         status=status,
     )
     _emit_payment_event(db, payment, "payment.failed", reason=payment.failure_reason)
+    _alert_gateway_failure(payment, payment.failure_reason)
     return payment
+
+
+def _mask_ref(value: Optional[str]) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    return f"{text[:4]}…{text[-4:]}" if len(text) > 8 else "…" + text[-2:]
+
+
+def _alert_gateway_failure(payment: Payment, reason: Optional[str]) -> None:
+    """Ops alert for a failed gateway payment: masked references only - never card
+    data, tokens or raw gateway payloads."""
+    from backend.app.core.alerts import send_alert
+
+    method = payment.method.value if hasattr(payment.method, "value") else str(payment.method or "")
+    send_alert(
+        "payment.failed",
+        f"Gateway payment {payment.payment_number} failed",
+        {
+            "organization_id": payment.organization_id,
+            "payment_number": payment.payment_number,
+            "gateway_order": _mask_ref(payment.gateway_order_id),
+            "gateway_payment": _mask_ref(payment.gateway_payment_id),
+            "amount": str(payment.amount),
+            "currency": payment.currency,
+            "method": method,
+            "reason": str(reason or "")[:200],
+        },
+        severity="warning",
+        dedup_key=f"payment.failed:{payment.organization_id}",
+    )
 
 
 __all__ = [

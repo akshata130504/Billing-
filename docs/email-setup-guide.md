@@ -75,7 +75,7 @@ In production, you connect Rooman Billing to an established transactional email 
 SMTP_HOST=smtp.sendgrid.net
 SMTP_PORT=587
 SMTP_USERNAME=apikey
-SMTP_PASSWORD=SG.your_actual_production_api_key_here
+SMTP_PASSWORD=<your-sendgrid-api-key>
 SMTP_USE_TLS=true
 SMTP_USE_SSL=false
 EMAIL_FROM_ADDRESS=billing@yourcompany.com

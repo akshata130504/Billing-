@@ -55,8 +55,39 @@ export interface CreditNote {
 
 export interface CreditNoteList {
   items: CreditNote[];
-  /** Note: the backend currently returns the number of items in this page. */
+  /** Number of credit notes matching the filters (across all pages). */
   total: number;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface CreditNoteCurrencySummary {
+  currency: string;
+  count: number;
+  /** Non-draft, non-void notes. */
+  issued_total: string;
+  applied_total: string;
+  /** Spendable credit still available. */
+  remaining_balance: string;
+  voided_total: string;
+  draft_total: string;
+  count_by_status: Record<CreditNoteStatus, number>;
+}
+
+export interface CreditNoteSummary {
+  total_count: number;
+  count_by_status: Record<CreditNoteStatus, number>;
+  /** One entry per currency — amounts are never summed across currencies. */
+  currencies: CreditNoteCurrencySummary[];
+  filters: { customer_id?: string | null; date_from?: string | null; date_to?: string | null };
+}
+
+export interface CreditNoteSummaryParams {
+  customer_id?: string;
+  /** Issue date on or after (YYYY-MM-DD). */
+  from?: string;
+  /** Issue date on or before (YYYY-MM-DD). */
+  to?: string;
 }
 
 export interface CreditNoteLineIn {
@@ -78,6 +109,8 @@ export interface CreditNoteCreateIn {
 export interface CreditNoteListParams {
   customer_id?: string;
   status?: CreditNoteStatus;
+  date_from?: string;
+  date_to?: string;
   limit?: number;
   offset?: number;
 }
@@ -85,6 +118,13 @@ export interface CreditNoteListParams {
 export const creditNoteService = {
   list: async (params?: CreditNoteListParams): Promise<CreditNoteList> => {
     const { data } = await apiClient.get<CreditNoteList>('/credit-notes', {
+      params: cleanParams(params),
+    });
+    return data;
+  },
+
+  summary: async (params?: CreditNoteSummaryParams): Promise<CreditNoteSummary> => {
+    const { data } = await apiClient.get<CreditNoteSummary>('/credit-notes/summary', {
       params: cleanParams(params),
     });
     return data;

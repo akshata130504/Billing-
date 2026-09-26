@@ -50,7 +50,7 @@ class ValidationAppError(AppException):
         super().__init__(
             message=message,
             code="VALIDATION_ERROR",
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,  # Unprocessable Content; numeric because the constant was renamed in Starlette 1.x
             details=details or {},
         )
 
@@ -132,7 +132,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         loc = [str(p) for p in err.get("loc", []) if p not in ("body", "query", "path")]
         fields[".".join(loc) or "request"] = err.get("msg", "Invalid value")
     return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=422,  # Unprocessable Content; numeric because the constant was renamed in Starlette 1.x
         content={
             "error": {
                 "code": "VALIDATION_ERROR",

@@ -10,10 +10,12 @@ import { EmptyState } from '../../components/common/EmptyState';
 import { CustomerCombobox } from '../../components/common/CustomerCombobox';
 import { useAuth } from '../../hooks/useAuth';
 import { toApiError } from '../../services/apiClient';
+import { StatCard } from '../../components/common/StatCard';
 import {
   creditNoteService,
   type CreditNote,
   type CreditNoteStatus,
+  type CreditNoteSummary,
 } from '../../services/creditNoteService';
 import { formatDate, formatMoney } from '../../utils/format';
 import { CreateCreditNoteModal } from './CreateCreditNoteModal';
@@ -46,19 +48,27 @@ export function CreditNotesListPage() {
     if (createRequested) setSearchParams({}, { replace: true });
   };
 
+  const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState<CreditNoteSummary | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      // The endpoint uses limit/offset and reports only the page size as `total`,
-      // so ask for one extra row to know whether a next page exists.
-      const res = await creditNoteService.list({
-        status: statusFilter || undefined,
-        customer_id: customerFilter || undefined,
-        limit: PAGE_SIZE + 1,
-        offset: (page - 1) * PAGE_SIZE,
-      });
+      // `total` is the real number of matching credit notes; the summary tiles come
+      // from the server (per currency), not from the rows on this page.
+      const [res, sum] = await Promise.all([
+        creditNoteService.list({
+          status: statusFilter || undefined,
+          customer_id: customerFilter || undefined,
+          limit: PAGE_SIZE,
+          offset: (page - 1) * PAGE_SIZE,
+        }),
+        creditNoteService.summary({ customer_id: customerFilter || undefined }).catch(() => null),
+      ]);
       setNotes(res.items || []);
+      setTotal(res.total ?? 0);
+      setSummary(sum);
     } catch (err) {
       setError(toApiError(err).message);
     } finally {
@@ -70,9 +80,17 @@ export function CreditNotesListPage() {
     void load();
   }, [load]);
 
-  const hasNextPage = notes.length > PAGE_SIZE;
-  const visible = notes.slice(0, PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const hasNextPage = page < totalPages;
+  const visible = notes;
+  const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(total, (page - 1) * PAGE_SIZE + visible.length);
   const filtered = Boolean(statusFilter || customerFilter);
+  const summaryCurrencies = summary?.currencies ?? [];
+  const tile = (field: 'issued_total' | 'applied_total' | 'remaining_balance' | 'voided_total') =>
+    summaryCurrencies.length === 0
+      ? formatMoney(0)
+      : summaryCurrencies.map((c) => formatMoney(c[field], c.currency)).join(' · ');
 
   return (
     <div className="space-y-6">
@@ -104,6 +122,27 @@ export function CreditNotesListPage() {
           </div>
         }
       />
+
+      {summary && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" aria-label="Credit note totals">
+          <StatCard
+            title="Issued"
+            value={tile('issued_total')}
+            comparisonText={`${summary.total_count - (summary.count_by_status.void ?? 0) - (summary.count_by_status.draft ?? 0)} credit notes`}
+          />
+          <StatCard title="Applied" value={tile('applied_total')} comparisonText="Used against invoices" />
+          <StatCard
+            title="Remaining balance"
+            value={tile('remaining_balance')}
+            comparisonText={`${(summary.count_by_status.issued ?? 0) + (summary.count_by_status.partially_applied ?? 0)} with credit left`}
+          />
+          <StatCard
+            title="Voided"
+            value={tile('voided_total')}
+            comparisonText={`${summary.count_by_status.void ?? 0} voided`}
+          />
+        </div>
+      )}
 
       <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="sm:col-span-2">
@@ -212,8 +251,12 @@ export function CreditNotesListPage() {
                 </tbody>
               </table>
             </div>
-            {(page > 1 || hasNextPage) && (
-              <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-end gap-1.5 text-xs text-slate-500 bg-slate-50/50">
+            <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between gap-1.5 text-xs text-slate-500 bg-slate-50/50">
+              <span data-testid="credit-notes-range">
+                Showing {rangeStart}–{rangeEnd} of {total}
+              </span>
+              {(page > 1 || hasNextPage) && (
+              <div className="flex items-center gap-1.5">
                 <Button
                   variant="outline"
                   size="sm"
@@ -223,7 +266,9 @@ export function CreditNotesListPage() {
                 >
                   Previous
                 </Button>
-                <span className="px-2 font-medium text-slate-600">Page {page}</span>
+                <span className="px-2 font-medium text-slate-600">
+                  Page {page} of {totalPages}
+                </span>
                 <Button
                   variant="outline"
                   size="sm"
@@ -234,7 +279,8 @@ export function CreditNotesListPage() {
                   Next
                 </Button>
               </div>
-            )}
+              )}
+            </div>
           </>
         )}
       </div>

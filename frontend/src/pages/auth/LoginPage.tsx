@@ -30,7 +30,10 @@ export function LoginPage() {
   const [mfaCode, setMfaCode] = useState('');
 
   const from = (location.state as LocationState | null)?.from;
-  const redirectTo = from?.pathname ? `${from.pathname}${from.search ?? ''}` : '/dashboard';
+  // Only same-origin app paths: reject protocol-relative ("//x") and backslash ("/\x")
+  // forms (react-router 6.x open-redirect advisory GHSA-wrjc-x8rr-h8h6).
+  const isSafePath = (p?: string) => !!p && p.startsWith('/') && !/^\/[\\/]/.test(p) && !p.includes('\\');
+  const redirectTo = isSafePath(from?.pathname) ? `${from!.pathname}${from!.search ?? ''}` : '/dashboard';
 
   if (isLoading) return <LoadingState message="Checking your session..." />;
   if (isAuthenticated) return <Navigate to={redirectTo} replace />;

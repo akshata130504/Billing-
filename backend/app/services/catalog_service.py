@@ -44,6 +44,18 @@ PLAN_SNAPSHOT_FIELDS = (
 )
 
 
+LINKED_MESSAGE = (
+    "This {kind} is managed by a Plans & Pricing offering (it bills subscriptions to that "
+    "offering); edit or archive the offering instead."
+)
+
+
+def _guard_not_linked(entity, kind: str) -> None:
+    """Linked products/plans mirror a catalog Offering; direct edits would desync billing."""
+    if getattr(entity, "offering_id", None):
+        raise InvalidStateError(LINKED_MESSAGE.format(kind=kind), {"fields": {"offering_id": entity.offering_id}})
+
+
 # --- products ----------------------------------------------------------------------------
 
 
@@ -68,7 +80,9 @@ def list_products(
     type_: Optional[str] = None,
 ) -> Page:
     stmt: Select = (
-        select(Product).where(Product.organization_id == ctx.organization_id).options(selectinload(Product.plans))
+        select(Product)
+        .where(Product.organization_id == ctx.organization_id, Product.offering_id.is_(None))
+        .options(selectinload(Product.plans))
     )
     if search:
         like = f"%{search.strip()}%"
@@ -120,6 +134,7 @@ def create_product(db: Session, ctx: CurrentContext, data: ProductCreate) -> Pro
 
 def update_product(db: Session, ctx: CurrentContext, product_id: str, data: ProductUpdate) -> Product:
     product = get_product_or_404(db, ctx.organization_id, product_id)
+    _guard_not_linked(product, "product")
     changes = data.model_dump(exclude_unset=True)
     if not changes:
         return product
@@ -147,6 +162,7 @@ def update_product(db: Session, ctx: CurrentContext, product_id: str, data: Prod
 
 def delete_product(db: Session, ctx: CurrentContext, product_id: str) -> None:
     product = get_product_or_404(db, ctx.organization_id, product_id)
+    _guard_not_linked(product, "product")
     org_id = ctx.organization_id
     plan_ids = select(Plan.id).where(Plan.product_id == product.id, Plan.organization_id == org_id)
     referenced = (
@@ -193,7 +209,8 @@ def list_plans(
     is_active: Optional[bool] = None,
     billing_interval: Optional[str] = None,
 ) -> Page:
-    stmt: Select = select(Plan).where(Plan.organization_id == ctx.organization_id)
+    # Plans linked to a catalog offering are listed with their offering, not here.
+    stmt: Select = select(Plan).where(Plan.organization_id == ctx.organization_id, Plan.offering_id.is_(None))
     if product_id:
         stmt = stmt.where(Plan.product_id == product_id)
     if is_active is not None:
@@ -213,6 +230,7 @@ def _code_taken(db: Session, organization_id: str, code: str, exclude_id: Option
 
 def create_plan(db: Session, ctx: CurrentContext, data: PlanCreate) -> Plan:
     product = get_product_or_404(db, ctx.organization_id, data.product_id)
+    _guard_not_linked(product, "product")
     if _code_taken(db, ctx.organization_id, data.code):
         raise ConflictError(f"A plan with code '{data.code}' already exists.", details={"fields": {"code": "duplicate"}})
     payload = data.model_dump(exclude_none=True)
@@ -254,6 +272,7 @@ def _has_live_subscriptions(db: Session, organization_id: str, plan_id: str) -> 
 
 def update_plan(db: Session, ctx: CurrentContext, plan_id: str, data: PlanUpdate) -> Plan:
     plan = get_plan_or_404(db, ctx.organization_id, plan_id)
+    _guard_not_linked(plan, "plan")
     changes = data.model_dump(exclude_unset=True)
     if not changes:
         return plan
@@ -298,6 +317,7 @@ def update_plan(db: Session, ctx: CurrentContext, plan_id: str, data: PlanUpdate
 
 def delete_plan(db: Session, ctx: CurrentContext, plan_id: str) -> None:
     plan = get_plan_or_404(db, ctx.organization_id, plan_id)
+    _guard_not_linked(plan, "plan")
     has_subs = db.scalar(
         select(exists().where(Subscription.organization_id == ctx.organization_id, Subscription.plan_id == plan.id))
     )

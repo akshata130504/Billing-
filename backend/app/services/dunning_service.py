@@ -50,7 +50,7 @@ from backend.app.schemas.dunning import (
     DunningPolicyUpdate,
     ExpiringCardNoticeOut,
 )
-from backend.app.services import audit, invoice_service, payment_service, razorpay_gateway
+from backend.app.services import audit, invoice_service, payment_service, razorpay_gateway, timezones
 from backend.app.services.gateways.registry import get_gateway_adapter
 from backend.app.services.notification_service import dispatch_notification
 from backend.app.services.numbering import next_number
@@ -108,6 +108,35 @@ def _record_dunning_void_approval(
 
 def D_(value) -> Decimal:
     return Decimal(str(value or 0))
+
+
+def _alert_charge_failure(organization_id, case, invoice, pm, attempt_num, gateway_result) -> None:
+    """Ops alert for a declined/failed dunning gateway charge. Only masked identifiers:
+    never the saved-method token, card data or the raw gateway payload."""
+    from backend.app.core.alerts import mask_email, send_alert
+
+    try:
+        gateway = pm.gateway.value if hasattr(pm.gateway, "value") else str(pm.gateway)
+        send_alert(
+            "payment.charge_failed",
+            f"Dunning retry {attempt_num} charge failed for invoice {invoice.invoice_number}",
+            {
+                "organization_id": organization_id,
+                "invoice_number": invoice.invoice_number,
+                "dunning_case_id": case.id,
+                "attempt_number": attempt_num,
+                "gateway": gateway,
+                "customer": mask_email(case.customer.email) if getattr(case, "customer", None) and case.customer.email else "",
+                "amount": str(invoice.amount_due),
+                "currency": invoice.currency or "INR",
+                "error_category": getattr(gateway_result, "error_category", None),
+                "error": str(getattr(gateway_result, "error_message", "") or "")[:200],
+            },
+            severity="warning",
+            dedup_key=f"payment.charge_failed:{organization_id}",
+        )
+    except Exception:  # alerting must never break the dunning run
+        logger.warning("dunning charge-failure alert could not be built")
 
 
 # A gateway charge that has not been confirmed within this window is treated as failed.
@@ -633,6 +662,7 @@ def execute_dunning_retries(db: Session, organization_id: str) -> Dict[str, Any]
             payment_attempt.failure_category = gateway_result.error_category
             payment_attempt.failure_reason = gateway_result.error_message
             payment_attempt.payload = gateway_result.raw_payload
+            _alert_charge_failure(organization_id, case, invoice, pm, attempt_num, gateway_result)
         db.flush()
 
         if charge_pending:
@@ -1028,7 +1058,7 @@ def check_pre_dunning_expiring_cards(
     days_threshold: int = 30,
 ) -> List[ExpiringCardNoticeOut]:
     """Identifies cards in vault expiring within days_threshold to prevent dunning failures."""
-    today = date.today()
+    today = timezones.org_today_for_id(db, organization_id)
     now_year = today.year
     now_month = today.month
 

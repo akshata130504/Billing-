@@ -1,6 +1,6 @@
 """Quote schemas (contract section 6) plus the InvoiceOut-shaped response of
 POST /quotes/{id}/convert and the public hosted-page shapes."""
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import List, Optional
 
@@ -33,7 +33,12 @@ class QuoteCreate(BaseModel):
     @field_validator("issue_date")
     @classmethod
     def _issue_date_not_past(cls, v):
-        if v and v < date.today():
+        # Lenient, timezone-agnostic backstop: no organization's local date is earlier than
+        # the UTC date at now-14h (UTC-12 is the westernmost zone). The strict check against
+        # the organization's own business day lives in quote_service.create_quote.
+        from backend.app.services import timezones
+
+        if v and v < (timezones.utc_now() - timedelta(hours=14)).date():
             raise ValueError("Issue date cannot be in the past.")
         return v
 
@@ -78,6 +83,18 @@ class QuoteConvertIn(BaseModel):
     due_date: Optional[date] = None
 
 
+class QuoteToSubscriptionIn(BaseModel):
+    """POST /quotes/{id}/convert-to-subscription."""
+
+    start_date: Optional[date] = None
+    # None = the primary plan's trial_days (legacy plans; catalog offerings have none).
+    trial_days: Optional[int] = Field(None, ge=0, le=365)
+    auto_renewal: bool = True
+    # Default: issue the first period invoice when the subscription starts active.
+    generate_first_invoice: Optional[bool] = None
+    notes: Optional[str] = Field(None, max_length=2000)
+
+
 class QuoteOut(BaseModel):
     id: str
     quote_number: str
@@ -106,6 +123,7 @@ class QuoteOut(BaseModel):
     accepted_at: Optional[datetime] = None
     declined_at: Optional[datetime] = None
     converted_invoice_id: Optional[str] = None
+    converted_subscription_id: Optional[str] = None
     approval_request_id: Optional[str] = None
     # Only set on the send response: True when the customer email was handed to SMTP,
     # False when it could not be delivered (no email on file, SMTP off or failing).

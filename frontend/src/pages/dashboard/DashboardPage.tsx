@@ -13,6 +13,7 @@ import {
   UserMinus,
 } from 'lucide-react';
 import { controlCenterService } from '../../services/controlCenterService';
+import { dashboardSummaryService, formatPerCurrency } from '../../services/dashboardSummaryService';
 import { toApiError } from '../../services/apiClient';
 import { queryKeys } from '../../hooks/queries';
 import { useAuth } from '../../hooks/useAuth';
@@ -90,6 +91,13 @@ export function DashboardPage() {
     queryFn: () => controlCenterService.actionCenter(),
   });
 
+  // Server-side, currency-aware counters (invoice counts, collections, receivables).
+  // Keyed under 'control-center' so the existing control-center invalidation refreshes it.
+  const financial = useQuery({
+    queryKey: ['control-center', 'financial-summary', dateFilter] as const,
+    queryFn: () => dashboardSummaryService.financial({ range: dateFilter }),
+  });
+
   const firstName = user?.full_name?.trim().split(/\s+/)[0] || 'there';
 
   if (summary.isPending) {
@@ -107,16 +115,37 @@ export function DashboardPage() {
   const { metrics, revenue, pipeline, customer_health, recovery, recent_transactions, activity, currency } =
     summary.data;
 
-  const totalInvoices =
+  const fin = financial.data;
+  // Prefer the server summary (real counts, per-currency money); fall back to the
+  // pipeline figures while it loads or if it failed.
+  const pipelineInvoiceCount =
     (pipeline?.draft?.count || 0) +
     (pipeline?.sent?.count || 0) +
     (pipeline?.partially_paid?.count || 0) +
     (pipeline?.overdue?.count || 0) +
     (pipeline?.paid_this_period?.count || 0);
+  const totalInvoices = fin ? fin.invoices.total_count : pipelineInvoiceCount;
+  const overdueInvoices = fin
+    ? fin.receivables.reduce((n, r) => n + r.overdue_count, 0)
+    : pipeline?.overdue?.count || 0;
 
   const totalRevNum = parseMoney(metrics?.total_revenue) || 0;
   const paymentsRecvNum = parseMoney(pipeline?.paid_this_period?.amount) || 0;
-  const outstandingNum = parseMoney(metrics?.outstanding_amount) || 0;
+  const outstandingNum = fin
+    ? fin.receivables.reduce((sum, r) => sum + (parseMoney(r.amount_due) || 0), 0)
+    : parseMoney(metrics?.outstanding_amount) || 0;
+  const paymentsReceivedLabel = fin
+    ? formatPerCurrency(fin.payments_collected, (r) => r.net, formatMoney, currency)
+    : formatMoney(paymentsRecvNum, currency);
+  const paymentsReceivedChange = fin
+    ? `${fin.payments_collected.reduce((n, r) => n + r.count, 0)} payments this period`
+    : `${pipeline?.paid_this_period?.count || 0} paid this period`;
+  const outstandingLabel = fin
+    ? formatPerCurrency(fin.receivables, (r) => r.amount_due, formatMoney, currency)
+    : formatMoney(outstandingNum, currency);
+  const outstandingCount = fin
+    ? fin.receivables.reduce((n, r) => n + r.open_count, 0)
+    : metrics?.outstanding_count || 0;
 
   const revChangePct = metrics?.revenue_change_pct
     ? `${metrics.revenue_change_pct}% from last period`
@@ -138,8 +167,8 @@ export function DashboardPage() {
     {
       title: 'Total Invoices',
       value: String(totalInvoices),
-      change: `${pipeline?.overdue?.count || 0} overdue`,
-      changeColor: (pipeline?.overdue?.count || 0) > 0 ? 'text-[#E83E8C]' : 'text-[#10B981]',
+      change: `${overdueInvoices} overdue`,
+      changeColor: overdueInvoices > 0 ? 'text-[#E83E8C]' : 'text-[#10B981]',
       icon: (
         <div className="w-12 h-12 rounded-2xl bg-[#E8EBFC] text-[#3F51C9] flex items-center justify-center shrink-0">
           <FileText className="w-5 h-5 stroke-[2]" />
@@ -159,8 +188,8 @@ export function DashboardPage() {
     },
     {
       title: 'Payments Received',
-      value: formatMoney(paymentsRecvNum, currency),
-      change: `${pipeline?.paid_this_period?.count || 0} paid this period`,
+      value: paymentsReceivedLabel,
+      change: paymentsReceivedChange,
       changeColor: 'text-[#10B981]',
       icon: (
         <div className="w-12 h-12 rounded-2xl bg-[#F9D9E8] text-[#E83E8C] flex items-center justify-center shrink-0">
@@ -170,8 +199,8 @@ export function DashboardPage() {
     },
     {
       title: 'Outstanding',
-      value: formatMoney(outstandingNum, currency),
-      change: `${metrics?.outstanding_count || 0} unpaid invoices`,
+      value: outstandingLabel,
+      change: `${outstandingCount} unpaid invoices`,
       changeColor: outstandingNum > 0 ? 'text-[#E83E8C]' : 'text-[#10B981]',
       icon: (
         <div className="w-12 h-12 rounded-full bg-[#FCEBD9] text-[#E07A28] flex items-center justify-center shrink-0">

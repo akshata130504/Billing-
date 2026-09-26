@@ -41,6 +41,7 @@ from backend.app.services import audit
 from backend.app.services.email import frontend_url, send_email
 from backend.app.services.money import D, LineInput, compute_totals, q2
 from backend.app.services import gst
+from backend.app.services import timezones
 from backend.app.services.numbering import next_number, release_number_if_latest
 from backend.app.services.pagination import PageParams, apply_sort, paginate
 
@@ -84,7 +85,14 @@ def snapshot(invoice: Invoice) -> Dict[str, Any]:
 def days_overdue(invoice: Invoice, today: Optional[date] = None) -> int:
     if invoice.status not in OPEN_INVOICE_STATUSES or invoice.due_date is None:
         return 0
-    today = today or date.today()
+    if today is None:
+        # The organization's business day, not the server's (UTC in production).
+        session = object_session(invoice)
+        today = (
+            timezones.org_today_for_id(session, invoice.organization_id)
+            if session is not None
+            else timezones.utc_today()
+        )
     return max(0, (today - invoice.due_date).days)
 
 
@@ -279,7 +287,7 @@ def list_invoices(
     if date_to:
         stmt = stmt.where(Invoice.issue_date <= date_to)
     if overdue_only:
-        today = date.today()
+        today = timezones.org_today_for_id(db, organization_id)
         stmt = stmt.where(
             or_(
                 Invoice.status == InvoiceStatus.OVERDUE,
@@ -345,7 +353,7 @@ def create_invoice_record(
         totals = compute_totals(lines, discount_pct, supply=supply)
     except ValueError as exc:
         raise ValidationAppError(str(exc), {"fields": {"items": str(exc)}})
-    issue_date = issue_date or date.today()
+    issue_date = issue_date or timezones.org_today(organization)
     if due_date is None:
         due_date = issue_date + timedelta(days=int(customer.payment_terms_days or 0))
     if due_date < issue_date:
@@ -1002,9 +1010,19 @@ def void_invoice(
     return get_invoice(db, org_id, invoice.id)
 
 
-def mark_overdue(db: Session, invoice: Invoice, *, actor_label: str = audit.SYSTEM_ACTOR) -> bool:
-    """Scheduler step (c): flip an open invoice past its due date to overdue. No commit."""
-    if invoice.status not in (InvoiceStatus.SENT, InvoiceStatus.PARTIALLY_PAID) or invoice.due_date >= date.today():
+def mark_overdue(
+    db: Session,
+    invoice: Invoice,
+    *,
+    actor_label: str = audit.SYSTEM_ACTOR,
+    today: Optional[date] = None,
+) -> bool:
+    """Scheduler step (c): flip an open invoice past its due date to overdue. No commit.
+
+    "Past due" is judged against the organization's local business day (the same day the
+    scheduler uses), never the server's UTC date."""
+    today = today or timezones.org_today_for_id(db, invoice.organization_id)
+    if invoice.status not in (InvoiceStatus.SENT, InvoiceStatus.PARTIALLY_PAID) or invoice.due_date >= today:
         return False
     before = snapshot(invoice)
     invoice.status = InvoiceStatus.OVERDUE
@@ -1101,7 +1119,7 @@ def recompute_invoice(
     total = q2(invoice.total)
     invoice.amount_paid = paid
     invoice.amount_due = q2(max(Decimal("0"), total - paid))
-    today = date.today()
+    today = timezones.org_today_for_id(db, invoice.organization_id)
 
     if invoice.amount_due == 0:
         invoice.status = InvoiceStatus.PAID

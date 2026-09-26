@@ -39,7 +39,7 @@ from backend.app.models import (
     RefundStatus,
 )
 from backend.app.schemas.common_refs import customer_ref, money_str
-from backend.app.services import invoice_service
+from backend.app.services import invoice_service, timezones
 from backend.app.services.money import D, q2
 from backend.app.services.payment_service import SETTLED_PAYMENT_STATUSES, effective_amount
 
@@ -60,41 +60,64 @@ class ReportRange:
     key: str
     start: date
     end: date  # inclusive
+    # The organization's timezone: start/end are its local business days, and instants
+    # (paid_at, created_at) are bucketed by their local date. None = UTC.
+    tz: Any = None
 
 
-def resolve_report_range(range_key: str, start: Optional[date] = None, end: Optional[date] = None) -> ReportRange:
-    today = date.today()
+def resolve_report_range(
+    range_key: str,
+    start: Optional[date] = None,
+    end: Optional[date] = None,
+    *,
+    today: Optional[date] = None,
+    tz: Any = None,
+) -> ReportRange:
+    """`today` should be the organization's local date (timezones.org_today) and `tz` its
+    timezone (the endpoints and the scheduled export pass both). Without `today` the date
+    is taken in `tz`; with neither, the legacy process-local date is kept for callers that
+    have no organization context."""
+    if today is None:
+        today = timezones.org_today(tz) if tz is not None else date.today()
     key = range_key or "this_month"
     if key == "custom":
         if not start or not end:
             raise ValueError("start and end are required for a custom range.")
         if end < start:
             raise ValueError("end cannot be before start.")
-        return ReportRange("custom", start, end)
+        return ReportRange("custom", start, end, tz)
     if key == "today":
-        return ReportRange(key, today, today)
+        return ReportRange(key, today, today, tz)
     if key == "this_week":
-        return ReportRange(key, today - timedelta(days=today.weekday()), today)
+        return ReportRange(key, today - timedelta(days=today.weekday()), today, tz)
     if key == "this_month":
-        return ReportRange(key, today.replace(day=1), today)
+        return ReportRange(key, today.replace(day=1), today, tz)
     if key == "last_month":
         first_this_month = today.replace(day=1)
         last_day_prev = first_this_month - timedelta(days=1)
-        return ReportRange(key, last_day_prev.replace(day=1), last_day_prev)
+        return ReportRange(key, last_day_prev.replace(day=1), last_day_prev, tz)
     if key == "this_quarter":
         quarter_start_month = ((today.month - 1) // 3) * 3 + 1
-        return ReportRange(key, today.replace(month=quarter_start_month, day=1), today)
+        return ReportRange(key, today.replace(month=quarter_start_month, day=1), today, tz)
     if key == "this_year":
-        return ReportRange(key, today.replace(month=1, day=1), today)
+        return ReportRange(key, today.replace(month=1, day=1), today, tz)
     if key == "last_12_months":
-        return ReportRange(key, today - timedelta(days=365), today)
+        return ReportRange(key, today - timedelta(days=365), today, tz)
     raise ValueError(f"Unknown range '{range_key}'. Expected one of {REPORT_RANGE_KEYS}.")
 
 
+def _range_tz(r: ReportRange) -> Any:
+    return r.tz if r.tz is not None else timezone.utc
+
+
 def _dt_bounds(r: ReportRange) -> Tuple[datetime, datetime]:
-    lo = datetime.combine(r.start, time.min, tzinfo=timezone.utc)
-    hi = datetime.combine(r.end, time.max, tzinfo=timezone.utc)
+    """Half-open [start 00:00 local, end+1 00:00 local) as UTC instants (compare with `<` hi)."""
+    lo, hi = timezones.range_bounds_utc(r.start, r.end, _range_tz(r))
     return lo, hi
+
+
+def _local_date(value: datetime, r: ReportRange) -> date:
+    return timezones.local_date(value, _range_tz(r))
 
 
 def _bucket_key(d: date, granularity: str) -> str:
@@ -140,7 +163,7 @@ def _settled_payments_query(organization_id: str, r: ReportRange):
         Payment.organization_id == organization_id,
         Payment.status.in_(SETTLED_PAYMENT_STATUSES),
         Payment.paid_at >= lo,
-        Payment.paid_at <= hi,
+        Payment.paid_at < hi,
     )
 
 
@@ -158,7 +181,7 @@ def kpis(db: Session, organization_id: str, r: ReportRange) -> Dict[str, Any]:
             Invoice.organization_id == organization_id, Invoice.status.in_(OPEN_INVOICE_STATUSES)
         )
     ) or Decimal("0")
-    today = date.today()
+    today = timezones.org_today_for_id(db, organization_id)
     overdue = db.scalar(
         select(func.coalesce(func.sum(Invoice.amount_due), 0)).where(
             Invoice.organization_id == organization_id,
@@ -187,7 +210,7 @@ def kpis(db: Session, organization_id: str, r: ReportRange) -> Dict[str, Any]:
 def _revenue_over_time(db: Session, organization_id: str, r: ReportRange, granularity: str) -> List[Dict[str, Any]]:
     buckets = _empty_buckets(r, granularity)
     for p in db.scalars(_settled_payments_query(organization_id, r)):
-        key = _bucket_key(p.paid_at.date(), granularity)
+        key = _bucket_key(_local_date(p.paid_at, r), granularity)
         buckets[key] = buckets.get(key, Decimal("0")) + effective_amount(p)
     return [{"period": k, "amount": money_str(v)} for k, v in sorted(buckets.items())]
 
@@ -199,7 +222,7 @@ def _invoiced_vs_collected(db: Session, organization_id: str, r: ReportRange, gr
         invoiced[key] = invoiced.get(key, Decimal("0")) + D(inv.total)
     collected = _empty_buckets(r, granularity)
     for p in db.scalars(_settled_payments_query(organization_id, r)):
-        key = _bucket_key(p.paid_at.date(), granularity)
+        key = _bucket_key(_local_date(p.paid_at, r), granularity)
         collected[key] = collected.get(key, Decimal("0")) + effective_amount(p)
     keys = sorted(set(invoiced) | set(collected))
     return [
@@ -315,17 +338,18 @@ def receivables_analytics(db: Session, organization_id: str, r: ReportRange) -> 
 
     top_outstanding = sorted(outstanding_by_customer.items(), key=lambda kv: kv[1], reverse=True)[:10]
 
+    paid_lo, paid_hi = _dt_bounds(r)
     paid_in_range = db.scalars(
         select(Invoice).where(
             Invoice.organization_id == organization_id,
             Invoice.status == InvoiceStatus.PAID,
             Invoice.paid_at.is_not(None),
-            Invoice.paid_at >= datetime.combine(r.start, time.min, tzinfo=timezone.utc),
-            Invoice.paid_at <= datetime.combine(r.end, time.max, tzinfo=timezone.utc),
+            Invoice.paid_at >= paid_lo,
+            Invoice.paid_at < paid_hi,
         )
     ).all()
     if paid_in_range:
-        total_days = sum(((inv.paid_at.date() - inv.issue_date).days for inv in paid_in_range), 0)
+        total_days = sum(((_local_date(inv.paid_at, r) - inv.issue_date).days for inv in paid_in_range), 0)
         avg_days_to_payment = round(total_days / len(paid_in_range), 1)
     else:
         avg_days_to_payment = None
@@ -373,7 +397,7 @@ def payment_analytics(db: Session, organization_id: str, r: ReportRange) -> Dict
             Refund.organization_id == organization_id,
             Refund.status == RefundStatus.PROCESSED,
             Refund.created_at >= lo,
-            Refund.created_at <= hi,
+            Refund.created_at < hi,
         )
     ) or Decimal("0")
 

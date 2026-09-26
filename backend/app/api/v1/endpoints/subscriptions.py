@@ -1,5 +1,5 @@
 """/subscriptions (contract §7)."""
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
@@ -10,6 +10,7 @@ from backend.app.models import SubscriptionStatus
 from backend.app.schemas.common import PaginatedResponse
 from backend.app.schemas.invoices import InvoiceOut
 from backend.app.schemas.subscriptions import (
+    SubscribablePlanOption,
     SubscriptionCancelIn,
     SubscriptionCreate,
     SubscriptionOut,
@@ -28,6 +29,20 @@ def subscriptions_summary(
     db: Session = Depends(get_db),
 ):
     return subscription_service.get_subscriptions_summary(db, ctx.organization_id)
+
+
+@router.get(
+    "/plan-options",
+    response_model=List[SubscribablePlanOption],
+    summary="Plans a subscription can be created on: legacy plans and recurring Plans & Pricing offerings",
+)
+def subscription_plan_options(
+    ctx: CurrentContext = Depends(require_viewer),
+    db: Session = Depends(get_db),
+):
+    from backend.app.services import offering_subscription_service
+
+    return offering_subscription_service.list_subscribable_options(db, ctx.organization_id)
 
 
 @router.get("", response_model=PaginatedResponse[SubscriptionOut], summary="List subscriptions")

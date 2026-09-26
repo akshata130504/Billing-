@@ -56,7 +56,9 @@ def preview_change(
         db,
         organization_id=ctx.organization_id,
         subscription_id=subscription_id,
-        target_plan_id=body.target_plan_id,
+        target_plan_id=subscription_change_service.resolve_target_plan_id(
+            db, ctx.organization_id, body.target_plan_id, body.target_offering_id
+        ),
         target_quantity=body.target_quantity,
         effective_date=body.effective_date,
     )
@@ -78,7 +80,9 @@ def apply_change(
         db,
         ctx=ctx,
         subscription_id=subscription_id,
-        target_plan_id=body.target_plan_id,
+        target_plan_id=subscription_change_service.resolve_target_plan_id(
+            db, ctx.organization_id, body.target_plan_id, body.target_offering_id
+        ),
         target_quantity=body.target_quantity,
         effective_type=body.effective_type,
         effective_date=body.effective_date,

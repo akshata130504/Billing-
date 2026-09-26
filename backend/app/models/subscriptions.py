@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -36,6 +37,7 @@ class Subscription(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "subscriptions"
     __table_args__ = (
         UniqueConstraint("organization_id", "subscription_number", name="uq_subscription_number_per_org"),
+        Index("ix_subscriptions_org_status", "organization_id", "status"),
     )
 
     subscription_number = Column(String(24), nullable=False)

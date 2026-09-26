@@ -20,6 +20,7 @@ _VALID_PROD_OVERRIDES = {
     "DATABASE_URL": "postgresql+psycopg://app_user:prod_strong_pass_123@localhost:5432/rooman_billing",
     "ALLOWED_ORIGINS": ["https://billing.example.com"],
     "SMTP_HOST": "smtp.example.com",
+    "FRONTEND_URL": "https://billing.example.com",
 }
 
 

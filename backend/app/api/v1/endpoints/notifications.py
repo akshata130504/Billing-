@@ -6,6 +6,12 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import CurrentContext, get_db, require_admin, require_viewer
 from backend.app.schemas.notifications import (
+    NotificationChannelInfo,
+    NotificationPreferencesIn,
+    NotificationPreferencesOut,
+    NotificationReadStateIn,
+    NotificationReadStateItem,
+    NotificationReadStateOut,
     NotificationDeliveryOut,
     NotificationDispatchIn,
     NotificationTemplateCreateIn,
@@ -142,3 +148,70 @@ def list_notification_deliveries(
 ) -> List[NotificationDeliveryOut]:
     """Lists audit logs for sent customer notifications."""
     return notification_service.list_deliveries(db, ctx.organization_id, recipient=recipient, limit=limit)
+
+
+@router.get("/notifications/channels", response_model=List[NotificationChannelInfo])
+def list_notification_channels(
+    ctx: CurrentContext = Depends(require_viewer),
+) -> List[NotificationChannelInfo]:
+    """Notification channels and whether each can deliver. SMS is listed as unsupported."""
+    return [NotificationChannelInfo(**c) for c in notification_service.list_channels()]
+
+
+# --- The signed-in user's own notification settings (any active member of the organization) ---------------------
+
+
+@router.get("/notifications/preferences", response_model=NotificationPreferencesOut)
+def get_my_notification_preferences(
+    ctx: CurrentContext = Depends(require_viewer),
+    db: Session = Depends(get_db),
+) -> NotificationPreferencesOut:
+    """The current user's in-app notification preferences in the current organization (defaults if never saved)."""
+    return NotificationPreferencesOut(
+        **notification_service.get_user_preferences(db, ctx.organization_id, ctx.user_id)
+    )
+
+
+@router.put("/notifications/preferences", response_model=NotificationPreferencesOut)
+def update_my_notification_preferences(
+    data: NotificationPreferencesIn,  # type: ignore[valid-type]
+    ctx: CurrentContext = Depends(require_viewer),
+    db: Session = Depends(get_db),
+) -> NotificationPreferencesOut:
+    """Saves the supplied preference keys for the current user in the current organization.
+
+    Unknown keys and non-boolean values are rejected with 422; omitted keys keep their value.
+    """
+    result = notification_service.update_user_preferences(
+        db, ctx.organization_id, ctx.user_id, data.model_dump(exclude_none=True)
+    )
+    db.commit()
+    return NotificationPreferencesOut(**result)
+
+
+@router.get("/notifications/read-state", response_model=NotificationReadStateOut)
+def get_my_notification_read_state(
+    ctx: CurrentContext = Depends(require_viewer),
+    db: Session = Depends(get_db),
+) -> NotificationReadStateOut:
+    """Read / dismissed markers of the current user's header notifications in the current organization."""
+    items = notification_service.list_read_states(db, ctx.organization_id, ctx.user_id)
+    return NotificationReadStateOut(items=[NotificationReadStateItem(**i) for i in items])
+
+
+@router.post("/notifications/read-state", response_model=NotificationReadStateOut)
+def update_my_notification_read_state(
+    data: NotificationReadStateIn,
+    ctx: CurrentContext = Depends(require_viewer),
+    db: Session = Depends(get_db),
+) -> NotificationReadStateOut:
+    """Marks header notifications read (``read``), dismissed (``dismiss``) or all read (``read_all``).
+
+    ``read_all`` without ``keys`` marks every item currently in the action center. Returns the
+    affected markers.
+    """
+    items = notification_service.mark_read_state(
+        db, ctx.organization_id, ctx.user_id, data.action.value, data.keys
+    )
+    db.commit()
+    return NotificationReadStateOut(items=[NotificationReadStateItem(**i) for i in items])

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Plus,
   Search,
@@ -11,6 +11,7 @@ import {
   Trash2,
   CheckCircle2,
   XCircle,
+  Repeat,
 } from 'lucide-react';
 import { Button } from '../../components/common/Button';
 import { LoadingState } from '../../components/common/LoadingState';
@@ -29,6 +30,7 @@ const PAGE_SIZE = 25;
 export function PlansPricingPage() {
   const { showToast } = useToast();
   const { hasRole } = useAuth();
+  const navigate = useNavigate();
   const canEdit = hasRole('finance');
   const canDelete = hasRole('admin');
 
@@ -418,6 +420,16 @@ export function PlansPricingPage() {
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
+                        {plan.is_active && plan.billing_frequency !== 'one_time' && (
+                          <button
+                            onClick={() => navigate(`/subscriptions/new?offering_id=${plan.id}`)}
+                            className="p-1 rounded text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+                            title="Create subscription"
+                            aria-label={`Create subscription on ${plan.name}`}
+                          >
+                            <Repeat className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <button
                           onClick={() => handleClonePlan(plan)}
                           className="p-1 rounded text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"

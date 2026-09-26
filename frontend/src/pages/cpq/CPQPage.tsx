@@ -22,6 +22,7 @@ import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { toApiError } from '../../services/apiClient';
 import { catalogCpqService } from '../../services/catalogCpqService';
+import { dashboardSummaryService } from '../../services/dashboardSummaryService';
 import { customerService } from '../../services/customerService';
 import type { CPQDealOut, OfferingOut, PriceBookOut, PriceSimulationResponse } from '../../types/catalog_cpq';
 import type { CustomerOut } from '../../types/api';
@@ -71,22 +72,21 @@ export function CPQPage() {
     try {
       setLoading(true);
       setLoadError(null);
-      const count = (status?: string) =>
-        catalogCpqService.listDeals({ status, page: 1, page_size: 1 }).then((r) => r.total ?? 0);
-      const [dealData, offeringData, pbData, total, pending, approved, configured, converted] =
+      const [dealData, offeringData, pbData, summary] =
         await Promise.all([
           catalogCpqService.listDeals({ page, page_size: PAGE_SIZE }),
           catalogCpqService.listOfferings({ is_active: true, page_size: 100 }),
           catalogCpqService.listPriceBooks({ status: 'active', page_size: 100 }),
-          count(),
-          count('pending_approval'),
-          count('approved'),
-          count('configured'),
-          count('converted'),
+          dashboardSummaryService.deals(),
         ]);
       setDeals(dealData.items || []);
       setDealsTotal(dealData.total ?? 0);
-      setDealCounts({ total, pending, approved: approved + configured, converted });
+      setDealCounts({
+        total: summary.total_count,
+        pending: summary.groups.pending,
+        approved: summary.groups.approved,
+        converted: summary.groups.converted,
+      });
       setOfferings(offeringData.items || []);
       setPriceBooks(pbData.items || []);
     } catch (err) {

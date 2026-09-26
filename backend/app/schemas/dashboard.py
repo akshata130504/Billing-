@@ -153,6 +153,150 @@ class CalendarResponse(BaseModel):
     events: List[CalendarEvent]
 
 
+# --- server-side summary counters (dashboard_summary_service) -------------------------------------
+
+
+class QuoteValueByCurrency(BaseModel):
+    currency: str
+    count: int
+    total: str
+    open_total: str
+
+
+class QuotesSummary(BaseModel):
+    total_count: int
+    by_status: Dict[str, int]
+    # KPI tiles: draft, pending_approval, sent (sent+viewed), accepted (accepted/invoiced/converted)
+    groups: Dict[str, int]
+    value_by_currency: List[QuoteValueByCurrency]
+    base_currency: str
+
+
+class OfferingCounts(BaseModel):
+    total: int
+    active: int
+    inactive: int
+    by_type: Dict[str, int]
+
+
+class PriceBookCounts(BaseModel):
+    total: int
+    by_status: Dict[str, int]
+
+
+class CatalogSummary(BaseModel):
+    offerings: OfferingCounts
+    price_books: PriceBookCounts
+
+
+class DealValueByCurrency(BaseModel):
+    currency: str
+    count: int
+    total: str
+
+
+class DealsSummary(BaseModel):
+    total_count: int
+    by_status: Dict[str, int]
+    # KPI tiles: pending (pending_approval), approved (approved+configured), converted
+    groups: Dict[str, int]
+    value_by_currency: List[DealValueByCurrency]
+    base_currency: str
+
+
+class InvoiceStatusAmount(BaseModel):
+    count: int
+    total: str
+    amount_due: str
+
+
+class InvoiceCurrencyTotals(BaseModel):
+    currency: str
+    count: int
+    total: str  # excludes void
+    amount_paid: str
+    amount_due: str  # excludes draft and void
+    by_status: Dict[str, InvoiceStatusAmount]
+
+
+class InvoicesBlock(BaseModel):
+    total_count: int
+    by_status: Dict[str, int]
+    by_currency: List[InvoiceCurrencyTotals]
+
+
+class ReceivableTotals(BaseModel):
+    currency: str
+    open_count: int
+    amount_due: str
+    overdue_count: int
+    overdue_amount: str
+
+
+class CollectedTotals(BaseModel):
+    currency: str
+    count: int
+    gross: str
+    refunded: str
+    net: str
+
+
+class SubscriptionsBlock(BaseModel):
+    total_count: int
+    by_status: Dict[str, int]
+
+
+class MrrBlock(BaseModel):
+    currency: str
+    mrr: str
+    arr: str
+    by_currency: Dict[str, str]
+    subscription_count: int
+
+
+class QuotesBlock(BaseModel):
+    total_count: int
+    by_status: Dict[str, int]
+    value_by_currency: List[QuoteValueByCurrency]
+
+
+class CreditNoteCurrencyTotals(BaseModel):
+    currency: str
+    count: int
+    issued_total: str
+    applied_total: str
+    remaining_balance: str
+    voided_total: str
+    draft_total: str
+    count_by_status: Dict[str, int]
+
+
+class CreditNotesBlock(BaseModel):
+    total_count: int
+    count_by_status: Dict[str, int]
+    currencies: List[CreditNoteCurrencyTotals]
+
+
+class CustomersBlock(BaseModel):
+    total: int
+    active: int
+    new_in_period: int
+
+
+class FinancialSummary(BaseModel):
+    base_currency: str
+    date_from: Optional[date] = None
+    date_to: Optional[date] = None
+    invoices: InvoicesBlock
+    receivables: List[ReceivableTotals]
+    payments_collected: List[CollectedTotals]
+    subscriptions: SubscriptionsBlock
+    mrr: MrrBlock
+    quotes: QuotesBlock
+    credit_notes: CreditNotesBlock
+    customers: CustomersBlock
+
+
 class JobsRunResult(BaseModel):
     renewals: int
     trials_converted: int

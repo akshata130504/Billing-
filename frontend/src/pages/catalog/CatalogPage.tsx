@@ -18,6 +18,7 @@ import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { toApiError } from '../../services/apiClient';
 import { catalogCpqService } from '../../services/catalogCpqService';
+import { dashboardSummaryService } from '../../services/dashboardSummaryService';
 import type { OfferingOut, PriceBookOut, OfferingIn, PriceBookIn } from '../../types/catalog_cpq';
 import { OfferingModal } from './components/OfferingModal';
 import { PriceBookModal } from './components/PriceBookModal';
@@ -80,13 +81,8 @@ export function CatalogPage() {
       setLoadError(null);
       const search = searchQuery.trim() || undefined;
       const isPriceBooks = activeTab === 'price_books';
-      // KPI counts come from each filtered list's `total`, so they cover the
-      // whole catalog rather than just the rows on this page.
-      const count = (extra: { type?: string; is_active?: boolean }) =>
-        catalogCpqService
-          .listOfferings({ search, ...extra, page: 1, page_size: 1 })
-          .then((r) => r.total ?? 0);
-      const [offeringData, pbData, all, active, product, service, plan, bundle] = await Promise.all([
+      // KPI counts come from one server-side catalog summary (whole catalog, same search).
+      const [offeringData, pbData, summary] = await Promise.all([
         catalogCpqService.listOfferings({
           search,
           type: TAB_TYPE[activeTab],
@@ -98,18 +94,21 @@ export function CatalogPage() {
           page: isPriceBooks ? page : 1,
           page_size: PAGE_SIZE,
         }),
-        count({}),
-        count({ is_active: true }),
-        count({ type: 'product' }),
-        count({ type: 'service' }),
-        count({ type: 'plan' }),
-        count({ type: 'bundle' }),
+        dashboardSummaryService.catalog({ search }),
       ]);
       setOfferings(offeringData.items || []);
       setOfferingsTotal(offeringData.total ?? 0);
       setPriceBooks(pbData.items || []);
       setPriceBooksTotal(pbData.total ?? 0);
-      setCounts({ all, active, product, service, plan, bundle });
+      const byType = summary.offerings.by_type || {};
+      setCounts({
+        all: summary.offerings.total,
+        active: summary.offerings.active,
+        product: byType.product ?? 0,
+        service: byType.service ?? 0,
+        plan: byType.plan ?? 0,
+        bundle: byType.bundle ?? 0,
+      });
     } catch (err) {
       setLoadError(toApiError(err).message);
     } finally {

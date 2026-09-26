@@ -7,8 +7,10 @@ Documented approximations
 - revenue = Σ (amount - amount_refunded) of settled payments by paid_at.
 - pipeline amounts: draft/paid use `total`, open buckets use `amount_due`.
 - MRR (compute_mrr) = sum over ACTIVE + PAST_DUE subscriptions of the subscription's own
-  unit price x quantity - discount, normalised to a month; reported in the org's base
-  currency with other currencies listed separately (never summed across currencies).
+  unit price x quantity - discount, normalised to a month, plus every ACTIVE add-on item
+  (snapshot unit price x quantity, normalised by the item's own interval); reported in the
+  org's base currency with other currencies listed separately (never summed across currencies).
+- Date ranges are organization-local business days ([local 00:00, local 00:00) in UTC).
 - mrr_change_pct compares today's MRR with the MRR of subscriptions that were billing at
   the start of the previous month (created before it, not cancelled/ended before it).
 - churn_rate = logo churn: customers billing at period start who cancelled during the
@@ -18,12 +20,15 @@ Documented approximations
 """
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
+
+from backend.app.models.billing_cycles import SubscriptionItem, SubscriptionItemStatus, SubscriptionItemType
+from backend.app.services import timezones
 
 from backend.app.core.exceptions import ValidationAppError
 from backend.app.models import (
@@ -61,13 +66,10 @@ RANGE_KEYS = ("today", "7_days", "30_days", "3_months", "12_months")
 # --- helpers ---------------------------------------------------------------------------------------
 
 
-def _dt(value: date) -> datetime:
-    return datetime.combine(value, time.min, tzinfo=timezone.utc)
-
-
-def _bounds(start: date, end: date) -> Tuple[datetime, datetime]:
-    """[start 00:00, end+1 00:00) in UTC."""
-    return _dt(start), _dt(end + timedelta(days=1))
+def _bounds(start: date, end: date, tz: Any) -> Tuple[datetime, datetime]:
+    """[start 00:00, end+1 00:00) in the organization's timezone, as UTC instants."""
+    lo, hi = timezones.range_bounds_utc(start, end, tz)
+    return lo, hi
 
 
 def _dec(value) -> Decimal:
@@ -82,7 +84,7 @@ def _pct_change(current: Decimal, previous: Decimal) -> Optional[str]:
 
 def resolve_range(range_key: str, today: Optional[date] = None) -> Tuple[date, date, date, date]:
     """Return (start, end, prev_start, prev_end) for a dashboard range."""
-    today = today or date.today()
+    today = today or timezones.utc_today()
     if range_key == "today":
         start = today
     elif range_key == "7_days":
@@ -108,8 +110,8 @@ def _month_label(value: date) -> str:
 # --- aggregate building blocks -----------------------------------------------------------------------------
 
 
-def _revenue_between(db: Session, org_id: str, start: date, end: date) -> Decimal:
-    lo, hi = _bounds(start, end)
+def _revenue_between(db: Session, org_id: str, start: date, end: date, tz: Any = None) -> Decimal:
+    lo, hi = _bounds(start, end, tz if tz is not None else timezones.org_tz_for_id(db, org_id))
     value = db.scalar(
         select(func.coalesce(func.sum(Payment.amount - Payment.amount_refunded), 0)).where(
             Payment.organization_id == org_id,
@@ -121,8 +123,8 @@ def _revenue_between(db: Session, org_id: str, start: date, end: date) -> Decima
     return _dec(value)
 
 
-def _invoiced_between(db: Session, org_id: str, start: date, end: date) -> Decimal:
-    lo, hi = _bounds(start, end)
+def _invoiced_between(db: Session, org_id: str, start: date, end: date, tz: Any = None) -> Decimal:
+    lo, hi = _bounds(start, end, tz if tz is not None else timezones.org_tz_for_id(db, org_id))
     value = db.scalar(
         select(func.coalesce(func.sum(Invoice.total), 0)).where(
             Invoice.organization_id == org_id,
@@ -168,13 +170,7 @@ def _live_subscription_filters(org_id: str, as_of: Optional[datetime]) -> List[A
     return filters
 
 
-def subscription_monthly_amount(subscription: Subscription, plan: Plan) -> Decimal:
-    """The subscription's own contracted price x quantity - discount, normalised to one month.
-
-    Uses the price agreed on the subscription (falling back to the plan list price when
-    no override was stored), so negotiated prices and discounts are reflected.
-    One-time plans contribute nothing.
-    """
+def _primary_monthly_amount(subscription: Subscription, plan: Plan) -> Decimal:
     months = INTERVAL_MONTHS.get(plan.billing_interval)
     if not months:
         return Decimal("0")
@@ -184,6 +180,54 @@ def subscription_monthly_amount(subscription: Subscription, plan: Plan) -> Decim
     if period_amount <= 0:
         return Decimal("0")
     return period_amount / Decimal(months)
+
+
+def addon_monthly_amount(item: SubscriptionItem) -> Decimal:
+    """One ACTIVE add-on item's recurring amount normalised to a month.
+
+    Priced exactly as generate_period_invoice bills it: the item's immutable price
+    snapshot (else its own unit_price, else its plan's list price) x quantity for per-unit
+    pricing (1 otherwise), over the snapshot's (else the item plan's) billing interval.
+    Items carry no discount of their own. One-time items contribute nothing.
+    """
+    if item.status != SubscriptionItemStatus.ACTIVE or item.item_type != SubscriptionItemType.ADDON:
+        return Decimal("0")
+    snap = item.price_snapshot
+    item_plan = item.plan
+    interval = snap.billing_interval if snap is not None else (item_plan.billing_interval if item_plan else None)
+    count = (snap.interval_count if snap is not None else (item_plan.interval_count if item_plan else 1)) or 1
+    months = INTERVAL_MONTHS.get(interval) if interval is not None else None
+    if not months:
+        return Decimal("0")
+    months *= max(1, int(count))
+    pricing_model = snap.pricing_model if snap is not None else (item_plan.pricing_model if item_plan else PricingModel.FLAT)
+    units = D(item.quantity or 1) if pricing_model == PricingModel.PER_UNIT else Decimal("1")
+    if snap is not None:
+        unit_amount = D(snap.unit_amount)
+    elif item.unit_price is not None and D(item.unit_price) > 0:
+        unit_amount = D(item.unit_price)
+    else:
+        unit_amount = D(item_plan.unit_amount if item_plan else 0)
+    period_amount = unit_amount * units
+    if period_amount <= 0:
+        return Decimal("0")
+    return period_amount / Decimal(months)
+
+
+def subscription_monthly_amount(subscription: Subscription, plan: Plan) -> Decimal:
+    """The subscription's contracted recurring amount, normalised to one month.
+
+    Primary plan: the price agreed on the subscription (falling back to the plan list
+    price when no override was stored) x quantity - discount, so negotiated prices and
+    discounts are reflected. Plus every ACTIVE add-on item (e.g. the extra recurring lines
+    of a converted multi-line quote), each normalised by its own interval. PLAN items are
+    the primary line (already counted) and METERED items are usage, not recurring revenue.
+    One-time plans/items contribute nothing.
+    """
+    amount = _primary_monthly_amount(subscription, plan)
+    for item in subscription.subscription_items or []:
+        amount += addon_monthly_amount(item)
+    return amount
 
 
 def compute_mrr(
@@ -209,13 +253,17 @@ def compute_mrr(
         select(Subscription, Plan)
         .join(Plan, Plan.id == Subscription.plan_id)
         .where(*_live_subscription_filters(org_id, as_of))
+        .options(
+            selectinload(Subscription.subscription_items).selectinload(SubscriptionItem.price_snapshot),
+            selectinload(Subscription.subscription_items).selectinload(SubscriptionItem.plan),
+        )
     ).all()
     by_currency: Dict[str, Decimal] = {}
     counted = 0
     for subscription, plan in rows:
-        if not INTERVAL_MONTHS.get(plan.billing_interval):
-            continue  # one-time plans are not recurring revenue
         amount = subscription_monthly_amount(subscription, plan)
+        if not INTERVAL_MONTHS.get(plan.billing_interval) and amount <= 0:
+            continue  # one-time plans (with no recurring add-ons) are not recurring revenue
         currency = (subscription.currency or plan.currency or base_currency).upper()
         by_currency[currency] = by_currency.get(currency, Decimal("0")) + amount
         counted += 1
@@ -292,14 +340,14 @@ def _bucket(db: Session, org_id: str, statuses, amount_column) -> Dict[str, Any]
 
 def dashboard_summary(db: Session, organization, range_key: str = "30_days") -> Dict[str, Any]:
     org_id = organization.id
-    today = date.today()
+    tz = timezones.resolve_tz(organization)
+    today = timezones.org_today(organization)
     start, end, prev_start, prev_end = resolve_range(range_key, today)
-    lo, hi = _bounds(start, end)
-    now = datetime.now(timezone.utc)
+    lo, hi = _bounds(start, end, tz)
 
     # --- metrics
-    revenue = _revenue_between(db, org_id, start, end)
-    prev_revenue = _revenue_between(db, org_id, prev_start, prev_end)
+    revenue = _revenue_between(db, org_id, start, end, tz)
+    prev_revenue = _revenue_between(db, org_id, prev_start, prev_end, tz)
     outstanding = db.execute(
         select(func.count(), func.coalesce(func.sum(Invoice.amount_due), 0)).where(
             Invoice.organization_id == org_id, Invoice.status.in_(list(OPEN_INVOICE_STATUSES))
@@ -330,7 +378,7 @@ def dashboard_summary(db: Session, organization, range_key: str = "30_days") -> 
     base_currency = (organization.default_currency or "INR").upper()
     mrr_now = compute_mrr(db, org_id, base_currency=base_currency)
     mrr = mrr_now["mrr"]
-    prev_month_start = _dt(add_months(today.replace(day=1), -1))
+    prev_month_start = timezones.day_start_utc(add_months(today.replace(day=1), -1), tz)
     prev_mrr = compute_mrr(db, org_id, as_of=prev_month_start, base_currency=base_currency)["mrr"]
     churned_customers, churn_base, churn_rate = logo_churn(db, org_id, lo, hi)
     trend: List[Dict[str, Any]] = []
@@ -342,8 +390,8 @@ def dashboard_summary(db: Session, organization, range_key: str = "30_days") -> 
             {
                 "label": _month_label(month_start),
                 "period_start": month_start,
-                "revenue": money_str(_revenue_between(db, org_id, month_start, month_end)),
-                "invoiced": money_str(_invoiced_between(db, org_id, month_start, month_end)),
+                "revenue": money_str(_revenue_between(db, org_id, month_start, month_end, tz)),
+                "invoiced": money_str(_invoiced_between(db, org_id, month_start, month_end, tz)),
             }
         )
 
@@ -547,8 +595,8 @@ URGENCY_RANK = {"critical": 0, "high": 1, "medium": 2}
 
 
 def action_center(db: Session, organization_id: str) -> Dict[str, Any]:
-    today = date.today()
-    now = datetime.now(timezone.utc)
+    today = timezones.org_today_for_id(db, organization_id)
+    now = timezones.utc_now()
     items: List[Dict[str, Any]] = []
 
     overdue_invoices = db.scalars(
@@ -713,9 +761,9 @@ def action_center(db: Session, organization_id: str) -> Dict[str, Any]:
 # --- calendar -----------------------------------------------------------------------------------------------------------------
 
 
-def parse_month(month: Optional[str]) -> Tuple[date, date]:
+def parse_month(month: Optional[str], today: Optional[date] = None) -> Tuple[date, date]:
     if not month:
-        first = date.today().replace(day=1)
+        first = (today or timezones.utc_today()).replace(day=1)
     else:
         try:
             year, mon = month.split("-")
@@ -727,7 +775,7 @@ def parse_month(month: Optional[str]) -> Tuple[date, date]:
 
 
 def calendar_events(db: Session, organization_id: str, month: Optional[str]) -> Dict[str, Any]:
-    first, last = parse_month(month)
+    first, last = parse_month(month, timezones.org_today_for_id(db, organization_id))
     events: List[Dict[str, Any]] = []
 
     for inv in db.scalars(

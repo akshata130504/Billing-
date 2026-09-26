@@ -5,29 +5,37 @@ import sys
 from datetime import datetime, timezone
 
 from backend.app.core.config import settings
-
-import re
+from backend.app.core.redaction import redact_text
 
 correlation_id_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar("correlation_id", default=None)
 
-_SENSITIVE_PATTERNS = [
-    (re.compile(r"Bearer\s+[a-zA-Z0-9_\-\.]{15,}", re.IGNORECASE), "Bearer [redacted]"),
-    (re.compile(r"(['\"]?(?:password|passwd|secret|token)['\"]?\s*[:=]\s*)(?:'[^']+'|\"[^\"]+\"|[^\s,;]+)", re.IGNORECASE), r'\1"[redacted]"'),
-    (re.compile(r"ghp_[a-zA-Z0-9]{20,}", re.IGNORECASE), "ghp_[redacted]"),
-    (re.compile(r"AIza[a-zA-Z0-9_-]{20,}", re.IGNORECASE), "AIza[redacted]"),
-    (re.compile(r"rzp_(test|live)_[a-zA-Z0-9]{10,}", re.IGNORECASE), r"rzp_\1_[redacted]"),
-]
-
 
 class SensitiveDataFilter(logging.Filter):
-    """Scrubs passwords, tokens, API keys, and Authorization headers from log records."""
+    """Scrubs passwords, tokens, OTPs, API keys, card numbers and Authorization headers.
+
+    The message is rendered first (msg % args) so secrets passed as %-format arguments are
+    scrubbed too, and exception tracebacks are pre-formatted and scrubbed as well.
+    Patterns live in core/redaction.py (shared with core/alerts.py).
+    """
+
+    _formatter = logging.Formatter()
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if isinstance(record.msg, str):
-            msg = record.msg
-            for pattern, replacement in _SENSITIVE_PATTERNS:
-                msg = pattern.sub(replacement, msg)
-            record.msg = msg
+        try:
+            message = record.getMessage()
+        except Exception:  # malformed format args: keep the raw template
+            message = str(record.msg)
+        record.msg = redact_text(message)
+        record.args = None
+        if record.exc_info and not record.exc_text:
+            try:
+                record.exc_text = self._formatter.formatException(record.exc_info)
+            except Exception:  # pragma: no cover
+                record.exc_text = None
+        if record.exc_text:
+            record.exc_text = redact_text(record.exc_text)
+        if record.stack_info:
+            record.stack_info = redact_text(record.stack_info)
         return True
 
 
@@ -50,7 +58,9 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
-        if record.exc_info:
+        if record.exc_text:  # pre-formatted and redacted by SensitiveDataFilter
+            payload["exception"] = record.exc_text
+        elif record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         for key in ("request_id", "path", "method", "status_code", "duration_ms"):
             if hasattr(record, key) and getattr(record, key) is not None:
