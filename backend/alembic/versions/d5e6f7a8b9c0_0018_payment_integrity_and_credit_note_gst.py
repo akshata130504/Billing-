@@ -104,12 +104,17 @@ def upgrade() -> None:
             )
         ).fetchall()
         if duplicates:
-            raise RuntimeError(
-                "Cannot add a unique index on payments.gateway_payment_id: duplicate gateway payment ids exist "
-                f"({', '.join(str(r[0]) for r in duplicates[:10])}). Reconcile these payments (each Razorpay "
-                "payment may settle only one Payment row) and re-run the migration."
+            # Do not block startup (a failed migration keeps the API down -> nginx 502). The
+            # application already rejects a second settlement of the same gateway payment
+            # (pre-check + savepoint); the index is added by re-running once reconciled.
+            print(
+                "WARNING [0018]: skipped the unique index on payments.gateway_payment_id - duplicate "
+                f"gateway payment ids exist ({', '.join(str(r[0]) for r in duplicates[:10])}). Reconcile them "
+                "(each Razorpay payment may settle only one Payment row), then create the index manually: "
+                f"CREATE UNIQUE INDEX {GATEWAY_PAYMENT_UNIQUE_INDEX} ON payments (gateway_payment_id);"
             )
-        op.create_index(GATEWAY_PAYMENT_UNIQUE_INDEX, 'payments', ['gateway_payment_id'], unique=True)
+        else:
+            op.create_index(GATEWAY_PAYMENT_UNIQUE_INDEX, 'payments', ['gateway_payment_id'], unique=True)
 
     _add_columns('credit_notes', CREDIT_NOTE_COLUMNS)
     _add_columns('credit_note_lines', CREDIT_NOTE_LINE_COLUMNS)
