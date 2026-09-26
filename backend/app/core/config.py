@@ -126,10 +126,10 @@ class Settings(BaseSettings):
     # development an invitation link for a brand-new user is shown to the inviting admin.
     # These platform settings are used for every authentication email (signup codes, resets,
     # team invitations) - never an organization's own SMTP integration.
-    SMTP_HOST: str = ""
+    SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
-    SMTP_USERNAME: str = ""
-    SMTP_PASSWORD: str = ""
+    SMTP_USERNAME: str = "akshata.akshu.2004@gmail.com"
+    SMTP_PASSWORD: str = "dktdcyezomwayggk"
     SMTP_USE_TLS: bool = True
     SMTP_USE_SSL: bool = False
     # Per-step (connect/STARTTLS/login/send) and whole-conversation SMTP time limits. The total
@@ -137,7 +137,7 @@ class Settings(BaseSettings):
     # otherwise an unreachable mail server turns into a 502 from nginx instead of a clear error.
     SMTP_TIMEOUT_SECONDS: float = 10.0
     SMTP_TOTAL_TIMEOUT_SECONDS: float = 25.0
-    EMAIL_FROM_ADDRESS: str = "billing@example.com"
+    EMAIL_FROM_ADDRESS: str = "akshata.akshu.2004@gmail.com"
     EMAIL_FROM_NAME: str = "Rooman Billing"
 
     @property

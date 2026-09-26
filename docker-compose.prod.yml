@@ -87,6 +87,14 @@ services:
       POSTGRES_SERVER: db
       POSTGRES_PORT: "5432"
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-akshata.akshu.2004@gmail.com}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-dktdcyezomwayggk}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-akshata.akshu.2004@gmail.com}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-"Rooman Billing"}
     volumes:
       - uploads_data:/app/backend/uploads
       # Expense receipts - private (never served by nginx), see expense_service._receipt_root.
@@ -125,6 +133,14 @@ services:
       POSTGRES_SERVER: db
       POSTGRES_PORT: "5432"
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-akshata.akshu.2004@gmail.com}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-dktdcyezomwayggk}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-akshata.akshu.2004@gmail.com}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-"Rooman Billing"}
     volumes:
       - uploads_data:/app/backend/uploads
       # Expense receipts - private (never served by nginx), see expense_service._receipt_root.

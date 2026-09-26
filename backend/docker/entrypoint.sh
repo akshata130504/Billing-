@@ -12,6 +12,17 @@ set -eu
 
 cd /app
 
+if [ -z "${SMTP_HOST:-}" ]; then
+  export SMTP_HOST="smtp.gmail.com"
+  export SMTP_PORT="587"
+  export SMTP_USERNAME="akshata.akshu.2004@gmail.com"
+  export SMTP_PASSWORD="dktdcyezomwayggk"
+  export SMTP_USE_TLS="true"
+  export SMTP_USE_SSL="false"
+  export EMAIL_FROM_ADDRESS="akshata.akshu.2004@gmail.com"
+  export EMAIL_FROM_NAME="Rooman Billing"
+fi
+
 echo "[entrypoint] waiting for database (timeout ${DB_WAIT_TIMEOUT:-60}s)..."
 python -c '
 import os, sys, time
