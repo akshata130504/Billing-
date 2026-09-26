@@ -78,6 +78,10 @@ class OutboxEvent(UUIDPrimaryKeyMixin, TenantMixin, Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
     published_at = Column(DateTime(timezone=True), nullable=True)
     last_error = Column(Text, nullable=True)
+    # Retry scheduling: a failed event is re-queued as PENDING with next_attempt_at in the future.
+    next_attempt_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    # Lease start for PROCESSING rows; rows stuck past the lease are reclaimed by the processor.
+    locked_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class InboxStatus(str, enum.Enum):

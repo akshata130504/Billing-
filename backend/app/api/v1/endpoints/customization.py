@@ -2,10 +2,11 @@
 web tabs, automation rules, automation logs, schedules, and webhook deliveries."""
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 
 from backend.app.api.deps import CurrentContext, get_db, require_admin, require_finance, require_viewer
 from backend.app.models.customization import AutomationLogStatus, DocumentType
+from backend.app.models.identity import MemberRole
 from backend.app.schemas.customization import (
     AutomationLogOut,
     AutomationRuleCreate,
@@ -182,6 +183,33 @@ def preview_template(
     return customization_service.render_template_preview(db, template_id, ctx.organization_id)
 
 
+@router.post("/templates/{template_id}/logo", summary="Upload logo for a document template")
+async def upload_template_logo(
+    template_id: str,
+    file: UploadFile = File(...),
+    ctx: CurrentContext = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    from backend.app.services import logo_service
+    template = customization_service.get_template(db, template_id, ctx.organization_id)
+    logo_url = await logo_service.save_template_logo(db, template, file)
+    db.commit()
+    return {"logo_url": logo_url}
+
+
+@router.delete("/templates/{template_id}/logo", summary="Remove logo for a document template")
+def delete_template_logo(
+    template_id: str,
+    ctx: CurrentContext = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    from backend.app.services import logo_service
+    template = customization_service.get_template(db, template_id, ctx.organization_id)
+    logo_service.delete_template_logo(db, template)
+    db.commit()
+    return {"status": "success", "logo_url": None}
+
+
 # --- Reporting Tags ---
 
 @router.get("/reporting-tags", response_model=List[ReportingTagOut])
@@ -320,11 +348,18 @@ def create_automation_rule(
     ctx: CurrentContext = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> AutomationRuleOut:
-    """Creates a new automation rule with its ordered actions."""
+    """Creates a new automation rule with its ordered actions.
+
+    Webhook actions without a secret get a random signing secret, returned once in
+    ``revealed_signing_secrets``; later reads only show a masked value.
+    """
     rule = customization_service.create_rule(db, ctx.organization_id, data)
+    revealed = dict(getattr(rule, "_revealed_signing_secrets", {}) or {})
     db.commit()
     db.refresh(rule)
-    return rule
+    out = AutomationRuleOut.model_validate(rule)
+    out.revealed_signing_secrets = revealed or None
+    return out
 
 
 @router.get("/automation/rules/{rule_id}", response_model=AutomationRuleOut)
@@ -468,8 +503,19 @@ def list_webhook_deliveries(
     db: Session = Depends(get_db),
     status: Optional[str] = Query(None, description="Filter by delivery status"),
 ) -> List[OutboundWebhookDeliveryOut]:
-    """Lists outbound webhook delivery attempts for the organization."""
-    return customization_service.list_webhook_deliveries(db, ctx.organization_id, status=status)
+    """Lists outbound webhook delivery attempts for the organization.
+
+    Receiver response bodies are only included for admins/owners.
+    """
+    deliveries = customization_service.list_webhook_deliveries(db, ctx.organization_id, status=status)
+    return [_delivery_out(d, ctx) for d in deliveries]
+
+
+def _delivery_out(delivery, ctx: CurrentContext) -> OutboundWebhookDeliveryOut:
+    out = OutboundWebhookDeliveryOut.model_validate(delivery)
+    if ctx.role not in (MemberRole.OWNER, MemberRole.ADMIN):
+        out.response_body = None
+    return out
 
 
 @router.post("/webhook-deliveries/{delivery_id}/retry", response_model=OutboundWebhookDeliveryOut)
@@ -482,4 +528,4 @@ def retry_webhook_delivery(
     delivery = customization_service.retry_webhook_delivery(db, delivery_id, ctx.organization_id)
     db.commit()
     db.refresh(delivery)
-    return delivery
+    return _delivery_out(delivery, ctx)

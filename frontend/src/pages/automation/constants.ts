@@ -50,11 +50,11 @@ export const ACTION_CONFIG_FIELDS: Record<
   ],
   webhook: [
     { key: 'url', label: 'Destination URL', placeholder: 'https://example.com/hooks/billing', type: 'url', required: true },
-    { key: 'secret', label: 'Signing secret', placeholder: 'Optional HMAC-SHA256 secret' },
+    { key: 'secret', label: 'Signing secret', placeholder: 'Leave blank to generate one (shown once after saving)' },
   ],
   field_update: [
-    { key: 'field', label: 'Field', placeholder: 'e.g. status', required: true },
-    { key: 'value', label: 'New value', placeholder: 'e.g. flagged', required: true },
+    { key: 'field', label: 'Field', placeholder: 'notes (supported on invoices, customers, subscriptions)', required: true },
+    { key: 'value', label: 'New value', placeholder: 'e.g. Flagged: payment at risk', required: true },
   ],
 };
 
@@ -79,12 +79,15 @@ export const FREQUENCY_OPTIONS = (Object.keys(FREQUENCY_LABELS) as ScheduleFrequ
   label: FREQUENCY_LABELS[value],
 }));
 
-/** Known target actions; the field also accepts a custom identifier. */
+/**
+ * Target actions the backend can execute (customization_service.SCHEDULE_TARGET_ACTIONS).
+ * run_billing_jobs is handled by the platform scheduler for every organization, so a manual
+ * run is logged as "skipped" rather than a fake success.
+ */
 export const TARGET_ACTION_SUGGESTIONS = [
-  { value: 'run_billing_jobs', label: 'Run billing jobs' },
-  { value: 'export_reports', label: 'Export reports' },
-  { value: 'send_dunning_reminders', label: 'Send dunning reminders' },
-  { value: 'sync_usage_records', label: 'Sync usage records' },
+  { value: 'export_reports', label: 'Export month-to-date KPI snapshot' },
+  { value: 'send_dunning_reminders', label: 'Run dunning retries & reminders' },
+  { value: 'run_billing_jobs', label: 'Run billing jobs (platform-managed)' },
 ];
 
 export const LOG_STATUS_LABELS: Record<AutomationLogStatus, string> = {

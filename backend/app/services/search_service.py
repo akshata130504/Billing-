@@ -1,13 +1,23 @@
-"""Global search across the tenant's customers, invoices, quotes, products, subscriptions and payments."""
+"""Global search across the tenant's customers, invoices, quotes, products, subscriptions, payments,
+projects and expenses."""
 from typing import Any, Dict, List
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app.models import Customer, Invoice, Payment, Plan, Product, Quote, Subscription
+from backend.app.models.expenses import Expense
+from backend.app.models.projects import Project
 from backend.app.schemas.common_refs import enum_value, money_str
 
 MAX_LIMIT = 50
+LIKE_ESCAPE = "\\"
+
+
+def _like_pattern(term: str) -> str:
+    """Contains-pattern with LIKE wildcards (%, _) and the escape char treated literally."""
+    escaped = term.replace(LIKE_ESCAPE, LIKE_ESCAPE * 2).replace("%", LIKE_ESCAPE + "%").replace("_", LIKE_ESCAPE + "_")
+    return f"%{escaped}%"
 
 
 def _result(id_: str, category: str, title: str, subtitle: str | None, path: str, badge: str | None) -> Dict[str, Any]:
@@ -19,7 +29,7 @@ def search(db: Session, organization_id: str, q: str, limit: int = 20) -> List[D
     if not term:
         return []
     limit = max(1, min(int(limit or 20), MAX_LIMIT))
-    like = f"%{term}%"
+    like = _like_pattern(term)
     results: List[Dict[str, Any]] = []
 
     customers = db.scalars(
@@ -27,10 +37,10 @@ def search(db: Session, organization_id: str, q: str, limit: int = 20) -> List[D
         .where(
             Customer.organization_id == organization_id,
             or_(
-                Customer.display_name.ilike(like),
-                Customer.company_name.ilike(like),
-                Customer.email.ilike(like),
-                Customer.customer_number.ilike(like),
+                Customer.display_name.ilike(like, escape=LIKE_ESCAPE),
+                Customer.company_name.ilike(like, escape=LIKE_ESCAPE),
+                Customer.email.ilike(like, escape=LIKE_ESCAPE),
+                Customer.customer_number.ilike(like, escape=LIKE_ESCAPE),
             ),
         )
         .order_by(Customer.display_name.asc())
@@ -50,7 +60,7 @@ def search(db: Session, organization_id: str, q: str, limit: int = 20) -> List[D
 
     invoices = db.scalars(
         select(Invoice)
-        .where(Invoice.organization_id == organization_id, Invoice.invoice_number.ilike(like))
+        .where(Invoice.organization_id == organization_id, Invoice.invoice_number.ilike(like, escape=LIKE_ESCAPE))
         .options(selectinload(Invoice.customer))
         .order_by(Invoice.issue_date.desc())
         .limit(limit)
@@ -70,7 +80,7 @@ def search(db: Session, organization_id: str, q: str, limit: int = 20) -> List[D
 
     quotes = db.scalars(
         select(Quote)
-        .where(Quote.organization_id == organization_id, Quote.quote_number.ilike(like))
+        .where(Quote.organization_id == organization_id, Quote.quote_number.ilike(like, escape=LIKE_ESCAPE))
         .options(selectinload(Quote.customer))
         .order_by(Quote.issue_date.desc())
         .limit(limit)
@@ -90,7 +100,7 @@ def search(db: Session, organization_id: str, q: str, limit: int = 20) -> List[D
 
     products = db.scalars(
         select(Product)
-        .where(Product.organization_id == organization_id, or_(Product.name.ilike(like), Product.sku.ilike(like)))
+        .where(Product.organization_id == organization_id, or_(Product.name.ilike(like, escape=LIKE_ESCAPE), Product.sku.ilike(like, escape=LIKE_ESCAPE)))
         .order_by(Product.name.asc())
         .limit(limit)
     ).all()
@@ -108,7 +118,7 @@ def search(db: Session, organization_id: str, q: str, limit: int = 20) -> List[D
 
     subscriptions = db.scalars(
         select(Subscription)
-        .where(Subscription.organization_id == organization_id, Subscription.subscription_number.ilike(like))
+        .where(Subscription.organization_id == organization_id, Subscription.subscription_number.ilike(like, escape=LIKE_ESCAPE))
         .options(selectinload(Subscription.customer), selectinload(Subscription.plan).selectinload(Plan.product))
         .order_by(Subscription.created_at.desc())
         .limit(limit)
@@ -132,9 +142,9 @@ def search(db: Session, organization_id: str, q: str, limit: int = 20) -> List[D
         .where(
             Payment.organization_id == organization_id,
             or_(
-                Payment.payment_number.ilike(like),
-                Payment.reference.ilike(like),
-                Payment.gateway_payment_id.ilike(like),
+                Payment.payment_number.ilike(like, escape=LIKE_ESCAPE),
+                Payment.reference.ilike(like, escape=LIKE_ESCAPE),
+                Payment.gateway_payment_id.ilike(like, escape=LIKE_ESCAPE),
             ),
         )
         .options(selectinload(Payment.customer))
@@ -151,6 +161,52 @@ def search(db: Session, organization_id: str, q: str, limit: int = 20) -> List[D
                 " - ".join(p for p in (customer_name, enum_value(pay.method), pay.reference) if p),
                 f"/payments/{pay.id}",
                 f"{pay.currency} {money_str(pay.amount)}",
+            )
+        )
+
+    projects = db.scalars(
+        select(Project)
+        .where(
+            Project.organization_id == organization_id,
+            or_(Project.name.ilike(like, escape=LIKE_ESCAPE), Project.customer_name.ilike(like, escape=LIKE_ESCAPE)),
+        )
+        .order_by(Project.name.asc())
+        .limit(limit)
+    ).all()
+    for pr in projects:
+        results.append(
+            _result(
+                pr.id,
+                "projects",
+                pr.name,
+                pr.customer_name,
+                f"/projects/{pr.id}",
+                enum_value(pr.status),
+            )
+        )
+
+    expenses = db.scalars(
+        select(Expense)
+        .where(
+            Expense.organization_id == organization_id,
+            or_(
+                Expense.name.ilike(like, escape=LIKE_ESCAPE),
+                Expense.category.ilike(like, escape=LIKE_ESCAPE),
+                Expense.customer_name.ilike(like, escape=LIKE_ESCAPE),
+            ),
+        )
+        .order_by(Expense.date.desc())
+        .limit(limit)
+    ).all()
+    for ex in expenses:
+        results.append(
+            _result(
+                ex.id,
+                "expenses",
+                ex.name,
+                " - ".join(p for p in (ex.category, ex.customer_name) if p),
+                f"/expenses/{ex.id}",
+                f"{ex.currency} {money_str(ex.amount)}",
             )
         )
 

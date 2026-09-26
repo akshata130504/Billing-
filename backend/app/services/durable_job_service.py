@@ -42,12 +42,15 @@ def claim_due_jobs(
     worker_id: str,
     limit: int = 10,
     lease_seconds: int = 300,
+    job_types: Optional[List[str]] = None,
 ) -> List[Job]:
     """Claims up to `limit` runnable jobs using lease locking.
 
     A job is claimable if:
     1. status == PENDING and run_at <= now
     2. status == RUNNING and locked_at < (now - lease_seconds) [crashed worker takeover]
+
+    When ``job_types`` is given only those job types are claimed.
     """
     now = utcnow()
     lease_cutoff = now - timedelta(seconds=lease_seconds)
@@ -61,9 +64,10 @@ def claim_due_jobs(
                 and_(Job.status == JobStatus.RUNNING, Job.locked_at < lease_cutoff),
             )
         )
-        .order_by(Job.run_at.asc())
-        .limit(limit)
     )
+    if job_types is not None:
+        query = query.filter(Job.job_type.in_(job_types))
+    query = query.order_by(Job.run_at.asc()).limit(limit)
     bind = db.get_bind() if hasattr(db, "get_bind") else getattr(db, "bind", None)
     if bind is not None and getattr(bind.dialect, "name", "") == "postgresql":
         query = query.with_for_update(skip_locked=True)

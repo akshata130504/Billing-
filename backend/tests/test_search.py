@@ -88,3 +88,28 @@ def test_search_requires_query_and_is_tenant_scoped(client, tenant, db):
     assert resp.status_code == 200
     assert all(r["id"] != foreign.id for r in resp.json()["results"])
     assert client.get(BASE, params={"q": "x"}).status_code == 401
+
+
+def test_search_treats_like_wildcards_literally_and_covers_projects_expenses(client, tenant, auth_headers, db):
+    from backend.app.models.expenses import Expense
+    from backend.app.models.projects import Project
+
+    tag = uuid.uuid4().hex[:6].upper()
+    org_id = tenant.organization.id
+    tenant.customer(display_name=f"Plain {tag}")
+    db.add(Project(organization_id=org_id, name=f"Apollo {tag}", customer_name="Globex"))
+    db.add(Expense(organization_id=org_id, name=f"Taxi {tag}", date=date.today(), category="Travel", amount=Decimal("12.50")))
+    db.commit()
+
+    # "%" must not act as a wildcard matching everything.
+    res = client.get(BASE, params={"q": "%%"}, headers=auth_headers)
+    assert res.status_code == 200
+    assert all("%%" in (r["title"] + (r["subtitle"] or "")) for r in res.json()["results"])
+
+    # "_" must not match an arbitrary single character.
+    res = client.get(BASE, params={"q": f"Plain_{tag}"}, headers=auth_headers)
+    assert res.json()["results"] == []
+
+    cats = {r["category"]: r for r in client.get(BASE, params={"q": tag}, headers=auth_headers).json()["results"]}
+    assert cats["projects"]["path"].startswith("/projects/")
+    assert cats["expenses"]["path"].startswith("/expenses/")

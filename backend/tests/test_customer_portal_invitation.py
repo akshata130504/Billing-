@@ -308,3 +308,240 @@ def test_cross_tenant_isolation(client: TestClient, db: Session):
         headers=finance_b,
     )
     assert res.status_code == 404
+
+
+def test_customer_portal_profile_self_service(client: TestClient, db: Session):
+    """B10: Customer can update safe contact details while sensitive fields remain protected."""
+    tenant = Tenant(db, "portal-self-service")
+    customer = tenant.customer(email="portal.user@example.com")
+    customer.company_name = "Original Legal Entity Ltd"
+    customer.gstin = "29ABCDE1234F1Z5"
+    db.commit()
+
+    finance_headers = tenant.headers_for_role(MemberRole.FINANCE)
+
+    # 1. Invite and activate customer
+    res = client.post(
+        f"/api/v1/customers/{customer.id}/portal-invite",
+        headers=finance_headers,
+        json={},
+    )
+    token = res.json()["invite_url"].split("token=")[1]
+    act_res = client.post(
+        "/api/v1/portal/auth/activate",
+        json={"token": token, "password": "SecurePassword123!"},
+    )
+    portal_token = act_res.json()["token"]
+    portal_headers = {"X-Portal-Token": portal_token}
+
+    # 2. Update safe fields via PATCH /portal/profile
+    patch_res = client.patch(
+        "/api/v1/portal/profile",
+        headers=portal_headers,
+        json={
+            "display_name": "Updated Contact Name",
+            "phone": "+91 98765 43210",
+            "billing_address_line1": "456 Tech Park, MG Road",
+            "billing_city": "Bengaluru",
+            "billing_state": "Karnataka",
+            "billing_postal_code": "560001",
+        },
+    )
+    assert patch_res.status_code == 200
+    data = patch_res.json()["customer"]
+    assert data["display_name"] == "Updated Contact Name"
+    assert data["phone"] == "+91 98765 43210"
+    assert data["billing_address_line1"] == "456 Tech Park, MG Road"
+    assert data["billing_city"] == "Bengaluru"
+
+    # 3. Verify sensitive legal entity and GSTIN are unchanged
+    assert data["company_name"] == "Original Legal Entity Ltd"
+    assert data["gstin"] == "29ABCDE1234F1Z5"
+
+    # 4. Verify persistence via GET /portal/profile
+    get_res = client.get("/api/v1/portal/profile", headers=portal_headers)
+    assert get_res.status_code == 200
+    persisted = get_res.json()["customer"]
+    assert persisted["display_name"] == "Updated Contact Name"
+
+
+def test_customer_portal_payment_methods_self_service(client: TestClient, db: Session):
+    """B10: Customer can view, set default, and remove saved payment methods with customer isolation."""
+    from backend.app.models.payments import CustomerPaymentMethod, CustomerPaymentMethodStatus
+
+    tenant = Tenant(db, "portal-pm-test")
+    customer = tenant.customer(email="pm.user@example.com")
+    finance_headers = tenant.headers_for_role(MemberRole.FINANCE)
+
+    # 1. Invite and activate
+    res = client.post(
+        f"/api/v1/customers/{customer.id}/portal-invite",
+        headers=finance_headers,
+        json={},
+    )
+    token = res.json()["invite_url"].split("token=")[1]
+    act_res = client.post(
+        "/api/v1/portal/auth/activate",
+        json={"token": token, "password": "SecurePassword123!"},
+    )
+    portal_headers = {"X-Portal-Token": act_res.json()["token"]}
+
+    # 2. Seed 2 payment methods
+    pm1 = CustomerPaymentMethod(
+        organization_id=tenant.organization.id,
+        customer_id=customer.id,
+        type="card",
+        card_brand="visa",
+        last4="1111",
+        gateway_token="tok_1111",
+        is_default=True,
+        status=CustomerPaymentMethodStatus.ACTIVE,
+    )
+    pm2 = CustomerPaymentMethod(
+        organization_id=tenant.organization.id,
+        customer_id=customer.id,
+        type="card",
+        card_brand="mastercard",
+        last4="2222",
+        gateway_token="tok_2222",
+        is_default=False,
+        status=CustomerPaymentMethodStatus.ACTIVE,
+    )
+    db.add_all([pm1, pm2])
+    db.commit()
+
+    # 3. List payment methods via GET /portal/payment-methods
+    list_res = client.get("/api/v1/portal/payment-methods", headers=portal_headers)
+    assert list_res.status_code == 200
+    pms = list_res.json()
+    assert len(pms) == 2
+
+    # 4. Set pm2 as default via PATCH /portal/payment-methods/{id}/default
+    def_res = client.patch(f"/api/v1/portal/payment-methods/{pm2.id}/default", headers=portal_headers)
+    assert def_res.status_code == 200
+
+    db.refresh(pm1)
+    db.refresh(pm2)
+    assert pm1.is_default is False
+    assert pm2.is_default is True
+
+    # 5. Remove pm1 via DELETE /portal/payment-methods/{id}
+    del_res = client.delete(f"/api/v1/portal/payment-methods/{pm1.id}", headers=portal_headers)
+    assert del_res.status_code == 200
+
+    db.refresh(pm1)
+    assert pm1.status == CustomerPaymentMethodStatus.REVOKED
+
+
+def _activated_portal_headers(client: TestClient, tenant: Tenant, customer) -> dict:
+    res = client.post(
+        f"/api/v1/customers/{customer.id}/portal-invite",
+        headers=tenant.headers_for_role(MemberRole.FINANCE),
+        json={},
+    )
+    token = res.json()["invite_url"].split("token=")[1]
+    act_res = client.post("/api/v1/portal/auth/activate", json={"token": token, "password": "SecurePassword123!"})
+    return {"X-Portal-Token": act_res.json()["token"]}
+
+
+def test_portal_never_exposes_draft_invoices(client: TestClient, db: Session):
+    from backend.app.models.invoices import InvoiceStatus
+
+    tenant = Tenant(db, "portal-drafts")
+    customer = tenant.customer(email="drafts.user@example.com")
+    issued = tenant.invoice(customer, amount="500.00", status=InvoiceStatus.SENT)
+    draft = tenant.invoice(customer, amount="900.00", status=InvoiceStatus.DRAFT)
+    void = tenant.invoice(customer, amount="700.00", status=InvoiceStatus.VOID)
+    headers = _activated_portal_headers(client, tenant, customer)
+
+    listed = {inv["id"] for inv in client.get("/api/v1/portal/invoices", headers=headers).json()}
+    assert issued.id in listed and void.id in listed
+    assert draft.id not in listed
+
+    assert client.get(f"/api/v1/portal/invoices/{draft.id}", headers=headers).status_code == 404
+    assert client.get(f"/api/v1/portal/invoices/{draft.id}/pdf", headers=headers).status_code == 404
+    assert client.get(f"/api/v1/portal/invoices/{draft.id}/signed-url", headers=headers).status_code == 404
+
+    from backend.app.services import customer_portal_service
+
+    token = customer_portal_service.generate_signed_document_token(
+        organization_id=tenant.organization.id, customer_id=customer.id, invoice_id=draft.id, expires_in_seconds=60
+    )
+    assert client.get(f"/api/v1/portal/invoices/signed-download?token={token}").status_code == 404
+
+    dashboard = client.get("/api/v1/portal/dashboard", headers=headers).json()
+    assert dashboard["open_invoices_count"] == 1
+    assert float(dashboard["total_outstanding_amount"]) == 500.0
+    assert draft.id not in {inv["id"] for inv in dashboard["recent_invoices"]}
+
+
+def test_portal_trial_settings_are_enforced(client: TestClient, db: Session):
+    from datetime import date
+
+    from backend.app.models.subscriptions import Subscription, SubscriptionStatus
+    from backend.app.services import customer_portal_service
+
+    tenant = Tenant(db, "portal-trials")
+    customer = tenant.customer(email="trial.user@example.com")
+    _, plan = tenant.product_with_plan(trial_days=14)
+    sub = Subscription(
+        organization_id=tenant.organization.id,
+        subscription_number=f"SUB-{uuid4_hex()}",
+        customer_id=customer.id,
+        plan_id=plan.id,
+        status=SubscriptionStatus.TRIALING,
+        start_date=date.today(),
+        trial_end=date.today() + timedelta(days=14),
+        current_period_start=date.today(),
+        current_period_end=date.today() + timedelta(days=14),
+    )
+    db.add(sub)
+    settings = customer_portal_service.get_or_create_portal_settings(db, tenant.organization.id)
+    settings.trials_allow_customer_extension = False
+    settings.trials_activate_immediately = False
+    db.commit()
+    headers = _activated_portal_headers(client, tenant, customer)
+
+    ext = client.post(f"/api/v1/portal/subscriptions/{sub.id}/trial/extend?days=3", headers=headers)
+    assert ext.status_code == 403
+    conv = client.post(f"/api/v1/portal/subscriptions/{sub.id}/trial/convert", headers=headers)
+    assert conv.status_code == 403
+
+    settings.trials_allow_customer_extension = True
+    settings.trials_max_extensions = 0
+    db.commit()
+    ext = client.post(f"/api/v1/portal/subscriptions/{sub.id}/trial/extend?days=3", headers=headers)
+    assert ext.status_code == 403
+    assert "Maximum" in ext.text
+
+
+def test_portal_settings_ignore_unimplemented_mfa_flag(client: TestClient, db: Session):
+    tenant = Tenant(db, "portal-mfa")
+    res = client.patch("/api/v1/portal/settings", headers=tenant.headers(), json={"mfa_enabled": True, "portal_name": "Acme Portal"})
+    assert res.status_code == 200
+    assert res.json()["portal_name"] == "Acme Portal"
+    assert res.json()["mfa_enabled"] is False
+
+
+def test_portal_invitation_email_escapes_user_values(client: TestClient, db: Session, monkeypatch):
+    from backend.app.services import customer_portal_service
+
+    captured = {}
+
+    def fake_send_email(**kwargs):
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(customer_portal_service, "send_email", fake_send_email)
+    customer_portal_service._send_portal_invitation_email(
+        db, "org-x", "a@example.com", "https://app.example.com/portal/activate?token=t&x=1", "<b>Evil & Co</b>", "<script>"
+    )
+    assert "<script>" not in captured["html_body"]
+    assert "&lt;b&gt;Evil &amp; Co&lt;/b&gt;" in captured["html_body"]
+    assert "token=t&amp;x=1" in captured["html_body"]
+
+
+def uuid4_hex() -> str:
+    import uuid
+
+    return uuid.uuid4().hex[:8]

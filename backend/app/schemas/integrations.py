@@ -114,6 +114,8 @@ class WebhookStatus(BaseModel):
     has_signing_secret: bool = False
     last_tested_at: Optional[datetime] = None
     status_message: Optional[str] = None
+    # Populated ONLY in the save response when the server generated the secret (shown once).
+    generated_signing_secret: Optional[str] = None
 
 
 # --- Stub / Coming Soon Schemas ---

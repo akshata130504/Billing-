@@ -40,13 +40,15 @@ import { validateSlug } from '../../utils/validation';
 // Form model
 // ---------------------------------------------------------------------------
 
+/** Portal MFA is not implemented server-side, so it is not offered as a setting. */
+type PortalToggleKey = Exclude<CustomerPortalToggleKey, 'mfa_enabled'>;
+
 type FormState = Pick<
   CustomerPortalSettings,
   | 'portal_name'
   | 'portal_url_slug'
   | 'banner_message'
   | 'auto_invite_enabled'
-  | 'mfa_enabled'
   | 'prevent_duplicate_payments'
   | 'allow_self_signup'
   | 'allow_document_upload'
@@ -65,7 +67,6 @@ const FORM_KEYS: (keyof FormState)[] = [
   'portal_url_slug',
   'banner_message',
   'auto_invite_enabled',
-  'mfa_enabled',
   'prevent_duplicate_payments',
   'allow_self_signup',
   'allow_document_upload',
@@ -101,7 +102,7 @@ function diff(saved: FormState, current: FormState): CustomerPortalSettingsUpdat
 }
 
 interface ToggleDef {
-  key: CustomerPortalToggleKey;
+  key: PortalToggleKey;
   label: string;
   description: string;
 }
@@ -116,12 +117,7 @@ const ACCESS_TOGGLES: ToggleDef[] = [
   {
     key: 'auto_invite_enabled',
     label: 'Auto-invite new customers',
-    description: 'Flag new customer records for a portal invitation as soon as they are created.',
-  },
-  {
-    key: 'mfa_enabled',
-    label: 'Require multi-factor authentication',
-    description: 'Portal users must supply an MFA code when signing in.',
+    description: 'Email a portal invitation to new customers (with an email address) as soon as they are created.',
   },
   {
     key: 'enable_identity_verification_public_links',
@@ -627,7 +623,6 @@ export function CustomerPortalPage() {
                     <span className="shrink-0 w-5 h-5 rounded-full bg-brand-50 text-brand-700 text-[11px] font-semibold flex items-center justify-center">2</span>
                     <span>
                       <strong className="text-slate-800">Sign in</strong> to receive a session token valid for 7 days.
-                      {form.mfa_enabled && ' An MFA code is also required.'}
                     </span>
                   </li>
                   <li className="flex gap-2">

@@ -153,7 +153,9 @@ def test_smtp_disconnect(db, test_org):
 
 
 def test_webhook_configure_and_test(db, test_org):
-    with patch("httpx.Client.post") as mock_post:
+    with patch("httpx.Client.post") as mock_post, patch(
+        "backend.app.core.network_security.is_safe_url", return_value=True
+    ):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_post.return_value = mock_resp
@@ -189,3 +191,49 @@ def test_all_integrations_aggregates(db, test_org):
     assert all_status.accounting.is_connected is False
     assert all_status.crm.is_connected is False
     assert all_status.storage.is_connected is False
+
+
+def test_webhook_test_ping_signs_exact_body_with_timestamp(db, test_org):
+    import json as _json
+
+    from backend.app.services import customization_service
+
+    captured = {}
+
+    def fake_post(url, body, headers, timeout):
+        captured.update(url=url, body=body, headers=headers)
+        return 200, "ok"
+
+    with patch("backend.app.core.network_security.is_safe_url", return_value=True), patch.object(
+        customization_service, "_post_webhook", side_effect=fake_post
+    ):
+        res = integrations_service.test_webhook_endpoint("https://api.myapp.com/events", "whsec_abc")
+    assert res["success"] is True
+    ts = captured["headers"]["X-Rooman-Timestamp"]
+    expected = customization_service.sign_webhook_body(captured["body"], "whsec_abc", ts)
+    assert captured["headers"]["X-Rooman-Signature"] == f"sha256={expected}"
+    assert _json.loads(captured["body"])["type"] == "test.ping"
+
+
+def test_webhook_config_rejects_private_destinations(db, test_org):
+    from backend.app.core.exceptions import ValidationAppError
+    from backend.app.schemas.integrations import WebhookConfigureRequest
+
+    for url in ("http://127.0.0.1:9000/hook", "http://169.254.169.254/latest", "http://192.168.1.10/x"):
+        with pytest.raises(ValidationAppError):
+            integrations_service.save_webhook_config(
+                db, test_org.id, WebhookConfigureRequest(url=url, events=["invoice.paid"], is_enabled=True)
+            )
+    db.rollback()
+
+
+def test_smtp_test_blocks_private_hosts_in_production(monkeypatch):
+    from backend.app.core.config import settings
+    from backend.app.core.exceptions import AppException
+
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    for host in ("127.0.0.1", "localhost", "10.1.2.3", "169.254.169.254"):
+        with patch("smtplib.SMTP") as mock_smtp:
+            with pytest.raises(AppException):
+                integrations_service.test_smtp_connection(host=host, port=25)
+            mock_smtp.assert_not_called()

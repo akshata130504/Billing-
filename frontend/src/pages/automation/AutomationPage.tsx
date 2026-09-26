@@ -35,6 +35,7 @@ import { LoadingState } from '../../components/common/LoadingState';
 import { EmptyState } from '../../components/common/EmptyState';
 import { ErrorState } from '../../components/common/ErrorState';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
+import { Modal } from '../../components/common/Modal';
 import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { formatDateTime, formatRelative, humanize } from '../../utils/format';
@@ -166,6 +167,7 @@ export function AutomationPage() {
 
   // Data
   const [rules, setRules] = useState<AutomationRule[]>([]);
+  const [revealedSecrets, setRevealedSecrets] = useState<{ name: string; secret: string }[] | null>(null);
   const [schedules, setSchedules] = useState<AutomationSchedule[]>([]);
   const [allLogs, setAllLogs] = useState<AutomationLog[]>([]);
   const [logs, setLogs] = useState<AutomationLog[]>([]);
@@ -376,6 +378,16 @@ export function AutomationPage() {
   };
 
   const handleRuleSaved = (saved: AutomationRule) => {
+    // Webhook signing secrets are returned only in the create response; show them once.
+    const revealed = saved.revealed_signing_secrets;
+    if (revealed && Object.keys(revealed).length > 0) {
+      setRevealedSecrets(
+        Object.entries(revealed).map(([actionId, secret]) => ({
+          name: saved.actions.find((a) => a.id === actionId)?.name ?? actionId,
+          secret,
+        })),
+      );
+    }
     setRules((list) => {
       const exists = list.some((r) => r.id === saved.id);
       return exists ? list.map((r) => (r.id === saved.id ? saved : r)) : [saved, ...list];
@@ -1054,6 +1066,40 @@ export function AutomationPage() {
         onClose={() => setRuleModal({ open: false, rule: null })}
         onSaved={handleRuleSaved}
       />
+      <Modal
+        isOpen={revealedSecrets !== null}
+        onClose={() => setRevealedSecrets(null)}
+        title="Webhook signing secrets"
+        description="Copy these now - they will not be shown again. Receivers verify X-Rooman-Signature = sha256=HMAC(secret, `${X-Rooman-Timestamp}.${raw body}`)."
+        size="lg"
+        footer={
+          <Button type="button" onClick={() => setRevealedSecrets(null)}>
+            I have saved them
+          </Button>
+        }
+      >
+        <ul className="space-y-3">
+          {(revealedSecrets ?? []).map((item) => (
+            <li key={item.name} className="rounded-lg border border-slate-200 p-3">
+              <p className="text-xs font-medium text-slate-600 mb-1">{item.name}</p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 break-all rounded bg-slate-50 px-2 py-1 text-xs text-slate-800">{item.secret}</code>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(item.secret);
+                    showToast('success', 'Copied', 'Signing secret copied to clipboard.');
+                  }}
+                >
+                  Copy
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </Modal>
       <RuleTestModal isOpen={testRule !== null} rule={testRule} onClose={() => setTestRule(null)} />
       <ScheduleEditorModal
         isOpen={scheduleModal.open}
