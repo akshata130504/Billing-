@@ -1,3 +1,4 @@
+import { toApiError } from '../../../services/apiClient';
 import React, { useState } from 'react';
 import { X, Plus, Trash2, BookOpen, AlertCircle } from 'lucide-react';
 import { Button } from '../../../components/common/Button';
@@ -83,8 +84,8 @@ export const PriceBookModal: React.FC<PriceBookModalProps> = ({
 
       await onSave(payload);
       onClose();
-    } catch (err: any) {
-      setError(err?.response?.data?.error?.message || err?.message || 'Failed to save price book.');
+    } catch (err) {
+      setError(toApiError(err).message || 'Failed to save price book.');
     } finally {
       setIsSubmitting(false);
     }

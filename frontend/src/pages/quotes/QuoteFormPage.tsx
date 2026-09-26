@@ -15,12 +15,14 @@ import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
 import { LoadingState } from '../../components/common/LoadingState';
 import { PhoneInput } from '../../components/common/PhoneInput';
+import { CustomerCombobox } from '../../components/common/CustomerCombobox';
+import { useToast } from '../../components/common/Toast';
+import { toApiError } from '../../services/apiClient';
 import { validateDateAfter, validateDateNotPast, validateNonNegativeMoney, validatePercentage, validatePositiveQuantity } from '../../utils/validation';
 import { quoteService } from '../../services/quoteService';
 import { customerService } from '../../services/customerService';
 import { catalogCpqService } from '../../services/catalogCpqService';
 import { planPricingService } from '../../services/planPricingService';
-import type { CustomerOut } from '../../types/api';
 import type { OfferingOut } from '../../types/catalog_cpq';
 import type { QuoteItemIn } from '../../types/quotes';
 
@@ -39,8 +41,8 @@ export function QuoteFormPage() {
   const location = useLocation();
   const { id } = useParams<{ id: string }>();
   const isEditing = Boolean(id);
+  const { showToast } = useToast();
 
-  const [customers, setCustomers] = useState<CustomerOut[]>([]);
   const [offerings, setOfferings] = useState<OfferingOut[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -110,15 +112,15 @@ export function QuoteFormPage() {
         phone: newCustPhone.trim() || undefined,
         currency: 'INR',
       });
-      setCustomers([created, ...customers]);
       setCustomerId(created.id);
+      showToast('success', 'Customer created', created.display_name);
       setShowCustomerModal(false);
       setNewCustName('');
       setNewCustEmail('');
       setNewCustPhone('');
       setNewCustCompany('');
-    } catch (err: any) {
-      alert(err.response?.data?.detail || err.message || 'Failed to create customer');
+    } catch (err) {
+      showToast('error', 'Failed to create customer', toApiError(err).message);
     } finally {
       setCreatingCustomer(false);
     }
@@ -129,11 +131,7 @@ export function QuoteFormPage() {
     async function loadData() {
       setIsLoading(true);
       try {
-        const [custRes, offRes] = await Promise.all([
-          customerService.list({ page_size: 100 }),
-          catalogCpqService.listOfferings({ page_size: 100 }),
-        ]);
-        setCustomers(custRes.items);
+        const offRes = await catalogCpqService.listOfferings({ page_size: 100 });
         setOfferings(offRes.items);
 
         if (isEditing && id) {
@@ -193,7 +191,9 @@ export function QuoteFormPage() {
           ]);
         }
       } catch (err) {
-        console.error('Failed to load quote form data', err);
+        const message = toApiError(err).message;
+        setError(`Failed to load quote form data: ${message}`);
+        showToast('error', 'Failed to load quote form', message);
       } finally {
         setIsLoading(false);
       }
@@ -264,8 +264,8 @@ export function QuoteFormPage() {
         };
         setItems(updated);
         return;
-      } catch (err) {
-        console.error('Pricing simulation error', err);
+      } catch {
+        // Simulation unavailable: keep the current unit price and just update quantity.
       }
     }
 
@@ -429,12 +429,15 @@ export function QuoteFormPage() {
       }
 
       if (shouldSend && quote?.id) {
-        await quoteService.sendQuote(quote.id);
+        const sent = await quoteService.sendQuote(quote.id);
+        if (sent.email_sent === false) {
+          showToast('warning', quoteService.EMAIL_NOT_SENT_MESSAGE);
+        }
       }
 
       navigate(quote?.id ? `/quotes/${quote.id}` : '/quotes');
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || err?.message || 'Failed to save quote');
+    } catch (err) {
+      setError(toApiError(err).message || 'Failed to save quote');
     } finally {
       setIsSubmitting(false);
     }
@@ -451,7 +454,7 @@ export function QuoteFormPage() {
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6 animate-in fade-in duration-150">
       {/* Top Bar */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Link to="/quotes">
             <Button variant="outline" size="sm" leadingIcon={<ArrowLeft className="w-3.5 h-3.5" />}>
@@ -514,19 +517,12 @@ export function QuoteFormPage() {
                 <UserPlus className="w-3.5 h-3.5" /> + Create Customer
               </button>
             </div>
-            <select
+            <CustomerCombobox
               required
               value={customerId}
-              onChange={(e) => setCustomerId(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-medium rounded-lg border border-slate-200 bg-white text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-slate-900/10"
-            >
-              <option value="">Select a customer...</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.display_name} ({c.customer_number}) {c.company_name ? `- ${c.company_name}` : ''}
-                </option>
-              ))}
-            </select>
+              onChange={(nextId) => setCustomerId(nextId)}
+              placeholder="Search a customer..."
+            />
           </div>
 
           <div>
@@ -611,7 +607,8 @@ export function QuoteFormPage() {
           </div>
 
           <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
-            <table className="w-full text-left text-xs text-slate-600 border-collapse">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-600 border-collapse">
               <thead className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
                 <tr>
                   <th className="px-4 py-2.5 w-72">Offering / Product</th>
@@ -729,6 +726,7 @@ export function QuoteFormPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
 

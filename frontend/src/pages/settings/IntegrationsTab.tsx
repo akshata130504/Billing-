@@ -15,6 +15,8 @@ import {
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
+import { ConfirmDialog } from '../../components/common/ConfirmDialog';
+import { useToast } from '../../components/common/Toast';
 import { LoadingState } from '../../components/common/LoadingState';
 import { ErrorState } from '../../components/common/ErrorState';
 import {
@@ -241,7 +243,7 @@ function SMTPModal({ isOpen, onClose, currentStatus, onSaved }: SMTPModalProps) 
   const [password, setPassword] = useState('');
   const [useTls, setUseTls] = useState(currentStatus.use_tls ?? true);
   const [useSsl, setUseSsl] = useState(currentStatus.use_ssl ?? false);
-  const [fromEmail, setFromEmail] = useState(currentStatus.from_email || 'billing@example.com');
+  const [fromEmail, setFromEmail] = useState(currentStatus.from_email || '');
   const [fromName, setFromName] = useState(currentStatus.from_name || 'Rooman Billing');
 
   const [testEmailRecipient, setTestEmailRecipient] = useState('');
@@ -513,7 +515,8 @@ interface WebhookModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentStatus: WebhookStatus;
-  onSaved: () => void;
+  /** Receives the save response (may carry a one-time `generated_signing_secret`). */
+  onSaved: (status: WebhookStatus) => void;
 }
 
 const AVAILABLE_WEBHOOK_EVENTS = [
@@ -575,13 +578,13 @@ function WebhookModal({ isOpen, onClose, currentStatus, onSaved }: WebhookModalP
     setSaving(true);
     setFeedback(null);
     try {
-      await integrationsService.configureWebhook({
+      const saved = await integrationsService.configureWebhook({
         url: url.trim(),
         signing_secret: signingSecret.trim() || undefined,
         events,
         is_enabled: isEnabled,
       });
-      onSaved();
+      onSaved(saved);
       onClose();
     } catch (err: any) {
       setFeedback({ type: 'error', text: toApiError(err).message });
@@ -820,7 +823,11 @@ export function IntegrationsTab() {
     queryFn: integrationsService.getAll,
   });
 
+  const { showToast } = useToast();
   const [activeModal, setActiveModal] = useState<'razorpay' | 'smtp' | 'webhook' | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState<'razorpay' | 'smtp' | 'webhook' | null>(null);
+  // Server-generated webhook signing secret: returned once in the save response.
+  const [generatedSecret, setGeneratedSecret] = useState<string | null>(null);
 
   // Disconnect mutations
   const disconnectRazorpayMutation = useMutation({
@@ -844,6 +851,24 @@ export function IntegrationsTab() {
   }
 
   const { razorpay, smtp, webhook } = data;
+
+  const DISCONNECT = {
+    razorpay: {
+      title: 'Disconnect Razorpay',
+      description: 'Are you sure you want to disconnect Razorpay? Online invoice checkout will be disabled.',
+      mutation: disconnectRazorpayMutation,
+    },
+    smtp: {
+      title: 'Disconnect SMTP',
+      description: 'Are you sure you want to disconnect SMTP? Outbound emails will be disabled.',
+      mutation: disconnectSMTPMutation,
+    },
+    webhook: {
+      title: 'Disconnect Webhooks',
+      description: 'Are you sure you want to disconnect outbound webhooks?',
+      mutation: disconnectWebhookMutation,
+    },
+  } as const;
 
   return (
     <div className="space-y-6">
@@ -885,11 +910,7 @@ export function IntegrationsTab() {
             )
           }
           onConfigure={() => setActiveModal('razorpay')}
-          onDisconnect={() => {
-            if (window.confirm('Are you sure you want to disconnect Razorpay? Online invoice checkout will be disabled.')) {
-              disconnectRazorpayMutation.mutate();
-            }
-          }}
+          onDisconnect={() => setConfirmDisconnect('razorpay')}
           isDisconnecting={disconnectRazorpayMutation.isPending}
         />
       </div>
@@ -923,11 +944,7 @@ export function IntegrationsTab() {
             )
           }
           onConfigure={() => setActiveModal('smtp')}
-          onDisconnect={() => {
-            if (window.confirm('Are you sure you want to disconnect SMTP? Outbound emails will be disabled.')) {
-              disconnectSMTPMutation.mutate();
-            }
-          }}
+          onDisconnect={() => setConfirmDisconnect('smtp')}
           isDisconnecting={disconnectSMTPMutation.isPending}
         />
       </div>
@@ -970,11 +987,7 @@ export function IntegrationsTab() {
             )
           }
           onConfigure={() => setActiveModal('webhook')}
-          onDisconnect={() => {
-            if (window.confirm('Are you sure you want to disconnect outbound webhooks?')) {
-              disconnectWebhookMutation.mutate();
-            }
-          }}
+          onDisconnect={() => setConfirmDisconnect('webhook')}
           isDisconnecting={disconnectWebhookMutation.isPending}
         />
       </div>
@@ -1039,9 +1052,56 @@ export function IntegrationsTab() {
           isOpen={true}
           onClose={() => setActiveModal(null)}
           currentStatus={webhook}
-          onSaved={() => void refetch()}
+          onSaved={(saved) => {
+            if (saved.generated_signing_secret) setGeneratedSecret(saved.generated_signing_secret);
+            void refetch();
+          }}
         />
       )}
+
+      <ConfirmDialog
+        isOpen={confirmDisconnect !== null}
+        onClose={() => setConfirmDisconnect(null)}
+        onConfirm={() => {
+          const target = confirmDisconnect;
+          setConfirmDisconnect(null);
+          if (target) DISCONNECT[target].mutation.mutate();
+        }}
+        title={confirmDisconnect ? DISCONNECT[confirmDisconnect].title : ''}
+        description={confirmDisconnect ? DISCONNECT[confirmDisconnect].description : undefined}
+        confirmLabel="Disconnect"
+        variant="danger"
+      />
+
+      <Modal
+        isOpen={generatedSecret !== null}
+        onClose={() => setGeneratedSecret(null)}
+        title="Webhook signing secret"
+        description="Store this now - it won't be shown again. Receivers use it to verify the HMAC-SHA256 signature on each delivery."
+        size="md"
+        footer={
+          <Button type="button" onClick={() => setGeneratedSecret(null)}>
+            I have saved it
+          </Button>
+        }
+      >
+        <div className="flex items-center gap-2">
+          <code className="flex-1 break-all rounded bg-slate-50 border border-slate-200 px-2 py-1 text-xs text-slate-800">
+            {generatedSecret}
+          </code>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              if (generatedSecret) void navigator.clipboard?.writeText(generatedSecret);
+              showToast('success', 'Copied', 'Signing secret copied to clipboard.');
+            }}
+          >
+            Copy
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }

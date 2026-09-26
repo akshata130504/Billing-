@@ -101,6 +101,8 @@ export interface Quote {
   declined_at?: string;
   converted_invoice_id?: string;
   approval_request_id?: string;
+  /** Only set on the send response: false when the customer email could not be delivered. */
+  email_sent?: boolean | null;
   approved_by?: string;
   approved_at?: string;
   rejection_reason?: string;

@@ -13,3 +13,5 @@ export * from './ErrorState';
 export * from './RoomanLogo';
 export * from './ConfirmDialog';
 export * from './PageHeader';
+export * from './ErrorBoundary';
+export * from './PageLoader';

@@ -1,81 +1,91 @@
-import type { ReactNode } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { AlertCircle, ShieldOff } from 'lucide-react';
 import { AppLayout } from '../components/layout/AppLayout';
 import { Button } from '../components/common/Button';
 import { LoadingState } from '../components/common/LoadingState';
+import { PageLoader } from '../components/common/PageLoader';
+import { lazyNamed } from './lazyNamed';
 import { useAuth } from '../hooks/useAuth';
 import type { MemberRole } from '../types/api';
 import { ROLE_LABELS } from '../utils/format';
 
-import { DashboardPage } from '../pages/dashboard/DashboardPage';
-import {
-  LoginPage,
-  SignupPage,
-  ForgotPasswordPage,
-  ResetPasswordPage,
-  AcceptInvitationPage,
-} from '../pages/auth';
-import { CustomersListPage, CustomerFormPage, CustomerDetailPage } from '../pages/customers';
-import { CatalogPage } from '../pages/catalog';
-import { PlansPricingPage, PricingSimulatorPage } from '../pages/plans-pricing';
-import { CPQPage } from '../pages/cpq';
-import { QuotesListPage, QuoteFormPage, QuoteDetailPage } from '../pages/quotes';
-import {
-  SubscriptionsListPage,
-  SubscriptionFormPage,
-  SubscriptionDetailPage,
-  TrialsPage,
-} from '../pages/subscriptions';
-import { InvoicesListPage, InvoiceFormPage, InvoiceDetailPage } from '../pages/invoices';
-import { PaymentsListPage, PaymentDetailPage, PaymentsProvider } from '../pages/payments';
-import {
-  CollectionsDashboardPage,
-  CollectionsInvoiceListPage,
-  CollectionsInvoiceDetailPage,
-} from '../pages/collections';
-import { PayInvoicePage, PublicQuotePage, LandingPage, PublicCheckoutPage, CustomerLifecycleCinematicPage } from '../pages/public';
-import { ActivityPage } from '../pages/activity';
-import {
-  ActionCenterPage,
-  ApprovalCenterPage,
-  BillingCalendarPage,
-  ReconciliationPage,
-  AuditLogPage,
-  DataMigrationPage,
-} from '../pages/control-center';
-import { ProjectsPage, ProjectDetailsPage, ProjectsProvider } from '../pages/projects';
-import {
-  ExpensesPage,
-  RecurringExpensesPage,
-  ExpenseDetailsPage,
-  ExpensesProvider,
-} from '../pages/expenses';
-import { CustomerLifecycleListPage, CustomerLifecycleDetailPage } from '../pages/customer-lifecycle';
-import { TimesheetsPage } from '../pages/timesheets';
-import { ReportsPage } from '../pages/reports';
-import { SettingsPage } from '../pages/settings';
-import { MobilePlatformPage, DesktopPlatformPage } from '../pages/platforms';
-import { AIBillingPage } from '../pages/ai-billing';
-import { UsageMeteringPage } from '../pages/usage';
-import { ProrationPage } from '../pages/proration';
-import { DunningPage } from '../pages/dunning';
-import { CustomerPortalPage } from '../pages/customer-portal';
-import { HostedPaymentPagesPage } from '../pages/hosted-payment-pages';
-import { RevenueIntelligencePage } from '../pages/revenue-intelligence';
-import { AutomationPage } from '../pages/automation';
-import { CustomizationPage } from '../pages/customization';
-import {
-  PortalAuthProvider,
-  PortalLayout,
-  PortalLoginPage,
-  PortalDashboardPage,
-  PortalInvoicesPage,
-  PortalPaymentsPage,
-  PortalSubscriptionsPage,
-  PortalProfilePage,
-  PortalActivationPage,
-} from '../pages/portal-customer';
+// Route components are code-split: each page downloads on first visit.
+const DashboardPage = lazyNamed(() => import('../pages/dashboard/DashboardPage'), 'DashboardPage');
+const LoginPage = lazyNamed(() => import('../pages/auth/LoginPage'), 'LoginPage');
+const SignupPage = lazyNamed(() => import('../pages/auth/SignupPage'), 'SignupPage');
+const ForgotPasswordPage = lazyNamed(() => import('../pages/auth/ForgotPasswordPage'), 'ForgotPasswordPage');
+const ResetPasswordPage = lazyNamed(() => import('../pages/auth/ResetPasswordPage'), 'ResetPasswordPage');
+const AcceptInvitationPage = lazyNamed(() => import('../pages/auth/AcceptInvitationPage'), 'AcceptInvitationPage');
+const CustomersListPage = lazyNamed(() => import('../pages/customers/CustomersListPage'), 'CustomersListPage');
+const CustomerFormPage = lazyNamed(() => import('../pages/customers/CustomerFormPage'), 'CustomerFormPage');
+const CustomerDetailPage = lazyNamed(() => import('../pages/customers/CustomerDetailPage'), 'CustomerDetailPage');
+const CatalogPage = lazyNamed(() => import('../pages/catalog/CatalogPage'), 'CatalogPage');
+const PlansPricingPage = lazyNamed(() => import('../pages/plans-pricing/PlansPricingPage'), 'PlansPricingPage');
+const PricingSimulatorPage = lazyNamed(() => import('../pages/plans-pricing/PricingSimulatorPage'), 'PricingSimulatorPage');
+const CPQPage = lazyNamed(() => import('../pages/cpq/CPQPage'), 'CPQPage');
+const QuotesListPage = lazyNamed(() => import('../pages/quotes/QuotesListPage'), 'QuotesListPage');
+const QuoteFormPage = lazyNamed(() => import('../pages/quotes/QuoteFormPage'), 'QuoteFormPage');
+const QuoteDetailPage = lazyNamed(() => import('../pages/quotes/QuoteDetailPage'), 'QuoteDetailPage');
+const SubscriptionsListPage = lazyNamed(() => import('../pages/subscriptions/SubscriptionsListPage'), 'SubscriptionsListPage');
+const SubscriptionFormPage = lazyNamed(() => import('../pages/subscriptions/SubscriptionFormPage'), 'SubscriptionFormPage');
+const SubscriptionDetailPage = lazyNamed(() => import('../pages/subscriptions/SubscriptionDetailPage'), 'SubscriptionDetailPage');
+const TrialsPage = lazyNamed(() => import('../pages/subscriptions/TrialsPage'), 'TrialsPage');
+const InvoicesListPage = lazyNamed(() => import('../pages/invoices/InvoicesListPage'), 'InvoicesListPage');
+const InvoiceFormPage = lazyNamed(() => import('../pages/invoices/InvoiceFormPage'), 'InvoiceFormPage');
+const InvoiceDetailPage = lazyNamed(() => import('../pages/invoices/InvoiceDetailPage'), 'InvoiceDetailPage');
+const CreditNotesListPage = lazyNamed(() => import('../pages/credit-notes/CreditNotesListPage'), 'CreditNotesListPage');
+const CreditNoteDetailPage = lazyNamed(() => import('../pages/credit-notes/CreditNoteDetailPage'), 'CreditNoteDetailPage');
+const PaymentsListPage = lazyNamed(() => import('../pages/payments/PaymentsPage'), 'PaymentsPage');
+const PaymentDetailPage = lazyNamed(() => import('../pages/payments/PaymentDetailsPage'), 'PaymentDetailsPage');
+const PaymentsProvider = lazyNamed(() => import('../pages/payments/PaymentsContext'), 'PaymentsProvider');
+const CollectionsDashboardPage = lazyNamed(() => import('../pages/collections/CollectionsDashboardPage'), 'CollectionsDashboardPage');
+const CollectionsInvoiceListPage = lazyNamed(() => import('../pages/collections/CollectionsInvoiceListPage'), 'CollectionsInvoiceListPage');
+const CollectionsInvoiceDetailPage = lazyNamed(() => import('../pages/collections/CollectionsInvoiceDetailPage'), 'CollectionsInvoiceDetailPage');
+const PayInvoicePage = lazyNamed(() => import('../pages/public/PayInvoicePage'), 'PayInvoicePage');
+const PublicQuotePage = lazyNamed(() => import('../pages/public/PublicQuotePage'), 'PublicQuotePage');
+const LandingPage = lazyNamed(() => import('../pages/public/LandingPage'), 'LandingPage');
+const PublicCheckoutPage = lazyNamed(() => import('../pages/public/PublicCheckoutPage'), 'PublicCheckoutPage');
+const CustomerLifecycleCinematicPage = lazyNamed(() => import('../pages/public/CustomerLifecycleCinematicPage'), 'CustomerLifecycleCinematicPage');
+const ActivityPage = lazyNamed(() => import('../pages/activity/ActivityPage'), 'ActivityPage');
+const ActionCenterPage = lazyNamed(() => import('../pages/control-center/ActionCenterPage'), 'ActionCenterPage');
+const ApprovalCenterPage = lazyNamed(() => import('../pages/control-center/ApprovalCenterPage'), 'ApprovalCenterPage');
+const BillingCalendarPage = lazyNamed(() => import('../pages/control-center/BillingCalendarPage'), 'BillingCalendarPage');
+const ReconciliationPage = lazyNamed(() => import('../pages/control-center/ReconciliationPage'), 'ReconciliationPage');
+const AuditLogPage = lazyNamed(() => import('../pages/control-center/AuditLogPage'), 'AuditLogPage');
+const DataMigrationPage = lazyNamed(() => import('../pages/control-center/DataMigrationPage'), 'DataMigrationPage');
+const ProjectsPage = lazyNamed(() => import('../pages/projects/ProjectsPage'), 'ProjectsPage');
+const ProjectDetailsPage = lazyNamed(() => import('../pages/projects/ProjectDetailsPage'), 'ProjectDetailsPage');
+const ProjectsProvider = lazyNamed(() => import('../pages/projects/ProjectsContext'), 'ProjectsProvider');
+const ExpensesPage = lazyNamed(() => import('../pages/expenses/ExpensesPage'), 'ExpensesPage');
+const RecurringExpensesPage = lazyNamed(() => import('../pages/expenses/RecurringExpensesPage'), 'RecurringExpensesPage');
+const ExpenseDetailsPage = lazyNamed(() => import('../pages/expenses/ExpenseDetailsPage'), 'ExpenseDetailsPage');
+const ExpensesProvider = lazyNamed(() => import('../pages/expenses/ExpensesContext'), 'ExpensesProvider');
+const CustomerLifecycleListPage = lazyNamed(() => import('../pages/customer-lifecycle/CustomerLifecycleListPage'), 'CustomerLifecycleListPage');
+const CustomerLifecycleDetailPage = lazyNamed(() => import('../pages/customer-lifecycle/CustomerLifecycleDetailPage'), 'CustomerLifecycleDetailPage');
+const TimesheetsPage = lazyNamed(() => import('../pages/timesheets/TimesheetsPage'), 'TimesheetsPage');
+const ReportsPage = lazyNamed(() => import('../pages/reports/ReportsPage'), 'ReportsPage');
+const SettingsPage = lazyNamed(() => import('../pages/settings/SettingsPage'), 'SettingsPage');
+const MobilePlatformPage = lazyNamed(() => import('../pages/platforms/MobilePlatformPage'), 'MobilePlatformPage');
+const DesktopPlatformPage = lazyNamed(() => import('../pages/platforms/DesktopPlatformPage'), 'DesktopPlatformPage');
+const AIBillingPage = lazyNamed(() => import('../pages/ai-billing/AIBillingPage'), 'AIBillingPage');
+const UsageMeteringPage = lazyNamed(() => import('../pages/usage/UsageMeteringPage'), 'UsageMeteringPage');
+const ProrationPage = lazyNamed(() => import('../pages/proration/ProrationPage'), 'ProrationPage');
+const DunningPage = lazyNamed(() => import('../pages/dunning/DunningPage'), 'DunningPage');
+const CustomerPortalPage = lazyNamed(() => import('../pages/customer-portal/CustomerPortalPage'), 'CustomerPortalPage');
+const HostedPaymentPagesPage = lazyNamed(() => import('../pages/hosted-payment-pages/HostedPaymentPagesPage'), 'HostedPaymentPagesPage');
+const RevenueIntelligencePage = lazyNamed(() => import('../pages/revenue-intelligence/RevenueIntelligencePage'), 'RevenueIntelligencePage');
+const AutomationPage = lazyNamed(() => import('../pages/automation/AutomationPage'), 'AutomationPage');
+const CustomizationPage = lazyNamed(() => import('../pages/customization/CustomizationPage'), 'CustomizationPage');
+const PortalAuthProvider = lazyNamed(() => import('../pages/portal-customer/PortalAuthContext'), 'PortalAuthProvider');
+const PortalLayout = lazyNamed(() => import('../pages/portal-customer/PortalLayout'), 'PortalLayout');
+const PortalLoginPage = lazyNamed(() => import('../pages/portal-customer/PortalLoginPage'), 'PortalLoginPage');
+const PortalDashboardPage = lazyNamed(() => import('../pages/portal-customer/PortalDashboardPage'), 'PortalDashboardPage');
+const PortalInvoicesPage = lazyNamed(() => import('../pages/portal-customer/PortalInvoicesPage'), 'PortalInvoicesPage');
+const PortalPaymentsPage = lazyNamed(() => import('../pages/portal-customer/PortalPaymentsPage'), 'PortalPaymentsPage');
+const PortalSubscriptionsPage = lazyNamed(() => import('../pages/portal-customer/PortalSubscriptionsPage'), 'PortalSubscriptionsPage');
+const PortalProfilePage = lazyNamed(() => import('../pages/portal-customer/PortalProfilePage'), 'PortalProfilePage');
+const PortalActivationPage = lazyNamed(() => import('../pages/portal-customer/PortalActivationPage'), 'PortalActivationPage');
 
 // ---------------------------------------------------------------------------
 // Guards
@@ -174,6 +184,9 @@ function PublicOnly({ children }: { children: ReactNode }) {
 
 export function AppRoutes() {
   return (
+    // Top-level fallback for the public/auth/portal routes. Authenticated pages
+    // get their own Suspense inside AppLayout so the shell stays visible.
+    <Suspense fallback={<PageLoader fullScreen />}>
     <Routes>
       {/* Public: auth */}
       <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
@@ -210,15 +223,7 @@ export function AppRoutes() {
 
       {/* Private */}
       <Route element={<ProtectedRoute />}>
-        <Route
-          element={
-            <ProjectsProvider>
-              <ExpensesProvider>
-                <AppLayout />
-              </ExpensesProvider>
-            </ProjectsProvider>
-          }
-        >
+        <Route element={<AppLayout />}>
           <Route path="dashboard" element={<DashboardPage />} />
 
               {/* Workspace */}
@@ -230,13 +235,15 @@ export function AppRoutes() {
 
               {/* Revenue */}
               <Route path="quotes" element={<QuotesListPage />} />
-              <Route path="quotes/new" element={<QuoteFormPage />} />
+              <Route path="quotes/new" element={<RequireRole min="finance"><QuoteFormPage /></RequireRole>} />
               <Route path="quotes/:id" element={<QuoteDetailPage />} />
-              <Route path="quotes/:id/edit" element={<QuoteFormPage />} />
+              <Route path="quotes/:id/edit" element={<RequireRole min="finance"><QuoteFormPage /></RequireRole>} />
               <Route path="invoices" element={<InvoicesListPage />} />
-              <Route path="invoices/new" element={<InvoiceFormPage />} />
+              <Route path="invoices/new" element={<RequireRole min="finance"><InvoiceFormPage /></RequireRole>} />
               <Route path="invoices/:id" element={<InvoiceDetailPage />} />
-              <Route path="invoices/:id/edit" element={<InvoiceFormPage />} />
+              <Route path="invoices/:id/edit" element={<RequireRole min="finance"><InvoiceFormPage /></RequireRole>} />
+              <Route path="credit-notes" element={<CreditNotesListPage />} />
+              <Route path="credit-notes/:id" element={<CreditNoteDetailPage />} />
               {/*
                 PaymentsProvider loads payments, customers and totals on mount, so it
                 is scoped to these routes only. Mounted app-wide it would issue
@@ -261,11 +268,19 @@ export function AppRoutes() {
               <Route path="trials" element={<TrialsPage />} />
 
               {/* Operations */}
-              <Route path="expenses" element={<ExpensesPage />} />
-              <Route path="expenses/recurring" element={<RecurringExpensesPage />} />
-              <Route path="expenses/:expenseId" element={<ExpenseDetailsPage />} />
-              <Route path="projects" element={<ProjectsPage />} />
-              <Route path="projects/:projectId" element={<ProjectDetailsPage />} />
+              {/*
+                Like PaymentsProvider, these providers fetch on mount, so they are
+                scoped to their own routes instead of wrapping the whole layout.
+              */}
+              <Route path="expenses" element={<ExpensesProvider><Outlet /></ExpensesProvider>}>
+                <Route index element={<ExpensesPage />} />
+                <Route path="recurring" element={<RecurringExpensesPage />} />
+                <Route path=":expenseId" element={<ExpenseDetailsPage />} />
+              </Route>
+              <Route path="projects" element={<ProjectsProvider><Outlet /></ProjectsProvider>}>
+                <Route index element={<ProjectsPage />} />
+                <Route path=":projectId" element={<ProjectDetailsPage />} />
+              </Route>
               <Route path="timesheets" element={<TimesheetsPage />} />
 
               {/* Insights */}
@@ -336,5 +351,6 @@ export function AppRoutes() {
             </Route>
           </Route>
         </Routes>
+    </Suspense>
   );
 }

@@ -1,6 +1,7 @@
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from './components/common/Toast';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { AuthProvider } from './hooks/useAuth';
 import { AppRoutes } from './routes';
 
@@ -21,15 +22,17 @@ const queryClient = new QueryClient({
 
 export function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <AuthProvider>
-          <BrowserRouter>
-            <AppRoutes />
-          </BrowserRouter>
-        </AuthProvider>
-      </ToastProvider>
-    </QueryClientProvider>
+    <ErrorBoundary fullScreen>
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <AuthProvider>
+            <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+              <AppRoutes />
+            </BrowserRouter>
+          </AuthProvider>
+        </ToastProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
 

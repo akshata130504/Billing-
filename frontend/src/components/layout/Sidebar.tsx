@@ -9,6 +9,7 @@ import {
   FileText,
   Calculator,
   Receipt,
+  ReceiptText,
   CreditCard,
   ShieldCheck,
   Layers,
@@ -81,6 +82,7 @@ export const sidebarSections: SidebarSection[] = [
       { title: 'Quotes', path: '/quotes', icon: FileText },
       { title: 'CPQ', path: '/cpq', icon: Calculator },
       { title: 'Invoices', path: '/invoices', icon: Receipt },
+      { title: 'Credit Notes', path: '/credit-notes', icon: ReceiptText },
       { title: 'Payments', path: '/payments', icon: CreditCard },
       { title: 'Collections', path: '/collections', icon: ShieldCheck },
     ],
@@ -255,6 +257,16 @@ export function Sidebar({
     }
     return map;
   }, []);
+
+  // Close the mobile drawer on Escape (desktop rail has no open/close state to escape from)
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   const prevPathRef = useRef<string | null>(null);
 

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { invoiceService } from '../../../services/invoiceService';
+import { toApiError } from '../../../services/apiClient';
 import { formatMoney, formatDate } from '../../../utils/format';
 import type { Invoice } from '../../../types/invoices';
 import type { PaymentOut } from '../../../types';
@@ -22,16 +23,20 @@ const statusBadgeStyles: Record<string, { bg: string; text: string; label: strin
 export function RecentInvoicesWidget({ transactions: _transactions }: RecentInvoicesWidgetProps = {}) {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let mounted = true;
+    setLoading(true);
+    setLoadError(null);
     invoiceService
       .listInvoices({ page_size: 5 })
       .then((res) => {
         if (mounted) setInvoices(res.items || []);
       })
       .catch((err) => {
-        console.error('Failed to load recent invoices:', err);
+        if (mounted) setLoadError(toApiError(err).message);
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -39,7 +44,7 @@ export function RecentInvoicesWidget({ transactions: _transactions }: RecentInvo
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [reloadKey]);
 
   return (
     <div className="bg-white p-5 rounded-2xl border border-[#E7E9F2] shadow-sm space-y-4">
@@ -70,7 +75,20 @@ export function RecentInvoicesWidget({ transactions: _transactions }: RecentInvo
             </tr>
           </thead>
           <tbody className="divide-y divide-[#F0F2FA] text-xs">
-            {invoices.length === 0 ? (
+            {loadError ? (
+              <tr>
+                <td colSpan={5} className="py-8 px-3 text-center text-xs text-rose-600">
+                  Couldn't load recent invoices: {loadError}{' '}
+                  <button
+                    type="button"
+                    onClick={() => setReloadKey((k) => k + 1)}
+                    className="font-semibold underline hover:text-rose-700"
+                  >
+                    Retry
+                  </button>
+                </td>
+              </tr>
+            ) : invoices.length === 0 ? (
               <tr>
                 <td colSpan={5} className="py-8 px-3 text-center text-slate-400 italic text-xs">
                   {loading ? 'Loading recent invoices...' : 'No invoices recorded yet.'}

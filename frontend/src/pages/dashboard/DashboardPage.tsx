@@ -9,6 +9,8 @@ import {
   ChevronDown,
   ArrowUp,
   SlidersHorizontal,
+  Repeat,
+  UserMinus,
 } from 'lucide-react';
 import { controlCenterService } from '../../services/controlCenterService';
 import { toApiError } from '../../services/apiClient';
@@ -17,7 +19,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../components/common/Toast';
 import { LoadingState } from '../../components/common/LoadingState';
 import { ErrorState } from '../../components/common/ErrorState';
-import { formatMoney, parseMoney } from '../../utils/format';
+import { formatMoney, formatPercent, parseMoney } from '../../utils/format';
 import { RevenueOverviewWidget } from './widgets/RevenueOverviewWidget';
 import { ActionCenterWidget } from './widgets/ActionCenterWidget';
 import { BillingPipelineWidget } from './widgets/BillingPipelineWidget';
@@ -121,6 +123,17 @@ export function DashboardPage() {
     : 'No prior period data';
   const isRevPositive = !metrics?.revenue_change_pct || !metrics.revenue_change_pct.startsWith('-');
 
+  const mrrCurrency = revenue?.mrr_currency || currency;
+  const otherMrr = Object.entries(revenue?.mrr_other_currencies ?? {});
+  const mrrChange =
+    otherMrr.length > 0
+      ? `+ ${otherMrr.map(([cur, amt]) => formatMoney(amt, cur)).join(', ')} in other currencies`
+      : revenue?.mrr_change_pct
+        ? `${revenue.mrr_change_pct}% from last period`
+        : 'No prior period data';
+  const churnRate = customer_health?.churn_rate ?? null;
+  const churnedCustomers = customer_health?.churned_customers ?? 0;
+
   const kpiCards = [
     {
       title: 'Total Invoices',
@@ -163,6 +176,32 @@ export function DashboardPage() {
       icon: (
         <div className="w-12 h-12 rounded-full bg-[#FCEBD9] text-[#E07A28] flex items-center justify-center shrink-0">
           <Clock className="w-5 h-5 stroke-[2]" />
+        </div>
+      ),
+    },
+    {
+      title: `MRR (${mrrCurrency})`,
+      value: formatMoney(revenue?.mrr ?? 0, mrrCurrency),
+      change: mrrChange,
+      changeColor:
+        otherMrr.length === 0 && revenue?.mrr_change_pct?.startsWith('-') ? 'text-[#E83E8C]' : 'text-[#10B981]',
+      icon: (
+        <div className="w-12 h-12 rounded-2xl bg-[#E8EBFC] text-[#3F51C9] flex items-center justify-center shrink-0">
+          <Repeat className="w-5 h-5 stroke-[2]" />
+        </div>
+      ),
+    },
+    {
+      title: 'Churn Rate',
+      value: churnRate !== null ? formatPercent(churnRate, 2) : '—',
+      change:
+        churnRate !== null
+          ? `${churnedCustomers} of ${customer_health?.customers_at_period_start ?? 0} customers lost`
+          : 'No customers at period start',
+      changeColor: churnedCustomers > 0 ? 'text-[#E83E8C]' : 'text-[#10B981]',
+      icon: (
+        <div className="w-12 h-12 rounded-full bg-[#F9D9E8] text-[#E83E8C] flex items-center justify-center shrink-0">
+          <UserMinus className="w-5 h-5 stroke-[2]" />
         </div>
       ),
     },
@@ -239,8 +278,8 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* 4 Core Financial KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Core Financial KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {kpiCards.map((metric) => (
           <div
             key={metric.title}

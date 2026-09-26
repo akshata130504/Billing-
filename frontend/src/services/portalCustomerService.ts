@@ -1,5 +1,5 @@
-import axios, { AxiosInstance } from 'axios';
-import { API_BASE_URL } from './apiClient';
+import axios, { AxiosError, AxiosInstance } from 'axios';
+import { API_BASE_URL, toApiError } from './apiClient';
 import { triggerBlobDownload } from './download';
 import type {
   PortalLoginIn,
@@ -187,6 +187,7 @@ const portalClient: AxiosInstance = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 20000,
 });
 
 portalClient.interceptors.request.use((config) => {
@@ -196,6 +197,68 @@ portalClient.interceptors.request.use((config) => {
   }
   return config;
 });
+
+/** Dispatched on `window` when the portal session has expired or been revoked. */
+export const PORTAL_LOGOUT_EVENT = 'rooman:portal-logout';
+
+function isPortalAuthRoute(url: string | undefined): boolean {
+  return Boolean(url && /(^|\/)auth\//.test(url));
+}
+
+/** Clears the portal session and sends the customer back to the portal login. */
+function handlePortalSessionExpired(): void {
+  portalTokenStorage.clear();
+  try {
+    window.dispatchEvent(new CustomEvent(PORTAL_LOGOUT_EVENT));
+    if (!window.location.pathname.startsWith('/portal/login')) {
+      window.location.assign('/portal/login?expired=1');
+    }
+  } catch {
+    // no window (tests) - nothing to redirect
+  }
+}
+
+// Normalise every failure to an ApiError ({ code, message, status }) using the
+// backend envelope `{ error: { message } }`, same as the staff apiClient, so
+// pages can simply show `err.message`.
+portalClient.interceptors.response.use(
+  (response) => response,
+  (error: AxiosError) => {
+    const status = error.response?.status;
+    if (status === 401 && !isPortalAuthRoute(error.config?.url) && portalTokenStorage.hasSession()) {
+      handlePortalSessionExpired();
+    }
+    return Promise.reject(toApiError(error));
+  }
+);
+
+export interface PortalSavedPaymentMethod {
+  id: string;
+  type: string;
+  card_brand?: string;
+  last4?: string;
+  is_default: boolean;
+}
+
+export interface PortalProfileUpdate {
+  display_name?: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  billing_address_line1?: string;
+  billing_address_line2?: string;
+  billing_city?: string;
+  billing_state?: string;
+  billing_postal_code?: string;
+  billing_country?: string;
+  shipping_address_line1?: string;
+  shipping_address_line2?: string;
+  shipping_city?: string;
+  shipping_state?: string;
+  shipping_postal_code?: string;
+  shipping_country?: string;
+  user_display_name?: string;
+}
 
 export const portalCustomerService = {
   login: async (credentials: PortalLoginIn): Promise<PortalAuthOut> => {
@@ -258,6 +321,7 @@ export const portalCustomerService = {
     });
 
     if (!response.ok) {
+      if (response.status === 401 && portalTokenStorage.hasSession()) handlePortalSessionExpired();
       throw new Error(`Failed to download invoice PDF (${response.status})`);
     }
 
@@ -278,5 +342,23 @@ export const portalCustomerService = {
   getProfile: async (): Promise<PortalProfileData> => {
     const { data } = await portalClient.get<PortalProfileData>('/profile');
     return data;
+  },
+
+  updateProfile: async (payload: PortalProfileUpdate): Promise<PortalProfileData> => {
+    const { data } = await portalClient.patch<PortalProfileData>('/profile', payload);
+    return data;
+  },
+
+  getPaymentMethods: async (): Promise<PortalSavedPaymentMethod[]> => {
+    const { data } = await portalClient.get<PortalSavedPaymentMethod[]>('/payment-methods');
+    return data;
+  },
+
+  setDefaultPaymentMethod: async (methodId: string): Promise<void> => {
+    await portalClient.patch(`/payment-methods/${methodId}/default`);
+  },
+
+  deletePaymentMethod: async (methodId: string): Promise<void> => {
+    await portalClient.delete(`/payment-methods/${methodId}`);
   },
 };

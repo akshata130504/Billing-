@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Plus,
@@ -13,81 +13,143 @@ import {
 } from 'lucide-react';
 import { Button } from '../../components/common/Button';
 import { LoadingState } from '../../components/common/LoadingState';
+import { ConfirmDialog } from '../../components/common/ConfirmDialog';
+import { ErrorState } from '../../components/common/ErrorState';
+import { Pagination } from '../../components/common/Pagination';
+import { useToast } from '../../components/common/Toast';
+import { useAuth } from '../../hooks/useAuth';
+import { toApiError } from '../../services/apiClient';
+import { loadPreferences } from '../settings/PreferencesTab';
 import { quoteService } from '../../services/quoteService';
 import type { Quote, QuoteStatus } from '../../types/quotes';
 
+const PAGE_SIZE = 20;
+
+/** Tab id -> backend `status` filter value. Converting a quote sets it to `converted`. */
+const TAB_STATUS: Record<string, string | undefined> = {
+  all: undefined,
+  invoiced: 'converted',
+};
+
+interface QuoteCounts {
+  total: number;
+  draft: number;
+  pendingApproval: number;
+  sent: number;
+  accepted: number;
+}
+
+const EMPTY_COUNTS: QuoteCounts = { total: 0, draft: 0, pendingApproval: 0, sent: 0, accepted: 0 };
+
 export function QuotesListPage() {
   const navigate = useNavigate();
+  const { showToast } = useToast();
+  const { hasRole } = useAuth();
+  const canEdit = hasRole('finance');
+  const canApprove = hasRole('admin');
+
   const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [totalQuotes, setTotalQuotes] = useState(0);
+  const [counts, setCounts] = useState<QuoteCounts>(EMPTY_COUNTS);
+  const [page, setPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [dateFilter, setDateFilter] = useState('');
+  const [pendingSendQuoteId, setPendingSendQuoteId] = useState<string | null>(null);
+  const [pendingDeleteQuoteId, setPendingDeleteQuoteId] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
 
-  const fetchQuotes = async () => {
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Search, status and date filters are applied by the server so every quote is
+  // reachable through pagination (not just the first page).
+  const fetchQuotes = useCallback(async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
-      const res = await quoteService.listQuotes();
+      const base = {
+        search: debouncedSearch || undefined,
+        date_from: dateFilter || undefined,
+        date_to: dateFilter || undefined,
+      };
+      const status = activeTab in TAB_STATUS ? TAB_STATUS[activeTab] : activeTab;
+      const count = (s?: string) =>
+        quoteService.listQuotes({ ...base, status: s, page: 1, page_size: 1 }).then((r) => r.total ?? 0);
+      const [res, total, draft, pendingApproval, sent, viewed, accepted, converted] = await Promise.all([
+        quoteService.listQuotes({ ...base, status, page, page_size: PAGE_SIZE }),
+        count(),
+        count('draft'),
+        count('pending_approval'),
+        count('sent'),
+        count('viewed'),
+        count('accepted'),
+        count('converted'),
+      ]);
       setQuotes(res.items);
+      setTotalQuotes(res.total ?? res.items.length);
+      setCounts({
+        total,
+        draft,
+        pendingApproval,
+        sent: sent + viewed,
+        accepted: accepted + converted,
+      });
     } catch (err) {
-      console.error('Failed to fetch quotes', err);
+      setLoadError(toApiError(err).message);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [debouncedSearch, dateFilter, activeTab, page]);
 
   useEffect(() => {
-    fetchQuotes();
-  }, []);
+    void fetchQuotes();
+  }, [fetchQuotes]);
 
-  // Dashboard KPIs
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, dateFilter, activeTab]);
+
+  // Dashboard KPIs: counts are organization-wide; value covers the loaded page only.
   const kpis = useMemo(() => {
-    const total = quotes.length;
-    const draft = quotes.filter((q) => q.status === 'draft').length;
-    const pendingApproval = quotes.filter((q) => q.status === 'pending_approval').length;
-    const approved = quotes.filter((q) => q.status === 'approved').length;
-    const sent = quotes.filter((q) => q.status === 'sent' || q.status === 'viewed').length;
-    const accepted = quotes.filter((q) => q.status === 'accepted' || q.status === 'converted' || q.status === 'invoiced').length;
     const totalValue = quotes.reduce((acc, q) => acc + Number(q.total || 0), 0);
-    return { total, draft, pendingApproval, approved, sent, accepted, totalValue };
-  }, [quotes]);
+    return { ...counts, totalValue };
+  }, [quotes, counts]);
 
-  // Tab & search filtering
-  const filteredQuotes = useMemo(() => {
-    return quotes.filter((q) => {
-      // Tab filter
-      if (activeTab !== 'all') {
-        if (activeTab === 'invoiced' && q.status !== 'invoiced' && q.status !== 'converted') return false;
-        else if (activeTab !== 'invoiced' && q.status !== activeTab) return false;
-      }
+  const filteredQuotes = quotes;
 
-      // Search query
-      if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase();
-        const matchNum = q.quote_number.toLowerCase().includes(query);
-        const matchCust = (q.customer?.display_name || '').toLowerCase().includes(query);
-        const matchCustNo = (q.customer?.customer_number || '').toLowerCase().includes(query);
-        const matchEmail = (q.customer?.email || '').toLowerCase().includes(query);
-        const matchTitle = (q.title || '').toLowerCase().includes(query);
-        if (!matchNum && !matchCust && !matchCustNo && !matchEmail && !matchTitle) return false;
-      }
-
-      // Date filter
-      if (dateFilter && q.issue_date !== dateFilter) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [quotes, activeTab, searchQuery, dateFilter]);
-
-  const handleSendQuote = async (id: string, e: React.MouseEvent) => {
+  const handleSendQuote = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    const prefs = loadPreferences();
+    if (prefs.confirmBeforeSendInvoice) {
+      setPendingSendQuoteId(id);
+    } else {
+      void executeSendQuote(id);
+    }
+  };
+
+  const executeSendQuote = async (id: string) => {
+    setPendingSendQuoteId(null);
     try {
-      await quoteService.sendQuote(id);
+      setActionLoading(true);
+      const sent = await quoteService.sendQuote(id);
+      if (sent.status === 'pending_approval') {
+        showToast('info', 'Discount approval requested', 'An admin must approve this quote before it is sent.');
+      } else if (sent.email_sent === false) {
+        showToast('warning', quoteService.EMAIL_NOT_SENT_MESSAGE);
+      } else {
+        showToast('success', 'Quote sent');
+      }
       await fetchQuotes();
     } catch (err) {
-      console.error('Failed to send quote', err);
+      showToast('error', 'Could not send quote', toApiError(err).message);
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -95,9 +157,10 @@ export function QuotesListPage() {
     e.stopPropagation();
     try {
       await quoteService.approveQuote(id);
+      showToast('success', 'Quote approved and sent to the customer');
       await fetchQuotes();
     } catch (err) {
-      console.error('Failed to approve quote', err);
+      showToast('error', 'Could not approve quote', toApiError(err).message);
     }
   };
 
@@ -111,19 +174,27 @@ export function QuotesListPage() {
         await fetchQuotes();
       }
     } catch (err) {
-      console.error('Failed to convert quote', err);
+      showToast('error', 'Could not convert quote', toApiError(err).message);
     }
   };
 
-  const handleDeleteQuote = async (id: string, e: React.MouseEvent) => {
+  const handleDeleteQuote = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm('Are you sure you want to delete this draft quote?')) {
-      try {
-        await quoteService.deleteQuote(id);
-        await fetchQuotes();
-      } catch (err) {
-        console.error('Failed to delete quote', err);
-      }
+    setPendingDeleteQuoteId(id);
+  };
+
+  const executeDeleteQuote = async () => {
+    if (!pendingDeleteQuoteId) return;
+    try {
+      setActionLoading(true);
+      await quoteService.deleteQuote(pendingDeleteQuoteId);
+      setPendingDeleteQuoteId(null);
+      showToast('success', 'Quote deleted');
+      await fetchQuotes();
+    } catch (err) {
+      showToast('error', 'Could not delete quote', toApiError(err).message);
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -169,13 +240,15 @@ export function QuotesListPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Link to="/quotes/new">
-            <Button variant="primary" size="sm" leadingIcon={<Plus className="w-4 h-4" />}>
-              New Quote
-            </Button>
-          </Link>
-        </div>
+        {canEdit && (
+          <div className="flex items-center gap-2">
+            <Link to="/quotes/new">
+              <Button variant="primary" size="sm" leadingIcon={<Plus className="w-4 h-4" />}>
+                New Quote
+              </Button>
+            </Link>
+          </div>
+        )}
       </div>
 
       {/* KPI Cards */}
@@ -213,7 +286,7 @@ export function QuotesListPage() {
         <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
           <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Total Value</p>
           <p className="text-xl font-bold text-slate-900 mt-1">₹{Math.round(kpis.totalValue).toLocaleString('en-IN')}</p>
-          <p className="text-[10px] text-slate-400 mt-0.5">Pipeline pipeline</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">Quotes on this page</p>
         </div>
       </div>
 
@@ -268,7 +341,7 @@ export function QuotesListPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={fetchQuotes}
+              onClick={() => void fetchQuotes()}
               title="Refresh"
               leadingIcon={<RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />}
             />
@@ -278,12 +351,20 @@ export function QuotesListPage() {
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs overflow-hidden">
-        {isLoading ? (
+        {loadError ? (
+          <ErrorState
+            title="Couldn't load quotes"
+            message={loadError}
+            onRetry={() => void fetchQuotes()}
+            className="rounded-none border-0"
+          />
+        ) : isLoading ? (
           <div className="py-16">
             <LoadingState message="Loading quotes and proposals..." />
           </div>
         ) : (
-          <table className="w-full text-left text-xs text-slate-600 border-collapse">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-slate-600 border-collapse">
             <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
               <tr>
                 <th className="px-4 py-3">Quote #</th>
@@ -299,7 +380,11 @@ export function QuotesListPage() {
               {filteredQuotes.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-4 py-12 text-center text-slate-400 italic">
-                    No quotes found. Click &quot;New Quote&quot; to create your first quote.
+                    {debouncedSearch || dateFilter || activeTab !== 'all'
+                      ? 'No quotes match these filters.'
+                      : canEdit
+                        ? 'No quotes found. Click "New Quote" to create your first quote.'
+                        : 'No quotes found.'}
                   </td>
                 </tr>
               ) : (
@@ -334,7 +419,7 @@ export function QuotesListPage() {
                           </button>
                         </Link>
 
-                        {(quote.status === 'draft' || quote.status === 'pending_approval') && (
+                        {canEdit && (quote.status === 'draft' || quote.status === 'pending_approval') && (
                           <Link to={`/quotes/${quote.id}/edit`}>
                             <button className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100" title="Edit Quote">
                               <Edit2 className="w-3.5 h-3.5" />
@@ -342,17 +427,17 @@ export function QuotesListPage() {
                           </Link>
                         )}
 
-                        {quote.status === 'pending_approval' && (
+                        {canApprove && quote.status === 'pending_approval' && (
                           <button
                             onClick={(e) => handleApproveQuote(quote.id, e)}
                             className="p-1 rounded text-amber-600 hover:bg-amber-50"
-                            title="Approve Quote Discount"
+                            title="Approve discount & send quote"
                           >
                             <CheckSquare className="w-3.5 h-3.5" />
                           </button>
                         )}
 
-                        {(quote.status === 'draft' || quote.status === 'approved') && (
+                        {canEdit && (quote.status === 'draft' || quote.status === 'approved') && (
                           <button
                             onClick={(e) => handleSendQuote(quote.id, e)}
                             className="p-1 rounded text-indigo-600 hover:bg-indigo-50"
@@ -362,7 +447,7 @@ export function QuotesListPage() {
                           </button>
                         )}
 
-                        {quote.status === 'accepted' && (
+                        {canEdit && quote.status === 'accepted' && (
                           <button
                             onClick={(e) => handleConvertToInvoice(quote.id, e)}
                             className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-1"
@@ -373,7 +458,7 @@ export function QuotesListPage() {
                           </button>
                         )}
 
-                        {quote.status === 'draft' && (
+                        {canEdit && quote.status === 'draft' && (
                           <button
                             onClick={(e) => handleDeleteQuote(quote.id, e)}
                             className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50"
@@ -389,8 +474,43 @@ export function QuotesListPage() {
               )}
             </tbody>
           </table>
+          </div>
+        )}
+        {!loadError && !isLoading && (
+          <Pagination
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={totalQuotes}
+            onPageChange={setPage}
+            itemLabel="quotes"
+          />
         )}
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={Boolean(pendingDeleteQuoteId)}
+        onClose={() => setPendingDeleteQuoteId(null)}
+        onConfirm={() => void executeDeleteQuote()}
+        title="Delete draft quote"
+        description="Are you sure you want to delete this draft quote? This cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        isLoading={actionLoading}
+      />
+
+      {/* Send Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={Boolean(pendingSendQuoteId)}
+        onClose={() => setPendingSendQuoteId(null)}
+        onConfirm={() => {
+          if (pendingSendQuoteId) void executeSendQuote(pendingSendQuoteId);
+        }}
+        title="Send Quote"
+        description="Are you sure you want to send this quote to the customer? This will dispatch an email with the public quote link."
+        confirmLabel="Send Quote"
+        isLoading={actionLoading}
+      />
     </div>
   );
 }

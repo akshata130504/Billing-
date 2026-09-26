@@ -1,3 +1,4 @@
+import { toApiError } from '../../services/apiClient';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import {
@@ -45,11 +46,10 @@ export const PortalActivationPage: React.FC = () => {
           setInvitation(data);
           setDisplayName(data.customer_name || '');
         }
-      } catch (err: any) {
+      } catch (err) {
         if (isMounted) {
           const msg =
-            err?.response?.data?.detail ||
-            err?.message ||
+            toApiError(err).message ||
             'This activation link is invalid, expired, or has already been used.';
           setValidationError(msg);
         }
@@ -101,10 +101,9 @@ export const PortalActivationPage: React.FC = () => {
         display_name: displayName.trim() || undefined,
       });
       navigate('/portal', { replace: true });
-    } catch (err: any) {
+    } catch (err) {
       const msg =
-        err?.response?.data?.detail ||
-        err?.message ||
+        toApiError(err).message ||
         'Failed to activate account. The invitation may have expired or already been used.';
       setSubmitError(msg);
     } finally {

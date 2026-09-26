@@ -7,8 +7,8 @@ import {
   CheckCircle,
   XCircle,
   Eye,
-  FileCheck,
   Printer,
+  Download,
   Trash2,
   Clock,
   AlertCircle,
@@ -20,15 +20,26 @@ import type { Quote } from '../../types/quotes';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
 import { Modal } from '../../components/common/Modal';
+import { ConfirmDialog } from '../../components/common/ConfirmDialog';
+import { loadPreferences } from '../settings/PreferencesTab';
+import { useToast } from '../../components/common/Toast';
+import { useAuth } from '../../hooks/useAuth';
+import { toApiError } from '../../services/apiClient';
 
 export const QuoteDetailPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { showToast } = useToast();
+  const { hasRole } = useAuth();
+  const canEdit = hasRole('finance');
+  const canApprove = hasRole('admin');
 
   const [quote, setQuote] = useState<Quote | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [showSendConfirm, setShowSendConfirm] = useState(false);
 
   // Modals
   const [showRejectModal, setShowRejectModal] = useState(false);
@@ -48,33 +59,41 @@ export const QuoteDetailPage = () => {
       setError(null);
       const data = await quoteService.getQuote(quoteId);
       setQuote(data);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || 'Failed to load quote details');
+    } catch (err) {
+      setError(toApiError(err).message || 'Failed to load quote details');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAction = async (actionFn: () => Promise<any>) => {
+  const handleAction = async (actionFn: () => Promise<unknown>, successMessage?: string) => {
     try {
       setActionLoading(true);
       await actionFn();
+      if (successMessage) showToast('success', successMessage);
       if (id) await fetchQuote(id);
-    } catch (err: any) {
-      alert(err.response?.data?.detail || err.message || 'Action failed');
+    } catch (err) {
+      showToast('error', 'Action failed', toApiError(err).message);
     } finally {
       setActionLoading(false);
     }
   };
 
-  const handleSubmitForApproval = () => {
-    if (!id) return;
-    handleAction(() => quoteService.submitForApproval(id));
+  /** Toast for a send result: pending approval, sent, or sent without the customer email. */
+  const notifySendResult = (sent: Quote) => {
+    if (sent.status.toUpperCase() === 'PENDING_APPROVAL') {
+      showToast('info', 'Discount approval requested', 'An admin must approve this quote before it is sent.');
+    } else if (sent.email_sent === false) {
+      showToast('warning', quoteService.EMAIL_NOT_SENT_MESSAGE);
+    } else {
+      showToast('success', 'Quote sent');
+    }
   };
 
   const handleApprove = () => {
     if (!id) return;
-    handleAction(() => quoteService.approveQuote(id));
+    // Approving the discount sends the quote to the customer straight away.
+    handleAction(() => quoteService.approveQuote(id), 'Quote approved and sent to the customer');
   };
 
   const handleRejectConfirm = async () => {
@@ -84,9 +103,10 @@ export const QuoteDetailPage = () => {
       await quoteService.rejectQuote(id, rejectionReason);
       setShowRejectModal(false);
       setRejectionReason('');
+      showToast('success', 'Quote rejected');
       await fetchQuote(id);
-    } catch (err: any) {
-      alert(err.response?.data?.detail || err.message || 'Rejection failed');
+    } catch (err) {
+      showToast('error', 'Rejection failed', toApiError(err).message);
     } finally {
       setActionLoading(false);
     }
@@ -94,7 +114,18 @@ export const QuoteDetailPage = () => {
 
   const handleSend = () => {
     if (!id) return;
-    handleAction(() => quoteService.sendQuote(id));
+    const prefs = loadPreferences();
+    if (prefs.confirmBeforeSendInvoice) {
+      setShowSendConfirm(true);
+    } else {
+      executeSend();
+    }
+  };
+
+  const executeSend = () => {
+    setShowSendConfirm(false);
+    if (!id) return;
+    handleAction(async () => notifySendResult(await quoteService.sendQuote(id)));
   };
 
   const handleMarkViewed = () => {
@@ -104,12 +135,12 @@ export const QuoteDetailPage = () => {
 
   const handleAccept = () => {
     if (!id) return;
-    handleAction(() => quoteService.acceptQuote(id));
+    handleAction(() => quoteService.acceptQuote(id), 'Quote marked as accepted');
   };
 
   const handleDecline = () => {
     if (!id) return;
-    handleAction(() => quoteService.declineQuote(id));
+    handleAction(() => quoteService.declineQuote(id), 'Quote marked as declined');
   };
 
   const handleConvertToInvoice = async () => {
@@ -119,8 +150,8 @@ export const QuoteDetailPage = () => {
       const invoice = await quoteService.convertToInvoice(id);
       setShowConvertModal(false);
       navigate(`/invoices/${invoice.id}`);
-    } catch (err: any) {
-      alert(err.response?.data?.detail || err.message || 'Conversion failed');
+    } catch (err) {
+      showToast('error', 'Conversion failed', toApiError(err).message);
     } finally {
       setActionLoading(false);
     }
@@ -131,9 +162,10 @@ export const QuoteDetailPage = () => {
     try {
       setActionLoading(true);
       await quoteService.deleteQuote(id);
+      showToast('success', 'Quote deleted');
       navigate('/quotes');
-    } catch (err: any) {
-      alert(err.response?.data?.detail || err.message || 'Delete failed');
+    } catch (err) {
+      showToast('error', 'Delete failed', toApiError(err).message);
     } finally {
       setActionLoading(false);
     }
@@ -141,6 +173,18 @@ export const QuoteDetailPage = () => {
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!id || !quote) return;
+    try {
+      setDownloadingPdf(true);
+      await quoteService.downloadPdf(id, quote.quote_number);
+    } catch (err) {
+      showToast('error', 'Failed to download quote PDF', toApiError(err).message);
+    } finally {
+      setDownloadingPdf(false);
+    }
   };
 
   const getStatusBadgeVariant = (status: string) => {
@@ -224,15 +268,37 @@ export const QuoteDetailPage = () => {
           <Button variant="secondary" onClick={handlePrint}>
             <Printer className="w-4 h-4 mr-1.5" /> Print
           </Button>
+          <Button
+            variant="secondary"
+            onClick={handleDownloadPdf}
+            disabled={downloadingPdf}
+            title="Download backend-generated PDF"
+          >
+            {downloadingPdf ? (
+              <>
+                <div className="w-4 h-4 border-2 border-gray-500 border-t-transparent rounded-full animate-spin mr-1.5" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4 mr-1.5" /> Download PDF
+              </>
+            )}
+          </Button>
 
           {/* DRAFT */}
-          {upperStatus === 'DRAFT' && (
+          {canEdit && upperStatus === 'DRAFT' && (
             <>
               <Button variant="secondary" onClick={() => navigate(`/quotes/${quote.id}/edit`)}>
                 <Edit2 className="w-4 h-4 mr-1.5" /> Edit
               </Button>
-              <Button variant="primary" onClick={handleSubmitForApproval} disabled={actionLoading}>
-                <FileCheck className="w-4 h-4 mr-1.5" /> Submit for Approval
+              <Button
+                variant="primary"
+                onClick={handleSend}
+                disabled={actionLoading}
+                title="Sends the quote, or requests admin approval when the discount exceeds the threshold"
+              >
+                <Send className="w-4 h-4 mr-1.5" /> Send Quote
               </Button>
               <Button variant="danger" onClick={() => setShowDeleteModal(true)} disabled={actionLoading}>
                 <Trash2 className="w-4 h-4 mr-1.5" /> Delete
@@ -240,20 +306,23 @@ export const QuoteDetailPage = () => {
             </>
           )}
 
-          {/* PENDING APPROVAL */}
-          {upperStatus === 'PENDING_APPROVAL' && (
+          {/* PENDING APPROVAL (admin only; approving sends the quote immediately) */}
+          {canApprove && upperStatus === 'PENDING_APPROVAL' && (
             <>
               <Button variant="primary" onClick={handleApprove} disabled={actionLoading}>
-                <CheckCircle className="w-4 h-4 mr-1.5" /> Approve Quote
+                <CheckCircle className="w-4 h-4 mr-1.5" /> Approve &amp; Send
               </Button>
               <Button variant="danger" onClick={() => setShowRejectModal(true)} disabled={actionLoading}>
                 <XCircle className="w-4 h-4 mr-1.5" /> Reject Quote
               </Button>
             </>
           )}
+          {!canApprove && upperStatus === 'PENDING_APPROVAL' && (
+            <span className="text-sm text-amber-700">Awaiting admin approval</span>
+          )}
 
-          {/* APPROVED */}
-          {upperStatus === 'APPROVED' && (
+          {/* APPROVED (legacy: approval now sends immediately, but the backend still allows sending these) */}
+          {canEdit && upperStatus === 'APPROVED' && (
             <>
               <Button variant="secondary" onClick={() => navigate(`/quotes/${quote.id}/edit`)}>
                 <Edit2 className="w-4 h-4 mr-1.5" /> Edit
@@ -265,7 +334,7 @@ export const QuoteDetailPage = () => {
           )}
 
           {/* SENT */}
-          {upperStatus === 'SENT' && (
+          {canEdit && upperStatus === 'SENT' && (
             <>
               <Button variant="secondary" onClick={handleMarkViewed} disabled={actionLoading}>
                 <Eye className="w-4 h-4 mr-1.5" /> Mark Viewed
@@ -280,7 +349,7 @@ export const QuoteDetailPage = () => {
           )}
 
           {/* VIEWED */}
-          {upperStatus === 'VIEWED' && (
+          {canEdit && upperStatus === 'VIEWED' && (
             <>
               <Button variant="primary" onClick={handleAccept} disabled={actionLoading}>
                 <CheckCircle className="w-4 h-4 mr-1.5" /> Accept Quote
@@ -292,7 +361,7 @@ export const QuoteDetailPage = () => {
           )}
 
           {/* ACCEPTED / PARTIALLY_INVOICED */}
-          {(upperStatus === 'ACCEPTED' || upperStatus === 'PARTIALLY_INVOICED') && (
+          {canEdit && (upperStatus === 'ACCEPTED' || upperStatus === 'PARTIALLY_INVOICED') && (
             <Button variant="primary" onClick={() => setShowConvertModal(true)} disabled={actionLoading}>
               <CreditCard className="w-4 h-4 mr-1.5" /> Convert to Invoice
             </Button>
@@ -595,6 +664,17 @@ export const QuoteDetailPage = () => {
           </div>
         </div>
       </Modal>
+
+      {/* Send Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showSendConfirm}
+        onClose={() => setShowSendConfirm(false)}
+        onConfirm={executeSend}
+        title="Send Quote"
+        description={`Are you sure you want to send quote ${quote?.quote_number || ''} to ${quote?.customer?.display_name || 'the customer'}? This will dispatch an email with the quote link.`}
+        confirmLabel="Send Quote"
+        isLoading={actionLoading}
+      />
     </div>
   );
 };

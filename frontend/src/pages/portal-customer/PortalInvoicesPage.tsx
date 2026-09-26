@@ -1,3 +1,4 @@
+import { toApiError } from '../../services/apiClient';
 import React, { useState, useEffect } from 'react';
 import {
   Download,
@@ -11,11 +12,13 @@ import {
   type PortalInvoiceDetail,
 } from '../../services/portalCustomerService';
 import { LoadingState } from '../../components/common/LoadingState';
+import { useToast } from '../../components/common/Toast';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
 
 export const PortalInvoicesPage: React.FC = () => {
+  const { showToast } = useToast();
   const [invoices, setInvoices] = useState<PortalInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -38,8 +41,8 @@ export const PortalInvoicesPage: React.FC = () => {
       setError(null);
       const data = await portalCustomerService.getInvoices();
       setInvoices(data);
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || err?.message || 'Failed to load invoices.');
+    } catch (err) {
+      setError(toApiError(err).message || 'Failed to load invoices.');
     } finally {
       setLoading(false);
     }
@@ -49,8 +52,8 @@ export const PortalInvoicesPage: React.FC = () => {
     try {
       setDownloadingId(invoiceId);
       await portalCustomerService.downloadInvoicePdf(invoiceId, invoiceNumber);
-    } catch (err: any) {
-      alert(err?.message || 'Failed to download invoice PDF.');
+    } catch (err) {
+      showToast('error', 'Failed to download invoice PDF', toApiError(err).message);
     } finally {
       setDownloadingId(null);
     }
@@ -63,8 +66,8 @@ export const PortalInvoicesPage: React.FC = () => {
       setSelectedInvoice(null);
       const detail = await portalCustomerService.getInvoice(invoiceId);
       setSelectedInvoice(detail);
-    } catch (err: any) {
-      setModalError(err?.message || 'Failed to load invoice details.');
+    } catch (err) {
+      setModalError(toApiError(err).message || 'Failed to load invoice details.');
     } finally {
       setModalLoading(false);
     }
