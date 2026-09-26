@@ -85,8 +85,10 @@ class CheckoutSessionOut(BaseModel):
 
     id: str
     organization_id: str
+    # The raw bearer token (and a usable checkout_url) is only returned when the
+    # session is created. Listings return a non-secret display reference and no URL.
     token: str
-    checkout_url: str
+    checkout_url: Optional[str] = None
     purpose: str
     status: str
     amount: Decimal
@@ -122,15 +124,20 @@ class PublicCheckoutView(BaseModel):
     gateway: str = "razorpay"
     gateway_order_id: Optional[str] = None
     gateway_key_id: Optional[str] = None
+    # Razorpay customer (cust_...) - pass to Checkout with save=1 to let the customer save the card.
+    gateway_customer_id: Optional[str] = None
+    gateway_available: bool = False
+    gateway_message: Optional[str] = None
 
 
 class CheckoutConfirmIn(BaseModel):
     payment_method_type: str = Field("card", description="card, upi, netbanking")
-    gateway: Optional[str] = Field("razorpay", description="razorpay, manual, etc.")
+    gateway: Optional[str] = Field("razorpay", description="Only 'razorpay' is accepted on the public confirm endpoint.")
     razorpay_payment_id: Optional[str] = Field(None, description="Cryptographic payment ID from Razorpay")
     razorpay_order_id: Optional[str] = Field(None, description="Order ID from Razorpay")
     razorpay_signature: Optional[str] = Field(None, description="HMAC-SHA256 signature from Razorpay")
-    gateway_token: Optional[str] = Field(None, description="Vaulted or temporary gateway token")
+    gateway_token: Optional[str] = Field(None, description="Not accepted on the public endpoint (rejected with 400).")
+    # Ignored: saved-card details always come from the gateway, never the browser.
     card_last4: Optional[str] = None
     card_brand: Optional[str] = None
     save_payment_method: bool = False

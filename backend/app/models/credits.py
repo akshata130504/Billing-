@@ -50,6 +50,16 @@ class CreditNote(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
 
     subtotal = Column(Numeric(14, 2), nullable=False, default=0)
     tax_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    # GST heads, split like the invoice being credited (cgst+sgst+igst == tax_amount;
+    # all zero for exports). Place of supply / GSTINs are frozen at issue time.
+    cgst_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    sgst_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    igst_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    supply_type = Column(String(16), nullable=True)
+    place_of_supply_code = Column(String(2), nullable=True)
+    place_of_supply_name = Column(String(120), nullable=True)
+    customer_gstin = Column(String(15), nullable=True)
+    supplier_gstin = Column(String(15), nullable=True)
     total = Column(Numeric(14, 2), nullable=False, default=0)
     balance_remaining = Column(Numeric(14, 2), nullable=False, default=0)
 
@@ -73,6 +83,9 @@ class CreditNoteLine(UUIDPrimaryKeyMixin, TenantMixin, Base):
     unit_price = Column(Numeric(14, 2), nullable=False, default=0)
     tax_rate_pct = Column(Numeric(5, 2), nullable=False, default=0)
     amount = Column(Numeric(14, 2), nullable=False, default=0)
+    cgst_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    sgst_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    igst_amount = Column(Numeric(14, 2), nullable=False, default=0)
     position = Column(Integer, nullable=False, default=0)
 
     credit_note = relationship("CreditNote", back_populates="lines")

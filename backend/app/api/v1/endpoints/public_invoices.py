@@ -1,4 +1,5 @@
 """/public/invoices — the hosted payment page (no authentication; the opaque token is the credential)."""
+from decimal import Decimal
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, Request
@@ -27,6 +28,16 @@ from backend.app.services.money import q2
 from backend.app.services.numbering import next_number
 
 router = APIRouter()
+
+# Smallest partial payment accepted online (INR). An invoice with less than this
+# outstanding must be paid in full.
+MIN_PARTIAL_PAYMENT = Decimal("1.00")
+
+
+def _razorpay_public_config(db: Session, organization_id: str) -> Dict[str, Any]:
+    creds = razorpay_gateway.credentials_for(db, organization_id)
+    enabled = razorpay_gateway.is_configured(creds)
+    return {"enabled": enabled, "key_id": razorpay_gateway.public_key_id(creds) if enabled else None}
 
 
 def _public_invoice(db: Session, invoice) -> Dict[str, Any]:
@@ -88,7 +99,7 @@ def _public_invoice(db: Session, invoice) -> Dict[str, Any]:
             "billing_country": customer.billing_country,
         },
         "payments": data["payments"],
-        "razorpay": {"enabled": razorpay_gateway.is_configured(), "key_id": razorpay_gateway.public_key_id() if razorpay_gateway.is_configured() else None},
+        "razorpay": _razorpay_public_config(db, invoice.organization_id),
     }
 
 
@@ -116,15 +127,17 @@ def public_invoice_pdf(request: Request, token: str, db: Session = Depends(get_d
 @limiter.limit(public_action_rate_limit)
 def create_razorpay_order(request: Request, token: str, body: RazorpayOrderIn, db: Session = Depends(get_db)):
     invoice = invoice_service.get_invoice_by_token(db, token)
-    if not razorpay_gateway.is_configured():
+    creds = razorpay_gateway.credentials_for(db, invoice.organization_id)
+    if not razorpay_gateway.is_configured(creds):
         raise GatewayNotConfiguredError("razorpay")
     if invoice.status not in OPEN_INVOICE_STATUSES:
         raise InvalidStateError(f"Invoice {invoice.invoice_number} is {invoice.status.value} and cannot be paid online.")
     amount_due = q2(invoice.amount_due)
     amount = q2(body.amount) if body.amount is not None else amount_due
-    if amount <= 0 or amount > amount_due:
+    minimum = amount_due if amount_due < MIN_PARTIAL_PAYMENT else MIN_PARTIAL_PAYMENT
+    if amount < minimum or amount <= 0 or amount > amount_due:
         raise ValidationAppError(
-            f"Amount must be between 0.01 and the amount due ({amount_due}).", {"fields": {"amount": "out of range"}}
+            f"Amount must be between {minimum} and the amount due ({amount_due}).", {"fields": {"amount": "out of range"}}
         )
     organization = db.get(Organization, invoice.organization_id)
     customer = invoice.customer
@@ -150,6 +163,7 @@ def create_razorpay_order(request: Request, token: str, body: RazorpayOrderIn, d
         invoice.currency,
         invoice.invoice_number,
         {"invoice_id": invoice.id, "payment_id": payment.id, "organization_id": invoice.organization_id},
+        creds=creds,
     )
     payment.gateway_order_id = order["id"]
     payment.gateway_payload = {
@@ -172,7 +186,7 @@ def create_razorpay_order(request: Request, token: str, body: RazorpayOrderIn, d
         "order_id": order["id"],
         "amount": int(order.get("amount") or payment_service.to_paise(amount)),
         "currency": order.get("currency") or invoice.currency,
-        "key_id": razorpay_gateway.public_key_id(),
+        "key_id": razorpay_gateway.public_key_id(creds),
         "payment_id": payment.id,
         "invoice_number": invoice.invoice_number,
         "organization_name": organization.legal_name or organization.name,
@@ -188,6 +202,11 @@ def verify_razorpay_payment(request: Request, token: str, body: RazorpayVerifyIn
     if payment is None:
         raise ValidationAppError("Unknown order for this invoice.", {"fields": {"razorpay_order_id": "unknown"}})
 
+    notes = dict((payment.gateway_payload or {}).get("notes") or {})
+    payment_invoice_id = notes.get("invoice_id")
+    if (payment_invoice_id and payment_invoice_id != invoice.id) or payment.customer_id != invoice.customer_id:
+        raise ValidationAppError("The submitted payment order does not belong to this invoice.", {"fields": {"razorpay_order_id": "mismatch"}})
+
     if payment.status == PaymentStatus.SUCCEEDED or payment.status in (PaymentStatus.REFUNDED, PaymentStatus.PARTIALLY_REFUNDED):
         # Idempotent: the capture already happened (verify called twice, or the webhook got there first).
         return {
@@ -197,7 +216,10 @@ def verify_razorpay_payment(request: Request, token: str, body: RazorpayVerifyIn
             "amount_due": money_str(invoice.amount_due),
         }
 
-    if not razorpay_gateway.verify_payment_signature(body.razorpay_order_id, body.razorpay_payment_id, body.razorpay_signature):
+    creds = razorpay_gateway.credentials_for(db, invoice.organization_id)
+    if not razorpay_gateway.verify_payment_signature(
+        body.razorpay_order_id, body.razorpay_payment_id, body.razorpay_signature, creds=creds
+    ):
         audit.record(
             db,
             action="PAYMENT_FAILED",
@@ -212,12 +234,44 @@ def verify_razorpay_payment(request: Request, token: str, body: RazorpayVerifyIn
         db.commit()
         raise UnauthorizedError("Payment signature verification failed")
 
+    # A valid signature only proves the pair (order, payment) came from Razorpay. Ask
+    # Razorpay what actually happened: the payment must be captured/authorized, for
+    # this order, for exactly the ordered amount. (A GatewayError here leaves the
+    # payment pending; the payment.captured webhook settles it.)
+    fetched = razorpay_gateway.fetch_payment(body.razorpay_payment_id, creds=creds)
+    problem = razorpay_gateway.verify_fetched_payment(
+        fetched,
+        expected_order_id=payment.gateway_order_id,
+        expected_amount_paise=payment_service.to_paise(payment.amount),
+        expected_currency=payment.currency,
+    )
+    if problem:
+        audit.record(
+            db,
+            action="PAYMENT_FAILED",
+            entity_type="payment",
+            entity_id=payment.id,
+            entity_label=payment.payment_number,
+            organization_id=invoice.organization_id,
+            actor_label=audit.CUSTOMER_ACTOR,
+            after={"reason": f"gateway verification failed: {problem}", "razorpay_payment_id": body.razorpay_payment_id},
+            status=AuditStatus.DENIED,
+        )
+        db.commit()
+        raise ValidationAppError(f"Payment could not be verified with Razorpay: {problem}.", {"fields": {"razorpay_payment_id": "unverified"}})
+
     payment_service.capture_gateway_payment(
         db,
         payment,
         invoice,
         gateway_payment_id=body.razorpay_payment_id,
-        payload={"razorpay_order_id": body.razorpay_order_id, "razorpay_payment_id": body.razorpay_payment_id, "verified_at": utcnow().isoformat(), "source": "hosted_page"},
+        payload={
+            "razorpay_order_id": body.razorpay_order_id,
+            "razorpay_payment_id": body.razorpay_payment_id,
+            "gateway_status": fetched.get("status"),
+            "verified_at": utcnow().isoformat(),
+            "source": "hosted_page",
+        },
         signature_verified=True,
         actor_label=audit.CUSTOMER_ACTOR,
     )

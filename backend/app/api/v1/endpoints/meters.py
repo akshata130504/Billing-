@@ -3,18 +3,20 @@ from __future__ import annotations
 
 from typing import List
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import CurrentContext, get_db, require_admin, require_finance, require_viewer
 from backend.app.schemas.common_refs import money_str
 from backend.app.schemas.meters import (
+    BillingCycleOut,
     UsageAggregateOut,
     UsageEventBatchIn,
     UsageEventIn,
     UsageEventOut,
     UsageMeterCreateIn,
     UsageMeterOut,
+    UsageMeterUpdateIn,
 )
 from backend.app.services import meter_service
 
@@ -70,6 +72,7 @@ def create_meter(
         unit_name=body.unit_name,
         aggregation_type=body.aggregation_type,
         description=body.description,
+        unit_price=body.unit_price,
     )
 
 
@@ -86,6 +89,32 @@ def list_meters(
 
 
 @router.get(
+    "/billing-cycles",
+    response_model=List[BillingCycleOut],
+    summary="List a subscription's billing cycles (newest first) for usage finalization",
+)
+def list_billing_cycles(
+    subscription_id: str = Query(..., min_length=1),
+    ctx: CurrentContext = Depends(require_viewer),
+    db: Session = Depends(get_db),
+):
+    cycles = meter_service.list_billing_cycles(db, ctx.organization_id, subscription_id)
+    return [
+        {
+            "id": c.id,
+            "subscription_id": c.subscription_id,
+            "cycle_number": c.cycle_number,
+            "period_start": c.period_start,
+            "period_end": c.period_end,
+            "status": c.status.value if hasattr(c.status, "value") else str(c.status),
+            "invoice_id": c.invoice_id,
+            "finalized_at": c.finalized_at,
+        }
+        for c in cycles
+    ]
+
+
+@router.get(
     "/{meter_id}",
     response_model=UsageMeterOut,
     summary="Get usage meter details",
@@ -98,6 +127,20 @@ def get_meter(
     return meter_service.get_meter(db, ctx.organization_id, meter_id)
 
 
+@router.patch(
+    "/{meter_id}",
+    response_model=UsageMeterOut,
+    summary="Update a usage meter (name, unit, per-unit price, active flag)",
+)
+def update_meter(
+    meter_id: str,
+    body: UsageMeterUpdateIn,
+    ctx: CurrentContext = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return meter_service.update_meter(db, ctx.organization_id, meter_id, body.model_dump(exclude_unset=True))
+
+
 @router.post(
     "/events",
     response_model=UsageEventOut,
@@ -106,7 +149,7 @@ def get_meter(
 )
 def record_event(
     body: UsageEventIn,
-    ctx: CurrentContext = Depends(require_viewer),
+    ctx: CurrentContext = Depends(require_finance),
     db: Session = Depends(get_db),
 ):
     ev = meter_service.record_usage_event(
@@ -131,24 +174,27 @@ def record_event(
 )
 def record_batch_events(
     body: UsageEventBatchIn,
-    ctx: CurrentContext = Depends(require_viewer),
+    ctx: CurrentContext = Depends(require_finance),
     db: Session = Depends(get_db),
 ):
-    results = []
-    for ev_in in body.events:
-        ev = meter_service.record_usage_event(
-            db,
-            organization_id=ctx.organization_id,
-            meter_id_or_code=ev_in.meter_code,
-            customer_id=ev_in.customer_id,
-            quantity=ev_in.quantity,
-            idempotency_key=ev_in.idempotency_key,
-            subscription_id=ev_in.subscription_id,
-            timestamp=ev_in.timestamp,
-            properties=ev_in.properties,
-        )
-        results.append(_serialize_event(ev))
-    return results
+    # Atomic: one commit for the whole batch; any invalid event rejects all of them.
+    events = meter_service.record_usage_events_batch(
+        db,
+        ctx.organization_id,
+        [
+            {
+                "meter_id_or_code": ev_in.meter_code,
+                "customer_id": ev_in.customer_id,
+                "quantity": ev_in.quantity,
+                "idempotency_key": ev_in.idempotency_key,
+                "subscription_id": ev_in.subscription_id,
+                "timestamp": ev_in.timestamp,
+                "properties": ev_in.properties,
+            }
+            for ev_in in body.events
+        ],
+    )
+    return [_serialize_event(ev) for ev in events]
 
 
 @router.post(

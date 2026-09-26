@@ -234,6 +234,24 @@ def create_plan(db: Session, ctx: CurrentContext, data: PlanCreate) -> Plan:
     return get_plan_or_404(db, ctx.organization_id, plan.id)
 
 
+PLAN_STRUCTURAL_FIELDS = ("billing_interval", "interval_count", "pricing_model", "currency")
+ENDED_SUBSCRIPTION_STATUSES = (SubscriptionStatus.CANCELLED, SubscriptionStatus.EXPIRED, SubscriptionStatus.TRIAL_EXPIRED)
+
+
+def _has_live_subscriptions(db: Session, organization_id: str, plan_id: str) -> bool:
+    return bool(
+        db.scalar(
+            select(
+                exists().where(
+                    Subscription.organization_id == organization_id,
+                    Subscription.plan_id == plan_id,
+                    Subscription.status.not_in(ENDED_SUBSCRIPTION_STATUSES),
+                )
+            )
+        )
+    )
+
+
 def update_plan(db: Session, ctx: CurrentContext, plan_id: str, data: PlanUpdate) -> Plan:
     plan = get_plan_or_404(db, ctx.organization_id, plan_id)
     changes = data.model_dump(exclude_unset=True)
@@ -241,6 +259,23 @@ def update_plan(db: Session, ctx: CurrentContext, plan_id: str, data: PlanUpdate
         return plan
     if changes.get("code") and _code_taken(db, ctx.organization_id, changes["code"], exclude_id=plan.id):
         raise ConflictError(f"A plan with code '{changes['code']}' already exists.", details={"fields": {"code": "duplicate"}})
+    structural = [
+        field
+        for field in PLAN_STRUCTURAL_FIELDS
+        if field in changes
+        and changes[field] is not None
+        and enum_value(changes[field]) != enum_value(getattr(plan, field))
+    ]
+    if structural and _has_live_subscriptions(db, ctx.organization_id, plan.id):
+        # Period arithmetic, proration and renewal invoices of existing subscriptions
+        # depend on these; changing them under live subscriptions silently rewrites
+        # their contracts. Create a new plan and migrate subscribers instead.
+        raise InvalidStateError(
+            "This plan has live subscriptions, so its "
+            + ", ".join(f.replace("_", " ") for f in structural)
+            + " cannot be changed. Create a new plan and move subscribers to it instead.",
+            {"fields": {f: "locked while the plan has live subscriptions" for f in structural}},
+        )
     before = audit.snapshot(plan, PLAN_SNAPSHOT_FIELDS)
     for field, value in changes.items():
         if value is None and field != "description":

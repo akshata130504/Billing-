@@ -198,3 +198,22 @@ def test_catalog_tenant_isolation(client, tenant, db):
     assert client.get(f"{PRODUCTS}/{product.id}", headers=headers).status_code == 404
     assert client.get(f"{PLANS}/{plan.id}", headers=headers).status_code == 404
     assert client.get(PRODUCTS, headers=headers).json()["total"] == 0
+
+
+def test_structural_plan_fields_locked_with_live_subscriptions(client, tenant, auth_headers, db):
+    customer = tenant.customer()
+    _, plan = tenant.product_with_plan(unit_amount="100.00")
+    res = client.post(
+        "/api/v1/subscriptions",
+        headers=auth_headers,
+        json={"customer_id": customer.id, "plan_id": plan.id, "quantity": 1},
+    )
+    assert res.status_code == 201, res.text
+    for body in ({"billing_interval": "yearly"}, {"interval_count": 3}, {"pricing_model": "flat"}):
+        resp = client.patch(f"{PLANS}/{plan.id}", json=body, headers=auth_headers)
+        assert resp.status_code == 409, (body, resp.text)
+    # Non-structural edits are still fine.
+    assert client.patch(f"{PLANS}/{plan.id}", json={"name": "Renamed"}, headers=auth_headers).status_code == 200
+
+    client.post(f"/api/v1/subscriptions/{res.json()['id']}/cancel", headers=auth_headers, json={"at_period_end": False})
+    assert client.patch(f"{PLANS}/{plan.id}", json={"interval_count": 3}, headers=auth_headers).status_code == 200

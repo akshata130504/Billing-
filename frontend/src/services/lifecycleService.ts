@@ -13,6 +13,14 @@ export interface LifecycleListParams {
   stage?: CustomerLifecycleStage;
   health?: HealthStatus;
   search?: string;
+  page?: number;
+  page_size?: number;
+}
+
+export interface LifecyclePage {
+  items: CustomerLifecycleItem[];
+  /** From the X-Total-Count header; null when the header is not readable (CORS). */
+  total: number | null;
 }
 
 export const lifecycleService = {
@@ -21,6 +29,16 @@ export const lifecycleService = {
       params: cleanParams(params),
     });
     return data;
+  },
+
+  /** One page of lifecycles plus the total matching count (X-Total-Count header). */
+  listPage: async (params?: LifecycleListParams): Promise<LifecyclePage> => {
+    const response = await apiClient.get<CustomerLifecycleItem[]>('/lifecycle', {
+      params: cleanParams(params),
+    });
+    const raw = response.headers?.['x-total-count'];
+    const total = raw !== undefined && raw !== null && raw !== '' ? Number(raw) : null;
+    return { items: response.data, total: Number.isFinite(total as number) ? (total as number) : null };
   },
 
   kpis: async (): Promise<LifecycleKPIs> => {

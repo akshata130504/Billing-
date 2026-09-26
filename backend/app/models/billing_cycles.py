@@ -100,3 +100,20 @@ class BillingCycle(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
 
     subscription = relationship("Subscription")
     invoice = relationship("Invoice")
+
+
+class SchedulerHeartbeat(Base):
+    """Last-run bookkeeping for the background billing scheduler (one row per job).
+
+    Written by scheduler.run_billing_jobs after every run so health checks can tell a
+    stalled/crashing scheduler from a healthy one (see scheduler.get_scheduler_heartbeat).
+    """
+    __tablename__ = "scheduler_heartbeats"
+
+    job_name = Column(String(64), primary_key=True)
+    last_started_at = Column(DateTime(timezone=True), nullable=True)
+    last_finished_at = Column(DateTime(timezone=True), nullable=True)
+    last_error_count = Column(Integer, nullable=False, default=0)
+    last_counts = Column(JSON, nullable=True)
+    total_runs = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)

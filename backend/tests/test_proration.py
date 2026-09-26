@@ -256,6 +256,290 @@ def test_scheduled_change_with_future_date_is_deferred_not_applied(client, tenan
     assert sub.plan_id == plan2.id
 
 
+def test_scheduled_mid_cycle_upgrade_bills_on_execution(client, tenant, auth_headers, db):
+    """A genuinely mid-cycle scheduled change (not end-of-term) must raise the same
+    credit note + prorated invoice the immediate path would, using the already-stored
+    proration values - this is the gap that was fixed."""
+    from datetime import date, timedelta
+    from backend.app.models.subscriptions import Subscription
+    from backend.app.services.subscription_change_service import execute_due_scheduled_changes
+
+    customer = tenant.customer()
+    p1, plan1 = tenant.product_with_plan(unit_amount="1000.00")
+    p2, plan2 = tenant.product_with_plan(unit_amount="2000.00")
+
+    sub_resp = client.post(
+        "/api/v1/subscriptions",
+        json={"customer_id": customer.id, "plan_id": plan1.id, "quantity": 1},
+        headers=auth_headers,
+    )
+    sub_id = sub_resp.json()["id"]
+
+    future_date = date.today() + timedelta(days=10)
+    sched_resp = client.post(
+        f"/api/v1/subscriptions/{sub_id}/changes",
+        json={"target_plan_id": plan2.id, "effective_type": "scheduled", "effective_date": future_date.isoformat()},
+        headers=auth_headers,
+    )
+    assert sched_resp.status_code == 201, sched_resp.text
+    change = sched_resp.json()
+    assert change["status"] == "scheduled"
+    assert change["invoice_id"] is None
+    assert change["credit_note_id"] is None
+    prorated_credit = Decimal(change["prorated_credit"])
+    prorated_charge = Decimal(change["prorated_charge"])
+    net_amount = Decimal(change["net_amount"])
+    assert prorated_credit > 0
+    assert prorated_charge > 0
+
+    applied = execute_due_scheduled_changes(db, organization_id=tenant.organization.id, today=future_date)
+    db.commit()
+    assert len(applied) == 1
+    applied_change = applied[0]
+    assert applied_change.status == SubscriptionChangeStatus.APPLIED
+    assert applied_change.invoice_id is not None
+    assert applied_change.credit_note_id is not None
+
+    sub = db.query(Subscription).filter(Subscription.id == sub_id).first()
+    db.refresh(sub)
+    assert sub.plan_id == plan2.id
+
+    invoice = db.query(Invoice).filter(Invoice.id == applied_change.invoice_id).first()
+    credit_note = db.query(CreditNote).filter(CreditNote.id == applied_change.credit_note_id).first()
+    db.refresh(invoice)
+    db.refresh(credit_note)
+
+    # Both documents are proper tax documents: pre-tax amounts equal the stored
+    # proration, and tax is added at the plan's product rate.
+    assert invoice.subtotal == prorated_charge
+    assert credit_note.subtotal == prorated_credit
+    assert invoice.tax_amount > 0 and credit_note.tax_amount > 0
+    # Upgrade: credit < charge, so the credit note is fully consumed by the offset,
+    # leaving the invoice owing the (tax-inclusive) net difference.
+    assert credit_note.balance_remaining == Decimal("0.00")
+    assert invoice.amount_due == invoice.total - credit_note.total
+    assert net_amount == prorated_charge - prorated_credit
+
+
+def test_scheduled_mid_cycle_downgrade_bills_opposite_direction(client, tenant, auth_headers, db):
+    """A downgrade nets a credit rather than a charge - both documents are still
+    raised (old-plan credit is larger than new-plan charge), auto-offset pays the
+    invoice fully and leaves the remaining credit on the credit note."""
+    from datetime import date, timedelta
+    from backend.app.models.subscriptions import Subscription
+    from backend.app.services.subscription_change_service import execute_due_scheduled_changes
+
+    customer = tenant.customer()
+    p1, plan_hi = tenant.product_with_plan(unit_amount="2000.00")
+    p2, plan_lo = tenant.product_with_plan(unit_amount="500.00")
+
+    sub_resp = client.post(
+        "/api/v1/subscriptions",
+        json={"customer_id": customer.id, "plan_id": plan_hi.id, "quantity": 1},
+        headers=auth_headers,
+    )
+    sub_id = sub_resp.json()["id"]
+
+    future_date = date.today() + timedelta(days=10)
+    sched_resp = client.post(
+        f"/api/v1/subscriptions/{sub_id}/changes",
+        json={"target_plan_id": plan_lo.id, "effective_type": "scheduled", "effective_date": future_date.isoformat()},
+        headers=auth_headers,
+    )
+    assert sched_resp.status_code == 201, sched_resp.text
+    change = sched_resp.json()
+    assert change["change_type"] == SubscriptionChangeType.DOWNGRADE.value
+    prorated_credit = Decimal(change["prorated_credit"])
+    prorated_charge = Decimal(change["prorated_charge"])
+    net_amount = Decimal(change["net_amount"])
+    assert prorated_credit > prorated_charge  # downgrade: bigger credit than charge
+    assert net_amount < 0
+
+    applied = execute_due_scheduled_changes(db, organization_id=tenant.organization.id, today=future_date)
+    db.commit()
+    assert len(applied) == 1
+    applied_change = applied[0]
+    assert applied_change.invoice_id is not None
+    assert applied_change.credit_note_id is not None
+
+    sub = db.query(Subscription).filter(Subscription.id == sub_id).first()
+    db.refresh(sub)
+    assert sub.plan_id == plan_lo.id
+
+    invoice = db.query(Invoice).filter(Invoice.id == applied_change.invoice_id).first()
+    credit_note = db.query(CreditNote).filter(CreditNote.id == applied_change.credit_note_id).first()
+    db.refresh(invoice)
+    db.refresh(credit_note)
+
+    assert invoice.subtotal == prorated_charge
+    assert credit_note.subtotal == prorated_credit
+    # The smaller invoice is fully offset/paid; the credit note keeps the remainder.
+    assert invoice.amount_due == Decimal("0.00")
+    assert invoice.status.value == "paid"
+    assert credit_note.balance_remaining == (credit_note.total - invoice.total)
+    assert net_amount == prorated_charge - prorated_credit
+
+
+def test_scheduled_end_of_term_change_bills_nothing(client, tenant, auth_headers, db):
+    """True end-of-term changes have net_amount == 0 (0 days remaining in the OLD
+    period at the moment they take effect) - execution must not manufacture any
+    invoice or credit note, and existing plan-switch behavior is unchanged."""
+    from backend.app.models.subscriptions import Subscription
+    from backend.app.services.subscription_change_service import execute_due_scheduled_changes
+
+    customer = tenant.customer()
+    p1, plan1 = tenant.product_with_plan(unit_amount="1000.00")
+    p2, plan2 = tenant.product_with_plan(unit_amount="2000.00")
+
+    sub_resp = client.post(
+        "/api/v1/subscriptions",
+        json={"customer_id": customer.id, "plan_id": plan1.id, "quantity": 1},
+        headers=auth_headers,
+    )
+    sub_id = sub_resp.json()["id"]
+
+    sched_resp = client.post(
+        f"/api/v1/subscriptions/{sub_id}/changes",
+        json={"target_plan_id": plan2.id, "effective_type": "end_of_term"},
+        headers=auth_headers,
+    )
+    assert sched_resp.status_code == 201, sched_resp.text
+    change = sched_resp.json()
+    assert change["status"] == "scheduled"
+    assert Decimal(change["net_amount"]) == Decimal("0.00")
+    effective_date = date.fromisoformat(change["effective_date"])
+
+    invoices_before = db.query(Invoice).filter(Invoice.subscription_id == sub_id).count()
+
+    applied = execute_due_scheduled_changes(db, organization_id=tenant.organization.id, today=effective_date)
+    db.commit()
+    assert len(applied) == 1
+    applied_change = applied[0]
+    assert applied_change.status == SubscriptionChangeStatus.APPLIED
+    assert applied_change.invoice_id is None
+    assert applied_change.credit_note_id is None
+
+    sub = db.query(Subscription).filter(Subscription.id == sub_id).first()
+    db.refresh(sub)
+    assert sub.plan_id == plan2.id
+    assert db.query(Invoice).filter(Invoice.subscription_id == sub_id).count() == invoices_before
+
+
+def test_scheduled_change_execution_is_idempotent(client, tenant, auth_headers, db):
+    """Running the scheduler twice for the same due change must not double-bill it."""
+    from datetime import date, timedelta
+    from backend.app.services.subscription_change_service import execute_due_scheduled_changes
+
+    customer = tenant.customer()
+    p1, plan1 = tenant.product_with_plan(unit_amount="1000.00")
+    p2, plan2 = tenant.product_with_plan(unit_amount="2000.00")
+
+    sub_resp = client.post(
+        "/api/v1/subscriptions",
+        json={"customer_id": customer.id, "plan_id": plan1.id, "quantity": 1},
+        headers=auth_headers,
+    )
+    sub_id = sub_resp.json()["id"]
+
+    future_date = date.today() + timedelta(days=10)
+    sched_resp = client.post(
+        f"/api/v1/subscriptions/{sub_id}/changes",
+        json={"target_plan_id": plan2.id, "effective_type": "scheduled", "effective_date": future_date.isoformat()},
+        headers=auth_headers,
+    )
+    change_id = sched_resp.json()["id"]
+
+    first_run = execute_due_scheduled_changes(db, organization_id=tenant.organization.id, today=future_date)
+    db.commit()
+    assert len(first_run) == 1
+    first_invoice_id = first_run[0].invoice_id
+    first_credit_note_id = first_run[0].credit_note_id
+    assert first_invoice_id is not None
+    assert first_credit_note_id is not None
+
+    invoice_count_after_first = db.query(Invoice).filter(Invoice.subscription_id == sub_id).count()
+    credit_note_count_after_first = db.query(CreditNote).filter(CreditNote.subscription_id == sub_id).count()
+
+    # Simulate the scheduler (or an overlapping worker) running again for the same window.
+    second_run = execute_due_scheduled_changes(db, organization_id=tenant.organization.id, today=future_date)
+    db.commit()
+    assert second_run == []  # already APPLIED, so the due-changes query no longer selects it
+
+    assert db.query(Invoice).filter(Invoice.subscription_id == sub_id).count() == invoice_count_after_first
+    assert db.query(CreditNote).filter(CreditNote.subscription_id == sub_id).count() == credit_note_count_after_first
+
+    from backend.app.models.proration import SubscriptionChange
+    change = db.query(SubscriptionChange).filter(SubscriptionChange.id == change_id).first()
+    db.refresh(change)
+    assert change.invoice_id == first_invoice_id
+    assert change.credit_note_id == first_credit_note_id
+
+
+def test_scheduled_change_billing_failure_does_not_report_false_success(client, tenant, auth_headers, db, monkeypatch):
+    """If credit-note/invoice creation blows up mid-execution, the change must be
+    marked FAILED (not APPLIED), with no invoice/credit-note id and no plan switch -
+    never silently reported as successfully billed."""
+    from datetime import date, timedelta
+    from backend.app.models.subscriptions import Subscription
+    from backend.app.services import subscription_change_service
+
+    customer = tenant.customer()
+    p1, plan1 = tenant.product_with_plan(unit_amount="1000.00")
+    p2, plan2 = tenant.product_with_plan(unit_amount="2000.00")
+
+    sub_resp = client.post(
+        "/api/v1/subscriptions",
+        json={"customer_id": customer.id, "plan_id": plan1.id, "quantity": 1},
+        headers=auth_headers,
+    )
+    sub_id = sub_resp.json()["id"]
+    # Baseline: creating the subscription already raises its own first-period invoice.
+    invoices_before = db.query(Invoice).filter(Invoice.subscription_id == sub_id).count()
+    credit_notes_before = db.query(CreditNote).filter(CreditNote.subscription_id == sub_id).count()
+
+    future_date = date.today() + timedelta(days=10)
+    sched_resp = client.post(
+        f"/api/v1/subscriptions/{sub_id}/changes",
+        json={"target_plan_id": plan2.id, "effective_type": "scheduled", "effective_date": future_date.isoformat()},
+        headers=auth_headers,
+    )
+    change_id = sched_resp.json()["id"]
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated credit-note creation failure")
+
+    monkeypatch.setattr(subscription_change_service.credit_service, "create_credit_note", _boom)
+
+    applied = subscription_change_service.execute_due_scheduled_changes(
+        db, organization_id=tenant.organization.id, today=future_date
+    )
+    assert applied == []
+
+    from backend.app.models.proration import SubscriptionChange
+    change = db.query(SubscriptionChange).filter(SubscriptionChange.id == change_id).first()
+    assert change.status == SubscriptionChangeStatus.FAILED
+    assert change.invoice_id is None
+    assert change.credit_note_id is None
+
+    # The subscription's plan mutation must have been rolled back with everything else.
+    sub = db.query(Subscription).filter(Subscription.id == sub_id).first()
+    assert sub.plan_id == plan1.id
+    assert db.query(Invoice).filter(Invoice.subscription_id == sub_id).count() == invoices_before
+    assert db.query(CreditNote).filter(CreditNote.subscription_id == sub_id).count() == credit_notes_before
+
+
+def test_admin_jobs_run_returns_scheduled_changes_and_dunning_counts(client, auth_headers, db):
+    # POST /admin/jobs/run was removed (jobs run only in the scheduler process);
+    # the counts contract lives on run_billing_jobs itself.
+    from backend.app.services.scheduler import run_billing_jobs
+
+    body = run_billing_jobs(db)
+    assert "scheduled_changes_applied" in body
+    assert "dunning_recovered" in body
+    assert isinstance(body["scheduled_changes_applied"], int)
+    assert isinstance(body["dunning_recovered"], int)
+
+
 def test_scheduled_change_dated_today_applies_immediately(client, tenant, auth_headers, db):
     from datetime import date
     from backend.app.models.subscriptions import Subscription
@@ -286,3 +570,113 @@ def test_scheduled_change_dated_today_applies_immediately(client, tenant, auth_h
     sub = db.query(Subscription).filter(Subscription.id == sub_id).first()
     db.refresh(sub)
     assert sub.plan_id == plan2.id
+
+
+# --- production-readiness regressions ---------------------------------------------------------
+
+
+def _new_sub(client, auth_headers, customer, plan, **extra):
+    body = {"customer_id": customer.id, "plan_id": plan.id, "quantity": 1}
+    body.update(extra)
+    resp = client.post("/api/v1/subscriptions", json=body, headers=auth_headers)
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+def test_immediate_upgrade_moves_item_snapshot_and_renewal_bills_new_plan(client, tenant, auth_headers, db):
+    from datetime import date
+    from backend.app.models.billing_cycles import SubscriptionItem, SubscriptionItemType
+    from backend.app.models.subscriptions import Subscription
+    from backend.app.services.subscription_service import renew_subscription
+
+    customer = tenant.customer()
+    _, plan1 = tenant.product_with_plan(unit_amount="1000.00")
+    _, plan2 = tenant.product_with_plan(unit_amount="2500.00")
+    sub_id = _new_sub(client, auth_headers, customer, plan1)
+
+    resp = client.post(f"/api/v1/subscriptions/{sub_id}/changes", json={"target_plan_id": plan2.id}, headers=auth_headers)
+    assert resp.status_code == 201, resp.text
+
+    item = (
+        db.query(SubscriptionItem)
+        .filter(SubscriptionItem.subscription_id == sub_id, SubscriptionItem.item_type == SubscriptionItemType.PLAN)
+        .one()
+    )
+    db.refresh(item)
+    assert item.plan_id == plan2.id
+    assert item.unit_price == Decimal("2500.00")
+    assert item.price_snapshot.plan_id == plan2.id
+    sub = db.get(Subscription, sub_id)
+    db.refresh(sub)
+    assert sub.unit_price == Decimal("2500.00")
+
+    sub.next_billing_date = date.today()
+    db.commit()
+    assert renew_subscription(db, sub) == "renewed"
+    db.commit()
+    renewal = (
+        db.query(Invoice)
+        .filter(Invoice.subscription_id == sub_id, Invoice.period_start == sub.current_period_start)
+        .one()
+    )
+    assert renewal.subtotal == Decimal("2500.00")
+
+
+def test_change_on_trialing_subscription_swaps_plan_without_proration(client, tenant, auth_headers, db):
+    customer = tenant.customer()
+    _, plan1 = tenant.product_with_plan(unit_amount="1000.00", trial_days=14)
+    _, plan2 = tenant.product_with_plan(unit_amount="3000.00")
+    sub_id = _new_sub(client, auth_headers, customer, plan1)
+
+    resp = client.post(f"/api/v1/subscriptions/{sub_id}/changes", json={"target_plan_id": plan2.id}, headers=auth_headers)
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert Decimal(body["prorated_credit"]) == 0
+    assert Decimal(body["prorated_charge"]) == 0
+    assert body["invoice_id"] is None and body["credit_note_id"] is None
+    assert client.get(f"/api/v1/subscriptions/{sub_id}", headers=auth_headers).json()["plan"]["id"] == plan2.id
+
+
+def test_change_validation_rejects_bad_targets(client, tenant, auth_headers, db):
+    customer = tenant.customer()
+    _, plan1 = tenant.product_with_plan(unit_amount="1000.00")
+    _, inactive = tenant.product_with_plan(unit_amount="2000.00")
+    _, usd = tenant.product_with_plan(unit_amount="20.00")
+    inactive.is_active = False
+    usd.currency = "USD"
+    db.commit()
+    sub_id = _new_sub(client, auth_headers, customer, plan1)
+
+    url = f"/api/v1/subscriptions/{sub_id}/changes"
+    assert client.post(url, json={"target_quantity": "2.5"}, headers=auth_headers).status_code == 422
+    assert client.post(url, json={"target_plan_id": inactive.id}, headers=auth_headers).status_code == 422
+    assert client.post(url, json={"target_plan_id": usd.id}, headers=auth_headers).status_code == 422
+
+
+def test_proration_uses_contracted_price_not_current_list_price(client, tenant, auth_headers, db):
+    customer = tenant.customer()
+    _, plan1 = tenant.product_with_plan(unit_amount="1000.00")
+    _, plan2 = tenant.product_with_plan(unit_amount="2000.00")
+    sub_id = _new_sub(client, auth_headers, customer, plan1)
+    plan1.unit_amount = Decimal("5000.00")  # list-price edit after signing
+    db.commit()
+
+    preview = client.post(
+        f"/api/v1/subscriptions/{sub_id}/changes/preview", json={"target_plan_id": plan2.id}, headers=auth_headers
+    ).json()
+    assert Decimal(preview["old_plan"]["unit_amount"]) == Decimal("1000.00")
+    assert preview["change_type"] == "upgrade"
+
+
+def test_flat_plan_quantity_change_has_no_proration(client, tenant, auth_headers, db):
+    from backend.app.models import PricingModel
+
+    customer = tenant.customer()
+    _, plan = tenant.product_with_plan(unit_amount="1000.00")
+    plan.pricing_model = PricingModel.FLAT
+    db.commit()
+    sub_id = _new_sub(client, auth_headers, customer, plan)
+    resp = client.post(f"/api/v1/subscriptions/{sub_id}/changes", json={"target_quantity": 5}, headers=auth_headers)
+    assert resp.status_code == 201, resp.text
+    assert Decimal(resp.json()["net_amount"]) == 0
+    assert resp.json()["invoice_id"] is None

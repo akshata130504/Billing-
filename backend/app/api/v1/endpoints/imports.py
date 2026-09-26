@@ -12,6 +12,8 @@ from backend.app.services.pagination import PageParams, page_params
 
 router = APIRouter()
 
+_READ_CHUNK_BYTES = 64 * 1024
+
 
 @router.get("", response_model=PaginatedResponse[ImportResult], summary="Import history")
 def list_imports(
@@ -45,8 +47,18 @@ async def run_import(
     ctx: CurrentContext = Depends(require_finance),
     db: Session = Depends(get_db),
 ):
-    content = await file.read()
-    if len(content) > svc.MAX_FILE_BYTES:
-        raise ValidationAppError("CSV file is larger than 5 MB.", {"fields": {"file": "too large"}})
+    # Read in bounded chunks: never buffer more than MAX_FILE_BYTES (+1 chunk) of an
+    # oversized upload into memory just to reject it afterwards.
+    chunks = []
+    size = 0
+    while True:
+        chunk = await file.read(_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > svc.MAX_FILE_BYTES:
+            raise ValidationAppError("CSV file is larger than 5 MB.", {"fields": {"file": "too large"}})
+        chunks.append(chunk)
+    content = b"".join(chunks)
     file_name = file.filename or f"{entity.value}.csv"
     return svc.run_import(db, ctx, entity, file_name, content, dry_run)

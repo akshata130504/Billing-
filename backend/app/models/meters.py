@@ -58,6 +58,9 @@ class UsageMeter(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
     unit_name = Column(String(40), nullable=False, default="unit")
     aggregation_type = Column(Enum(AggregationType, name="meter_aggregation_type"), nullable=False, default=AggregationType.SUM)
     is_active = Column(Boolean, nullable=False, default=True)
+    # Flat per-unit rate usage on this meter is billed at. NULL = unpriced: usage is
+    # rated at 0 and flagged rather than silently billed at the plan's recurring price.
+    unit_price = Column(Numeric(18, 4), nullable=True)
 
     events = relationship("UsageEvent", back_populates="meter", cascade="all, delete-orphan")
     aggregates = relationship("UsageAggregate", back_populates="meter")

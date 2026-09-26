@@ -38,6 +38,9 @@ from backend.app.services.pagination import Page, PageParams, apply_sort, pagina
 MAX_FILE_BYTES = 5 * 1024 * 1024
 MAX_ROWS = 5000
 MAX_ERRORS = 100
+# Numeric(14, 2) holds < 10^12; bound imported money well inside it.
+MAX_MONEY = Decimal("999999999999.99")
+MAX_TRIAL_DAYS = 3650
 PREVIEW_ROWS = 10
 
 IMPORT_SORT_FIELDS = ("created_at", "entity", "status")
@@ -114,7 +117,7 @@ def _parse_int(value: Optional[str], field: str, default: int, minimum: int = 0)
         return default
     try:
         number = int(Decimal(value))
-    except (InvalidOperation, ValueError):
+    except (InvalidOperation, ValueError, OverflowError):
         raise RowError(f"{field} must be a whole number")
     if number < minimum:
         raise RowError(f"{field} must be >= {minimum}")
@@ -128,6 +131,8 @@ def _parse_decimal(value: Optional[str], field: str, default: Optional[Decimal],
         number = Decimal(value.replace(",", ""))
     except InvalidOperation:
         raise RowError(f"{field} must be a number")
+    if not number.is_finite():
+        raise RowError(f"{field} must be a finite number")
     if number < minimum:
         raise RowError(f"{field} must be >= {minimum}")
     if maximum is not None and number > maximum:
@@ -231,6 +236,25 @@ def _import_customer(db: Session, ctx: CurrentContext, row: Dict[str, Optional[s
     pan = row.get("pan")
     if pan and len(pan) > 10:
         raise RowError("pan must be at most 10 characters")
+    company_name = row.get("company_name")
+    if company_name and len(company_name) > 200:
+        raise RowError("company_name must be at most 200 characters")
+    phone = row.get("phone")
+    if phone:
+        if len(phone) > 40:
+            raise RowError("phone must be at most 40 characters")
+        if not all(ch.isdigit() or ch in "+-() ." for ch in phone):
+            raise RowError("phone may only contain digits, spaces and + - ( ) .")
+    for field, limit in (
+        ("billing_address_line1", 255),
+        ("billing_address_line2", 255),
+        ("billing_city", 120),
+        ("billing_state", 120),
+        ("billing_postal_code", 20),
+    ):
+        value = row.get(field)
+        if value and len(value) > limit:
+            raise RowError(f"{field} must be at most {limit} characters")
     country = row.get("billing_country") or org.country or "IN"
     if len(country) != 2 or not country.isalpha():
         raise RowError("billing_country must be a 2-letter ISO code")
@@ -238,9 +262,9 @@ def _import_customer(db: Session, ctx: CurrentContext, row: Dict[str, Optional[s
         organization_id=ctx.organization_id,
         customer_number=next_number(db, ctx.organization_id, "customer"),
         display_name=row["display_name"][:200],
-        company_name=row.get("company_name"),
+        company_name=company_name,
         email=email,
-        phone=row.get("phone"),
+        phone=phone,
         gstin=gstin.upper() if gstin else None,
         pan=pan.upper() if pan else None,
         currency=_parse_currency(row.get("currency"), org.default_currency or "INR"),
@@ -304,6 +328,10 @@ def _import_plan(
         raise RowError(f"duplicate code '{code}' within the file")
     if key in existing:
         raise RowError(f"a plan with code '{code}' already exists")
+    if _parse_int(row.get("trial_days"), "trial_days", 0) > MAX_TRIAL_DAYS:
+        raise RowError(f"trial_days must be <= {MAX_TRIAL_DAYS}")
+    if _parse_int(row.get("interval_count"), "interval_count", 1, minimum=1) > 36:
+        raise RowError("interval_count must be <= 36")
     if len(code) > 64:
         raise RowError("code must be at most 64 characters")
     product_id = products_by_sku.get(row["product_sku"].lower())
@@ -317,9 +345,9 @@ def _import_plan(
         billing_interval=_parse_enum(row.get("billing_interval"), "billing_interval", BillingInterval, None),
         interval_count=_parse_int(row.get("interval_count"), "interval_count", 1, minimum=1),
         pricing_model=_parse_enum(row.get("pricing_model"), "pricing_model", PricingModel, PricingModel.FLAT),
-        unit_amount=_parse_decimal(row.get("unit_amount"), "unit_amount", None),
+        unit_amount=_parse_decimal(row.get("unit_amount"), "unit_amount", None, maximum=MAX_MONEY),
         currency=_parse_currency(row.get("currency"), ctx.organization.default_currency or "INR"),
-        setup_fee=_parse_decimal(row.get("setup_fee"), "setup_fee", Decimal("0")),
+        setup_fee=_parse_decimal(row.get("setup_fee"), "setup_fee", Decimal("0"), maximum=MAX_MONEY),
         trial_days=_parse_int(row.get("trial_days"), "trial_days", 0),
         is_active=_parse_bool(row.get("is_active"), "is_active", True),
     )

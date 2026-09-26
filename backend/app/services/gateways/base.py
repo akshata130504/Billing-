@@ -16,6 +16,12 @@ class GatewayChargeResult:
     error_message: Optional[str] = None
     error_category: Optional[str] = None  # e.g., "insufficient_funds", "card_expired", "authentication_failed"
     raw_payload: Optional[Dict[str, Any]] = None
+    # True when the gateway accepted the charge but has not confirmed capture yet
+    # (e.g. a Razorpay recurring token charge). `success` is True as well - the
+    # charge was not declined - but callers must NOT settle the invoice; the
+    # payment.captured webhook does that. Defaults to False so older adapters and
+    # test doubles keep their meaning.
+    pending: bool = False
 
 
 @dataclass

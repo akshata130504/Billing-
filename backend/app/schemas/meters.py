@@ -22,6 +22,29 @@ class UsageMeterCreateIn(BaseModel):
     unit_name: str = Field(default="unit", max_length=40)
     aggregation_type: AggregationType = AggregationType.SUM
     description: Optional[str] = Field(default=None, max_length=300)
+    # Flat per-unit usage rate; omit to leave the meter unpriced (usage rates at 0).
+    unit_price: Optional[Decimal] = Field(default=None, ge=0, le=Decimal("99999999999999"), decimal_places=4)
+
+
+class UsageMeterUpdateIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    unit_name: Optional[str] = Field(default=None, min_length=1, max_length=40)
+    description: Optional[str] = Field(default=None, max_length=300)
+    unit_price: Optional[Decimal] = Field(default=None, ge=0, le=Decimal("99999999999999"), decimal_places=4)
+    is_active: Optional[bool] = None
+
+
+class BillingCycleOut(BaseModel):
+    id: str
+    subscription_id: str
+    cycle_number: int
+    period_start: date
+    period_end: date
+    status: str
+    invoice_id: Optional[str] = None
+    finalized_at: Optional[datetime] = None
 
 
 class UsageMeterOut(BaseModel):
@@ -32,6 +55,7 @@ class UsageMeterOut(BaseModel):
     aggregation_type: AggregationType
     description: Optional[str] = None
     is_active: bool
+    unit_price: Optional[Decimal] = None
     created_at: datetime
 
 

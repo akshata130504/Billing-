@@ -209,3 +209,25 @@ def test_lifecycle_stage_filter(client: TestClient, tenant, auth_headers):
     items = res.json()
     for item in items:
         assert item["lifecycle_stage"] == "at_risk"
+
+
+def test_lifecycle_list_paginates_and_excludes_draft_invoices(client: TestClient, tenant, auth_headers):
+    customers = [tenant.customer() for _ in range(3)]
+    tenant.invoice(customers[0], amount="500.00", status=InvoiceStatus.DRAFT)
+
+    page1 = client.get("/api/v1/lifecycle?page=1&page_size=2", headers=auth_headers)
+    assert page1.status_code == 200, page1.text
+    assert len(page1.json()) == 2
+    assert page1.headers["X-Total-Count"] == "3"
+    page2 = client.get("/api/v1/lifecycle?page=2&page_size=2", headers=auth_headers).json()
+    assert len(page2) == 1
+
+    everyone = page1.json() + page2
+    row = next(i for i in everyone if i["customer_id"] == customers[0].id)
+    # A draft is not owed yet: it must not show as due nor count as billed.
+    assert Decimal(row["amount_due"]) == Decimal("0.00")
+    assert row["total_invoices_count"] == 0
+
+    kpis = client.get("/api/v1/lifecycle/kpis", headers=auth_headers).json()
+    assert kpis["total_customers"] == 3
+    assert kpis["at_risk_count"] == 0

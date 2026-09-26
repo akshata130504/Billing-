@@ -54,6 +54,7 @@ export function SubscriptionDetailPage() {
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelAtPeriodEnd, setCancelAtPeriodEnd] = useState(false);
+  const [prorateCredit, setProrateCredit] = useState(false);
   const [generateInvoiceModalOpen, setGenerateInvoiceModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
 
@@ -165,6 +166,7 @@ export function SubscriptionDetailPage() {
       await subscriptionService.cancel(id, {
         at_period_end: cancelAtPeriodEnd,
         reason: cancelReason.trim() || undefined,
+        prorate_credit: !cancelAtPeriodEnd && prorateCredit,
       });
       showToast(
         'info',
@@ -841,6 +843,22 @@ export function SubscriptionDetailPage() {
             <p className="text-[11px] text-slate-500 pl-6">
               If checked, customer retains access until the current cycle expires. If unchecked, subscription cancels immediately.
             </p>
+            {!cancelAtPeriodEnd && (
+              <>
+                <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer pt-1">
+                  <input
+                    type="checkbox"
+                    checked={prorateCredit}
+                    onChange={(e) => setProrateCredit(e.target.checked)}
+                    className="w-4 h-4 rounded text-brand-600 border-slate-300 focus:ring-brand-500"
+                  />
+                  <span>Issue a prorated credit note for the unused period</span>
+                </label>
+                <p className="text-[11px] text-slate-500 pl-6">
+                  Credits the unused, already-invoiced remainder of the current period (with tax) to the customer.
+                </p>
+              </>
+            )}
           </div>
 
           <div>

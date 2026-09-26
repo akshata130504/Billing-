@@ -147,6 +147,16 @@ def create_customer(db: Session, ctx: CurrentContext, data: CustomerCreate) -> C
     db.flush()
     _apply_contacts(db, customer, data.contacts)
     db.flush()
+    try:
+        # Savepoint: a failing portal invitation must never break customer creation.
+        with db.begin_nested():
+            from backend.app.services.customer_portal_service import maybe_auto_invite_customer
+
+            maybe_auto_invite_customer(db, ctx, customer)
+    except Exception:
+        from backend.app.core.logging import logger
+
+        logger.exception("Customer portal auto-invite failed for customer %s", customer.id)
     audit.record(
         db,
         ctx=ctx,
@@ -165,6 +175,20 @@ def update_customer(db: Session, ctx: CurrentContext, customer_id: str, data: Cu
     changes = data.model_dump(exclude_unset=True)
     if not changes:
         return customer
+    new_currency = changes.get("currency")
+    if new_currency and new_currency.upper() != (customer.currency or "").upper():
+        # Invoices/subscriptions are denominated in the customer's currency; switching it
+        # afterwards would mix currencies across the customer's ledger.
+        billed = [
+            label
+            for label, model in (("invoices", Invoice), ("subscriptions", Subscription))
+            if db.scalar(select(exists().where(model.customer_id == customer.id, model.organization_id == ctx.organization_id)))
+        ]
+        if billed:
+            raise InvalidStateError(
+                f"The currency cannot be changed because the customer already has {' and '.join(billed)}.",
+                details={"fields": {"currency": "locked once the customer has been billed"}},
+            )
     before = audit.snapshot(customer, CUSTOMER_SNAPSHOT_FIELDS)
     for field, value in changes.items():
         if field in ("display_name", "currency", "billing_country", "payment_terms_days", "tax_exempt", "status"):
@@ -188,8 +212,26 @@ def update_customer(db: Session, ctx: CurrentContext, customer_id: str, data: Cu
 
 def _customer_references(db: Session, organization_id: str, customer_id: str) -> List[str]:
     """Names of the entity types that still reference the customer."""
+    from backend.app.models.catalog_cpq import CPQDeal
+    from backend.app.models.credits import CreditNote
+    from backend.app.models.dunning import DunningCase
+    from backend.app.models.meters import UsageEvent
+    from backend.app.models.payments import CustomerPaymentMethod
+
     refs = []
-    for label, model in (("invoices", Invoice), ("quotes", Quote), ("subscriptions", Subscription), ("payments", Payment)):
+    # Financial records (RESTRICT FKs) plus records whose FK would CASCADE and silently
+    # destroy billing evidence (usage events, stored payment methods, dunning history).
+    for label, model in (
+        ("invoices", Invoice),
+        ("quotes", Quote),
+        ("CPQ quotes", CPQDeal),
+        ("subscriptions", Subscription),
+        ("payments", Payment),
+        ("credit notes", CreditNote),
+        ("usage events", UsageEvent),
+        ("payment methods", CustomerPaymentMethod),
+        ("dunning cases", DunningCase),
+    ):
         stmt = select(exists().where(model.customer_id == customer_id, model.organization_id == organization_id))
         if db.scalar(stmt):
             refs.append(label)
@@ -309,9 +351,8 @@ def list_customer_subscriptions(db: Session, ctx: CurrentContext, customer_id: s
 
 
 def portal_url(customer: Customer) -> Optional[str]:
-    if not customer.portal_token:
-        return None
-    return f"{settings.FRONTEND_URL.rstrip('/')}/portal/{customer.portal_token}"
+    # Points to authenticated customer portal route; invitation tokens use /portal/activate?token=...
+    return f"{settings.FRONTEND_URL.rstrip('/')}/portal"
 
 
 def serialize_contact(contact: CustomerContact) -> Dict[str, Any]:

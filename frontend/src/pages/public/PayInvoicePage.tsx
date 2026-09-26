@@ -39,6 +39,9 @@ import {
 // Razorpay Checkout.js loader (idempotent — guards against double injection)
 // ---------------------------------------------------------------------------
 
+/** Smallest partial payment the server accepts (see public_invoices.MIN_PARTIAL_PAYMENT). */
+const MIN_PARTIAL_PAYMENT = 1;
+
 const RAZORPAY_SCRIPT_SRC = 'https://checkout.razorpay.com/v1/checkout.js';
 let razorpayScriptPromise: Promise<RazorpayCheckoutConstructor> | null = null;
 
@@ -180,8 +183,11 @@ export function PayInvoicePage() {
     let amount: string | undefined;
     if (payPartial) {
       const n = parseMoney(partialAmount);
-      if (Number.isNaN(n) || n <= 0) {
-        setAmountError('Enter an amount greater than zero.');
+      // Mirrors the server rule: partial payments of at least 1.00, or the full
+      // balance when less than 1.00 is outstanding.
+      const minimum = Math.min(MIN_PARTIAL_PAYMENT, amountDue);
+      if (Number.isNaN(n) || n < minimum - 1e-9 || n <= 0) {
+        setAmountError(`Enter at least ${formatMoney(toMoneyString(minimum), currency)}.`);
         return;
       }
       if (n > amountDue + 1e-9) {
@@ -437,7 +443,7 @@ export function PayInvoicePage() {
                       label="Amount to pay"
                       type="number"
                       inputMode="decimal"
-                      min="0.01"
+                      min={Math.min(MIN_PARTIAL_PAYMENT, amountDue).toFixed(2)}
                       step="0.01"
                       max={invoice.amount_due}
                       value={partialAmount}
@@ -446,7 +452,7 @@ export function PayInvoicePage() {
                         setAmountError(undefined);
                       }}
                       error={amountError}
-                      helperText={`Any amount up to ${formatMoney(invoice.amount_due, currency)}`}
+                      helperText={`Minimum ${formatMoney(toMoneyString(Math.min(MIN_PARTIAL_PAYMENT, amountDue)), currency)}, up to ${formatMoney(invoice.amount_due, currency)}`}
                       disabled={paying}
                     />
                   )}

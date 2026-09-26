@@ -15,7 +15,9 @@ import {
   AlertCircle,
   ShieldCheck,
   MoreVertical,
+  Layers,
 } from 'lucide-react';
+import { LegacyPlansManager } from './LegacyPlansManager';
 import { subscriptionService } from '../../services/subscriptionService';
 import type {
   SubscriptionOut,
@@ -38,6 +40,7 @@ export function SubscriptionsListPage() {
   const { showToast } = useToast();
   const { hasRole } = useAuth();
   const canWrite = hasRole('finance');
+  const [plansManagerOpen, setPlansManagerOpen] = useState(false);
 
   const [subscriptions, setSubscriptions] = useState<SubscriptionOut[]>([]);
   const [summary, setSummary] = useState<SubscriptionSummaryOut | null>(null);
@@ -249,6 +252,14 @@ export function SubscriptionsListPage() {
             leadingIcon={<Clock className="w-4 h-4 text-sky-600" />}
           >
             Trial Center
+          </Button>
+          <Button
+            variant="outline"
+            size="md"
+            onClick={() => setPlansManagerOpen(true)}
+            leadingIcon={<Layers className="w-4 h-4 text-brand-600" />}
+          >
+            Plans &amp; Products
           </Button>
           {canWrite && (
             <Button
@@ -756,6 +767,8 @@ export function SubscriptionsListPage() {
         variant="default"
         isLoading={actionLoading}
       />
+
+      <LegacyPlansManager isOpen={plansManagerOpen} onClose={() => setPlansManagerOpen(false)} />
     </div>
   );
 }
