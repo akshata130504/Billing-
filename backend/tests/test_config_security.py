@@ -152,11 +152,37 @@ def test_secret_key_masked_in_repr_and_str():
     assert "POSTGRES_PASSWORD='***'" in repr_str
 
 
-def test_production_requires_smtp_host():
-    """Auth emails (signup codes, resets, invitations) have no other delivery channel."""
+def test_production_without_smtp_host_starts_but_logs_critical(monkeypatch):
+    """Missing SMTP must not take the whole API down (that surfaced as nginx 502 on every
+    request); it logs a CRITICAL line and email-dependent actions fail with a clear error."""
+    import logging
+
+    messages = []
+    app_logger = logging.getLogger("rooman_billing")
+    monkeypatch.setattr(app_logger, "critical", lambda msg, *args, **kw: messages.append(msg % args if args else msg))
+    prod = Settings(_env_file=None, ENVIRONMENT="production", **{**_VALID_PROD_OVERRIDES, "SMTP_HOST": ""})
+    assert prod.is_production and not prod.email_enabled
+    assert any("SMTP_HOST is not set" in m for m in messages)
+
+
+def test_production_still_refuses_insecure_secret_even_without_smtp():
     with pytest.raises(ValidationError) as exc_info:
-        Settings(_env_file=None, ENVIRONMENT="production", **{**_VALID_PROD_OVERRIDES, "SMTP_HOST": ""})
-    assert "SMTP_HOST must be set" in str(exc_info.value)
+        Settings(_env_file=None, ENVIRONMENT="production", **{**_VALID_PROD_OVERRIDES, "SMTP_HOST": "", "SECRET_KEY": "short"})
+    assert "SECRET_KEY" in str(exc_info.value)
+
+
+def test_signup_code_without_smtp_in_production_returns_clear_error(client, monkeypatch):
+    """With the API up but SMTP unset, requesting a signup code gets a clear message, not a 502."""
+    from backend.app.core.config import settings
+
+    monkeypatch.setattr(settings, "SMTP_HOST", "")
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    r = client.post(
+        "/api/v1/auth/signup/request-verification",
+        json={"email": "no-smtp-prod@example.test", "full_name": "No Smtp", "organization_name": "No Smtp Org", "password": "Str0ngPassw0rd!"},
+    )
+    assert r.status_code in (422, 503), r.text
+    assert "email" in r.json()["error"]["message"].lower()
 
 
 @pytest.mark.parametrize("origin", ["http://localhost:5173", "http://127.0.0.1:5173"])

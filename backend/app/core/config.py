@@ -212,8 +212,14 @@ class Settings(BaseSettings):
             if any(o.startswith(("http://localhost", "http://127.0.0.1")) for o in self.ALLOWED_ORIGINS):
                 problems.append("ALLOWED_ORIGINS must not include localhost or 127.0.0.1")
             if not (self.SMTP_HOST or "").strip():
-                problems.append(
-                    "SMTP_HOST must be set: signup codes, password resets and invitations are only delivered by email"
+                # Not fatal: refusing to boot took the WHOLE API down (nginx 502 on every request)
+                # just because email was unset. Email-dependent actions (signup codes, invitations,
+                # password resets) fail with a clear 503/notice instead; nothing leaks a link.
+                import logging
+
+                logging.getLogger("rooman_billing").critical(
+                    "SMTP_HOST is not set in %s: signup verification codes, invitations and password "
+                    "resets cannot be emailed until SMTP_* is configured", self.ENVIRONMENT
                 )
             if problems:
                 raise ValueError(
