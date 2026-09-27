@@ -481,7 +481,7 @@ def trigger_dunning_for_failed_payment(
             recipient_email=customer.email,
             subject=f"Payment Failed for Invoice {invoice.invoice_number}",
             template_type="failure",
-            body_preview=f"Your recent payment of {invoice.currency} {invoice.amount_due} failed. We will automatically retry on {next_retry.strftime('%Y-%m-%d')}.",
+            body_preview=f"Your recent payment of {invoice.currency} {invoice.amount_due} failed. Please complete payment using your invoice payment link or customer portal.",
             sent_at=now,
         )
         db.add(comm)
@@ -602,11 +602,12 @@ def execute_dunning_retries(db: Session, organization_id: str) -> Dict[str, Any]
 
         # Charge only through the configured gateway adapter for the customer's saved
         # method — never fabricate success. A MANUAL-type saved method (an offline
-        # record, e.g. cash/cheque) cannot be auto-charged by an unattended retry; that
-        # case falls through to "no chargeable method" below, same as no method at all.
+        # record, e.g. cash/cheque) or a method not authorized for unattended auto-charge
+        # cannot be charged by an unattended retry; that case falls through to
+        # "no chargeable method" below.
         gateway_result = None
         charge_amount = invoice.amount_due
-        if pm is not None and pm.gateway != PaymentGateway.MANUAL:
+        if pm is not None and pm.gateway != PaymentGateway.MANUAL and getattr(pm, "is_autocharge_eligible", False):
             adapter = get_gateway_adapter(pm.gateway)
             gateway_result = adapter.charge(
                 amount=charge_amount,
@@ -647,7 +648,7 @@ def execute_dunning_retries(db: Session, organization_id: str) -> Dict[str, Any]
             payment_attempt.status = PaymentAttemptStatus.FAILED
             payment_attempt.failure_category = "no_payment_method"
             payment_attempt.failure_reason = (
-                "No chargeable saved payment method on file (missing, inactive, or manual/offline only)."
+                "No chargeable saved payment method on file (missing, inactive, manual/offline only, or requires customer-initiated checkout)."
             )
         elif charge_pending:
             payment_attempt.status = PaymentAttemptStatus.PENDING

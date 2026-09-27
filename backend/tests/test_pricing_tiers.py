@@ -243,3 +243,26 @@ def test_quantity_to_invoice_total_end_to_end(client, tenant, db):
 def test_simulate_without_offering_returns_422(client, tenant):
     res = client.post("/api/v1/pricing/simulate", json={"quantity": "1"}, headers=tenant.headers())
     assert res.status_code == 422
+
+
+def test_graduated_quote_tiered_rounding_consistency(client, tenant, db):
+    """Tiered quote calculation with graduated brackets:
+    10 units @ ₹300.00 + 2 units @ ₹200.00 = ₹3,400.00 exact subtotal.
+    Effective unit price is 3,400 / 12 = ₹283.33 (2dp).
+    Ensures calculations use Decimal, not binary floating-point, and financial fields
+    reconcile without floating point drift."""
+    graduated_brackets = [
+        {"min_qty": 1, "max_qty": 10, "unit_price": 300},
+        {"min_qty": 11, "max_qty": 20, "unit_price": 200},
+    ]
+    res = _price("tiered", graduated_brackets, 12)
+    # The exact graduated subtotal is 10*300 + 2*200 = 3400.00
+    assert res["subtotal"] == Decimal("3400.00")
+    # Effective unit price is 3400 / 12 = 283.33
+    assert res["unit_price"] == Decimal("283.33")
+    assert isinstance(res["subtotal"], Decimal)
+    assert isinstance(res["unit_price"], Decimal)
+    # Tier explanation documents the exact bracket breakdown
+    assert "10" in res["explanation"]["tier_explanation"]
+    assert "2" in res["explanation"]["tier_explanation"]
+

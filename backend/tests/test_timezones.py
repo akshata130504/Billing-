@@ -89,3 +89,65 @@ def test_audit_today_filter_finds_an_entry_logged_after_ist_midnight(client, ten
     assert res.status_code == 200, res.text
     labels = [row["entity_label"] for row in res.json()["items"]]
     assert "Early bird" in labels
+
+
+def test_utc_and_other_timezones_day_bounds():
+    """Verify UTC and non-IST timezones correctly convert local midnight to UTC."""
+    utc_tz = timezone.utc
+    day = date(2026, 9, 27)
+    start_utc = timezones.day_start_utc(day, utc_tz)
+    end_utc = timezones.day_end_utc(day, utc_tz)
+    assert start_utc == datetime(2026, 9, 27, 0, 0, tzinfo=timezone.utc)
+    assert end_utc == datetime(2026, 9, 28, 0, 0, tzinfo=timezone.utc)
+
+    # Dubai is UTC+4
+    gst_tz = ZoneInfo("Asia/Dubai")
+    start_gst = timezones.day_start_utc(day, gst_tz)
+    assert start_gst == datetime(2026, 9, 26, 20, 0, tzinfo=timezone.utc)
+
+
+def test_month_and_year_boundary_transitions():
+    """Cross-month and cross-year transitions must cleanly map half-open ranges."""
+    # Month boundary: Feb 28 -> Mar 1 (non-leap year 2027)
+    feb28 = date(2027, 2, 28)
+    mar1 = date(2027, 3, 1)
+    feb_end = timezones.day_end_utc(feb28, IST)
+    mar_start = timezones.day_start_utc(mar1, IST)
+    assert feb_end == mar_start
+
+    # Year boundary: Dec 31 -> Jan 1
+    dec31 = date(2026, 12, 31)
+    jan1 = date(2027, 1, 1)
+    dec_end = timezones.day_end_utc(dec31, IST)
+    jan_start = timezones.day_start_utc(jan1, IST)
+    assert dec_end == jan_start
+
+
+def test_dst_timezone_transitions_america_new_york():
+    """America/New_York experiences Daylight Saving Time (EDT UTC-4 / EST UTC-5)."""
+    ny_tz = ZoneInfo("America/New_York")
+
+    # Winter (EST, UTC-5): Jan 15
+    winter_day = date(2026, 1, 15)
+    winter_start = timezones.day_start_utc(winter_day, ny_tz)
+    # Midnight EST is 05:00 UTC
+    assert winter_start == datetime(2026, 1, 15, 5, 0, tzinfo=timezone.utc)
+
+    # Summer (EDT, UTC-4): July 15
+    summer_day = date(2026, 7, 15)
+    summer_start = timezones.day_start_utc(summer_day, ny_tz)
+    # Midnight EDT is 04:00 UTC
+    assert summer_start == datetime(2026, 7, 15, 4, 0, tzinfo=timezone.utc)
+
+    # Spring-forward transition day in US (March 8, 2026): 23 hours long
+    spring_day = date(2026, 3, 8)
+    spring_start = timezones.day_start_utc(spring_day, ny_tz)
+    spring_end = timezones.day_end_utc(spring_day, ny_tz)
+    assert (spring_end - spring_start) == timedelta(hours=23)
+
+    # Fall-back transition day in US (November 1, 2026): 25 hours long
+    fall_day = date(2026, 11, 1)
+    fall_start = timezones.day_start_utc(fall_day, ny_tz)
+    fall_end = timezones.day_end_utc(fall_day, ny_tz)
+    assert (fall_end - fall_start) == timedelta(hours=25)
+

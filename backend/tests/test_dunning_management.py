@@ -334,6 +334,35 @@ def test_dunning_retry_never_fabricates_success_for_manual_or_declined_charge(cl
     assert latest_attempt.error_message == "Card declined."
 
 
+def test_dunning_retry_skipped_when_pm_not_autocharge_eligible(client, tenant, auth_headers, db):
+    """When a saved payment method is not eligible for unattended auto-charge (e.g. standard
+    tokenized card without recurring mandate capability), unattended dunning retries must not
+    attempt a charge or mark the invoice/case recovered."""
+    case, inv, _ = _fresh_dunning_case_with_pm(db, tenant, gateway="razorpay", amount="1800.00")
+    # Mark the payment method as non-autocharge eligible (customer-initiated checkout only)
+    pm = db.scalars(
+        select(CustomerPaymentMethod).where(CustomerPaymentMethod.customer_id == case.customer_id)
+    ).first()
+    assert pm is not None
+    pm.is_autocharge_eligible = False
+    db.commit()
+
+    res = dunning_service.execute_dunning_retries(db, tenant.organization.id)
+    db.commit()
+
+    db.refresh(case)
+    db.refresh(inv)
+    assert res["recovered_count"] == 0
+    assert case.status != DunningCaseStatus.RECOVERED
+    assert inv.status != InvoiceStatus.PAID
+    assert inv.amount_due == Decimal("1800.00")
+
+    # Payment attempt must be marked FAILED with clear category
+    latest_attempt = next(a for a in case.attempts if a.attempt_number == case.attempt_count)
+    assert latest_attempt.status == DunningAttemptStatus.FAILED
+    assert latest_attempt.error_code == "no_payment_method"
+
+
 def test_dunning_retry_exhaustion_final_actions(client, tenant, auth_headers, db):
     customer = tenant.customer()
     product, plan = tenant.product_with_plan(unit_amount="1200.00")

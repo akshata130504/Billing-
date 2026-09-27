@@ -166,19 +166,10 @@ export function PreferencesTab() {
         description="Configure date, time, and numeric formatting according to your operating region."
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
-          <Select
-            label="Timezone"
-            value={prefs.timezone}
-            onChange={(e) => setPrefs((p) => ({ ...p, timezone: e.target.value }))}
-            options={[
-              { value: 'Asia/Kolkata', label: 'Asia/Kolkata (IST, UTC+05:30)' },
-              { value: 'UTC', label: 'UTC (Coordinated Universal Time)' },
-              { value: 'Asia/Dubai', label: 'Asia/Dubai (GST, UTC+04:00)' },
-              { value: 'Asia/Singapore', label: 'Asia/Singapore (SGT, UTC+08:00)' },
-              { value: 'Europe/London', label: 'Europe/London (GMT/BST)' },
-              { value: 'America/New_York', label: 'America/New_York (EST/EDT)' },
-            ]}
-          />
+          <div className="md:col-span-2 rounded-lg border border-slate-200 bg-slate-50/80 p-3 text-xs text-slate-600">
+            <span className="font-semibold text-slate-700">Business Timezone:</span> Configured canonical organization timezone in{' '}
+            <span className="font-semibold text-indigo-600">Settings → Organization</span> controls invoice dates, billing cycles, and reporting boundaries.
+          </div>
 
           <Select
             label="Date Format"
