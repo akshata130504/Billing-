@@ -8,6 +8,7 @@ import {
   changeTypeLabel,
   changeTypeVariant,
   formatQuantity,
+  previewRate,
   intervalLabel,
   intervalMonths,
   monthlyEquivalent,
@@ -186,5 +187,19 @@ describe('monthlyEquivalent', () => {
     expect(monthlyEquivalent('not-a-number', 'monthly')).toBeNull();
     expect(monthlyEquivalent(null, 'monthly')).toBeNull();
     expect(monthlyEquivalent('1000', 'one_time')).toBeNull();
+  });
+});
+
+// Regression (browser QA): upgrading 5 seats to the FLAT "Hosting Starter" plan previewed
+// "New recurring at renewal ₹24,995" (4,999 x 5) although the plan bills ₹4,999 per period.
+describe('previewRate', () => {
+  it('uses the server per-cycle rate when present', () => {
+    expect(previewRate('4999.00', '4999.00', '5')).toBe(4999);
+    expect(previewRate('0.00', '100', '3')).toBe(0);
+  });
+  it('falls back to unit x quantity for older responses', () => {
+    expect(previewRate(undefined, '650.00', '3')).toBe(1950);
+    expect(previewRate(null, '650.00', 5)).toBe(3250);
+    expect(previewRate('', '10', '2')).toBe(20);
   });
 });

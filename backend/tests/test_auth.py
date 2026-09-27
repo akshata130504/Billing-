@@ -534,6 +534,8 @@ def test_reset_password_rejects_bad_or_expired_tokens(client, db, tenant):
 
     bad = client.post(f"{API}/auth/reset-password", json={"token": "nonsense", "new_password": NEW_PASSWORD})
     assert bad.status_code == 422 and bad.json()["error"]["code"] == "VALIDATION_ERROR"
+    # The reset page shows this field in its banner; it must be a sentence, not a code.
+    assert "Request a new link" in bad.json()["error"]["details"]["fields"]["token"]
 
     raw = generate_opaque_token()
     db.add(PasswordResetToken(user_id=tenant.owner.id, token_hash=hash_token(raw), expires_at=datetime.now(timezone.utc) - timedelta(minutes=1)))
@@ -561,6 +563,18 @@ def test_rate_limit_returns_standard_envelope(client, monkeypatch):
     # a different client IP (as reported by our proxy) is not affected
     other = _client_from("10.8.7.6").post(f"{API}/auth/forgot-password", json=body)
     assert other.status_code == 202
+
+
+def test_public_token_rate_limit_is_per_endpoint_not_per_token(client, monkeypatch):
+    """Walking the token space (a different /public/invoices/<token> per request) must share
+    one bucket per client IP - not get a fresh bucket for every token."""
+    monkeypatch.setattr(settings, "PUBLIC_RATE_LIMIT", "3/minute")
+    proxied = _client_from(f"10.7.{uuid.uuid4().int % 250}.{uuid.uuid4().int % 250}")
+    statuses = [proxied.get(f"{API}/public/invoices/enum-{uuid.uuid4().hex}").status_code for _ in range(5)]
+    assert statuses[:3] == [404, 404, 404]
+    assert statuses[3:] == [429, 429]
+    # the same scan from another client IP is unaffected
+    assert _client_from("10.6.5.4").get(f"{API}/public/invoices/enum-{uuid.uuid4().hex}").status_code == 404
 
 
 def test_client_ip_ignores_forwarded_headers_from_untrusted_peers():

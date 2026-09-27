@@ -25,6 +25,7 @@ import { catalogCpqService } from '../../services/catalogCpqService';
 import { planPricingService } from '../../services/planPricingService';
 import type { OfferingOut } from '../../types/catalog_cpq';
 import type { QuoteItemIn } from '../../types/quotes';
+import { todayIso, addDays } from '../../utils/format';
 
 interface FormLineItem extends QuoteItemIn {
   id?: string;
@@ -59,20 +60,18 @@ export function QuoteFormPage() {
   // Form State
   const [customerId, setCustomerId] = useState('');
   const [title, setTitle] = useState('');
-  const [issueDate, setIssueDate] = useState(new Date().toISOString().split('T')[0]);
+  const [issueDate, setIssueDate] = useState(todayIso());
   const [expiryDate, setExpiryDate] = useState(
-    new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    addDays(todayIso(), 30)
   );
   const [issueDateError, setIssueDateError] = useState<string | null>(null);
   const [expiryDateError, setExpiryDateError] = useState<string | null>(null);
 
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const todayStr = useMemo(() => todayIso(), []);
   const minExpiryDate = useMemo(() => {
     if (!issueDate) return todayStr;
-    const d = new Date(issueDate);
-    if (Number.isNaN(d.getTime())) return todayStr;
-    d.setDate(d.getDate() + 1);
-    return d.toISOString().split('T')[0];
+    const next = addDays(issueDate, 1);
+    return next === issueDate ? todayStr : next;
   }, [issueDate, todayStr]);
 
   const handleIssueDateChange = (newVal: string) => {

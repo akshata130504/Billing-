@@ -5,6 +5,7 @@ import { validateSensibleName, validatePositiveMoney, validateNonNegativeMoney, 
 import { CustomerCombobox } from '../../../components/common/CustomerCombobox';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCustomerProjects } from '../useCustomerProjects';
+import { todayIso } from '../../../utils/format';
 
 const MAX_RECEIPT_BYTES = 10 * 1024 * 1024;
 const RECEIPT_EXTENSIONS = ['.pdf', '.png', '.jpg', '.jpeg', '.webp'];
@@ -46,7 +47,7 @@ export function ExpenseFormModal({
 }: ExpenseFormModalProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(() => todayIso());
   const [category, setCategory] = useState<ExpenseCategory>('Software');
   const [amount, setAmount] = useState<string>('');
   const [currency, setCurrency] = useState('INR');
@@ -100,7 +101,7 @@ export function ExpenseFormModal({
     } else {
       setName('');
       setDescription('');
-      setDate(new Date().toISOString().split('T')[0]);
+      setDate(todayIso());
       setCategory('Software');
       setAmount('');
       setCurrency('INR');
@@ -153,7 +154,7 @@ export function ExpenseFormModal({
     setReceipt({
       fileName: file.name,
       fileSize: `${(file.size / 1024).toFixed(0)} KB`,
-      uploadDate: new Date().toISOString().split('T')[0],
+      uploadDate: todayIso(),
       fileType: file.type || 'application/octet-stream',
     });
   };

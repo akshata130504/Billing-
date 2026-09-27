@@ -48,6 +48,10 @@ def _get_storage_uri() -> str:
 
 limiter = Limiter(
     key_func=rate_limit_key,
+    # One bucket per (client IP, endpoint). slowapi's default key_style="url" scopes the
+    # bucket to the full path, so /public/invoices/<token> gave every token its own bucket
+    # and a scanner walking the token space was never limited.
+    key_style="endpoint",
     storage_uri=_get_storage_uri(),
     in_memory_fallback_enabled=True,
     headers_enabled=False,

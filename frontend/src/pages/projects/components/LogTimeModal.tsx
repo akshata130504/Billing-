@@ -5,6 +5,7 @@ import { Button } from '../../../components/common/Button';
 import { Input } from '../../../components/common/Input';
 import { validateDescription, validateNonNegativeMoney, parseStrictNumber } from '../../../utils/validation';
 import { useAuth } from '../../../hooks/useAuth';
+import { todayIso } from '../../../utils/format';
 
 interface LogTimeModalProps {
   isOpen: boolean;
@@ -18,7 +19,7 @@ export function LogTimeModal({ isOpen, onClose, onLogTime }: LogTimeModalProps) 
   const { user } = useAuth();
   const employee = user?.full_name || user?.email || 'You';
   const [submitting, setSubmitting] = useState(false);
-  const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(() => todayIso());
   const [description, setDescription] = useState('');
   const [hours, setHours] = useState('4.0');
   const [billable, setBillable] = useState(true);
@@ -137,7 +138,7 @@ export function LogTimeModal({ isOpen, onClose, onLogTime }: LogTimeModalProps) 
               label="Hourly Rate (₹)"
               type="number"
               min="0"
-              step="50"
+              step="0.01"
               value={hourlyRate}
               onChange={(e) => setHourlyRate(e.target.value)}
             />

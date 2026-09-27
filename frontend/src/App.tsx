@@ -26,7 +26,7 @@ export function App() {
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
           <AuthProvider>
-            <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+            <BrowserRouter>
               <AppRoutes />
             </BrowserRouter>
           </AuthProvider>

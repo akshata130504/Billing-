@@ -830,6 +830,7 @@ def serialize_deal(deal: CPQDeal) -> Dict[str, Any]:
         "approved_by": deal.approved_by_id,
         "approved_at": iso_dt(deal.approved_at) if deal.approved_at else None,
         "converted_quote_id": deal.converted_quote_id,
+        "created_by_id": deal.created_by_id,
         "notes": deal.notes,
         "terms": deal.terms,
         "items": items_list,

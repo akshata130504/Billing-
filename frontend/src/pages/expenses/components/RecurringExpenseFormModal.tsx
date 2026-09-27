@@ -11,6 +11,7 @@ import { CustomerCombobox } from '../../../components/common/CustomerCombobox';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCustomerProjects } from '../useCustomerProjects';
 import { validateSensibleName, validatePositiveMoney, validateNonNegativeMoney, validateDateNotBefore, parseStrictNumber } from '../../../utils/validation';
+import { todayIso, toIsoDate } from '../../../utils/format';
 
 interface RecurringExpenseFormModalProps {
   isOpen: boolean;
@@ -53,7 +54,7 @@ export function RecurringExpenseFormModal({
 
   // Schedule
   const [frequency, setFrequency] = useState<RecurringExpenseFrequency>('monthly');
-  const [startDate, setStartDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(() => todayIso());
   const [neverEnds, setNeverEnds] = useState(true);
   const [endDate, setEndDate] = useState('');
 
@@ -100,7 +101,7 @@ export function RecurringExpenseFormModal({
       setAmount('');
       setCurrency('INR');
       setFrequency('monthly');
-      setStartDate(new Date().toISOString().split('T')[0]);
+      setStartDate(todayIso());
       setNeverEnds(true);
       setEndDate('');
       setBillable(false);
@@ -120,12 +121,15 @@ export function RecurringExpenseFormModal({
 
   const calculateNextRun = (start: string, freq: RecurringExpenseFrequency): string => {
     try {
-      const d = new Date(start);
+      // Parse YYYY-MM-DD as a local calendar date (new Date(str) is UTC midnight).
+      const [y, m, day] = start.split('-').map(Number);
+      const d = new Date(y, m - 1, day);
+      if (Number.isNaN(d.getTime())) return start;
       if (freq === 'weekly') d.setDate(d.getDate() + 7);
       else if (freq === 'monthly') d.setMonth(d.getMonth() + 1);
       else if (freq === 'quarterly') d.setMonth(d.getMonth() + 3);
       else if (freq === 'yearly') d.setFullYear(d.getFullYear() + 1);
-      return d.toISOString().split('T')[0];
+      return toIsoDate(d);
     } catch {
       return start;
     }

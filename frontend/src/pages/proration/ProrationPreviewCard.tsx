@@ -4,7 +4,7 @@ import { Badge } from '../../components/common/Badge';
 import { LoadingSpinner } from '../../components/common/LoadingState';
 import { cn } from '../../utils/cn';
 import { formatMoney, formatDate, parseMoney } from '../../utils/format';
-import { changeTypeLabel, changeTypeVariant, formatQuantity } from './prorationLabels';
+import { changeTypeLabel, changeTypeVariant, formatQuantity, previewRate } from './prorationLabels';
 
 interface ProrationPreviewCardProps {
   preview: SubscriptionChangePreviewOut | null;
@@ -91,8 +91,10 @@ export function ProrationPreviewCard({ preview, loading, error, effectiveType, c
   const netPositive = net > 0;
   const netNegative = net < 0;
   const isEndOfTerm = effectiveType === 'end_of_term';
-  const oldRate = parseMoney(preview.old_plan.unit_amount) * parseMoney(preview.old_quantity);
-  const newRate = parseMoney(preview.new_plan.unit_amount) * parseMoney(preview.new_quantity);
+  // Use the server's per-cycle rates: unit price x quantity is wrong for FLAT plans (one unit
+  // per period) and for volume/tiered/package plans (re-priced per quantity).
+  const oldRate = previewRate(preview.old_total_rate, preview.old_plan.unit_amount, preview.old_quantity);
+  const newRate = previewRate(preview.new_total_rate, preview.new_plan.unit_amount, preview.new_quantity);
   const usedPct = preview.total_days > 0 ? Math.min(100, Math.round((preview.days_used / preview.total_days) * 100)) : 0;
 
   return (

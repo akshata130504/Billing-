@@ -1,4 +1,4 @@
-import { AxiosError, AxiosHeaders, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios';
+import axios, { AxiosError, AxiosHeaders, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ApiError } from '../types/api';
 import {
@@ -7,6 +7,7 @@ import {
   absoluteUrl,
   apiClient,
   cleanParams,
+  errorSummary,
   fieldErrors,
   isApiError,
   toApiError,
@@ -208,6 +209,33 @@ describe('toApiError', () => {
       expect(typeof toApiError(input).message).toBe('string');
       expect(toApiError(input).message.length).toBeGreaterThan(0);
     }
+  });
+});
+
+// Regression (browser QA): overlapping / inverted pricing tiers only showed
+// "The request contains invalid fields." in the offering and plan modals.
+describe('errorSummary', () => {
+  it('surfaces the request-validation reason instead of the generic message', () => {
+    const err: ApiError = {
+      code: 'VALIDATION_ERROR',
+      message: 'The request contains invalid fields.',
+      details: {
+        fields: {
+          pricing_tiers:
+            "Value error, Pricing tiers overlap: a tier starting at 5 begins at or before the previous tier's max_qty (10).",
+        },
+      },
+    };
+    expect(errorSummary(err)).toBe(
+      "Pricing tiers overlap: a tier starting at 5 begins at or before the previous tier's max_qty (10)."
+    );
+  });
+
+  it('falls back to the message when there are no sentence-style field errors', () => {
+    expect(errorSummary({ code: 'CONFLICT', message: 'Plan code already exists.' })).toBe('Plan code already exists.');
+    expect(
+      errorSummary({ code: 'CONFLICT', message: 'Duplicate SKU.', details: { fields: { sku: 'duplicate' } } })
+    ).toBe('Duplicate SKU.');
   });
 });
 
@@ -425,6 +453,82 @@ describe('apiClient interceptors', () => {
     expect(onLogout).not.toHaveBeenCalled();
     expect(tokenStorage.getAccessToken()).toBe('acc-1');
   });
+
+  // Regression (browser QA): /auth/me, /auth/sessions, /auth/2fa/* are authenticated calls.
+  // Signing out on another device or changing the password supersedes the access token; the
+  // next page load's /auth/me used to 401 without a refresh, which logged the user out.
+  it.each(['/auth/me', '/auth/sessions', '/auth/2fa/setup'])(
+    'refreshes and retries a 401 from the authenticated auth endpoint %s',
+    async (url) => {
+      tokenStorage.set({ access_token: 'acc-old', refresh_token: 'ref-old' });
+      const refreshSpy = vi.spyOn(axios, 'post').mockResolvedValue({
+        data: { access_token: 'acc-new', refresh_token: 'ref-new' },
+      });
+      const seenAuth: (string | undefined)[] = [];
+      apiClient.defaults.adapter = async (config) => {
+        const auth = AxiosHeaders.from(config.headers).get('Authorization') as string | undefined;
+        seenAuth.push(auth);
+        if (auth === 'Bearer acc-old') {
+          return Promise.reject(
+            new AxiosError('Unauthorized', 'ERR_BAD_REQUEST', config, {}, {
+              data: { error: { code: 'UNAUTHORIZED', message: 'Access token has been revoked.' } },
+              status: 401,
+              statusText: '',
+              headers: {},
+              config,
+            } as AxiosResponse)
+          );
+        }
+        return { data: { ok: true }, status: 200, statusText: 'OK', headers: {}, config };
+      };
+
+      await expect(apiClient.get(url)).resolves.toMatchObject({ data: { ok: true } });
+      expect(refreshSpy).toHaveBeenCalledTimes(1);
+      expect(seenAuth).toEqual(['Bearer acc-old', 'Bearer acc-new']);
+      expect(tokenStorage.getAccessToken()).toBe('acc-new');
+    }
+  );
+
+  it('replays change-password with the rotated refresh token so this session is kept', async () => {
+    tokenStorage.set({ access_token: 'acc-old', refresh_token: 'ref-old' });
+    vi.spyOn(axios, 'post').mockResolvedValue({
+      data: { access_token: 'acc-new', refresh_token: 'ref-new' },
+    });
+    const bodies: unknown[] = [];
+    apiClient.defaults.adapter = async (config) => {
+      bodies.push(config.data);
+      if (AxiosHeaders.from(config.headers).get('Authorization') === 'Bearer acc-old') {
+        return Promise.reject(
+          new AxiosError('Unauthorized', 'ERR_BAD_REQUEST', config, {}, {
+            data: {}, status: 401, statusText: '', headers: {}, config,
+          } as AxiosResponse)
+        );
+      }
+      return { data: null, status: 204, statusText: 'No Content', headers: {}, config };
+    };
+
+    await apiClient.post('/auth/change-password', {
+      current_password: 'a', new_password: 'b', refresh_token: 'ref-old',
+    });
+    expect(JSON.parse(bodies[1] as string).refresh_token).toBe('ref-new');
+  });
+
+  it.each(['/auth/login', '/auth/login/mfa', '/auth/logout', '/auth/signup/verify-otp', '/auth/reset-password'])(
+    'never refreshes on a 401 from %s',
+    async (url) => {
+      tokenStorage.set({ access_token: 'acc-1', refresh_token: 'ref-1' });
+      const refreshSpy = vi.spyOn(axios, 'post');
+      apiClient.defaults.adapter = async (config) =>
+        Promise.reject(
+          new AxiosError('Unauthorized', 'ERR_BAD_REQUEST', config, {}, {
+            data: {}, status: 401, statusText: '', headers: {}, config,
+          } as AxiosResponse)
+        );
+      await expect(apiClient.post(url, {})).rejects.toMatchObject({ status: 401 });
+      expect(refreshSpy).not.toHaveBeenCalled();
+      expect(tokenStorage.getAccessToken()).toBe('acc-1');
+    }
+  );
 
   it('does not log out on a non-401 error', async () => {
     window.localStorage.setItem(ACCESS_KEY, 'acc-1');

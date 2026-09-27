@@ -310,6 +310,26 @@ def test_cpq_rules_and_approval_workflow(client, tenant, auth_headers, db):
     assert again.status_code == 409
 
 
+def test_deal_out_exposes_creator_so_ui_can_hide_self_approval(client, tenant, auth_headers):
+    """The deals list must say who created a deal: the UI hides Approve on the viewer's own deal
+    (the API rejects a self-approval with 403)."""
+    off = client.post(CATALOG_OFFERINGS, json=_offering(name="Creator Probe"), headers=auth_headers).json()
+    cust = client.post(CUSTOMERS, json={"display_name": "Creator Probe Ltd", "currency": "INR"}, headers=auth_headers).json()
+    created = client.post(
+        CPQ_DEALS,
+        json={"title": "Creator probe", "customer_id": cust["id"], "discount_pct": 25,
+              "items": [{"offering_id": off["id"], "quantity": 1}]},
+        headers=auth_headers,
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["created_by_id"] == tenant.owner.id
+
+    listed = client.get(CPQ_DEALS, headers=auth_headers).json()["items"]
+    assert [d["created_by_id"] for d in listed if d["id"] == created.json()["id"]] == [tenant.owner.id]
+    fetched = client.get(f"{CPQ_DEALS}/{created.json()['id']}", headers=auth_headers).json()
+    assert fetched["created_by_id"] == tenant.owner.id
+
+
 def test_tenant_isolation_and_security(client, tenant, db):
     from backend.tests.conftest import Tenant
     tenant_b = Tenant(db, "other")

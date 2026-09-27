@@ -11,7 +11,7 @@ import {
   UserPlus,
   AlertCircle,
 } from 'lucide-react';
-import { formatMoney } from '../../../utils/format';
+import { formatMoney, todayIso } from '../../../utils/format';
 import { validateDateNotFuture, validatePositiveMoney } from '../../../utils/validation';
 
 interface RecordPaymentModalProps {
@@ -51,7 +51,7 @@ export function RecordPaymentModal({
   const [paymentType, setPaymentType] = useState<PaymentType>('invoice_payment');
   const [customerId, setCustomerId] = useState<string>(preselectedCustomerId || (customers[0]?.id ?? ''));
   const [amountReceived, setAmountReceived] = useState<string>('');
-  const [paymentDate, setPaymentDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [paymentDate, setPaymentDate] = useState<string>(() => todayIso());
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('UPI');
   const [referenceNumber, setReferenceNumber] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
@@ -215,7 +215,7 @@ export function RecordPaymentModal({
       if (initialCustId) void loadCustomerInvoices(initialCustId);
       setPaymentType('invoice_payment');
       setAmountReceived('');
-      setPaymentDate(new Date().toISOString().split('T')[0]);
+      setPaymentDate(todayIso());
       setPaymentMethod('UPI');
       setReferenceNumber('');
       setNotes('');
@@ -642,7 +642,7 @@ export function RecordPaymentModal({
               <input
                 type="date"
                 value={paymentDate}
-                max={new Date().toISOString().split('T')[0]}
+                max={todayIso()}
                 onChange={(e) => setPaymentDate(e.target.value)}
                 className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand-500"
               />

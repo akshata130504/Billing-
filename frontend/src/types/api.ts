@@ -18,6 +18,8 @@ export type QuoteStatus =
   | 'draft'
   | 'pending_approval'
   | 'sent'
+  // Set when the customer opens the public link; still open for accept / decline.
+  | 'viewed'
   | 'accepted'
   | 'declined'
   | 'expired'

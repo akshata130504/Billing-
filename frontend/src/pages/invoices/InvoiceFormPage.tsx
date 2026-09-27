@@ -26,6 +26,7 @@ import { CustomerCombobox } from '../../components/common/CustomerCombobox';
 import { useToast } from '../../components/common/Toast';
 import { toApiError } from '../../services/apiClient';
 import { validateDateNotBefore, validateNonNegativeMoney, validatePercentage, validatePositiveQuantity } from '../../utils/validation';
+import { todayIso, toIsoDate } from '../../utils/format';
 
 export const InvoiceFormPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -54,11 +55,11 @@ export const InvoiceFormPage: React.FC = () => {
   // Read-only: the backend assigns the number from the organization's number
   // series when the invoice is created/issued.
   const [invoiceNumber, setInvoiceNumber] = useState('');
-  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
+  const [invoiceDate, setInvoiceDate] = useState(todayIso());
   const [dueDate, setDueDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 30);
-    return d.toISOString().split('T')[0];
+    return toIsoDate(d);
   });
   const [paymentTerms, setPaymentTerms] = useState('Net 30');
   const [reference, setReference] = useState('');
@@ -100,7 +101,7 @@ export const InvoiceFormPage: React.FC = () => {
         const inv = await invoiceService.getInvoice(id);
         setCustomerId(inv.customer_id || (inv.customer && inv.customer.id) || '');
         setInvoiceNumber(inv.invoice_number);
-        setInvoiceDate(inv.issue_date || inv.invoice_date || new Date().toISOString().split('T')[0]);
+        setInvoiceDate(inv.issue_date || inv.invoice_date || todayIso());
         setDueDate(inv.due_date);
         setPaymentTerms(inv.payment_terms || 'Net 30');
         setReference(inv.reference || '');
@@ -355,8 +356,8 @@ export const InvoiceFormPage: React.FC = () => {
 
       const payload = {
         customer_id: customerId,
-        issue_date: invoiceDate || new Date().toISOString().split('T')[0],
-        due_date: dueDate || new Date().toISOString().split('T')[0],
+        issue_date: invoiceDate || todayIso(),
+        due_date: dueDate || todayIso(),
         currency: 'INR',
         discount_pct: 0,
         notes: customerNotes.trim() || undefined,

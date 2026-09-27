@@ -9,6 +9,7 @@ import { lazyNamed } from './lazyNamed';
 import { useAuth } from '../hooks/useAuth';
 import type { MemberRole } from '../types/api';
 import { ROLE_LABELS } from '../utils/format';
+import { postLoginRedirect } from '../utils/redirect';
 
 // Route components are code-split: each page downloads on first visit.
 const DashboardPage = lazyNamed(() => import('../pages/dashboard/DashboardPage'), 'DashboardPage');
@@ -167,6 +168,7 @@ function NotFoundPage() {
 /** Sends already-authenticated users away from the auth screens. */
 function PublicOnly({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -174,7 +176,9 @@ function PublicOnly({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  if (isAuthenticated) return <Navigate to="/dashboard" replace />;
+  // Signing in flips isAuthenticated before LoginPage can navigate, so this redirect decides
+  // where the user lands: honour the page ProtectedRoute sent them away from.
+  if (isAuthenticated) return <Navigate to={postLoginRedirect(location.state)} replace />;
   return <>{children}</>;
 }
 

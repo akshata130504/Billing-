@@ -20,6 +20,10 @@ os.environ["RAZORPAY_KEY_ID"] = ""
 os.environ["RAZORPAY_KEY_SECRET"] = ""
 os.environ["SMTP_HOST"] = ""
 os.environ["AUTH_RATE_LIMIT"] = "1000/minute"
+# Public limits are per (client IP, endpoint) - every TestClient request shares one IP, so the
+# production defaults would throttle unrelated tests. Rate-limit tests monkeypatch their own limit.
+os.environ["PUBLIC_RATE_LIMIT"] = "1000/minute"
+os.environ["PUBLIC_ACTION_RATE_LIMIT"] = "1000/minute"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

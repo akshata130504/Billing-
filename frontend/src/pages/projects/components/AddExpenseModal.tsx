@@ -5,6 +5,7 @@ import { Button } from '../../../components/common/Button';
 import { Input } from '../../../components/common/Input';
 import { Select } from '../../../components/common/Select';
 import { validatePositiveMoney, parseStrictNumber } from '../../../utils/validation';
+import { todayIso } from '../../../utils/format';
 
 interface AddExpenseModalProps {
   isOpen: boolean;
@@ -16,7 +17,7 @@ interface AddExpenseModalProps {
 export function AddExpenseModal({ isOpen, onClose, onAddExpense }: AddExpenseModalProps) {
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<ProjectExpense['category']>('Infrastructure');
-  const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(() => todayIso());
   const [amount, setAmount] = useState('5000');
   const [billable, setBillable] = useState(true);
   const [error, setError] = useState('');

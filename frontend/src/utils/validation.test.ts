@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  toE164Phone,
   parseStrictNumber,
   validateRequiredText,
   validateSensibleName,
@@ -328,5 +329,24 @@ describe('validateDateAfter', () => {
 
   it('accepts an expiry date strictly after issue date', () => {
     expect(validateDateAfter('2026-09-17', '2026-09-16', 'Expiry date', 'issue date')).toBeNull();
+  });
+});
+
+// Regression (browser QA): editing a customer whose stored phone is "+91 9871662963" made the
+// country-code field log a console error on every render (it only accepts E.164).
+describe('toE164Phone', () => {
+  it('keeps E.164 values unchanged', () => {
+    expect(toE164Phone('+919871662963')).toBe('+919871662963');
+  });
+  it('normalises spaced / dashed / national numbers', () => {
+    expect(toE164Phone('+91 9871662963')).toBe('+919871662963');
+    expect(toE164Phone('+91 98716-62963')).toBe('+919871662963');
+    expect(toE164Phone('98716 62963')).toBe('+919871662963');
+    expect(toE164Phone('(415) 555-2671', 'US')).toBe('+14155552671');
+  });
+  it('returns undefined for empty or unparseable input', () => {
+    expect(toE164Phone('')).toBeUndefined();
+    expect(toE164Phone(null)).toBeUndefined();
+    expect(toE164Phone('not a phone')).toBeUndefined();
   });
 });

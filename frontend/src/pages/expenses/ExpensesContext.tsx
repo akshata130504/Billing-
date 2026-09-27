@@ -4,6 +4,7 @@ import { expenseService } from '../../services/expenseService';
 import { tokenStorage } from '../../services/apiClient';
 import { useToast } from '../../components/common/Toast';
 import { toApiError } from '../../services/apiClient';
+import { todayIso } from '../../utils/format';
 
 /** Server message when there is one (e.g. "Customer not found"), else the fallback. */
 function errorMessage(err: unknown, fallback: string): string {
@@ -267,7 +268,7 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
       return addExpense({
         ...original,
         name: `${original.name} (Copy)`,
-        date: new Date().toISOString().split('T')[0],
+        date: todayIso(),
         status: 'draft',
         invoiceId: undefined,
         receipt: undefined,

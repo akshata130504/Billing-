@@ -197,6 +197,10 @@ def preview_subscription_change(
         "new_plan": {"id": new_plan.id, "name": new_plan.name, "unit_amount": str(new_price)},
         "old_quantity": str(old_qty),
         "new_quantity": str(new_qty),
+        # Per-cycle rates as billed (FLAT plans bill one unit, Plans & Pricing plans are
+        # re-priced by the pricing engine), so clients never recompute price x quantity.
+        "old_total_rate": str(calc.old_total_rate),
+        "new_total_rate": str(calc.new_total_rate),
         "period_start": period_start.isoformat(),
         "period_end": period_end.isoformat(),
         "effective_date": change_date.isoformat(),

@@ -7,7 +7,7 @@ import { Modal } from '../../components/common/Modal';
 import { useToast } from '../../components/common/Toast';
 import { timesheetService } from '../../services/timesheetService';
 import { customerService } from '../../services/customerService';
-import { formatMoney, formatDate } from '../../utils/format';
+import { formatMoney, formatDate, todayIso, toIsoDate } from '../../utils/format';
 
 interface GenerateInvoiceModalProps {
   isOpen: boolean;
@@ -32,11 +32,11 @@ export function GenerateInvoiceModal({
   const [loadingEntries, setLoadingEntries] = useState(false);
   const [generating, setGenerating] = useState(false);
 
-  const [issueDate, setIssueDate] = useState(new Date().toISOString().split('T')[0]);
+  const [issueDate, setIssueDate] = useState(todayIso());
   const [dueDate, setDueDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 30);
-    return d.toISOString().split('T')[0];
+    return toIsoDate(d);
   });
   const [notes, setNotes] = useState('Consulting & technical services for tracked timesheet entries.');
 

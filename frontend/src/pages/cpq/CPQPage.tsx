@@ -20,6 +20,7 @@ import { ErrorState } from '../../components/common/ErrorState';
 import { Pagination } from '../../components/common/Pagination';
 import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
+import { cpqDealActions } from './cpqDealActions';
 import { toApiError } from '../../services/apiClient';
 import { catalogCpqService } from '../../services/catalogCpqService';
 import { dashboardSummaryService } from '../../services/dashboardSummaryService';
@@ -32,8 +33,9 @@ const PAGE_SIZE = 20;
 export function CPQPage() {
   const navigate = useNavigate();
   const { showToast } = useToast();
-  const { hasRole } = useAuth();
+  const { hasRole, user } = useAuth();
   const canEdit = hasRole('finance');
+  const canApprove = hasRole('admin');
 
   const [deals, setDeals] = useState<CPQDealOut[]>([]);
   const [dealsTotal, setDealsTotal] = useState(0);
@@ -377,8 +379,11 @@ export function CPQPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">
+                      {(() => {
+                        const actions = cpqDealActions(deal, { userId: user?.id, canEdit, canApprove });
+                        return (
                       <div className="flex items-center justify-end gap-2">
-                        {canEdit && deal.status === 'pending_approval' && (
+                        {actions.showApprove && (
                           <Button
                             variant="outline"
                             size="sm"
@@ -388,8 +393,7 @@ export function CPQPage() {
                             Approve
                           </Button>
                         )}
-                        {deal.status !== 'converted' ? (
-                          canEdit ? (
+                        {actions.showConvert && (
                           <Button
                             variant="primary"
                             size="sm"
@@ -398,15 +402,17 @@ export function CPQPage() {
                           >
                             <FileText className="w-3.5 h-3.5" /> Convert to Quote
                           </Button>
-                          ) : (
-                            <span className="text-[11px] text-slate-400">View only</span>
-                          )
-                        ) : (
+                        )}
+                        {actions.note === 'Quote Generated' ? (
                           <span className="text-[11px] font-semibold text-blue-600 flex items-center gap-1">
                             <CheckCircle2 className="w-3.5 h-3.5" /> Quote Generated
                           </span>
-                        )}
+                        ) : actions.note ? (
+                          <span className="text-[11px] text-slate-400">{actions.note}</span>
+                        ) : null}
                       </div>
+                        );
+                      })()}
                     </td>
                   </tr>
                 ))

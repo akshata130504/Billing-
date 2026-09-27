@@ -902,12 +902,12 @@ def enable_totp(db: Session, ctx: CurrentContext, code: str) -> None:
     if user.totp_enabled_at is not None:
         raise ConflictError("Two-factor authentication is already enabled.")
     if not user.totp_secret:
-        raise ValidationAppError("Start two-factor setup first.", {"fields": {"code": "setup_required"}})
+        raise ValidationAppError("Start two-factor setup first.", {"fields": {"code": "Start two-factor setup first."}})
     try:
         _check_totp_code(db, user, code, ctx.ip_address, ctx.user_agent)
     except UnauthorizedError as exc:
         # A wrong code while signed in is a form error, not a lost session.
-        raise ValidationAppError(exc.message, {"fields": {"code": "invalid"}}) from exc
+        raise ValidationAppError(exc.message, {"fields": {"code": exc.message}}) from exc
     user.totp_enabled_at = utcnow()
     audit.record(
         db,
@@ -925,11 +925,11 @@ def disable_totp(db: Session, ctx: CurrentContext, password: str, code: str) -> 
     if user.totp_enabled_at is None:
         raise ConflictError("Two-factor authentication is not enabled.")
     if not verify_password(password, user.hashed_password):
-        raise ValidationAppError("The password is incorrect.", {"fields": {"password": "incorrect"}})
+        raise ValidationAppError("The password is incorrect.", {"fields": {"password": "The password is incorrect."}})
     try:
         _check_totp_code(db, user, code, ctx.ip_address, ctx.user_agent)
     except UnauthorizedError as exc:
-        raise ValidationAppError(exc.message, {"fields": {"code": "invalid"}}) from exc
+        raise ValidationAppError(exc.message, {"fields": {"code": exc.message}}) from exc
     user.totp_secret = None
     user.totp_enabled_at = None
     user.totp_last_used_step = None
@@ -1077,12 +1077,14 @@ def change_password(
 ) -> None:
     if not verify_password(current_password, ctx.user.hashed_password):
         raise ValidationAppError(
-            "The current password is incorrect.", {"fields": {"current_password": "incorrect"}}
+            "The current password is incorrect.",
+            {"fields": {"current_password": "The current password is incorrect."}},
         )
     _password_problem(new_password, "new_password")
     if verify_password(new_password, ctx.user.hashed_password):
         raise ValidationAppError(
-            "The new password must differ from the current one.", {"fields": {"new_password": "unchanged"}}
+            "The new password must differ from the current one.",
+            {"fields": {"new_password": "The new password must differ from the current one."}},
         )
     ctx.user.hashed_password = hash_password(new_password)
     ctx.user.failed_login_attempts = 0
@@ -1172,7 +1174,8 @@ def forgot_password(db: Session, email: str, ip: Optional[str], user_agent: Opti
 
 def reset_password(db: Session, raw_token: str, new_password: str, ip: Optional[str], user_agent: Optional[str]) -> None:
     invalid = ValidationAppError(
-        "This password reset link is invalid or has expired.", {"fields": {"token": "invalid_or_expired"}}
+        "This password reset link is invalid or has expired.",
+        {"fields": {"token": "This password reset link is invalid or has expired. Request a new link."}},
     )
     token = db.scalars(select(PasswordResetToken).where(PasswordResetToken.token_hash == hash_token(raw_token))).first()
     if token is None or token.used_at is not None or aware(token.expires_at) <= utcnow():

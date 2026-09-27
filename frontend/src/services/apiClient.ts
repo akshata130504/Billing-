@@ -135,6 +135,19 @@ export function fieldErrors(error: unknown): Record<string, string> {
   return fields && typeof fields === 'object' ? fields : {};
 }
 
+/**
+ * One readable sentence for forms that show a single banner instead of per-field errors.
+ * Request validation answers with a generic "The request contains invalid fields." and puts
+ * the real reason (e.g. "Pricing tiers overlap: ...") in `details.fields`; surface that.
+ */
+export function errorSummary(error: unknown): string {
+  const apiError = toApiError(error);
+  const reasons = Object.values(fieldErrors(error))
+    .filter((v): v is string => typeof v === 'string' && v.includes(' '))
+    .map((v) => v.replace(/^Value error,\s*/i, '').trim());
+  return reasons.length > 0 ? reasons.join(' ') : apiError.message;
+}
+
 // ---------------------------------------------------------------------------
 // Axios instance
 // ---------------------------------------------------------------------------
@@ -166,9 +179,24 @@ apiClient.interceptors.request.use((config) => {
 // A single in-flight refresh shared by every request that hits a 401 at once.
 let refreshPromise: Promise<AuthTokens> | null = null;
 
+/**
+ * Auth endpoints that do not run on the access token (credentials, one-time codes, the
+ * refresh itself) or that must not be replayed with a rotated token (logout). A 401 from
+ * one of these is a real answer, never a reason to refresh.
+ *
+ * Every other /auth/* call (/auth/me, /auth/sessions, /auth/2fa/*, /auth/change-password,
+ * /auth/switch-organization, ...) is an ordinary authenticated request: when its access token
+ * has expired or been superseded (logout on another device and password changes bump
+ * `tokens_valid_after`), it must refresh and retry like any other call. Treating those as
+ * "auth routes" logged the user out on the next page load (/auth/me 401 -> session cleared)
+ * even though their refresh token was still valid.
+ */
+const NO_REFRESH_AUTH_ROUTE =
+  /(^|\/)auth\/(login(\/mfa)?|refresh|logout|signup(\/[^?]*)?|forgot-password|reset-password|accept-invitation|invitations\/[^/?]+)(\?|$)/;
+
 function isAuthRoute(url: string | undefined): boolean {
   if (!url) return false;
-  return /\/auth\//.test(url) || url.startsWith('auth/') || url.startsWith('/auth/');
+  return NO_REFRESH_AUTH_ROUTE.test(url);
 }
 
 function performRefresh(): Promise<AuthTokens> {
@@ -218,11 +246,17 @@ apiClient.interceptors.response.use(
       tokenStorage.getRefreshToken()
     ) {
       config._retried = true;
+      const staleRefreshToken = tokenStorage.getRefreshToken();
       try {
         const tokens = await performRefresh();
         const headers = AxiosHeaders.from(config.headers);
         headers.set('Authorization', `Bearer ${tokens.access_token}`);
         config.headers = headers;
+        // A body that carries our own refresh token (change-password keeps "this" session by
+        // it) must carry the rotated one on the replay, or the server would keep the old row.
+        if (typeof config.data === 'string' && staleRefreshToken && config.data.includes(staleRefreshToken)) {
+          config.data = config.data.split(staleRefreshToken).join(tokens.refresh_token);
+        }
         return apiClient.request(config);
       } catch (refreshError) {
         forceLogout();

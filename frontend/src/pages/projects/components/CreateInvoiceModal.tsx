@@ -5,6 +5,7 @@ import { Button } from '../../../components/common/Button';
 import { Input } from '../../../components/common/Input';
 import { Select } from '../../../components/common/Select';
 import { parseStrictNumber } from '../../../utils/validation';
+import { toIsoDate } from '../../../utils/format';
 
 interface CreateInvoiceModalProps {
   isOpen: boolean;
@@ -18,7 +19,7 @@ interface CreateInvoiceModalProps {
 function isoToday(offsetDays = 0): string {
   const d = new Date();
   d.setDate(d.getDate() + offsetDays);
-  return d.toISOString().split('T')[0];
+  return toIsoDate(d);
 }
 
 export function CreateInvoiceModal({

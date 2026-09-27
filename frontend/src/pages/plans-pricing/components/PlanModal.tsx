@@ -3,6 +3,7 @@ import { X, Plus, Trash2, Calculator, CheckCircle2, AlertCircle } from 'lucide-r
 import { Button } from '../../../components/common/Button';
 import { validateSensibleName, validateSku, validatePercentage, validateNonNegativeMoney } from '../../../utils/validation';
 import { calculatePricePreview } from './planPricePreview';
+import { errorSummary } from '../../../services/apiClient';
 import type {
   PlanPricingItem,
   CreatePlanPricingInput,
@@ -140,8 +141,8 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
         pricing_tiers: (pricingModel === 'volume' || pricingModel === 'tiered' || pricingModel === 'package') && tiers.length > 0 ? tiers : undefined,
       });
       onClose();
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || err?.message || 'Failed to save plan');
+    } catch (err) {
+      setError(errorSummary(err) || 'Failed to save plan');
     } finally {
       setIsSubmitting(false);
     }

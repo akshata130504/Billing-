@@ -1,4 +1,6 @@
 import { apiClient } from './apiClient';
+import { downloadAuthenticated } from './download';
+import { paidAtForLocalDate } from '../utils/format';
 import type {
   Invoice,
   PaymentRecordIn,
@@ -98,7 +100,7 @@ export const invoiceService = {
     const methodStr = (data.payment_method || 'bank_transfer').toLowerCase();
     const res = await apiClient.post<any>(`/invoices/${id}/record-payment`, {
       amount: data.amount,
-      paid_at: data.payment_date ? `${data.payment_date}T00:00:00Z` : undefined,
+      paid_at: data.payment_date ? paidAtForLocalDate(data.payment_date) : undefined,
       method: methodStr,
       reference: data.reference_number || undefined,
       notes: data.notes || undefined,
@@ -117,5 +119,12 @@ export const invoiceService = {
 
   getDownloadPdfUrl(id: string): string {
     return `${apiClient.defaults.baseURL || '/api/v1'}/invoices/${id}/pdf`;
+  },
+
+  /** Download the backend-generated GST tax-invoice PDF (same document customers receive). */
+  async downloadPdf(id: string, invoiceNumber?: string): Promise<void> {
+    const url = this.getDownloadPdfUrl(id);
+    const safe = (invoiceNumber || id).replace(/[\\/]/g, '_');
+    await downloadAuthenticated(url, `Invoice-${safe}.pdf`);
   },
 };

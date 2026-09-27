@@ -379,6 +379,7 @@ class CPQDealOut(BaseModel):
     approved_by: Optional[str] = None
     approved_at: Optional[datetime] = None
     converted_quote_id: Optional[str] = None
+    created_by_id: Optional[str] = None
     notes: Optional[str] = None
     terms: Optional[str] = None
     items: List[CPQDealItemOut] = []

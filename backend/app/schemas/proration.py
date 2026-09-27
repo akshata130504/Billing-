@@ -37,6 +37,10 @@ class SubscriptionChangePreviewOut(BaseModel):
     new_plan: PlanRef
     old_quantity: str
     new_quantity: str
+    # Per-cycle rate actually billed before/after the change (not unit price x quantity:
+    # FLAT plans bill one unit and Plans & Pricing plans are re-priced per quantity).
+    old_total_rate: Optional[str] = None
+    new_total_rate: Optional[str] = None
     period_start: str
     period_end: str
     effective_date: str
