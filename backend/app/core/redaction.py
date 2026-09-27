@@ -138,6 +138,10 @@ def _redact_pair(match: re.Match[str]) -> str:
     value = match.group("v")
     bare_key = key.strip("'\"")
     norm = _KEY_NORMALIZE.sub("", bare_key.lower())
+    if value.strip("'\"").startswith(REDACTED[:-1]):
+        # Already redacted (alert text is redacted, then logged through the redacting filter):
+        # the value pattern stops at "]", so re-replacing would append a stray "]" each pass.
+        return match.group(0)
     if norm == "code":
         # Only OTP/TOTP-shaped codes; keep "code=BAD_REQUEST_ERROR" style error codes readable.
         raw = value.strip("'\"")

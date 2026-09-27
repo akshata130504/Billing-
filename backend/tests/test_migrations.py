@@ -16,7 +16,7 @@ def test_alembic_migrations_upgrade_and_downgrade(tmp_path):
     assert alembic_ini_path.exists(), f"Missing alembic.ini at {alembic_ini_path}"
 
     alembic_cfg = Config(str(alembic_ini_path))
-    alembic_cfg.set_main_option("sqlalchemy.url", test_db_url)
+    alembic_cfg.set_main_option("sqlalchemy.url", test_db_url.replace("%", "%%"))
     alembic_cfg.set_main_option("script_location", str(repo_root / "backend" / "alembic"))
 
     # Upgrade to head
@@ -72,7 +72,7 @@ def test_postgres_enums_match_python_enums():
     try:
         repo_root = Path(__file__).resolve().parents[2]
         cfg = Config(str(repo_root / "backend" / "alembic.ini"))
-        cfg.set_main_option("sqlalchemy.url", scratch_url.render_as_string(hide_password=False))
+        cfg.set_main_option("sqlalchemy.url", scratch_url.render_as_string(hide_password=False).replace("%", "%%"))
         cfg.set_main_option("script_location", str(repo_root / "backend" / "alembic"))
         command.upgrade(cfg, "head")
 
@@ -131,7 +131,7 @@ def test_postgres_enums_match_python_enums():
 def _alembic_config(url: str) -> Config:
     repo_root = Path(__file__).resolve().parents[2]
     cfg = Config(str(repo_root / "backend" / "alembic.ini"))
-    cfg.set_main_option("sqlalchemy.url", url)
+    cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
     cfg.set_main_option("script_location", str(repo_root / "backend" / "alembic"))
     return cfg
 

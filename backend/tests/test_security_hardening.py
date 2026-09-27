@@ -81,6 +81,16 @@ def test_redact_text_keeps_useful_context():
     assert "1234 5678 9012 3456" in redact_text("ref 1234 5678 9012 3456")
 
 
+def test_redact_text_is_idempotent():
+    """Alert text is redacted and then logged through the redacting filter: no stray ']'."""
+    from backend.app.core.redaction import redact_text
+
+    once = redact_text("login failed password=Sup3r-Secret-Pw! token: 'abc123def456' in summary")
+    assert "Sup3r-Secret-Pw!" not in once and "abc123def456" not in once
+    assert redact_text(once) == once
+    assert redact_text(redact_text(once)) == once
+
+
 def test_redact_data_nested():
     from backend.app.core.redaction import redact_data
 

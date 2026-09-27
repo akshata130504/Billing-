@@ -11,9 +11,13 @@ WORKDIR /src
 # VITE_API_BASE_URL is empty on purpose: the SPA then calls same-origin /api/v1 and
 # nginx proxies it to the backend container. Set an absolute URL only when the API
 # lives on a different origin (and add that origin to ALLOWED_ORIGINS).
+# VITE_SUPPORT_EMAIL is baked into the bundle at build time (Help > "Contact support").
+# CI passes the GitHub repository variable SUPPORT_EMAIL; empty = "contact your administrator".
+ARG VITE_SUPPORT_EMAIL=""
 ENV CI=true \
     VITE_API_BASE_URL="" \
-    VITE_APP_TITLE="Rooman Billing"
+    VITE_APP_TITLE="Rooman Billing" \
+    VITE_SUPPORT_EMAIL=${VITE_SUPPORT_EMAIL}
 
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund

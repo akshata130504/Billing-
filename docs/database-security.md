@@ -139,3 +139,22 @@ The verification ran on local PostgreSQL 18 with a `rb_owner_t` owner, a `rb_app
    - denial of DDL, TRUNCATE, CREATE and triggers (SQLSTATE 42501)
    - default privileges on a table the owner creates later
    - the real app booted with uvicorn as the runtime role: `/health/ready` returns 200, and login, `/auth/me` and customer create/list work
+
+### 2026-09-27 re-verification (branch feat/production-hardening-recovery)
+
+- **Least privilege:** `least_privilege.sql` applied twice (92/92 tables with DML, `runtime_can_create = f`);
+  `test_least_privilege.py` 21/21 passed as the runtime role. Then the whole demo seeder ran
+  through an API connected **only** as the runtime role (12 customers, 12 subscriptions,
+  48 invoices, 28 payments) and a scheduler pass (7 renewals, 10 overdue, 10 reminders):
+  0 `permission denied`, 0 HTTP 500.
+- **TLS:** a throwaway PostgreSQL 18 cluster with `ssl = on` and `hostnossl ... reject`, server
+  certificate signed by a private CA (SAN `localhost`). Results: `verify-full` + correct CA connects
+  (TLSv1.3); a rogue CA is refused (`certificate verify failed`); a hostname not in the SAN is refused
+  under `verify-full`; plaintext is rejected by the server; `alembic upgrade head` (29 migrations) and
+  the app engine work through `POSTGRES_SSLMODE=verify-full` + `POSTGRES_SSLROOTCERT`. The full
+  backend suite also ran against that TLS-only server.
+- **Encryption at rest:** stored integration credentials are Fernet ciphertext; a wrong key raises
+  `DecryptionError` without plaintext; `rotate --dry-run` / `rotate` re-encrypt to the new primary key
+  (exit 1 while any row is undecryptable); keys never appear in output or logs.
+- **Not verified here:** the production database's own TLS and roles - they need the server steps in
+  sections 1 and 2.

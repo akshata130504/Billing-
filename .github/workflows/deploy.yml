@@ -97,6 +97,9 @@ jobs:
           context: ./frontend
           file: frontend/Dockerfile
           push: true
+          # Public support mailbox shown on the Help page (repository variable, not a secret).
+          build-args: |
+            VITE_SUPPORT_EMAIL=${{ vars.SUPPORT_EMAIL }}
           tags: ${{ env.WEB_IMAGE }}:${{ env.DEPLOY_SHA }}
           labels: |
             org.opencontainers.image.revision=${{ env.DEPLOY_SHA }}

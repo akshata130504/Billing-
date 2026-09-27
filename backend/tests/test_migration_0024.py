@@ -22,7 +22,7 @@ NEW_COLUMNS = {
 def _cfg(url: str) -> Config:
     repo_root = Path(__file__).resolve().parents[2]
     cfg = Config(str(repo_root / "backend" / "alembic.ini"))
-    cfg.set_main_option("sqlalchemy.url", url)
+    cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
     cfg.set_main_option("script_location", str(repo_root / "backend" / "alembic"))
     return cfg
 
