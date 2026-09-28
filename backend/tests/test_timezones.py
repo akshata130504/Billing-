@@ -65,6 +65,9 @@ def test_audit_today_filter_finds_an_entry_logged_after_ist_midnight(client, ten
     """End to end: the bug that broke the audit log between 00:00 and 05:30 IST."""
     from backend.app.models import AuditLog
 
+    tenant.organization.timezone = "Asia/Kolkata"
+    db.commit()
+
     local_today = timezones.today_in(IST)
     # An entry written at 00:20 IST today == 18:50 UTC yesterday.
     created_utc = timezones.day_start_utc(local_today, IST) + timedelta(minutes=20)
