@@ -1,6 +1,7 @@
 """Dunning management service: recovery policies, cases, retries, final actions, and metrics."""
 from __future__ import annotations
 
+import calendar
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -1081,8 +1082,9 @@ def check_pre_dunning_expiring_cards(
         exp_year = c.exp_year or now_year
         exp_month = c.exp_month or now_month
 
-        # Calculate rough days until end of expiry month
-        card_exp_date = date(exp_year, exp_month, 28)
+        # Calculate days until end of expiry month
+        last_day = calendar.monthrange(exp_year, exp_month)[1]
+        card_exp_date = date(exp_year, exp_month, last_day)
         diff_days = (card_exp_date - today).days
 
         if 0 <= diff_days <= days_threshold:
