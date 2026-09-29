@@ -22,6 +22,7 @@ import type { ApiError } from '../../types/api';
 import type { PublicQuoteFull } from '../../types/public';
 import { formatDate, formatDateTime, formatMoney, formatPercent, parseMoney, todayIso } from '../../utils/format';
 import { PublicCard, PublicLoading, PublicMessage, PublicShell } from './PublicShell';
+import { isQuoteOpenForCustomer } from './quoteStatus';
 import {
   AddressBlock,
   ContactLink,
@@ -165,8 +166,12 @@ export function PublicQuotePage() {
   const cust = quote.customer;
   const currency = quote.currency;
   const expiredByDate = Boolean(quote.expiry_date && quote.expiry_date < todayIso());
+  // Opening this link moves a sent quote to "viewed"; both are open for the customer's answer
+  // (backend OPEN_FOR_CUSTOMER_STATUSES). Treating only "sent" as open meant every customer saw
+  // "This quote isn't ready yet" with no Accept / Decline buttons.
+  const openForCustomer = isQuoteOpenForCustomer(quote.status);
   // The backend flips sent -> expired on read, but guard client-side too.
-  const actionable = quote.status === 'sent' && !expiredByDate;
+  const actionable = openForCustomer && !expiredByDate;
 
   const meta: MetaItem[] = [
     { label: 'Issue date', value: formatDate(quote.issue_date) },
@@ -256,6 +261,7 @@ export function PublicQuotePage() {
           </InfoPanel>
         );
       case 'sent':
+      case 'viewed':
         if (expiredByDate) {
           return (
             <InfoPanel tone="warning" icon={<Hourglass className="w-5 h-5" />} title="This quote has expired">
@@ -286,7 +292,7 @@ export function PublicQuotePage() {
           logoUrl={org.logo_url}
           docLabel="Quote"
           docNumber={quote.quote_number}
-          status={expiredByDate && quote.status === 'sent' ? 'expired' : quote.status}
+          status={expiredByDate && openForCustomer ? 'expired' : quote.status}
         />
 
         {quote.title && (
