@@ -98,3 +98,121 @@ describe('normalizeBrackets', () => {
     ]);
   });
 });
+
+describe('calculatePricePreview — currency formatting and dynamic symbols', () => {
+  it('formats explanation note with the correct currency symbol for supported currencies', () => {
+    const currencies = [
+      { code: 'INR', symbol: '₹' },
+      { code: 'USD', symbol: '$' },
+      { code: 'EUR', symbol: '€' },
+      { code: 'GBP', symbol: '£' },
+      { code: 'AED', symbol: 'AED' },
+      { code: 'SGD', symbol: 'SGD' },
+      { code: 'AUD', symbol: 'A$' },
+      { code: 'CAD', symbol: 'CA$' },
+    ];
+
+    for (const { code, symbol } of currencies) {
+      const res = calculatePricePreview({
+        pricingModel: 'per_unit',
+        basePrice: 5500,
+        taxRatePct: 18,
+        tiers: [],
+        quantity: 5,
+        currency: code,
+      });
+
+      expect(res.subtotal).toBe(27500);
+      expect(res.tax).toBe(4950);
+      expect(res.total).toBe(32450);
+      expect(res.note).toBe(`5 units × ${symbol}5,500`);
+    }
+  });
+
+  it('changing currency after entering price and quantity updates the symbol without changing numeric amounts', () => {
+    const inputBase = {
+      pricingModel: 'per_unit' as const,
+      basePrice: 5500,
+      taxRatePct: 18,
+      tiers: [],
+      quantity: 5,
+    };
+
+    // User initially enters in INR
+    const inrPreview = calculatePricePreview({ ...inputBase, currency: 'INR' });
+    expect(inrPreview.subtotal).toBe(27500);
+    expect(inrPreview.tax).toBe(4950);
+    expect(inrPreview.total).toBe(32450);
+    expect(inrPreview.note).toBe('5 units × ₹5,500');
+
+    // User changes currency dropdown to USD ($)
+    const usdPreview = calculatePricePreview({ ...inputBase, currency: 'USD' });
+    // Numeric amounts must be identical (no FX conversion)
+    expect(usdPreview.subtotal).toBe(inrPreview.subtotal);
+    expect(usdPreview.tax).toBe(inrPreview.tax);
+    expect(usdPreview.total).toBe(inrPreview.total);
+    // Currency symbol must be updated to $
+    expect(usdPreview.note).toBe('5 units × $5,500');
+
+    // User changes currency to EUR (€)
+    const eurPreview = calculatePricePreview({ ...inputBase, currency: 'EUR' });
+    expect(eurPreview.subtotal).toBe(inrPreview.subtotal);
+    expect(eurPreview.note).toBe('5 units × €5,500');
+
+    // User changes currency to GBP (£)
+    const gbpPreview = calculatePricePreview({ ...inputBase, currency: 'GBP' });
+    expect(gbpPreview.subtotal).toBe(inrPreview.subtotal);
+    expect(gbpPreview.note).toBe('5 units × £5,500');
+  });
+
+  it('formats flat, volume, tiered, and package notes with the dynamic currency symbol', () => {
+    const tiers: PlanPricingTier[] = [
+      { min_qty: 1, max_qty: 10, unit_price: 100 },
+      { min_qty: 11, max_qty: 50, unit_price: 80 },
+    ];
+
+    // Flat in USD
+    const flat = calculatePricePreview({
+      pricingModel: 'flat',
+      basePrice: 2000,
+      taxRatePct: 0,
+      tiers: [],
+      quantity: 5,
+      currency: 'USD',
+    });
+    expect(flat.note).toBe('Fixed $2,000 regardless of quantity (5 units)');
+
+    // Volume in EUR
+    const volume = calculatePricePreview({
+      pricingModel: 'volume',
+      basePrice: 150,
+      taxRatePct: 0,
+      tiers,
+      quantity: 5,
+      currency: 'EUR',
+    });
+    expect(volume.note).toContain('@ €100/unit');
+
+    // Tiered in GBP
+    const tiered = calculatePricePreview({
+      pricingModel: 'tiered',
+      basePrice: 150,
+      taxRatePct: 0,
+      tiers,
+      quantity: 12,
+      currency: 'GBP',
+    });
+    expect(tiered.note).toContain('@ £100 + 2 @ £80');
+
+    // Package in USD
+    const pkg = calculatePricePreview({
+      pricingModel: 'package',
+      basePrice: 500,
+      taxRatePct: 0,
+      tiers: [{ package_qty: 10, package_price: 800 }],
+      quantity: 8,
+      currency: 'USD',
+    });
+    expect(pkg.note).toBe('Covered by package of 10 units for $800');
+  });
+});

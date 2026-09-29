@@ -1,4 +1,5 @@
 import type { PlanPricingModel, PlanPricingTier } from '../../../types/plans_pricing';
+import { currencySymbol } from '../../../utils/format';
 
 // Client-side price preview for the plan editor. Mirrors the bracket semantics of
 // backend/app/services/pricing_engine.py (calculate_line_item_pricing / _normalize_brackets):
@@ -10,6 +11,8 @@ export interface PricePreviewInput {
   taxRatePct: number;
   tiers: PlanPricingTier[];
   quantity: number;
+  /** Currency code (e.g. 'USD', 'INR', 'EUR', 'GBP'). */
+  currency?: string;
   /** Display symbol used in the explanation note. */
   symbol?: string;
 }
@@ -61,9 +64,12 @@ export function calculatePricePreview({
   taxRatePct,
   tiers,
   quantity: qty,
-  symbol = '₹',
+  currency = 'INR',
+  symbol,
 }: PricePreviewInput): PricePreview {
-  const money = (n: number) => `${symbol}${n.toLocaleString('en-IN')}`;
+  const sym = symbol ?? currencySymbol(currency);
+  const locale = currency === 'INR' ? 'en-IN' : 'en-US';
+  const money = (n: number) => `${sym}${n.toLocaleString(locale, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
   let subtotal = 0;
   let note = '';
 

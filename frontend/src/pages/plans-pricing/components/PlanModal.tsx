@@ -3,6 +3,7 @@ import { X, Plus, Trash2, Calculator, CheckCircle2, AlertCircle } from 'lucide-r
 import { Button } from '../../../components/common/Button';
 import { validateSensibleName, validateSku, validatePercentage, validateNonNegativeMoney } from '../../../utils/validation';
 import { calculatePricePreview } from './planPricePreview';
+import { currencySymbol } from '../../../utils/format';
 import { errorSummary } from '../../../services/apiClient';
 import type {
   PlanPricingItem,
@@ -11,6 +12,8 @@ import type {
   PlanBillingFrequency,
   PlanPricingTier,
 } from '../../../types/plans_pricing';
+
+const SUPPORTED_CURRENCIES = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD', 'AUD', 'CAD'];
 
 interface PlanModalProps {
   isOpen: boolean;
@@ -95,8 +98,21 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
     setTiers(updated);
   };
 
+  const sym = currencySymbol(currency);
+  const locale = currency === 'INR' ? 'en-IN' : 'en-US';
+  const formatPreview = (val: number) =>
+    `${sym}${val.toLocaleString(locale, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+
   // Live price preview (same bracket semantics as backend pricing_engine).
-  const preview = calculatePricePreview({ pricingModel, basePrice, taxRatePct, tiers, quantity: previewQty });
+  const preview = calculatePricePreview({
+    pricingModel,
+    basePrice,
+    taxRatePct,
+    tiers,
+    quantity: previewQty,
+    currency,
+    symbol: sym,
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -293,10 +309,11 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
                   onChange={(e) => setCurrency(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-hidden focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800"
                 >
-                  <option value="INR">INR (₹)</option>
-                  <option value="USD">USD ($)</option>
-                  <option value="EUR">EUR (€)</option>
-                  <option value="GBP">GBP (£)</option>
+                  {(SUPPORTED_CURRENCIES.includes(currency) ? SUPPORTED_CURRENCIES : [currency, ...SUPPORTED_CURRENCIES]).map((c) => (
+                    <option key={c} value={c}>
+                      {c} ({currencySymbol(c)})
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -331,7 +348,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  {pricingModel === 'flat' ? 'Fixed Flat Rate (₹)' : 'Catalog Base Rate (₹)'}
+                  {pricingModel === 'flat' ? `Fixed Flat Rate (${sym})` : `Catalog Base Rate (${sym})`}
                 </label>
                 <input
                   type="number"
@@ -393,7 +410,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
 
                 {tiers.length === 0 ? (
                   <p className="text-xs text-slate-400 italic py-2 text-center">
-                    No custom tiers added yet. Default base price of ₹{basePrice} will apply.
+                    No custom tiers added yet. Default base price of {sym}{basePrice} will apply.
                   </p>
                 ) : (
                   <div className="space-y-2">
@@ -414,7 +431,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
                               />
                             </div>
                             <div className="flex-1 flex items-center gap-2">
-                              <span className="text-slate-500 text-[11px]">Package Price (₹):</span>
+                              <span className="text-slate-500 text-[11px]">Package Price ({sym}):</span>
                               <input
                                 type="number"
                                 min="0"
@@ -452,7 +469,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
                               />
                             </div>
                             <div className="flex-1 flex items-center gap-1 justify-end">
-                              <span className="text-slate-500 text-[11px]">Rate (₹/unit):</span>
+                              <span className="text-slate-500 text-[11px]">Rate ({sym}/unit):</span>
                               <input
                                 type="number"
                                 min="0"
@@ -506,15 +523,15 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs bg-white p-3 rounded-lg border border-emerald-100">
               <div>
                 <p className="text-slate-400 text-[11px]">Calculated Subtotal</p>
-                <p className="font-bold text-slate-900 text-sm">₹{preview.subtotal.toLocaleString('en-IN')}</p>
+                <p className="font-bold text-slate-900 text-sm">{formatPreview(preview.subtotal)}</p>
               </div>
               <div>
                 <p className="text-slate-400 text-[11px]">Taxes ({taxRatePct}% GST)</p>
-                <p className="font-bold text-slate-900 text-sm">₹{preview.tax.toLocaleString('en-IN')}</p>
+                <p className="font-bold text-slate-900 text-sm">{formatPreview(preview.tax)}</p>
               </div>
               <div>
                 <p className="text-slate-400 text-[11px]">Final Total Amount</p>
-                <p className="font-bold text-emerald-600 text-base">₹{preview.total.toLocaleString('en-IN')}</p>
+                <p className="font-bold text-emerald-600 text-base">{formatPreview(preview.total)}</p>
               </div>
             </div>
             <p className="text-[11px] text-emerald-700 font-medium italic">
