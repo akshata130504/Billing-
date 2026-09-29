@@ -105,7 +105,8 @@ def _apply_approved_effect(db: Session, ctx: CurrentContext, approval: ApprovalR
         payload["approved_discount_pct"] = str(requested if requested is not None else quote.discount_pct)
         approval.payload = payload
         if quote.status == QuoteStatus.PENDING_APPROVAL:
-            quote_service.mark_sent(db, quote, ctx.organization, ctx)
+            # Internal authorisation only: the quote becomes `approved` and staff send it next.
+            quote_service.mark_approved(db, quote, ctx)
         return
     if approval.type == ApprovalType.REFUND:
         # Money moves here. If the effect cannot run, fail the approval rather than

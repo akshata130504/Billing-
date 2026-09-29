@@ -472,7 +472,7 @@ def test_concurrent_quote_conversion_issues_one_invoice(client, tenant, db):
     assert res.status_code == 201, res.text
     qid = res.json()["id"]
     assert client.post(f"/api/v1/quotes/{qid}/send", headers=headers).status_code == 200
-    assert client.post(f"/api/v1/quotes/{qid}/mark-accepted", headers=headers, json={}).status_code == 200
+    assert client.post(f"/api/v1/quotes/{qid}/mark-accepted", headers=headers, json={"reason": "Signed PDF received"}).status_code == 200
 
     def convert(_i):
         return thread_client().post(f"/api/v1/quotes/{qid}/convert", headers=headers, json={}).status_code

@@ -270,7 +270,7 @@ def test_6_to_8_quote_lifecycle_and_conversion_to_invoice(db: Session, org_and_u
     with pytest.raises(ForbiddenError):
         quote_service.approve_quote(db, ctx, quote.id)
 
-    # Another admin approves -> routed through approval_service, which sends the quote
+    # Another admin approves -> routed through approval_service; approval authorises, it does not send
     reviewer = User(email=f"reviewer_{uuid.uuid4().hex[:8]}@example.com", full_name="Reviewer", is_active=True)
     db.add(reviewer)
     db.flush()
@@ -282,14 +282,19 @@ def test_6_to_8_quote_lifecycle_and_conversion_to_invoice(db: Session, org_and_u
         user=reviewer, organization=org, membership=reviewer_membership, ip_address=None, user_agent=None
     )
     quote = quote_service.approve_quote(db, reviewer_ctx, quote.id)
+    assert quote.status == QuoteStatus.APPROVED
+    assert quote.accepted_at is None
+
+    # Staff send the approved quote
+    quote = quote_service.send_quote(db, ctx, quote.id)
     assert quote.status == QuoteStatus.SENT
 
     # Mark viewed
     quote = quote_service.mark_viewed(db, ctx, quote.id)
     assert quote.status == QuoteStatus.VIEWED
 
-    # Accept
-    quote = quote_service.mark_accepted(db, ctx, quote.id)
+    # The customer accepts on the hosted link
+    quote = quote_service.public_accept(db, quote.public_token, "E2E Customer")
     assert quote.status == QuoteStatus.ACCEPTED
 
     # TEST 8: Convert Quote to Invoice

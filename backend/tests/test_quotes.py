@@ -158,7 +158,7 @@ def test_mark_accepted_declined_and_convert(client, tenant, auth_headers, db):
     # cannot convert before acceptance
     assert client.post(f"{BASE}/{quote['id']}/convert", json={}, headers=auth_headers).status_code == 409
 
-    resp = client.post(f"{BASE}/{quote['id']}/mark-accepted", json={}, headers=auth_headers)
+    resp = client.post(f"{BASE}/{quote['id']}/mark-accepted", json={"reason": "Signed PDF received"}, headers=auth_headers)
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "accepted"
     assert resp.json()["accepted_at"] is not None
@@ -193,10 +193,10 @@ def test_mark_accepted_declined_and_convert(client, tenant, auth_headers, db):
     resp = client.post(f"{BASE}/{declined['id']}/mark-declined", json={"reason": "too pricey"}, headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json()["status"] == "declined"
-    log = db.query(AuditLog).filter_by(entity_id=declined["id"], action="QUOTE_DECLINED").one()
+    log = db.query(AuditLog).filter_by(entity_id=declined["id"], action="QUOTE_DECLINED_OVERRIDE").one()
     assert log.after_state["reason"] == "too pricey"
     # declined quote cannot be accepted
-    assert client.post(f"{BASE}/{declined['id']}/mark-accepted", json={}, headers=auth_headers).status_code == 409
+    assert client.post(f"{BASE}/{declined['id']}/mark-accepted", json={"reason": "Signed PDF received"}, headers=auth_headers).status_code == 409
 
 
 def test_delete_draft_quote(client, tenant, auth_headers, db):
@@ -259,8 +259,11 @@ def test_public_quote_page_accept_and_decline(client, tenant, auth_headers, db):
     assert log.actor_label == "Customer (hosted page)"
     assert log.actor_user_id is None
     assert log.after_state["accepted_by_name"] == "Priya S"
-    # second accept is rejected
-    assert client.post(f"{PUBLIC}/{token}/accept", json={"accepted_by_name": "Again"}).status_code == 409
+    # a repeated accept (double click / retry) is idempotent: same answer, no second audit row
+    again = client.post(f"{PUBLIC}/{token}/accept", json={"accepted_by_name": "Again"})
+    assert again.status_code == 200, again.text
+    assert again.json() == {"status": "accepted"}
+    assert db.query(AuditLog).filter_by(entity_id=quote["id"], action="QUOTE_ACCEPTED").count() == 1
 
     other = _sent_quote(client, auth_headers, customer)
     other_token = other["public_url"].rsplit("/", 1)[1]
@@ -274,7 +277,7 @@ def test_public_quote_page_accept_and_decline(client, tenant, auth_headers, db):
 def test_actions_on_draft_are_invalid_state(client, tenant, auth_headers, path):
     customer = tenant.customer()
     quote = _create(client, auth_headers, customer)
-    resp = client.post(f"{BASE}/{quote['id']}/{path}", json={}, headers=auth_headers)
+    resp = client.post(f"{BASE}/{quote['id']}/{path}", json={"reason": "Signed PDF received"}, headers=auth_headers)
     assert resp.status_code == 409
     assert resp.json()["error"]["code"] == "INVALID_STATE"
 
@@ -316,7 +319,7 @@ def test_approved_discount_is_an_upper_bound(client, tenant, auth_headers, db):
     admin = _admin_headers(tenant, db)
     approved = client.post(f"{BASE}/{quote['id']}/approve", json={}, headers=admin)
     assert approved.status_code == 200, approved.text
-    assert approved.json()["status"] == "sent"
+    assert approved.json()["status"] == "approved"
     approval = db.get(ApprovalRequest, pending["approval_request_id"])
     db.refresh(approval)
     assert approval.payload["approved_discount_pct"] == "25.00"
@@ -356,14 +359,14 @@ def test_viewed_quotes_can_be_accepted_publicly_and_expire(client, tenant, auth_
     db.refresh(row)
     row.expiry_date = date.today() - timedelta(days=1)
     db.commit()
-    assert client.post(f"{BASE}/{stale['id']}/mark-accepted", json={}, headers=auth_headers).status_code == 409
+    assert client.post(f"{BASE}/{stale['id']}/mark-accepted", json={"reason": "Signed PDF received"}, headers=auth_headers).status_code == 409
     assert client.get(f"{BASE}/{stale['id']}", headers=auth_headers).json()["status"] == "expired"
 
 
 def test_convert_is_single_shot(client, tenant, auth_headers, db):
     customer = tenant.customer()
     quote = _sent_quote(client, auth_headers, customer)
-    client.post(f"{BASE}/{quote['id']}/mark-accepted", json={}, headers=auth_headers)
+    client.post(f"{BASE}/{quote['id']}/mark-accepted", json={"reason": "Signed PDF received"}, headers=auth_headers)
     first = client.post(f"{BASE}/{quote['id']}/convert", json={}, headers=auth_headers)
     assert first.status_code == 201, first.text
     second = client.post(f"{BASE}/{quote['id']}/convert", json={}, headers=auth_headers)

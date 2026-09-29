@@ -50,8 +50,14 @@ def record(
     before: Optional[Dict[str, Any]] = None,
     after: Optional[Dict[str, Any]] = None,
     status: AuditStatus = AuditStatus.SUCCESS,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
 ) -> AuditLog:
-    """Add an audit row to the current transaction (caller commits)."""
+    """Add an audit row to the current transaction (caller commits).
+
+    ``ip_address``/``user_agent`` attribute unauthenticated actors (e.g. a customer on a hosted page);
+    when omitted they come from ``ctx``.
+    """
     entry = AuditLog(
         organization_id=organization_id or (ctx.organization_id if ctx else None),
         actor_user_id=ctx.user.id if ctx else None,
@@ -63,8 +69,8 @@ def record(
         status=status,
         before_state=_jsonable(before) if before is not None else None,
         after_state=_jsonable(after) if after is not None else None,
-        ip_address=ctx.ip_address if ctx else None,
-        user_agent=ctx.user_agent if ctx else None,
+        ip_address=ip_address or (ctx.ip_address if ctx else None),
+        user_agent=user_agent or (ctx.user_agent if ctx else None),
     )
     db.add(entry)
     return entry
