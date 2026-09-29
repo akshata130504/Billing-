@@ -4,6 +4,7 @@ to an invoice, and the public hosted quote page.
 All queries are tenant scoped; mutations audit and commit once per request.
 """
 import html as html_lib
+import re
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional, Sequence
@@ -306,17 +307,30 @@ def create_quote(db: Session, ctx: CurrentContext, data: QuoteCreate) -> Quote:
     _validate_refs(db, ctx.organization_id, data.items)
     supply = gst.resolve_supply(ctx.organization, customer)
     totals = compute_quote_totals(data.items, data.discount_pct, supply=supply)
+    issue_dt = data.issue_date or timezones.org_today(ctx.organization)
+    validity_days = None
+    if issue_dt and data.expiry_date:
+        diff = (data.expiry_date - issue_dt).days
+        if diff > 0:
+            validity_days = diff
+
+    terms_val = data.terms
+    if terms_val and validity_days:
+        terms_val = re.sub(r'(?i)Quote valid for \d+ days?', f'Quote valid for {validity_days} days', terms_val)
+    elif not terms_val and validity_days:
+        terms_val = f"1. Quote valid for {validity_days} days.\n2. Payment terms: 30 days from invoice date.\n3. Taxes as applicable per Indian GST."
+
     quote = Quote(
         organization_id=ctx.organization_id,
         quote_number=next_number(db, ctx.organization_id, "quote"),
         customer_id=customer.id,
         status=QuoteStatus.DRAFT,
         title=data.title,
-        issue_date=data.issue_date or timezones.org_today(ctx.organization),
+        issue_date=issue_dt,
         expiry_date=data.expiry_date,
         currency=data.currency or customer.currency or ctx.organization.default_currency or "INR",
         notes=data.notes,
-        terms=data.terms,
+        terms=terms_val,
         created_by_id=ctx.user.id,
     )
     db.add(quote)
@@ -356,6 +370,14 @@ def update_quote(db: Session, ctx: CurrentContext, quote_id: str, data: QuoteUpd
         quote.issue_date = changes["issue_date"]
     if changes.get("currency"):
         quote.currency = changes["currency"]
+
+    if quote.issue_date and quote.expiry_date:
+        diff = (quote.expiry_date - quote.issue_date).days
+        if diff > 0:
+            if quote.terms:
+                quote.terms = re.sub(r'(?i)Quote valid for \d+ days?', f'Quote valid for {diff} days', quote.terms)
+            else:
+                quote.terms = f"1. Quote valid for {diff} days.\n2. Payment terms: 30 days from invoice date.\n3. Taxes as applicable per Indian GST."
 
     discount = changes["discount_pct"] if changes.get("discount_pct") is not None else quote.discount_pct
     quote_supply = gst.resolve_supply(ctx.organization, quote.customer)

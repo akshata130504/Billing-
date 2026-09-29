@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { quoteService } from '../../services/quoteService';
 import type { Quote } from '../../types/quotes';
+import { calculateValidityDays, formatQuoteTerms, updateTermsValidity } from '../../utils/format';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
 import { Modal } from '../../components/common/Modal';
@@ -41,6 +42,13 @@ export const QuoteDetailPage = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [showSendConfirm, setShowSendConfirm] = useState(false);
+
+  const validityDays = quote ? calculateValidityDays(quote.issue_date || quote.quote_date, quote.expiry_date) : null;
+  const displayTerms = quote
+    ? (quote.terms
+        ? (validityDays ? updateTermsValidity(quote.terms, validityDays) : quote.terms)
+        : (quote.terms_and_conditions || (validityDays ? formatQuoteTerms(validityDays) : null)))
+    : null;
 
   // Modals
   const [showRejectModal, setShowRejectModal] = useState(false);
@@ -536,7 +544,7 @@ export const QuoteDetailPage = () => {
             </div>
 
             {/* Terms and Notes */}
-            {(quote.notes || quote.customer_notes || quote.terms || quote.terms_and_conditions) && (
+            {(quote.notes || quote.customer_notes || displayTerms) && (
               <div className="mt-8 border-t border-gray-100 pt-6 grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
                 {(quote.notes || quote.customer_notes) && (
                   <div>
@@ -546,11 +554,11 @@ export const QuoteDetailPage = () => {
                     </p>
                   </div>
                 )}
-                {(quote.terms || quote.terms_and_conditions) && (
+                {displayTerms && (
                   <div>
                     <h4 className="font-semibold text-gray-900 mb-1">Terms & Conditions</h4>
                     <p className="text-gray-600 whitespace-pre-line text-xs bg-gray-50 p-3 rounded-lg border border-gray-100">
-                      {quote.terms || quote.terms_and_conditions}
+                      {displayTerms}
                     </p>
                   </div>
                 )}

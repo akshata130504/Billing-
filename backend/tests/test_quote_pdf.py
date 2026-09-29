@@ -315,3 +315,36 @@ def test_quote_pdf_unauthorized(client, tenant, db):
     quote = _create_sample_quote(tenant, db)
     resp = client.get(f"/api/v1/quotes/{quote.id}/pdf")
     assert resp.status_code == 401
+
+
+@pytest.mark.parametrize("validity_days", [7, 15, 30, 60, 90])
+def test_quote_pdf_dynamic_terms_validity(client, tenant, auth_headers, db, validity_days):
+    quote = _create_sample_quote(tenant, db)
+    quote.issue_date = date.today()
+    quote.expiry_date = date.today() + timedelta(days=validity_days)
+    # Stored terms might have the old default 30 days or dynamic
+    quote.terms = (
+        "1. Quote valid for 30 days.\n"
+        "2. Payment terms: 30 days from invoice date.\n"
+        "3. Taxes as applicable per Indian GST."
+    )
+    db.commit()
+
+    resp = client.get(f"/api/v1/quotes/{quote.id}/pdf", headers=auth_headers)
+    assert resp.status_code == 200
+
+    pdf_text = _extract_pdf_text(resp.content)
+
+    # 1. Terms must dynamically say "Quote valid for {validity_days} days"
+    assert f"Quote valid for {validity_days} days" in pdf_text
+
+    # 2. For non-30-day quotes, the validity line must NOT say "Quote valid for 30 days"
+    if validity_days != 30:
+        assert "Quote valid for 30 days" not in pdf_text
+
+    # 3. Payment terms must be preserved untouched
+    assert "Payment terms: 30 days from invoice date." in pdf_text
+
+    # 4. GST terms must be preserved untouched
+    assert "Taxes as applicable per Indian GST." in pdf_text
+
