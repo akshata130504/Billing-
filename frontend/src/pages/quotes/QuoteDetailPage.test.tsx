@@ -128,7 +128,7 @@ describe('<QuoteDetailPage /> internal workflow', () => {
       .mockResolvedValueOnce(
         makeQuote({
           status: 'accepted',
-          customer_decision: { outcome: 'accepted', actor_type: 'staff', name: 'Admin User', reason: 'Signed PDF received', at: '2026-09-02T09:00:00Z' },
+          customer_decision: { outcome: 'accepted', actor_type: 'staff', title: 'Marked accepted by admin', actor_display: 'Admin User', name: 'Admin User', reason: 'Signed PDF received', at: '2026-09-02T09:00:00Z' },
         })
       );
     vi.mocked(quoteService.overrideAccept).mockResolvedValue(makeQuote({ status: 'accepted' }));
@@ -142,7 +142,9 @@ describe('<QuoteDetailPage /> internal workflow', () => {
     fireEvent.click(record);
 
     await waitFor(() => expect(quoteService.overrideAccept).toHaveBeenCalledWith('q-1', 'Signed PDF received'));
-    expect(await screen.findByText('Acceptance recorded by admin override')).toBeInTheDocument();
+    expect(await screen.findByText('Marked accepted by admin')).toBeInTheDocument();
+    expect(screen.getByText('Admin: Admin User')).toBeInTheDocument();
+    expect(screen.queryByText(/by customer/i)).not.toBeInTheDocument();
     expect(screen.getByText('Reason: Signed PDF received')).toBeInTheDocument();
   });
 
@@ -161,12 +163,13 @@ describe('<QuoteDetailPage /> internal workflow', () => {
       makeQuote({
         status: 'accepted',
         accepted_at: '2026-09-02T09:00:00Z',
-        customer_decision: { outcome: 'accepted', actor_type: 'customer', name: 'Priya Sharma', reason: null, at: '2026-09-02T09:00:00Z' },
+        customer_decision: { outcome: 'accepted', actor_type: 'customer', title: 'Accepted by customer', actor_display: 'Priya Sharma (Acme Corp)', name: 'Priya Sharma', reason: null, at: '2026-09-02T09:00:00Z' },
       })
     );
     renderPage();
     expect(await screen.findByText('Accepted by customer')).toBeInTheDocument();
-    expect(screen.getByText('Priya Sharma via quote link')).toBeInTheDocument();
+    expect(screen.getByText('Priya Sharma (Acme Corp) via quote link')).toBeInTheDocument();
+    expect(screen.queryByText(/by admin/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Awaiting customer response')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /admin override/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /convert to invoice/i })).toBeInTheDocument();
@@ -176,12 +179,31 @@ describe('<QuoteDetailPage /> internal workflow', () => {
     getQuote().mockResolvedValue(
       makeQuote({
         status: 'declined',
-        customer_decision: { outcome: 'declined', actor_type: 'customer', name: null, reason: 'Over budget', at: '2026-09-02T09:00:00Z' },
+        customer_decision: { outcome: 'declined', actor_type: 'customer', title: 'Declined by customer', actor_display: 'Acme Corp', name: null, reason: 'Over budget', at: '2026-09-02T09:00:00Z' },
       })
     );
     renderPage();
     expect(await screen.findByText('Declined by customer')).toBeInTheDocument();
     expect(screen.getByText('Reason: Over budget')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /convert to invoice/i })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['declined', 'staff', 'Marked declined by admin', 'Admin: Olivia Owner', 'Customer said no by phone'],
+    ['accepted', 'customer', 'Accepted by customer', 'Priya Sharma (Acme Corp) via quote link', null],
+    ['accepted', 'staff', 'Marked accepted by admin', 'Admin: Olivia Owner', 'Signed PDF received'],
+    ['declined', 'customer', 'Declined by customer', 'Acme Corp via quote link', 'Over budget'],
+  ] as const)('%s by %s reads "%s"', async (outcome, actorType, title, actorLine, reason) => {
+    const actor = actorType === 'customer' ? (outcome === 'accepted' ? 'Priya Sharma (Acme Corp)' : 'Acme Corp') : 'Olivia Owner';
+    getQuote().mockResolvedValue(
+      makeQuote({
+        status: outcome,
+        customer_decision: { outcome, actor_type: actorType, title, actor_display: actor, name: actor, reason, at: '2026-09-02T09:00:00Z' },
+      })
+    );
+    renderPage();
+    expect(await screen.findByText(title)).toBeInTheDocument();
+    expect(screen.getByText(actorLine)).toBeInTheDocument();
+    if (reason) expect(screen.getByText(`Reason: ${reason}`)).toBeInTheDocument();
   });
 });

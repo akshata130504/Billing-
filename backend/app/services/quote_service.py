@@ -1198,18 +1198,60 @@ def customer_decision(db: Session, quote: Quote) -> Optional[Dict[str, Any]]:
     ).first()
     if row is None:
         return None
+    described = describe_decision(row)
+    return {
+        "outcome": described["outcome"],
+        "actor_type": described["actor_type"],
+        "title": described["title"],
+        "actor_display": described["actor_display"],
+        "name": described["name"],
+        "reason": described["reason"],
+        "at": iso_dt(row.created_at),
+    }
+
+
+_DECISION_TITLES = {
+    ("accepted", "customer"): "Accepted by customer",
+    ("declined", "customer"): "Declined by customer",
+    ("accepted", "staff"): "Marked accepted by admin",
+    ("declined", "staff"): "Marked declined by admin",
+}
+
+
+def is_decision_action(action: Optional[str]) -> bool:
+    return action in _DECISION_ACTIONS
+
+
+def describe_decision(row: AuditLog) -> Dict[str, Any]:
+    """Presentation of an accept/decline audit row, attributed to whoever actually acted.
+
+    The single source of the wording used by the quote detail panel, the customer lifecycle timeline
+    and the activity feed: the customer's own decision on their link reads "Accepted/Declined by
+    customer"; an admin override reads "Marked accepted/declined by admin" with the admin and reason.
+    """
     outcome, actor_type = _DECISION_ACTIONS[row.action]
     after = row.after_state or {}
     # Rows written before actor_type was recorded were staff actions unless the hosted page wrote them.
     if actor_type == "customer" and row.actor_label != audit.CUSTOMER_ACTOR:
         actor_type = "staff"
-    name = after.get("accepted_by_name") if actor_type == "customer" else row.actor_label
+    if actor_type == "customer":
+        signer = after.get("accepted_by_name")
+        customer_name = after.get("customer_name")
+        name = signer
+        if signer and customer_name and signer != customer_name:
+            actor_display = f"{signer} ({customer_name})"
+        else:
+            actor_display = signer or customer_name or "Customer"
+    else:
+        name = row.actor_label
+        actor_display = row.actor_label or "Admin"
     return {
         "outcome": outcome,
         "actor_type": actor_type,
+        "title": _DECISION_TITLES[(outcome, actor_type)],
+        "actor_display": actor_display,
         "name": name,
         "reason": after.get("reason"),
-        "at": iso_dt(row.created_at),
     }
 
 
