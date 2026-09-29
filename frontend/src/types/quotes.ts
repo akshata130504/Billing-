@@ -80,6 +80,10 @@ export interface QuoteItemIn {
 export interface QuoteDecision {
   outcome: 'accepted' | 'declined';
   actor_type: 'customer' | 'staff';
+  /** "Accepted by customer" | "Declined by customer" | "Marked accepted by admin" | "Marked declined by admin". */
+  title?: string | null;
+  /** Who acted, e.g. "Priya Sharma (Acme Corp)" for the customer or the admin's name. */
+  actor_display?: string | null;
   /** The name the customer signed with, or the staff member who recorded the override. */
   name?: string | null;
   reason?: string | null;

@@ -564,9 +564,20 @@ def humanize_action(action: str) -> str:
 def activity_item(row: AuditLog) -> Dict[str, Any]:
     label = row.entity_label or (row.entity_type or "").title()
     description = f"{label} - {row.actor_label}" if label else row.actor_label
+    title = humanize_action(row.action)
+    from backend.app.services import quote_service
+
+    if row.entity_type == "quote" and quote_service.is_decision_action(row.action):
+        # Say who decided: the customer on their link, or an admin override (with its reason).
+        described = quote_service.describe_decision(row)
+        title = f"Quote {described['title'][:1].lower()}{described['title'][1:]}"
+        actor = described["actor_display"]
+        description = f"{label} - {actor}" if label else actor
+        if described["reason"]:
+            description = f"{description} - Reason: {described['reason']}"
     return {
         "id": row.id,
-        "title": humanize_action(row.action),
+        "title": title,
         "description": description,
         "timestamp": iso_dt(row.created_at),
         "category": activity_category(row.entity_type),

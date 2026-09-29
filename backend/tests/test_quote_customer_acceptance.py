@@ -195,7 +195,8 @@ def test_customer_declines_sent_quote_audited_as_customer(client, tenant, auth_h
     detail = client.get(f"{BASE}/{quote['id']}", headers=auth_headers).json()
     assert detail["status"] == "declined"
     assert detail["customer_decision"] == {
-        "outcome": "declined", "actor_type": "customer", "name": None, "reason": "Over budget",
+        "outcome": "declined", "actor_type": "customer", "title": "Declined by customer",
+        "actor_display": customer.display_name, "name": None, "reason": "Over budget",
         "at": detail["customer_decision"]["at"],
     }
 
@@ -404,3 +405,113 @@ def test_full_flow_approve_send_customer_accepts_then_owner_sees_it(client, tena
         assert actions.count(expected) == 1, (expected, actions)
     assert "QUOTE_ACCEPTED_OVERRIDE" not in actions
     assert db.query(Invoice).filter_by(quote_id=pending["id"]).count() == 0
+
+
+# --- presentation: who decided is shown as who decided -----------------------------------------------
+
+
+def _accept_as_customer(client, headers, customer, name="Priya Sharma"):
+    quote = _sent(client, headers, customer)
+    assert client.post(f"{PUBLIC}/{_token(quote)}/accept", json={"accepted_by_name": name}).status_code == 200
+    return quote
+
+
+def _timeline_for(client, headers, customer, quote):
+    resp = client.get(f"/api/v1/lifecycle/{customer.id}/timeline", headers=headers)
+    assert resp.status_code == 200, resp.text
+    return [e for e in resp.json() if e["related_entity_id"] == quote["id"] and e["event_type"] != "QUOTE_CREATED"]
+
+
+def _activity_for(client, headers, quote):
+    resp = client.get("/api/v1/activity", params={"category": "billing", "page_size": 100}, headers=headers)
+    assert resp.status_code == 200, resp.text
+    return [a for a in resp.json()["items"] if a["entity_id"] == quote["id"] and a["title"].startswith(("Quote accepted", "Quote declined", "Quote marked"))]
+
+
+def test_customer_acceptance_is_presented_as_the_customer(client, tenant, auth_headers, db):
+    customer = tenant.customer(display_name="Acme Corp")
+    quote = _accept_as_customer(client, auth_headers, customer)
+
+    decision = client.get(f"{BASE}/{quote['id']}", headers=auth_headers).json()["customer_decision"]
+    assert decision["title"] == "Accepted by customer"
+    assert decision["actor_display"] == "Priya Sharma (Acme Corp)"
+
+    (event,) = _timeline_for(client, auth_headers, customer, quote)
+    assert event["event_type"] == "QUOTE_ACCEPTED"
+    assert event["title"] == f"Quote #{quote['quote_number']}: Accepted by customer"
+    assert event["actor_label"] == "Customer: Priya Sharma (Acme Corp)"
+    assert "admin" not in (event["title"] + event["actor_label"]).lower()
+
+    (item,) = _activity_for(client, auth_headers, quote)
+    assert item["title"] == "Quote accepted by customer"
+    assert "Priya Sharma (Acme Corp)" in item["description"]
+
+
+def test_customer_decline_is_presented_as_the_customer_with_reason(client, tenant, auth_headers, db):
+    customer = tenant.customer(display_name="Globex Ltd")
+    quote = _sent(client, auth_headers, customer)
+    client.post(f"{PUBLIC}/{_token(quote)}/decline", json={"reason": "Over budget"})
+
+    decision = client.get(f"{BASE}/{quote['id']}", headers=auth_headers).json()["customer_decision"]
+    assert decision["title"] == "Declined by customer"
+    assert decision["actor_display"] == "Globex Ltd"
+    assert decision["reason"] == "Over budget"
+
+    (event,) = _timeline_for(client, auth_headers, customer, quote)
+    assert event["event_type"] == "QUOTE_DECLINED"
+    assert event["title"] == f"Quote #{quote['quote_number']}: Declined by customer"
+    assert event["actor_label"] == "Customer: Globex Ltd"
+    assert "Reason: Over budget" in event["description"]
+
+    (item,) = _activity_for(client, auth_headers, quote)
+    assert item["title"] == "Quote declined by customer"
+    assert "Reason: Over budget" in item["description"]
+
+
+@pytest.mark.parametrize(
+    "path,action,title",
+    [
+        ("mark-accepted", "QUOTE_ACCEPTED_OVERRIDE", "Marked accepted by admin"),
+        ("mark-declined", "QUOTE_DECLINED_OVERRIDE", "Marked declined by admin"),
+    ],
+)
+def test_admin_override_is_presented_as_the_admin_never_the_customer(client, tenant, auth_headers, db, path, action, title):
+    customer = tenant.customer(display_name="Initech")
+    quote = _sent(client, auth_headers, customer)
+    assert client.post(f"{BASE}/{quote['id']}/{path}", json=OVERRIDE, headers=auth_headers).status_code == 200
+    admin_name = tenant.owner.full_name
+
+    decision = client.get(f"{BASE}/{quote['id']}", headers=auth_headers).json()["customer_decision"]
+    assert decision["title"] == title
+    assert decision["actor_type"] == "staff"
+    assert decision["actor_display"] == admin_name
+    assert decision["reason"] == OVERRIDE["reason"]
+
+    (event,) = _timeline_for(client, auth_headers, customer, quote)
+    assert event["event_type"] == action
+    assert event["title"] == f"Quote #{quote['quote_number']}: {title}"
+    assert event["actor_label"] == f"Admin: {admin_name}"
+    assert f"Reason: {OVERRIDE['reason']}" in event["description"]
+    assert "customer" not in event["title"].lower()
+    assert not event["actor_label"].startswith("Customer")
+
+    (item,) = _activity_for(client, auth_headers, quote)
+    assert item["title"] == f"Quote {title[:1].lower()}{title[1:]}"
+    assert admin_name in item["description"]
+    assert f"Reason: {OVERRIDE['reason']}" in item["description"]
+    assert "by customer" not in item["title"]
+
+
+def test_legacy_acceptance_without_audit_row_claims_no_actor(client, tenant, auth_headers, db):
+    """Quotes accepted before decisions were audited must not be credited to the customer."""
+    customer = tenant.customer()
+    quote = _sent(client, auth_headers, customer)
+    row = db.get(Quote, quote["id"])
+    row.status = QuoteStatus.ACCEPTED
+    from backend.app.models import utcnow
+
+    row.accepted_at = utcnow()
+    db.commit()
+    (event,) = _timeline_for(client, auth_headers, customer, quote)
+    assert event["title"] == f"Quote #{quote['quote_number']} accepted"
+    assert event["actor_label"] == "Not recorded"

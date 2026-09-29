@@ -110,6 +110,9 @@ class QuoteDecisionOut(BaseModel):
 
     outcome: str  # accepted | declined
     actor_type: str  # customer | staff
+    # "Accepted by customer" | "Declined by customer" | "Marked accepted by admin" | "Marked declined by admin"
+    title: Optional[str] = None
+    actor_display: Optional[str] = None  # e.g. "Priya Sharma (Acme Corp)" or the admin's name
     name: Optional[str] = None  # the name the customer signed with, or the staff user
     reason: Optional[str] = None
     at: Optional[datetime] = None

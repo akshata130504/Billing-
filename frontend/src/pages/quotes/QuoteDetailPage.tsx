@@ -643,14 +643,15 @@ export const QuoteDetailPage = () => {
                     ) : (
                       <ShieldAlert className="w-4 h-4 text-amber-600" />
                     )}
-                    {decision.actor_type === 'customer'
-                      ? `${decision.outcome === 'accepted' ? 'Accepted' : 'Declined'} by customer`
-                      : `${decision.outcome === 'accepted' ? 'Acceptance' : 'Decline'} recorded by admin override`}
+                    {decision.title ||
+                      (decision.actor_type === 'customer'
+                        ? `${decision.outcome === 'accepted' ? 'Accepted' : 'Declined'} by customer`
+                        : `Marked ${decision.outcome} by admin`)}
                   </div>
                   <div className="font-medium text-gray-900 mt-0.5">
                     {decision.actor_type === 'customer'
-                      ? `${decision.name || quote.customer?.display_name || 'Customer'} via quote link`
-                      : decision.name || 'Staff'}
+                      ? `${decision.actor_display || decision.name || quote.customer?.display_name || 'Customer'} via quote link`
+                      : `Admin: ${decision.actor_display || decision.name || 'Staff'}`}
                   </div>
                   {decision.at && (
                     <div className="text-xs text-gray-400 mt-0.5">{new Date(decision.at).toLocaleString()}</div>
