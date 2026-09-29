@@ -7,6 +7,7 @@ rupee glyph because built-in Helvetica has no ₹ and a missing glyph renders as
 Reuses the same DocumentTemplate branding (colors, typography, layout, header/footer, logo)
 as the invoice PDF engine.
 """
+import re
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
@@ -321,7 +322,26 @@ def render_quote_pdf(quote, organization, template=None) -> bytes:
         story.append(_p(quote.notes, base))
         story.append(Spacer(1, 4 * mm))
 
-    terms_text = quote.terms or (getattr(template, "terms_and_conditions", None) if template else None)
+    validity_days = None
+    if getattr(quote, "issue_date", None) and getattr(quote, "expiry_date", None):
+        try:
+            diff = (quote.expiry_date - quote.issue_date).days
+            if diff > 0:
+                validity_days = diff
+        except Exception:
+            validity_days = None
+
+    raw_terms = quote.terms or (getattr(template, "terms_and_conditions", None) if template else None)
+    if raw_terms:
+        if validity_days:
+            terms_text = re.sub(r'(?i)Quote valid for \d+ days?', f'Quote valid for {validity_days} days', raw_terms)
+        else:
+            terms_text = raw_terms
+    elif validity_days:
+        terms_text = f"1. Quote valid for {validity_days} days.\n2. Payment terms: 30 days from invoice date.\n3. Taxes as applicable per Indian GST."
+    else:
+        terms_text = None
+
     if terms_text:
         story.append(_p("TERMS & CONDITIONS", section))
         story.append(_p(terms_text, base))

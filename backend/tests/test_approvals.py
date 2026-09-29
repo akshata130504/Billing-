@@ -51,7 +51,7 @@ def test_list_approvals_with_filters(client, tenant, auth_headers):
     assert client.get(BASE, headers=auth_headers, params={"type": "quote_discount", "status": "pending"}).json()["total"] == 1
 
 
-def test_approve_sends_quote(client, tenant, auth_headers, db):
+def test_approve_authorises_quote_then_staff_send_it(client, tenant, auth_headers, db):
     finance = tenant.headers_for_role(MemberRole.FINANCE)
     customer = tenant.customer()
     quote = _pending_quote(client, finance, customer)
@@ -68,13 +68,23 @@ def test_approve_sends_quote(client, tenant, auth_headers, db):
     assert body["reviewed_at"] is not None
     assert body["decision_note"] == "Strategic account"
 
+    # Approval is internal authorisation only: not sent, not accepted, no customer link yet.
     detail = client.get(f"{QUOTES}/{quote['id']}", headers=auth_headers).json()
-    assert detail["status"] == "sent"
-    assert detail["sent_at"] is not None
-    assert detail["public_url"]
+    assert detail["status"] == "approved"
+    assert detail["sent_at"] is None
+    assert detail["accepted_at"] is None
+    assert detail["public_url"] is None
     assert detail["approval_request_id"] == approval_id
-
     assert db.query(AuditLog).filter_by(entity_id=approval_id, action="APPROVAL_APPROVED").count() == 1
+    assert db.query(AuditLog).filter_by(entity_id=quote["id"], action="QUOTE_APPROVED").count() == 1
+    assert db.query(AuditLog).filter_by(entity_id=quote["id"], action="QUOTE_SENT").count() == 0
+
+    # Staff then send it; the recorded approval covers the discount, so no second approval.
+    sent = client.post(f"{QUOTES}/{quote['id']}/send", headers=finance)
+    assert sent.status_code == 200, sent.text
+    assert sent.json()["status"] == "sent"
+    assert sent.json()["sent_at"] is not None
+    assert sent.json()["public_url"]
     assert db.query(AuditLog).filter_by(entity_id=quote["id"], action="QUOTE_SENT").count() == 1
 
     # deciding twice is an invalid state

@@ -22,6 +22,7 @@ import type { ApiError } from '../../types/api';
 import type { PublicQuoteFull } from '../../types/public';
 import { formatDate, formatDateTime, formatMoney, formatPercent, parseMoney, todayIso } from '../../utils/format';
 import { PublicCard, PublicLoading, PublicMessage, PublicShell } from './PublicShell';
+import { isQuoteOpenForCustomer } from './quoteStatus';
 import {
   AddressBlock,
   ContactLink,
@@ -165,8 +166,12 @@ export function PublicQuotePage() {
   const cust = quote.customer;
   const currency = quote.currency;
   const expiredByDate = Boolean(quote.expiry_date && quote.expiry_date < todayIso());
+  // Opening this link moves a sent quote to "viewed"; both are open for the customer's answer
+  // (backend OPEN_FOR_CUSTOMER_STATUSES). Treating only "sent" as open meant every customer saw
+  // "This quote isn't ready yet" with no Accept / Decline buttons.
+  const openForCustomer = isQuoteOpenForCustomer(quote.status);
   // The backend flips sent -> expired on read, but guard client-side too.
-  const actionable = quote.status === 'sent' && !expiredByDate;
+  const actionable = openForCustomer && !expiredByDate;
 
   const meta: MetaItem[] = [
     { label: 'Issue date', value: formatDate(quote.issue_date) },
@@ -226,6 +231,8 @@ export function PublicQuotePage() {
           </InfoPanel>
         );
       case 'converted':
+      case 'invoiced':
+      case 'partially_invoiced':
         return (
           <InfoPanel tone="success" icon={<FileCheck2 className="w-5 h-5" />} title="Accepted and invoiced">
             {quote.accepted_at && <p>Accepted on {formatDateTime(quote.accepted_at)}.</p>}
@@ -256,6 +263,7 @@ export function PublicQuotePage() {
           </InfoPanel>
         );
       case 'sent':
+      case 'viewed':
         if (expiredByDate) {
           return (
             <InfoPanel tone="warning" icon={<Hourglass className="w-5 h-5" />} title="This quote has expired">
@@ -269,6 +277,8 @@ export function PublicQuotePage() {
         }
         return null;
       default:
+        // Only draft / pending_approval / approved land here. The customer link is minted when the
+        // quote is sent, so a normally-sent quote never shows this.
         return (
           <InfoPanel tone="info" icon={<Clock className="w-5 h-5" />} title="This quote isn't ready yet">
             <p>{org.name} is still finalising it. You'll be notified when it is ready to review.</p>
@@ -286,7 +296,7 @@ export function PublicQuotePage() {
           logoUrl={org.logo_url}
           docLabel="Quote"
           docNumber={quote.quote_number}
-          status={expiredByDate && quote.status === 'sent' ? 'expired' : quote.status}
+          status={expiredByDate && openForCustomer ? 'expired' : quote.status}
         />
 
         {quote.title && (
@@ -335,8 +345,15 @@ export function PublicQuotePage() {
                   >
                     Decline
                   </Button>
-                  <Button onClick={openAccept} disabled={submitting} leadingIcon={<CheckCircle2 className="w-4 h-4" />}>
-                    Accept quote
+                  <Button
+                    onClick={openAccept}
+                    disabled={submitting}
+                    leadingIcon={<CheckCircle2 className="w-4 h-4" />}
+                    aria-label="Accept quote"
+                  >
+                    {/* The full label is truncated in the half-width button on phones. */}
+                    <span className="sm:hidden">Accept</span>
+                    <span className="hidden sm:inline">Accept quote</span>
                   </Button>
                 </div>
               </div>
