@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   addDays,
+  calculateValidityDays,
   currencySymbol,
   formatDate,
   formatDateTime,
@@ -8,6 +9,7 @@ import {
   formatMoney,
   formatNumber,
   formatPercent,
+  formatQuoteTerms,
   formatRelative,
   humanize,
   initials,
@@ -16,6 +18,7 @@ import {
   toIsoDate,
   toMoneyString,
   todayIso,
+  updateTermsValidity,
 } from './format';
 
 // ICU shortens September to "Sep" or "Sept" depending on the ICU version bundled
@@ -379,5 +382,70 @@ describe('initials', () => {
     expect(initials('')).toBe('?');
     expect(initials('   ')).toBe('?');
     expect(initials(null, '--')).toBe('--');
+  });
+});
+
+describe('calculateValidityDays', () => {
+  it('calculates exact difference in calendar days', () => {
+    expect(calculateValidityDays('2026-09-28', '2026-10-05')).toBe(7);
+    expect(calculateValidityDays('2026-09-28', '2026-10-13')).toBe(15);
+    expect(calculateValidityDays('2026-09-28', '2026-10-28')).toBe(30);
+    expect(calculateValidityDays('2026-09-28', '2026-11-27')).toBe(60);
+    expect(calculateValidityDays('2026-09-28', '2026-12-27')).toBe(90);
+  });
+
+  it('returns null when expiry is not after issue date or dates are invalid', () => {
+    expect(calculateValidityDays('2026-09-28', '2026-09-28')).toBeNull();
+    expect(calculateValidityDays('2026-09-28', '2026-09-20')).toBeNull();
+    expect(calculateValidityDays(null, '2026-10-13')).toBeNull();
+    expect(calculateValidityDays('2026-09-28', null)).toBeNull();
+    expect(calculateValidityDays('invalid', '2026-10-13')).toBeNull();
+  });
+});
+
+describe('formatQuoteTerms', () => {
+  it('formats default terms with canonical validity tenure', () => {
+    expect(formatQuoteTerms(7)).toContain('Quote valid for 7 days.');
+    expect(formatQuoteTerms(15)).toContain('Quote valid for 15 days.');
+    expect(formatQuoteTerms(30)).toContain('Quote valid for 30 days.');
+    expect(formatQuoteTerms(60)).toContain('Quote valid for 60 days.');
+    expect(formatQuoteTerms(90)).toContain('Quote valid for 90 days.');
+    expect(formatQuoteTerms(15)).toContain('Payment terms: 30 days from invoice date.');
+    expect(formatQuoteTerms(15)).toContain('Taxes as applicable per Indian GST.');
+  });
+});
+
+describe('updateTermsValidity', () => {
+  it('updates the quote validity clause while preserving payment terms and taxes', () => {
+    const original = '1. Quote valid for 30 days.\n2. Payment terms: 30 days from invoice date.\n3. Taxes as applicable per Indian GST.';
+    const updated15 = updateTermsValidity(original, 15);
+    expect(updated15).toContain('Quote valid for 15 days');
+    expect(updated15).not.toContain('Quote valid for 30 days');
+    expect(updated15).toContain('Payment terms: 30 days from invoice date.');
+
+    const updated60 = updateTermsValidity(original, 60);
+    expect(updated60).toContain('Quote valid for 60 days');
+    expect(updated60).not.toContain('Quote valid for 30 days');
+
+    const updated90 = updateTermsValidity(original, 90);
+    expect(updated90).toContain('Quote valid for 90 days');
+    expect(updated90).not.toContain('Quote valid for 30 days');
+
+    const updated7 = updateTermsValidity(original, 7);
+    expect(updated7).toContain('Quote valid for 7 days');
+    expect(updated7).not.toContain('Quote valid for 30 days');
+  });
+
+  it('preserves custom additional clauses when updating validity', () => {
+    const custom = '1. Quote valid for 30 days.\n2. Payment terms: 45 days net.\n3. Custom SLA 99.99% applies.';
+    const updated = updateTermsValidity(custom, 15);
+    expect(updated).toContain('Quote valid for 15 days');
+    expect(updated).toContain('Payment terms: 45 days net.');
+    expect(updated).toContain('Custom SLA 99.99% applies.');
+  });
+
+  it('formats new terms if input is null or empty', () => {
+    expect(updateTermsValidity(null, 15)).toBe(formatQuoteTerms(15));
+    expect(updateTermsValidity('', 60)).toBe(formatQuoteTerms(60));
   });
 });

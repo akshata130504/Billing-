@@ -256,3 +256,35 @@ export function initials(name: string | null | undefined, fallback = '?'): strin
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
+
+/**
+ * Calculate calendar days between two ISO date strings (start to end).
+ * Returns positive integer or null if either date is invalid.
+ */
+export function calculateValidityDays(startIso: string | null | undefined, endIso: string | null | undefined): number | null {
+  const start = toDate(startIso);
+  const end = toDate(endIso);
+  if (!start || !end) return null;
+  const diffMs = end.getTime() - start.getTime();
+  const days = Math.round(diffMs / (1000 * 60 * 60 * 24));
+  return days > 0 ? days : null;
+}
+
+/**
+ * Format default terms with the canonical quote validity tenure.
+ */
+export function formatQuoteTerms(validityDays: number = 30): string {
+  return `1. Quote valid for ${validityDays} day${validityDays === 1 ? '' : 's'}.\n2. Payment terms: 30 days from invoice date.\n3. Taxes as applicable per Indian GST.`;
+}
+
+/**
+ * Update the quote validity line in terms while preserving all other custom text.
+ */
+export function updateTermsValidity(terms: string | null | undefined, validityDays: number): string {
+  if (!terms) return formatQuoteTerms(validityDays);
+  const pattern = /Quote valid for \d+ days?/i;
+  if (pattern.test(terms)) {
+    return terms.replace(pattern, `Quote valid for ${validityDays} day${validityDays === 1 ? '' : 's'}`);
+  }
+  return terms;
+}
