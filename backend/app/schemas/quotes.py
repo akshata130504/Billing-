@@ -73,9 +73,32 @@ class QuoteDeclineIn(BaseModel):
     reason: Optional[str] = Field(None, max_length=500)
 
 
+class QuoteOverrideIn(BaseModel):
+    """Admin override that records the customer's decision on their behalf (e.g. a signed PDF or
+    a phone call). The reason is mandatory so the audit trail says why staff, not the customer,
+    moved the quote."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    reason: str = Field(..., min_length=3, max_length=500)
+
+
 class QuoteConvertIn(BaseModel):
     issue_date: Optional[date] = None
     due_date: Optional[date] = None
+
+
+class QuoteDecisionOut(BaseModel):
+    """Who recorded the accept/decline: the customer on their link, or staff via admin override."""
+
+    outcome: str  # accepted | declined
+    actor_type: str  # customer | staff
+    # "Accepted by customer" | "Declined by customer" | "Marked accepted by admin" | "Marked declined by admin"
+    title: Optional[str] = None
+    actor_display: Optional[str] = None  # e.g. "Priya Sharma (Acme Corp)" or the admin's name
+    name: Optional[str] = None  # the name the customer signed with, or the staff user
+    reason: Optional[str] = None
+    at: Optional[datetime] = None
 
 
 class QuoteOut(BaseModel):
@@ -107,6 +130,8 @@ class QuoteOut(BaseModel):
     declined_at: Optional[datetime] = None
     converted_invoice_id: Optional[str] = None
     approval_request_id: Optional[str] = None
+    # Detail responses only: how the accept/decline was recorded (None until decided).
+    customer_decision: Optional[QuoteDecisionOut] = None
     # Only set on the send response: True when the customer email was handed to SMTP,
     # False when it could not be delivered (no email on file, SMTP off or failing).
     email_sent: Optional[bool] = None

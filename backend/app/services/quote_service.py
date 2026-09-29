@@ -4,6 +4,7 @@ to an invoice, and the public hosted quote page.
 All queries are tenant scoped; mutations audit and commit once per request.
 """
 import html as html_lib
+import re
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional, Sequence
@@ -20,6 +21,7 @@ from backend.app.models import (
     ApprovalRequest,
     ApprovalStatus,
     ApprovalType,
+    AuditLog,
     Customer,
     Invoice,
     InvoiceItem,
@@ -75,6 +77,13 @@ EDITABLE_STATUSES = (QuoteStatus.DRAFT, QuoteStatus.PENDING_APPROVAL, QuoteStatu
 SENDABLE_STATUSES = (QuoteStatus.DRAFT, QuoteStatus.APPROVED)
 # A customer can act on a quote that was sent, whether or not they opened it yet.
 OPEN_FOR_CUSTOMER_STATUSES = (QuoteStatus.SENT, QuoteStatus.VIEWED)
+# The customer already said yes; a repeated accept is answered with the current state, not an error.
+ACCEPTED_OUTCOME_STATUSES = (
+    QuoteStatus.ACCEPTED,
+    QuoteStatus.PARTIALLY_INVOICED,
+    QuoteStatus.INVOICED,
+    QuoteStatus.CONVERTED,
+)
 FINANCIAL_FIELDS = ("customer_id", "currency", "discount_pct", "items")
 
 
@@ -269,17 +278,30 @@ def create_quote(db: Session, ctx: CurrentContext, data: QuoteCreate) -> Quote:
     _validate_refs(db, ctx.organization_id, data.items)
     supply = gst.resolve_supply(ctx.organization, customer)
     totals = compute_quote_totals(data.items, data.discount_pct, supply=supply)
+    issue_dt = data.issue_date or date.today()
+    validity_days = None
+    if issue_dt and data.expiry_date:
+        diff = (data.expiry_date - issue_dt).days
+        if diff > 0:
+            validity_days = diff
+
+    terms_val = data.terms
+    if terms_val and validity_days:
+        terms_val = re.sub(r'(?i)Quote valid for \d+ days?', f'Quote valid for {validity_days} days', terms_val)
+    elif not terms_val and validity_days:
+        terms_val = f"1. Quote valid for {validity_days} days.\n2. Payment terms: 30 days from invoice date.\n3. Taxes as applicable per Indian GST."
+
     quote = Quote(
         organization_id=ctx.organization_id,
         quote_number=next_number(db, ctx.organization_id, "quote"),
         customer_id=customer.id,
         status=QuoteStatus.DRAFT,
         title=data.title,
-        issue_date=data.issue_date or date.today(),
+        issue_date=issue_dt,
         expiry_date=data.expiry_date,
         currency=data.currency or customer.currency or ctx.organization.default_currency or "INR",
         notes=data.notes,
-        terms=data.terms,
+        terms=terms_val,
         created_by_id=ctx.user.id,
     )
     db.add(quote)
@@ -319,6 +341,14 @@ def update_quote(db: Session, ctx: CurrentContext, quote_id: str, data: QuoteUpd
         quote.issue_date = changes["issue_date"]
     if changes.get("currency"):
         quote.currency = changes["currency"]
+
+    if quote.issue_date and quote.expiry_date:
+        diff = (quote.expiry_date - quote.issue_date).days
+        if diff > 0:
+            if quote.terms:
+                quote.terms = re.sub(r'(?i)Quote valid for \d+ days?', f'Quote valid for {diff} days', quote.terms)
+            else:
+                quote.terms = f"1. Quote valid for {diff} days.\n2. Payment terms: 30 days from invoice date.\n3. Taxes as applicable per Indian GST."
 
     discount = changes["discount_pct"] if changes.get("discount_pct") is not None else quote.discount_pct
     quote_supply = gst.resolve_supply(ctx.organization, quote.customer)
@@ -620,7 +650,35 @@ def send_quote(db: Session, ctx: CurrentContext, quote_id: str) -> Quote:
     return result
 
 
-def mark_accepted(db: Session, ctx: CurrentContext, quote_id: str) -> Quote:
+def mark_approved(db: Session, quote: Quote, ctx: CurrentContext) -> None:
+    """Internal authorisation: `pending_approval` -> `approved` (no commit).
+
+    Approval only clears the quote for sending; it is not sent, and it is never the customer's
+    acceptance. Staff send it afterwards with send_quote, which honours the recorded approval.
+    """
+    before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
+    if not _claim_transition(db, quote, (QuoteStatus.PENDING_APPROVAL,), QuoteStatus.APPROVED):
+        raise InvalidStateError("This quote was changed by someone else; reload and try again.")
+    db.flush()
+    audit.record(
+        db,
+        ctx=ctx,
+        action="QUOTE_APPROVED",
+        entity_type="quote",
+        entity_id=quote.id,
+        entity_label=quote.quote_number,
+        before=before,
+        after=audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS),
+    )
+
+
+def mark_accepted(db: Session, ctx: CurrentContext, quote_id: str, reason: Optional[str] = None) -> Quote:
+    """Admin override: record the customer's acceptance on their behalf (signed PDF, phone, ...).
+
+    The customer normally accepts on the hosted page (public_accept). This path is admin-only at
+    the API, requires a reason there, and is audited as QUOTE_ACCEPTED_OVERRIDE so it can never
+    be mistaken for the customer's own acceptance.
+    """
     quote = get_quote(db, ctx, quote_id)
     if quote.status not in OPEN_FOR_CUSTOMER_STATUSES:
         raise InvalidStateError(f"Only sent or viewed quotes can be accepted (current status '{enum_value(quote.status)}').")
@@ -633,34 +691,49 @@ def mark_accepted(db: Session, ctx: CurrentContext, quote_id: str) -> Quote:
     audit.record(
         db,
         ctx=ctx,
-        action="QUOTE_ACCEPTED",
+        action="QUOTE_ACCEPTED_OVERRIDE",
         entity_type="quote",
         entity_id=quote.id,
         entity_label=quote.quote_number,
         before=before,
-        after=audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS),
+        after={
+            **audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS),
+            "actor_type": "staff",
+            "override": True,
+            "decided_via": "admin_override",
+            "customer_id": quote.customer_id,
+            "reason": reason,
+        },
     )
     db.commit()
     return get_quote_or_404(db, ctx.organization_id, quote.id)
 
 
 def mark_declined(db: Session, ctx: CurrentContext, quote_id: str, reason: Optional[str] = None) -> Quote:
+    """Admin override: record the customer's decline on their behalf (see mark_accepted)."""
     quote = get_quote(db, ctx, quote_id)
-    if quote.status not in (QuoteStatus.SENT, QuoteStatus.VIEWED):
+    if quote.status not in OPEN_FOR_CUSTOMER_STATUSES:
         raise InvalidStateError(f"Only sent or viewed quotes can be declined (current status '{enum_value(quote.status)}').")
     before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
-    quote.status = QuoteStatus.DECLINED
-    quote.declined_at = utcnow()
+    if not _claim_transition(db, quote, OPEN_FOR_CUSTOMER_STATUSES, QuoteStatus.DECLINED, declined_at=utcnow()):
+        raise InvalidStateError("This quote was changed by someone else; reload and try again.")
     db.flush()
     audit.record(
         db,
         ctx=ctx,
-        action="QUOTE_DECLINED",
+        action="QUOTE_DECLINED_OVERRIDE",
         entity_type="quote",
         entity_id=quote.id,
         entity_label=quote.quote_number,
         before=before,
-        after={**audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS), "reason": reason},
+        after={
+            **audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS),
+            "actor_type": "staff",
+            "override": True,
+            "decided_via": "admin_override",
+            "customer_id": quote.customer_id,
+            "reason": reason,
+        },
     )
     db.commit()
     return get_quote_or_404(db, ctx.organization_id, quote.id)
@@ -777,11 +850,11 @@ def _create_invoice_from_quote(db: Session, ctx: CurrentContext, quote: Quote, d
 
 
 def approve_quote(db: Session, ctx: CurrentContext, quote_id: str, note: Optional[str] = None) -> Quote:
-    """Approve the quote's pending discount request.
+    """Approve the quote's pending discount request: `pending_approval` -> `approved`.
 
     Delegates to approval_service so the same guards apply as on /approvals (admin
-    role, no self-approval, one decision per request) and the approved effect (the
-    quote is sent to the customer) runs exactly once.
+    role, no self-approval, one decision per request) and the approved effect runs
+    exactly once. Approval does not send the quote; staff send it with send_quote.
     """
     from backend.app.services import approval_service
 
@@ -923,12 +996,43 @@ def get_public_quote_or_404(db: Session, token: str) -> Quote:
     return quote
 
 
-def public_accept(db: Session, token: str, accepted_by_name: str) -> Quote:
+def _customer_decision_audit(quote: Quote, **extra: Any) -> Dict[str, Any]:
+    """Who decided: the customer holding this quote's link, never a staff user."""
+    return {
+        "status": enum_value(quote.status),
+        "actor_type": "customer",
+        "decided_via": "hosted_quote_link",
+        "customer_id": quote.customer_id,
+        "customer_name": quote.customer.display_name if quote.customer else None,
+        **extra,
+    }
+
+
+def public_accept(
+    db: Session,
+    token: str,
+    accepted_by_name: str,
+    *,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Quote:
+    """The customer accepts on the hosted page: `sent`/`viewed` -> `accepted`.
+
+    The opaque link token is the customer's credential and scopes the call to exactly one quote.
+    Idempotent: a repeated accept (double click, retry, second tab) returns the accepted quote
+    without a second audit row or any other side effect. A declined/expired quote stays closed.
+    """
     quote = get_public_quote_or_404(db, token)
+    if quote.status in ACCEPTED_OUTCOME_STATUSES:
+        return quote
     if quote.status not in OPEN_FOR_CUSTOMER_STATUSES or _is_past_expiry(quote):
         raise InvalidStateError(f"This quote can no longer be accepted (status '{enum_value(quote.status)}').")
     before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
     if not _claim_transition(db, quote, OPEN_FOR_CUSTOMER_STATUSES, QuoteStatus.ACCEPTED, accepted_at=utcnow()):
+        # A concurrent request won the race; if it was also an acceptance, answer the same way.
+        quote = get_public_quote_or_404(db, token)
+        if quote.status in ACCEPTED_OUTCOME_STATUSES:
+            return quote
         raise InvalidStateError("This quote can no longer be accepted.")
     db.flush()
     audit.record(
@@ -940,18 +1044,33 @@ def public_accept(db: Session, token: str, accepted_by_name: str) -> Quote:
         entity_id=quote.id,
         entity_label=quote.quote_number,
         before=before,
-        after={"accepted_by_name": accepted_by_name, "status": "accepted"},
+        after=_customer_decision_audit(quote, accepted_by_name=accepted_by_name),
+        ip_address=ip_address,
+        user_agent=user_agent,
     )
     db.commit()
     return get_public_quote_or_404(db, token)
 
 
-def public_decline(db: Session, token: str, reason: Optional[str]) -> Quote:
+def public_decline(
+    db: Session,
+    token: str,
+    reason: Optional[str],
+    *,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Quote:
+    """The customer declines on the hosted page: `sent`/`viewed` -> `declined` (idempotent like accept)."""
     quote = get_public_quote_or_404(db, token)
+    if quote.status == QuoteStatus.DECLINED:
+        return quote
     if quote.status not in OPEN_FOR_CUSTOMER_STATUSES or _is_past_expiry(quote):
         raise InvalidStateError(f"This quote can no longer be declined (status '{enum_value(quote.status)}').")
     before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
     if not _claim_transition(db, quote, OPEN_FOR_CUSTOMER_STATUSES, QuoteStatus.DECLINED, declined_at=utcnow()):
+        quote = get_public_quote_or_404(db, token)
+        if quote.status == QuoteStatus.DECLINED:
+            return quote
         raise InvalidStateError("This quote can no longer be declined.")
     db.flush()
     audit.record(
@@ -963,7 +1082,9 @@ def public_decline(db: Session, token: str, reason: Optional[str]) -> Quote:
         entity_id=quote.id,
         entity_label=quote.quote_number,
         before=before,
-        after={"reason": reason, "status": "declined"},
+        after=_customer_decision_audit(quote, reason=reason),
+        ip_address=ip_address,
+        user_agent=user_agent,
     )
     db.commit()
     return get_public_quote_or_404(db, token)
@@ -1051,8 +1172,93 @@ def serialize_quotes(db: Session, organization_id: str, quotes: List[Quote]) -> 
     return [serialize_quote(q, approvals.get(q.id), _created_by(db, q.created_by_id, cache)) for q in quotes]
 
 
+_DECISION_ACTIONS = {
+    "QUOTE_ACCEPTED": ("accepted", "customer"),
+    "QUOTE_DECLINED": ("declined", "customer"),
+    "QUOTE_ACCEPTED_OVERRIDE": ("accepted", "staff"),
+    "QUOTE_DECLINED_OVERRIDE": ("declined", "staff"),
+}
+
+
+def customer_decision(db: Session, quote: Quote) -> Optional[Dict[str, Any]]:
+    """The audited accept/decline for this quote, so staff can tell the customer's own decision
+    apart from an admin override."""
+    if quote.accepted_at is None and quote.declined_at is None:
+        return None
+    row = db.scalars(
+        select(AuditLog)
+        .where(
+            AuditLog.organization_id == quote.organization_id,
+            AuditLog.entity_type == "quote",
+            AuditLog.entity_id == quote.id,
+            AuditLog.action.in_(list(_DECISION_ACTIONS)),
+        )
+        .order_by(AuditLog.created_at.desc())
+        .limit(1)
+    ).first()
+    if row is None:
+        return None
+    described = describe_decision(row)
+    return {
+        "outcome": described["outcome"],
+        "actor_type": described["actor_type"],
+        "title": described["title"],
+        "actor_display": described["actor_display"],
+        "name": described["name"],
+        "reason": described["reason"],
+        "at": iso_dt(row.created_at),
+    }
+
+
+_DECISION_TITLES = {
+    ("accepted", "customer"): "Accepted by customer",
+    ("declined", "customer"): "Declined by customer",
+    ("accepted", "staff"): "Marked accepted by admin",
+    ("declined", "staff"): "Marked declined by admin",
+}
+
+
+def is_decision_action(action: Optional[str]) -> bool:
+    return action in _DECISION_ACTIONS
+
+
+def describe_decision(row: AuditLog) -> Dict[str, Any]:
+    """Presentation of an accept/decline audit row, attributed to whoever actually acted.
+
+    The single source of the wording used by the quote detail panel, the customer lifecycle timeline
+    and the activity feed: the customer's own decision on their link reads "Accepted/Declined by
+    customer"; an admin override reads "Marked accepted/declined by admin" with the admin and reason.
+    """
+    outcome, actor_type = _DECISION_ACTIONS[row.action]
+    after = row.after_state or {}
+    # Rows written before actor_type was recorded were staff actions unless the hosted page wrote them.
+    if actor_type == "customer" and row.actor_label != audit.CUSTOMER_ACTOR:
+        actor_type = "staff"
+    if actor_type == "customer":
+        signer = after.get("accepted_by_name")
+        customer_name = after.get("customer_name")
+        name = signer
+        if signer and customer_name and signer != customer_name:
+            actor_display = f"{signer} ({customer_name})"
+        else:
+            actor_display = signer or customer_name or "Customer"
+    else:
+        name = row.actor_label
+        actor_display = row.actor_label or "Admin"
+    return {
+        "outcome": outcome,
+        "actor_type": actor_type,
+        "title": _DECISION_TITLES[(outcome, actor_type)],
+        "actor_display": actor_display,
+        "name": name,
+        "reason": after.get("reason"),
+    }
+
+
 def serialize_quote_full(db: Session, quote: Quote) -> Dict[str, Any]:
-    return serialize_quotes(db, quote.organization_id, [quote])[0]
+    data = serialize_quotes(db, quote.organization_id, [quote])[0]
+    data["customer_decision"] = customer_decision(db, quote)
+    return data
 
 
 def serialize_invoice(db: Session, invoice: Invoice) -> Dict[str, Any]:

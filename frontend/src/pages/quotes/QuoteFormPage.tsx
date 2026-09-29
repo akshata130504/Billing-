@@ -25,6 +25,9 @@ import { catalogCpqService } from '../../services/catalogCpqService';
 import { planPricingService } from '../../services/planPricingService';
 import type { OfferingOut } from '../../types/catalog_cpq';
 import type { QuoteItemIn } from '../../types/quotes';
+import { addDays, calculateValidityDays, formatQuoteTerms, updateTermsValidity } from '../../utils/format';
+
+const VALIDITY_PRESETS = [7, 15, 30, 60, 90] as const;
 
 interface FormLineItem extends QuoteItemIn {
   id?: string;
@@ -75,11 +78,28 @@ export function QuoteFormPage() {
     return d.toISOString().split('T')[0];
   }, [issueDate, todayStr]);
 
+  const currentValidityDays = useMemo(() => {
+    return calculateValidityDays(issueDate, expiryDate);
+  }, [issueDate, expiryDate]);
+
+  const handleValidityChange = (days: number) => {
+    const newExp = addDays(issueDate, days);
+    setExpiryDate(newExp);
+    const expErr = validateDateAfter(newExp, issueDate, 'Expiry date', 'issue date');
+    setExpiryDateError(expErr);
+    setTerms((prev) => updateTermsValidity(prev, days));
+  };
+
   const handleIssueDateChange = (newVal: string) => {
     setIssueDate(newVal);
     const pastErr = !isEditing ? validateDateNotPast(newVal, 'Issue date') : null;
     setIssueDateError(pastErr);
-    if (expiryDate) {
+    if (currentValidityDays && currentValidityDays > 0) {
+      const newExp = addDays(newVal, currentValidityDays);
+      setExpiryDate(newExp);
+      const expErr = validateDateAfter(newExp, newVal, 'Expiry date', 'issue date');
+      setExpiryDateError(expErr);
+    } else if (expiryDate) {
       const expErr = validateDateAfter(expiryDate, newVal, 'Expiry date', 'issue date');
       setExpiryDateError(expErr);
     }
@@ -89,13 +109,15 @@ export function QuoteFormPage() {
     setExpiryDate(newVal);
     const expErr = validateDateAfter(newVal, issueDate, 'Expiry date', 'issue date');
     setExpiryDateError(expErr);
+    const diff = calculateValidityDays(issueDate, newVal);
+    if (diff && diff > 0) {
+      setTerms((prev) => updateTermsValidity(prev, diff));
+    }
   };
   const [currency, setCurrency] = useState('INR');
   const [discountPct, setDiscountPct] = useState<number>(0);
   const [notes, setNotes] = useState('');
-  const [terms, setTerms] = useState(
-    '1. Quote valid for 30 days.\n2. Payment terms: 30 days from invoice date.\n3. Taxes as applicable per Indian GST.'
-  );
+  const [terms, setTerms] = useState(formatQuoteTerms(30));
 
   const [items, setItems] = useState<FormLineItem[]>([]);
 
@@ -143,7 +165,11 @@ export function QuoteFormPage() {
           setCurrency(q.currency || 'INR');
           setDiscountPct(Number(q.discount_pct || 0));
           setNotes(q.notes || '');
-          setTerms(q.terms || '');
+          const loadedValidity = calculateValidityDays(q.issue_date, q.expiry_date);
+          const initialTerms = q.terms
+            ? (loadedValidity ? updateTermsValidity(q.terms, loadedValidity) : q.terms)
+            : formatQuoteTerms(loadedValidity || 30);
+          setTerms(initialTerms);
           setItems(
             q.items.map((it) => ({
               offering_id: it.offering_id,
@@ -568,7 +594,25 @@ export function QuoteFormPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Expiry Date (Valid Until)</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-semibold text-slate-700">Expiry Date (Valid Until)</label>
+              <div className="flex items-center gap-1">
+                {VALIDITY_PRESETS.map((days) => (
+                  <button
+                    key={days}
+                    type="button"
+                    onClick={() => handleValidityChange(days)}
+                    className={`px-1.5 py-0.5 text-[10px] rounded font-medium transition-colors ${
+                      currentValidityDays === days
+                        ? 'bg-indigo-600 text-white font-bold'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {days}d
+                  </button>
+                ))}
+              </div>
+            </div>
             <input
               type="date"
               min={minExpiryDate}

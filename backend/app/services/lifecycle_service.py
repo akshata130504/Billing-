@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from backend.app.api.deps import CurrentContext
 from backend.app.core.exceptions import EntityNotFoundError, ForbiddenError, ValidationAppError
 from backend.app.models import (
+    AuditLog,
     Customer,
     CustomerLifecycle,
     CustomerLifecycleStage,
@@ -608,6 +609,24 @@ def get_customer_lifecycle_timeline(db: Session, ctx: CurrentContext, customer_i
             Quote.customer_id == customer_id,
         )
     ).all()
+    # Accept/decline events come from the audit trail so each names who actually decided: the
+    # customer on their link, or an admin recording the decision as an override.
+    from backend.app.services import quote_service
+
+    decisions: Dict[str, List[AuditLog]] = {}
+    if quotes:
+        rows = db.scalars(
+            select(AuditLog)
+            .where(
+                AuditLog.organization_id == org_id,
+                AuditLog.entity_type == "quote",
+                AuditLog.entity_id.in_([q.id for q in quotes]),
+                AuditLog.action.in_(["QUOTE_ACCEPTED", "QUOTE_DECLINED", "QUOTE_ACCEPTED_OVERRIDE", "QUOTE_DECLINED_OVERRIDE"]),
+            )
+            .order_by(AuditLog.created_at.asc())
+        ).all()
+        for row in rows:
+            decisions.setdefault(row.entity_id, []).append(row)
     for q in quotes:
         if q.created_at:
             events.append(
@@ -623,18 +642,48 @@ def get_customer_lifecycle_timeline(db: Session, ctx: CurrentContext, customer_i
                     actor_label="Sales Team",
                 )
             )
-        if q.accepted_at:
+        for row in decisions.get(q.id, []):
+            described = quote_service.describe_decision(row)
+            if described["actor_type"] == "customer":
+                actor_label = f"Customer: {described['actor_display']}"
+            else:
+                actor_label = f"Admin: {described['actor_display']}"
+            parts = []
+            if described["outcome"] == "accepted":
+                parts.append(f"Deal agreed for {q.currency} {q.total}")
+            if described["reason"]:
+                parts.append(f"Reason: {described['reason']}")
+            events.append(
+                TimelineEvent(
+                    id=f"quote_decision_{row.id}",
+                    event_type=row.action,
+                    title=f"Quote #{q.quote_number}: {described['title']}",
+                    description=". ".join(parts) or None,
+                    timestamp=to_utc(row.created_at),
+                    related_entity_type="quote",
+                    related_entity_id=q.id,
+                    status=described["outcome"],
+                    actor_label=actor_label,
+                    metadata={
+                        "actor_type": described["actor_type"],
+                        "actor_display": described["actor_display"],
+                        "reason": described["reason"],
+                    },
+                )
+            )
+        if q.accepted_at and not decisions.get(q.id):
+            # Accepted before decisions were audited: we do not know who decided, so do not claim one.
             events.append(
                 TimelineEvent(
                     id=f"quote_accepted_{q.id}",
                     event_type="QUOTE_ACCEPTED",
-                    title=f"Quote #{q.quote_number} accepted by customer",
+                    title=f"Quote #{q.quote_number} accepted",
                     description=f"Deal agreed for {q.currency} {q.total}",
                     timestamp=to_utc(q.accepted_at),
                     related_entity_type="quote",
                     related_entity_id=q.id,
                     status="accepted",
-                    actor_label="Customer",
+                    actor_label="Not recorded",
                 )
             )
 
