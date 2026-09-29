@@ -13,6 +13,7 @@ from backend.app.schemas.quotes import (
     QuoteCreate,
     QuoteDeclineIn,
     QuoteOut,
+    QuoteOverrideIn,
     QuoteToSubscriptionIn,
     QuoteUpdate,
 )
@@ -135,7 +136,7 @@ def send_quote(
     return svc.serialize_quote_full(db, quote)
 
 
-@router.post("/{quote_id}/approve", response_model=QuoteOut, summary="Approve a pending quote's discount request")
+@router.post("/{quote_id}/approve", response_model=QuoteOut, summary="Approve a pending quote (internal authorisation; the quote becomes approved, then staff send it)")
 def approve_quote(
     quote_id: str,
     body: QuoteDeclineIn = Body(default=QuoteDeclineIn()),
@@ -168,24 +169,44 @@ def mark_viewed(
     return svc.serialize_quote_full(db, quote)
 
 
-@router.post("/{quote_id}/mark-accepted", response_model=QuoteOut, summary="Mark a sent quote as accepted")
-@router.post("/{quote_id}/accept", response_model=QuoteOut, summary="Accept a quote")
+# Customer acceptance/decline happens on the hosted quote link (/public/quotes/{token}). These
+# staff routes are an audited ADMIN OVERRIDE for decisions the customer gave outside the link
+# (signed PDF, email, phone): admin-only, a reason is mandatory, and the audit action is
+# QUOTE_ACCEPTED_OVERRIDE / QUOTE_DECLINED_OVERRIDE so it never reads as the customer's own act.
+@router.post(
+    "/{quote_id}/mark-accepted",
+    response_model=QuoteOut,
+    summary="Admin override: record the customer's acceptance on their behalf",
+)
+@router.post(
+    "/{quote_id}/accept",
+    response_model=QuoteOut,
+    summary="Admin override: record the customer's acceptance on their behalf",
+)
 def mark_accepted(
     quote_id: str,
-    _body: dict = Body(default={}),
-    ctx: CurrentContext = Depends(require_finance),
+    body: QuoteOverrideIn,
+    ctx: CurrentContext = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    quote = svc.mark_accepted(db, ctx, quote_id)
+    quote = svc.mark_accepted(db, ctx, quote_id, body.reason)
     return svc.serialize_quote_full(db, quote)
 
 
-@router.post("/{quote_id}/mark-declined", response_model=QuoteOut, summary="Mark a sent quote as declined")
-@router.post("/{quote_id}/decline", response_model=QuoteOut, summary="Decline a quote")
+@router.post(
+    "/{quote_id}/mark-declined",
+    response_model=QuoteOut,
+    summary="Admin override: record the customer's decline on their behalf",
+)
+@router.post(
+    "/{quote_id}/decline",
+    response_model=QuoteOut,
+    summary="Admin override: record the customer's decline on their behalf",
+)
 def mark_declined(
     quote_id: str,
-    body: QuoteDeclineIn = Body(default=QuoteDeclineIn()),
-    ctx: CurrentContext = Depends(require_finance),
+    body: QuoteOverrideIn,
+    ctx: CurrentContext = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     quote = svc.mark_declined(db, ctx, quote_id, body.reason)

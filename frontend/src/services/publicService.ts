@@ -60,8 +60,9 @@ export const publicService = {
     return data;
   },
 
-  acceptQuote: async (token: string, accepted_by_name: string): Promise<{ status: 'accepted' }> => {
-    const { data } = await publicClient.post<{ status: 'accepted' }>(
+  /** Idempotent: repeating it returns the quote's current accepted/converted status. */
+  acceptQuote: async (token: string, accepted_by_name: string): Promise<{ status: string }> => {
+    const { data } = await publicClient.post<{ status: string }>(
       `/public/quotes/${t(token)}/accept`,
       { accepted_by_name }
     );

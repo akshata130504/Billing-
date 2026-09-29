@@ -159,7 +159,7 @@ export function QuotesListPage() {
     e.stopPropagation();
     try {
       await quoteService.approveQuote(id);
-      showToast('success', 'Quote approved and sent to the customer');
+      showToast('success', 'Quote approved', 'Send it to the customer when ready.');
       await fetchQuotes();
     } catch (err) {
       showToast('error', 'Could not approve quote', toApiError(err).message);

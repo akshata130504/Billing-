@@ -231,6 +231,8 @@ export function PublicQuotePage() {
           </InfoPanel>
         );
       case 'converted':
+      case 'invoiced':
+      case 'partially_invoiced':
         return (
           <InfoPanel tone="success" icon={<FileCheck2 className="w-5 h-5" />} title="Accepted and invoiced">
             {quote.accepted_at && <p>Accepted on {formatDateTime(quote.accepted_at)}.</p>}
@@ -275,6 +277,8 @@ export function PublicQuotePage() {
         }
         return null;
       default:
+        // Only draft / pending_approval / approved land here. The customer link is minted when the
+        // quote is sent, so a normally-sent quote never shows this.
         return (
           <InfoPanel tone="info" icon={<Clock className="w-5 h-5" />} title="This quote isn't ready yet">
             <p>{org.name} is still finalising it. You'll be notified when it is ready to review.</p>
@@ -341,8 +345,15 @@ export function PublicQuotePage() {
                   >
                     Decline
                   </Button>
-                  <Button onClick={openAccept} disabled={submitting} leadingIcon={<CheckCircle2 className="w-4 h-4" />}>
-                    Accept quote
+                  <Button
+                    onClick={openAccept}
+                    disabled={submitting}
+                    leadingIcon={<CheckCircle2 className="w-4 h-4" />}
+                    aria-label="Accept quote"
+                  >
+                    {/* The full label is truncated in the half-width button on phones. */}
+                    <span className="sm:hidden">Accept</span>
+                    <span className="hidden sm:inline">Accept quote</span>
                   </Button>
                 </div>
               </div>

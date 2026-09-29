@@ -79,22 +79,18 @@ export const quoteService = {
     return res.data;
   },
 
-  async markAccepted(id: string): Promise<Quote> {
-    const res = await apiClient.post<Quote>(`/quotes/${id}/mark-accepted`);
+  /**
+   * ADMIN OVERRIDE: record the customer's acceptance on their behalf (signed PDF, email, phone).
+   * Customers accept on their hosted quote link; this is admin-only, needs a reason and is audited
+   * separately (QUOTE_ACCEPTED_OVERRIDE).
+   */
+  async overrideAccept(id: string, reason: string): Promise<Quote> {
+    const res = await apiClient.post<Quote>(`/quotes/${id}/mark-accepted`, { reason });
     return res.data;
   },
 
-  async acceptQuote(id: string): Promise<Quote> {
-    const res = await apiClient.post<Quote>(`/quotes/${id}/mark-accepted`);
-    return res.data;
-  },
-
-  async markDeclined(id: string, reason?: string): Promise<Quote> {
-    const res = await apiClient.post<Quote>(`/quotes/${id}/mark-declined`, { reason });
-    return res.data;
-  },
-
-  async declineQuote(id: string, reason?: string): Promise<Quote> {
+  /** ADMIN OVERRIDE: record the customer's decline on their behalf (see overrideAccept). */
+  async overrideDecline(id: string, reason: string): Promise<Quote> {
     const res = await apiClient.post<Quote>(`/quotes/${id}/mark-declined`, { reason });
     return res.data;
   },

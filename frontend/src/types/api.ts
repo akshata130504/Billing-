@@ -17,12 +17,16 @@ export type PricingModel = 'flat' | 'per_unit';
 export type QuoteStatus =
   | 'draft'
   | 'pending_approval'
+  // Internally approved, not yet sent: the customer has no link.
+  | 'approved'
   | 'sent'
   // Set when the customer opens the public link; still open for accept / decline.
   | 'viewed'
   | 'accepted'
   | 'declined'
   | 'expired'
+  | 'partially_invoiced'
+  | 'invoiced'
   | 'converted';
 export type SubscriptionStatus = 'draft' | 'pending_activation' | 'active' | 'trialing' | 'past_due' | 'paused' | 'cancelled' | 'expired';
 export type InvoiceStatus = 'draft' | 'sent' | 'partially_paid' | 'paid' | 'overdue' | 'void';

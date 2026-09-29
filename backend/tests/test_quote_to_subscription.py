@@ -46,9 +46,17 @@ def _accepted_quote(client, headers, customer, items, discount_pct="0", approver
         assert approver_headers is not None, "discount needs an approver"
         approved = client.post(f"{QUOTES}/{quote['id']}/approve", json={}, headers=approver_headers)
         assert approved.status_code == 200, approved.text
-    accepted = client.post(f"{QUOTES}/{quote['id']}/mark-accepted", json={}, headers=headers)
+        assert approved.json()["status"] == "approved"
+        sent = client.post(f"{QUOTES}/{quote['id']}/send", headers=headers)
+        assert sent.status_code == 200, sent.text
+    assert sent.json()["status"] == "sent"
+    # The customer accepts on their hosted link.
+    token = sent.json()["public_url"].rsplit("/", 1)[1]
+    accepted = client.post(f"/api/v1/public/quotes/{token}/accept", json={"accepted_by_name": "Customer"})
     assert accepted.status_code == 200, accepted.text
-    return accepted.json()
+    detail = client.get(f"{QUOTES}/{quote['id']}", headers=headers)
+    assert detail.json()["status"] == "accepted"
+    return detail.json()
 
 
 def _convert(client, headers, quote_id, **body):

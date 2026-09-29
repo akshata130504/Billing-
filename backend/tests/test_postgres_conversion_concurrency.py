@@ -82,7 +82,7 @@ def _accepted_quote(client, headers, customer, items):
     assert res.status_code == 201, res.text
     qid = res.json()["id"]
     assert client.post(f"{QUOTES}/{qid}/send", headers=headers).status_code == 200
-    assert client.post(f"{QUOTES}/{qid}/mark-accepted", headers=headers, json={}).status_code == 200
+    assert client.post(f"{QUOTES}/{qid}/mark-accepted", headers=headers, json={"reason": "Signed PDF received"}).status_code == 200
     return qid
 
 

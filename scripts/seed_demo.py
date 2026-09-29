@@ -178,11 +178,11 @@ for i, q in enumerate(quotes):
     if i in (1, 2, 3, 4):
         call("POST", f"/quotes/{q['id']}/send", quiet=True)
     if i in (2, 3):
-        call("POST", f"/quotes/{q['id']}/mark-accepted", quiet=True)
+        call("POST", f"/quotes/{q['id']}/mark-accepted", {"reason": "Demo data: signed PDF received"}, quiet=True)
     if i == 3:
         call("POST", f"/quotes/{q['id']}/convert-to-invoice", quiet=True) or call("POST", f"/quotes/{q['id']}/convert", quiet=True)
     if i == 4:
-        call("POST", f"/quotes/{q['id']}/mark-declined", quiet=True)
+        call("POST", f"/quotes/{q['id']}/mark-declined", {"reason": "Demo data: customer declined by email"}, quiet=True)
 print(f"  quotes: {len(quotes)}")
 
 # ---------------------------------------------------------------- invoices spread over 8 months, with payments

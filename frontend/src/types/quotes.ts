@@ -77,6 +77,15 @@ export interface QuoteItemIn {
   pricing_explanation?: string;
 }
 
+export interface QuoteDecision {
+  outcome: 'accepted' | 'declined';
+  actor_type: 'customer' | 'staff';
+  /** The name the customer signed with, or the staff member who recorded the override. */
+  name?: string | null;
+  reason?: string | null;
+  at?: string | null;
+}
+
 export interface Quote {
   id: string;
   quote_number: string;
@@ -116,6 +125,8 @@ export interface Quote {
   email_sent?: boolean | null;
   approved_by?: string;
   approved_at?: string;
+  /** Detail responses only: how the accept/decline was recorded (customer link vs admin override). */
+  customer_decision?: QuoteDecision | null;
   rejection_reason?: string;
   created_by?: {
     id: string;

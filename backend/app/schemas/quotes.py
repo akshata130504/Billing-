@@ -78,6 +78,16 @@ class QuoteDeclineIn(BaseModel):
     reason: Optional[str] = Field(None, max_length=500)
 
 
+class QuoteOverrideIn(BaseModel):
+    """Admin override that records the customer's decision on their behalf (e.g. a signed PDF or
+    a phone call). The reason is mandatory so the audit trail says why staff, not the customer,
+    moved the quote."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    reason: str = Field(..., min_length=3, max_length=500)
+
+
 class QuoteConvertIn(BaseModel):
     issue_date: Optional[date] = None
     due_date: Optional[date] = None
@@ -93,6 +103,16 @@ class QuoteToSubscriptionIn(BaseModel):
     # Default: issue the first period invoice when the subscription starts active.
     generate_first_invoice: Optional[bool] = None
     notes: Optional[str] = Field(None, max_length=2000)
+
+
+class QuoteDecisionOut(BaseModel):
+    """Who recorded the accept/decline: the customer on their link, or staff via admin override."""
+
+    outcome: str  # accepted | declined
+    actor_type: str  # customer | staff
+    name: Optional[str] = None  # the name the customer signed with, or the staff user
+    reason: Optional[str] = None
+    at: Optional[datetime] = None
 
 
 class QuoteOut(BaseModel):
@@ -125,6 +145,8 @@ class QuoteOut(BaseModel):
     converted_invoice_id: Optional[str] = None
     converted_subscription_id: Optional[str] = None
     approval_request_id: Optional[str] = None
+    # Detail responses only: how the accept/decline was recorded (None until decided).
+    customer_decision: Optional[QuoteDecisionOut] = None
     # Only set on the send response: True when the customer email was handed to SMTP,
     # False when it could not be delivered (no email on file, SMTP off or failing).
     email_sent: Optional[bool] = None

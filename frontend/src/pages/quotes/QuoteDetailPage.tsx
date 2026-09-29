@@ -15,6 +15,9 @@ import {
   HelpCircle,
   CreditCard,
   Repeat,
+  ExternalLink,
+  ShieldAlert,
+  UserCheck,
 } from 'lucide-react';
 import { quoteService } from '../../services/quoteService';
 import type { Quote } from '../../types/quotes';
@@ -57,6 +60,9 @@ export const QuoteDetailPage = () => {
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
   const [subTrialDays, setSubTrialDays] = useState('');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  /** Admin override of the customer's decision (recorded on their behalf, with a mandatory reason). */
+  const [overrideAction, setOverrideAction] = useState<'accept' | 'decline' | null>(null);
+  const [overrideReason, setOverrideReason] = useState('');
 
   useEffect(() => {
     if (id) {
@@ -103,8 +109,8 @@ export const QuoteDetailPage = () => {
 
   const handleApprove = () => {
     if (!id) return;
-    // Approving the discount sends the quote to the customer straight away.
-    handleAction(() => quoteService.approveQuote(id), 'Quote approved and sent to the customer');
+    // Internal authorisation only: the quote becomes Approved and is sent as a separate step.
+    handleAction(() => quoteService.approveQuote(id), 'Quote approved. Send it to the customer when ready.');
   };
 
   const handleRejectConfirm = async () => {
@@ -144,14 +150,32 @@ export const QuoteDetailPage = () => {
     handleAction(() => quoteService.markViewed(id));
   };
 
-  const handleAccept = () => {
-    if (!id) return;
-    handleAction(() => quoteService.acceptQuote(id), 'Quote marked as accepted');
+  const openOverride = (action: 'accept' | 'decline') => {
+    setOverrideReason('');
+    setOverrideAction(action);
   };
 
-  const handleDecline = () => {
-    if (!id) return;
-    handleAction(() => quoteService.declineQuote(id), 'Quote marked as declined');
+  const handleOverrideConfirm = async () => {
+    if (!id || !overrideAction) return;
+    const reason = overrideReason.trim();
+    if (reason.length < 3) return;
+    try {
+      setActionLoading(true);
+      if (overrideAction === 'accept') {
+        await quoteService.overrideAccept(id, reason);
+        showToast('success', 'Acceptance recorded (admin override)');
+      } else {
+        await quoteService.overrideDecline(id, reason);
+        showToast('success', 'Decline recorded (admin override)');
+      }
+      setOverrideAction(null);
+      setOverrideReason('');
+      await fetchQuote(id);
+    } catch (err) {
+      showToast('error', 'Override failed', toApiError(err).message);
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const handleConvertToInvoice = async () => {
@@ -265,6 +289,8 @@ export const QuoteDetailPage = () => {
   }
 
   const upperStatus = quote.status.toUpperCase();
+  const isAwaitingCustomer = upperStatus === 'SENT' || upperStatus === 'VIEWED';
+  const decision = quote.customer_decision;
   // Only quotes whose lines reference a plan / catalog plan can become a subscription
   // (the server re-validates that each one is recurring and active).
   const hasRecurringLines =
@@ -337,11 +363,16 @@ export const QuoteDetailPage = () => {
             </>
           )}
 
-          {/* PENDING APPROVAL (admin only; approving sends the quote immediately) */}
+          {/* PENDING APPROVAL (admin only). Internal authorisation: it does not send the quote. */}
           {canApprove && upperStatus === 'PENDING_APPROVAL' && (
             <>
-              <Button variant="primary" onClick={handleApprove} disabled={actionLoading}>
-                <CheckCircle className="w-4 h-4 mr-1.5" /> Approve &amp; Send
+              <Button
+                variant="primary"
+                onClick={handleApprove}
+                disabled={actionLoading}
+                title="Internally approve this quote so it can be sent to the customer"
+              >
+                <CheckCircle className="w-4 h-4 mr-1.5" /> Approve Quote
               </Button>
               <Button variant="danger" onClick={() => setShowRejectModal(true)} disabled={actionLoading}>
                 <XCircle className="w-4 h-4 mr-1.5" /> Reject Quote
@@ -352,7 +383,7 @@ export const QuoteDetailPage = () => {
             <span className="text-sm text-amber-700">Awaiting admin approval</span>
           )}
 
-          {/* APPROVED (legacy: approval now sends immediately, but the backend still allows sending these) */}
+          {/* APPROVED: internally authorised; staff send it to the customer. */}
           {canEdit && upperStatus === 'APPROVED' && (
             <>
               <Button variant="secondary" onClick={() => navigate(`/quotes/${quote.id}/edit`)}>
@@ -364,29 +395,39 @@ export const QuoteDetailPage = () => {
             </>
           )}
 
-          {/* SENT */}
+          {/* SENT / VIEWED: the CUSTOMER accepts or declines on their quote link. Staff can only
+              record a decision given outside the link, as an audited admin override. */}
           {canEdit && upperStatus === 'SENT' && (
-            <>
-              <Button variant="secondary" onClick={handleMarkViewed} disabled={actionLoading}>
-                <Eye className="w-4 h-4 mr-1.5" /> Mark Viewed
-              </Button>
-              <Button variant="primary" onClick={handleAccept} disabled={actionLoading}>
-                <CheckCircle className="w-4 h-4 mr-1.5" /> Accept Quote
-              </Button>
-              <Button variant="danger" onClick={handleDecline} disabled={actionLoading}>
-                <XCircle className="w-4 h-4 mr-1.5" /> Decline
-              </Button>
-            </>
+            <Button variant="secondary" onClick={handleMarkViewed} disabled={actionLoading}>
+              <Eye className="w-4 h-4 mr-1.5" /> Mark Viewed
+            </Button>
           )}
-
-          {/* VIEWED */}
-          {canEdit && upperStatus === 'VIEWED' && (
+          {isAwaitingCustomer && quote.public_url && (
+            <Button
+              variant="secondary"
+              onClick={() => window.open(quote.public_url, '_blank', 'noopener,noreferrer')}
+              title="Open the page the customer sees (their Accept / Decline link)"
+            >
+              <ExternalLink className="w-4 h-4 mr-1.5" /> Customer View
+            </Button>
+          )}
+          {canApprove && isAwaitingCustomer && (
             <>
-              <Button variant="primary" onClick={handleAccept} disabled={actionLoading}>
-                <CheckCircle className="w-4 h-4 mr-1.5" /> Accept Quote
+              <Button
+                variant="secondary"
+                onClick={() => openOverride('accept')}
+                disabled={actionLoading}
+                title="Only when the customer accepted outside the quote link (signed PDF, email, phone)"
+              >
+                <ShieldAlert className="w-4 h-4 mr-1.5" /> Mark as Accepted (Admin Override)
               </Button>
-              <Button variant="danger" onClick={handleDecline} disabled={actionLoading}>
-                <XCircle className="w-4 h-4 mr-1.5" /> Decline
+              <Button
+                variant="secondary"
+                onClick={() => openOverride('decline')}
+                disabled={actionLoading}
+                title="Only when the customer declined outside the quote link"
+              >
+                <ShieldAlert className="w-4 h-4 mr-1.5" /> Mark as Declined (Admin Override)
               </Button>
             </>
           )}
@@ -582,6 +623,42 @@ export const QuoteDetailPage = () => {
                 </Badge>
               </div>
 
+              {isAwaitingCustomer && (
+                <div className="text-sm py-2 border-b border-gray-100 flex items-start gap-2" data-testid="awaiting-customer">
+                  <Clock className="w-4 h-4 text-indigo-500 mt-0.5 shrink-0" />
+                  <div>
+                    <div className="font-medium text-gray-900">Awaiting customer response</div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      The customer accepts or declines from the quote link in their email.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {decision && (
+                <div className="text-sm py-2 border-b border-gray-100" data-testid="customer-decision">
+                  <div className="flex items-center gap-1.5 text-gray-500">
+                    {decision.actor_type === 'customer' ? (
+                      <UserCheck className="w-4 h-4 text-emerald-600" />
+                    ) : (
+                      <ShieldAlert className="w-4 h-4 text-amber-600" />
+                    )}
+                    {decision.actor_type === 'customer'
+                      ? `${decision.outcome === 'accepted' ? 'Accepted' : 'Declined'} by customer`
+                      : `${decision.outcome === 'accepted' ? 'Acceptance' : 'Decline'} recorded by admin override`}
+                  </div>
+                  <div className="font-medium text-gray-900 mt-0.5">
+                    {decision.actor_type === 'customer'
+                      ? `${decision.name || quote.customer?.display_name || 'Customer'} via quote link`
+                      : decision.name || 'Staff'}
+                  </div>
+                  {decision.at && (
+                    <div className="text-xs text-gray-400 mt-0.5">{new Date(decision.at).toLocaleString()}</div>
+                  )}
+                  {decision.reason && <div className="text-xs text-gray-600 mt-1">Reason: {decision.reason}</div>}
+                </div>
+              )}
+
               {quote.approved_by && (
                 <div className="text-sm py-2 border-b border-gray-100">
                   <div className="text-gray-500">Approved By</div>
@@ -619,7 +696,11 @@ export const QuoteDetailPage = () => {
             <h4 className="font-semibold text-indigo-950 mb-2">Quote Workflow</h4>
             <p className="text-xs text-indigo-800 leading-relaxed">
               Standard Quote Lifecycle: <br />
-              <span className="font-medium">Draft → Pending Approval → Approved → Sent → Accepted → Invoiced</span>
+              <span className="font-medium">Draft → Pending Approval → Approved → Sent → Accepted / Declined → Invoiced</span>
+            </p>
+            <p className="text-xs text-indigo-800 leading-relaxed mt-2">
+              Approval is internal and only clears the quote for sending. The customer accepts or declines from the
+              quote link in their email.
             </p>
           </div>
         </div>
@@ -649,6 +730,50 @@ export const QuoteDetailPage = () => {
             <Button variant="secondary" onClick={() => setShowRejectModal(false)}>Cancel</Button>
             <Button variant="danger" onClick={handleRejectConfirm} disabled={!rejectionReason || actionLoading}>
               Reject Quote
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Admin override: record the customer's decision on their behalf */}
+      <Modal
+        isOpen={overrideAction !== null}
+        onClose={() => !actionLoading && setOverrideAction(null)}
+        title={overrideAction === 'decline' ? 'Mark as Declined (Admin Override)' : 'Mark as Accepted (Admin Override)'}
+      >
+        <div className="space-y-4">
+          <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
+            <p>
+              Customers normally {overrideAction === 'decline' ? 'decline' : 'accept'} from the quote link in their
+              email. Use this only when {quote.customer?.display_name || 'the customer'} gave their decision another
+              way (signed PDF, email, phone). It is recorded in the audit trail as an admin override, under your name.
+            </p>
+          </div>
+          <div>
+            <label htmlFor="override-reason" className="block text-sm font-medium text-gray-700 mb-1">
+              Reason / evidence <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              id="override-reason"
+              value={overrideReason}
+              onChange={(e) => setOverrideReason(e.target.value)}
+              rows={3}
+              maxLength={500}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
+              placeholder="E.g. Signed PDF received from the customer by email on 12 Oct"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" onClick={() => setOverrideAction(null)} disabled={actionLoading}>
+              Cancel
+            </Button>
+            <Button
+              variant={overrideAction === 'decline' ? 'danger' : 'primary'}
+              onClick={handleOverrideConfirm}
+              disabled={overrideReason.trim().length < 3 || actionLoading}
+            >
+              {overrideAction === 'decline' ? 'Record Decline' : 'Record Acceptance'}
             </Button>
           </div>
         </div>
