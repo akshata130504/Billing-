@@ -22,6 +22,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { toApiError } from '../../services/apiClient';
 import { PlanModal } from './components/PlanModal';
 import { planPricingService } from '../../services/planPricingService';
+import { currencySymbol } from '../../utils/format';
 import type { PlanPricingItem, CreatePlanPricingInput } from '../../types/plans_pricing';
 
 const PAGE_SIZE = 25;
@@ -388,7 +389,7 @@ export function PlansPricingPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 font-semibold text-slate-900">
-                      ₹{Number(plan.base_price).toLocaleString('en-IN')}
+                      {currencySymbol(plan.currency)}{Number(plan.base_price).toLocaleString((plan.currency || 'INR') === 'INR' ? 'en-IN' : 'en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                       <span className="text-[10px] text-slate-400 font-normal ml-1">/ {plan.unit}</span>
                     </td>
                     <td className="px-4 py-3 capitalize">{plan.billing_frequency.replace('_', ' ')}</td>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2, Calculator, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Button } from '../../../components/common/Button';
 import { validateSensibleName, validateSku, validatePercentage, validateNonNegativeMoney } from '../../../utils/validation';
+import { currencySymbol } from '../../../utils/format';
 import type {
   PlanPricingItem,
   CreatePlanPricingInput,
@@ -9,6 +10,8 @@ import type {
   PlanBillingFrequency,
   PlanPricingTier,
 } from '../../../types/plans_pricing';
+
+const SUPPORTED_CURRENCIES = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD', 'AUD', 'CAD'];
 
 interface PlanModalProps {
   isOpen: boolean;
@@ -93,6 +96,12 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
     setTiers(updated);
   };
 
+  // Every amount shown in the editor uses the plan's selected currency (never a hardcoded ₹).
+  const sym = currencySymbol(currency);
+  const locale = currency === 'INR' ? 'en-IN' : 'en-US';
+  const money = (val: number) =>
+    `${sym}${val.toLocaleString(locale, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+
   // Compute live price preview
   const calculatePreviewPrice = (qty: number): { subtotal: number; tax: number; total: number; note: string } => {
     let subtotal = 0;
@@ -100,10 +109,10 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
 
     if (pricingModel === 'flat') {
       subtotal = basePrice;
-      note = `Fixed ₹${basePrice.toLocaleString('en-IN')} regardless of quantity (${qty} units)`;
+      note = `Fixed ${money(basePrice)} regardless of quantity (${qty} units)`;
     } else if (pricingModel === 'per_unit') {
       subtotal = basePrice * qty;
-      note = `${qty} units × ₹${basePrice.toLocaleString('en-IN')}`;
+      note = `${qty} units × ${money(basePrice)}`;
     } else if (pricingModel === 'volume') {
       let appliedPrice = basePrice;
       let matched = false;
@@ -113,12 +122,12 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
         if (qty >= minQ && (maxQ === undefined || maxQ === null || qty <= maxQ)) {
           appliedPrice = t.unit_price ?? basePrice;
           matched = true;
-          note = `Volume tier [${minQ} - ${maxQ || '∞'}]: All ${qty} units @ ₹${appliedPrice.toLocaleString('en-IN')}/unit`;
+          note = `Volume tier [${minQ} - ${maxQ || '∞'}]: All ${qty} units @ ${money(appliedPrice)}/unit`;
           break;
         }
       }
       if (!matched) {
-        note = `Base rate: All ${qty} units @ ₹${basePrice.toLocaleString('en-IN')}/unit`;
+        note = `Base rate: All ${qty} units @ ${money(basePrice)}/unit`;
       }
       subtotal = appliedPrice * qty;
     } else if (pricingModel === 'tiered') {
@@ -136,13 +145,13 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
         if (inBracket > 0) {
           accum += inBracket * tPrice;
           remaining -= inBracket;
-          logs.push(`${inBracket} @ ₹${tPrice}`);
+          logs.push(`${inBracket} @ ${money(tPrice)}`);
         }
         if (remaining <= 0) break;
       }
       if (remaining > 0) {
         accum += remaining * basePrice;
-        logs.push(`${remaining} @ ₹${basePrice} (base)`);
+        logs.push(`${remaining} @ ${money(basePrice)} (base)`);
       }
       subtotal = accum;
       note = `Graduated brackets: ${logs.join(' + ')}`;
@@ -150,7 +159,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
       const sorted = [...tiers].sort((a, b) => (a.package_qty || 0) - (b.package_qty || 0));
       if (sorted.length === 0) {
         subtotal = basePrice;
-        note = `Default package: ₹${basePrice}`;
+        note = `Default package: ${money(basePrice)}`;
       } else {
         let best = sorted[0];
         for (const t of sorted) {
@@ -161,7 +170,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
           best = t;
         }
         subtotal = best.package_price ?? basePrice;
-        note = `Covered by package of ${best.package_qty} units for ₹${(best.package_price ?? 0).toLocaleString('en-IN')}`;
+        note = `Covered by package of ${best.package_qty} units for ${money((best.package_price ?? 0))}`;
       }
     }
 
@@ -367,10 +376,11 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
                   onChange={(e) => setCurrency(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-hidden focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800"
                 >
-                  <option value="INR">INR (₹)</option>
-                  <option value="USD">USD ($)</option>
-                  <option value="EUR">EUR (€)</option>
-                  <option value="GBP">GBP (£)</option>
+                  {(SUPPORTED_CURRENCIES.includes(currency) ? SUPPORTED_CURRENCIES : [currency, ...SUPPORTED_CURRENCIES]).map((c) => (
+                    <option key={c} value={c}>
+                      {c} ({currencySymbol(c)})
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -405,7 +415,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  {pricingModel === 'flat' ? 'Fixed Flat Rate (₹)' : 'Catalog Base Rate (₹)'}
+                  {pricingModel === 'flat' ? `Fixed Flat Rate (${sym})` : `Catalog Base Rate (${sym})`}
                 </label>
                 <input
                   type="number"
@@ -467,7 +477,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
 
                 {tiers.length === 0 ? (
                   <p className="text-xs text-slate-400 italic py-2 text-center">
-                    No custom tiers added yet. Default base price of ₹{basePrice} will apply.
+                    No custom tiers added yet. Default base price of {sym}{basePrice} will apply.
                   </p>
                 ) : (
                   <div className="space-y-2">
@@ -488,7 +498,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
                               />
                             </div>
                             <div className="flex-1 flex items-center gap-2">
-                              <span className="text-slate-500 text-[11px]">Package Price (₹):</span>
+                              <span className="text-slate-500 text-[11px]">Package Price ({sym}):</span>
                               <input
                                 type="number"
                                 min="0"
@@ -526,7 +536,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
                               />
                             </div>
                             <div className="flex-1 flex items-center gap-1 justify-end">
-                              <span className="text-slate-500 text-[11px]">Rate (₹/unit):</span>
+                              <span className="text-slate-500 text-[11px]">Rate ({sym}/unit):</span>
                               <input
                                 type="number"
                                 min="0"
@@ -580,15 +590,15 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs bg-white p-3 rounded-lg border border-emerald-100">
               <div>
                 <p className="text-slate-400 text-[11px]">Calculated Subtotal</p>
-                <p className="font-bold text-slate-900 text-sm">₹{preview.subtotal.toLocaleString('en-IN')}</p>
+                <p className="font-bold text-slate-900 text-sm">{money(preview.subtotal)}</p>
               </div>
               <div>
                 <p className="text-slate-400 text-[11px]">Taxes ({taxRatePct}% GST)</p>
-                <p className="font-bold text-slate-900 text-sm">₹{preview.tax.toLocaleString('en-IN')}</p>
+                <p className="font-bold text-slate-900 text-sm">{money(preview.tax)}</p>
               </div>
               <div>
                 <p className="text-slate-400 text-[11px]">Final Total Amount</p>
-                <p className="font-bold text-emerald-600 text-base">₹{preview.total.toLocaleString('en-IN')}</p>
+                <p className="font-bold text-emerald-600 text-base">{money(preview.total)}</p>
               </div>
             </div>
             <p className="text-[11px] text-emerald-700 font-medium italic">
