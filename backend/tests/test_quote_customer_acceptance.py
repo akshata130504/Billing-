@@ -9,7 +9,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from backend.app.models import AuditLog, Invoice, MemberRole, Quote, QuoteStatus
+from backend.app.models import AuditLog, Invoice, MemberRole, Quote, QuoteStatus, Subscription
 
 BASE = "/api/v1/quotes"
 PUBLIC = "/api/v1/public/quotes"
@@ -235,7 +235,9 @@ def test_expired_quote_cannot_be_accepted_or_declined(client, tenant, auth_heade
 
 
 def test_repeated_accept_is_idempotent_without_side_effects(client, tenant, auth_headers, db):
-    quote = _sent(client, auth_headers, tenant.customer())
+    customer = tenant.customer()
+    customer_id = customer.id
+    quote = _sent(client, auth_headers, customer)
     token = _token(quote)
     for _ in range(3):
         resp = client.post(f"{PUBLIC}/{token}/accept", json={"accepted_by_name": "Priya"})
@@ -246,6 +248,7 @@ def test_repeated_accept_is_idempotent_without_side_effects(client, tenant, auth
     assert db.query(Invoice).filter_by(quote_id=quote["id"]).count() == 0
     row = db.get(Quote, quote["id"])
     assert row.converted_invoice_id is None and row.converted_subscription_id is None
+    assert db.query(Subscription).filter_by(customer_id=customer_id).count() == 0
 
     # After staff convert it, a late repeat accept still does nothing extra.
     assert client.post(f"{BASE}/{quote['id']}/convert", json={}, headers=auth_headers).status_code == 201
