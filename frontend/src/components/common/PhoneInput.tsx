@@ -2,6 +2,7 @@ import React, { useId } from 'react';
 import RHFPhoneInput, { type Country } from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
 import { cn } from '../../utils/cn';
+import { toE164Phone } from '../../utils/validation';
 
 export interface PhoneInputProps {
   label?: string;
@@ -63,7 +64,7 @@ export const PhoneInput: React.FC<PhoneInputProps> = ({
           id={id}
           international
           defaultCountry={defaultCountry}
-          value={value ?? undefined}
+          value={toE164Phone(value, defaultCountry)}
           onChange={(v) => onChange(v ?? '')}
           placeholder={placeholder}
           disabled={disabled}

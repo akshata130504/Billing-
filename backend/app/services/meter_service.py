@@ -24,6 +24,7 @@ from backend.app.models.meters import (
     UsageMeter,
 )
 from backend.app.models.subscriptions import Subscription
+from backend.app.services import timezones
 
 
 def create_meter(
@@ -98,13 +99,14 @@ def list_meters(db: Session, organization_id: str) -> List[UsageMeter]:
     )
 
 
-def _day_bounds(period_start: date, period_end: date):
-    """Half-open [period_start 00:00, period_end 00:00) window.
+def _day_bounds(period_start: date, period_end: date, tz=None):
+    """Half-open [period_start 00:00, period_end 00:00) window, in the organization's
+    timezone, returned as aware UTC instants (usage timestamps are stored in UTC).
 
     Billing periods are contiguous (one period's end is the next one's start), so an
     inclusive end double-counted every event on the boundary day in both cycles.
     """
-    return datetime.combine(period_start, datetime.min.time()), datetime.combine(period_end, datetime.min.time())
+    return timezones.period_bounds_utc(tz, period_start, period_end)
 
 
 def record_usage_event(
@@ -164,11 +166,13 @@ def record_usage_event(
     if existing_event:
         return existing_event
 
-    event_time = timestamp or utcnow()
+    # Store the instant in UTC (a naive timestamp is taken as UTC); the billing day it
+    # belongs to is the organization-local date of that instant.
+    event_time = timezones.to_utc(timestamp) if timestamp else utcnow()
     if subscription_id:
         from backend.app.models.billing_cycles import BillingCycleStatus
 
-        event_day = event_time.date()
+        event_day = timezones.local_date(event_time, timezones.org_tz_for_id(db, organization_id))
         frozen_cycle = db.query(BillingCycle).filter(
             BillingCycle.subscription_id == subscription_id,
             BillingCycle.period_start <= event_day,
@@ -232,7 +236,7 @@ def aggregate_subscription_usage(
     if not meter:
         raise NotFoundAppError(f"Meter {meter_id} not found.")
 
-    start_dt, end_dt = _day_bounds(period_start, period_end)
+    start_dt, end_dt = _day_bounds(period_start, period_end, timezones.org_tz_for_id(db, organization_id))
     filters = (
         UsageEvent.organization_id == organization_id,
         UsageEvent.meter_id == meter.id,
@@ -263,7 +267,8 @@ def aggregate_subscription_usage(
 
 
 def subscription_has_usage(db: Session, subscription_id: str, period_start: date, period_end: date) -> bool:
-    start_dt, end_dt = _day_bounds(period_start, period_end)
+    org_id = db.query(Subscription.organization_id).filter(Subscription.id == subscription_id).scalar()
+    start_dt, end_dt = _day_bounds(period_start, period_end, timezones.org_tz_for_id(db, org_id))
     return (
         db.query(UsageEvent.id)
         .filter(

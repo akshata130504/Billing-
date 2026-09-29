@@ -1,7 +1,10 @@
+import ipaddress
 import json
 import secrets
+import warnings
 from pathlib import Path
-from typing import Annotated, List, Union
+from typing import Annotated, Any, Dict, List, Optional, Union
+from urllib.parse import parse_qs, quote, urlsplit
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -30,6 +33,48 @@ _INSECURE_SECRET_KEYS = {
     "replace-in-production",
 }
 
+# sslmode values that authenticate the server certificate (libpq semantics).
+VERIFIED_SSLMODES = {"verify-full", "verify-ca"}
+_VALID_SSLMODES = {"disable", "allow", "prefer", "require", "verify-ca", "verify-full"}
+# Default reverse-proxy ranges allowed to set X-Real-IP (RFC 1918, loopback, IPv6 ULA).
+DEFAULT_TRUSTED_PROXIES = [
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "127.0.0.0/8",
+    "::1/128",
+    "fc00::/7",
+]
+# Host headers always accepted so in-container / on-host probes keep working
+# (compose healthcheck -> 127.0.0.1:8000, deploy-poll readiness -> 127.0.0.1:<port>).
+INTERNAL_HOSTS = ["localhost", "127.0.0.1"]
+
+
+def _split_list(v: Any) -> Any:
+    """Accept a JSON array or a comma-separated string for list settings."""
+    if isinstance(v, str):
+        value = v.strip()
+        if not value:
+            return []
+        if value.startswith("["):
+            return json.loads(value)
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return v
+
+
+def is_private_db_host(host: Optional[str]) -> bool:
+    """True for hosts only reachable on a private network: unix sockets, loopback, RFC 1918 /
+    ULA addresses and single-label names (docker compose service names such as `db`)."""
+    host = (host or "").strip().strip("[]").lower()
+    if not host or host.startswith("/"):
+        return True
+    if host == "localhost":
+        return True
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return "." not in host
+    return addr.is_private or addr.is_loopback
 
 
 class Settings(BaseSettings):
@@ -78,15 +123,89 @@ class Settings(BaseSettings):
         "http://localhost:3000",
     ]
 
-    @field_validator("ALLOWED_ORIGINS", mode="before")
+    # Host headers the API answers to (TrustedHostMiddleware). Empty = derive: "*" outside
+    # production; in production the hostnames of FRONTEND_URL and ALLOWED_ORIGINS. localhost
+    # and 127.0.0.1 are always accepted for internal health probes. "*" is refused in production.
+    ALLOWED_HOSTS: Annotated[List[str], NoDecode] = []
+    # CIDRs of reverse proxies whose X-Real-IP header is trusted (see api/deps.client_ip).
+    # Default: private + loopback ranges (our nginx container on the compose network).
+    TRUSTED_PROXIES: Annotated[List[str], NoDecode] = list(DEFAULT_TRUSTED_PROXIES)
+
+    @field_validator("ALLOWED_ORIGINS", "ALLOWED_HOSTS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
-        if isinstance(v, str):
-            value = v.strip()
-            if value.startswith("["):
-                return json.loads(value)
-            return [origin.strip() for origin in value.split(",") if origin.strip()]
-        return v
+        return _split_list(v)
+
+    @field_validator("TRUSTED_PROXIES", mode="before")
+    @classmethod
+    def assemble_trusted_proxies(cls, v: Union[str, List[str]]) -> List[str]:
+        items = _split_list(v)
+        for item in items:
+            ipaddress.ip_network(item, strict=False)  # ValueError on garbage -> startup fails
+        return items
+
+    @property
+    def trusted_proxy_networks(self) -> List[Union[ipaddress.IPv4Network, ipaddress.IPv6Network]]:
+        return [ipaddress.ip_network(item, strict=False) for item in self.TRUSTED_PROXIES]
+
+    @property
+    def effective_allowed_hosts(self) -> List[str]:
+        hosts = [h.strip().lower() for h in self.ALLOWED_HOSTS if h.strip()]
+        if not hosts:
+            if not self.is_production:
+                return ["*"]
+            for url in [self.FRONTEND_URL, *self.ALLOWED_ORIGINS]:
+                host = urlsplit(url).hostname
+                if host and host not in hosts:
+                    hosts.append(host.lower())
+        if "*" in hosts:
+            return ["*"]
+        for internal in INTERNAL_HOSTS:
+            if internal not in hosts:
+                hosts.append(internal)
+        return hosts
+
+    # --- Encryption of secrets at rest ------------------------------------------------
+    # Keyring for integration credentials / TOTP seeds (see core/encryption.py). Comma or
+    # JSON list of "<key_id>:<urlsafe-base64 32-byte Fernet key>"; the FIRST entry encrypts,
+    # every entry (plus the legacy SECRET_KEY-derived key) decrypts. Empty = legacy
+    # behaviour (single key derived from SECRET_KEY). Generate a key with
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    ENCRYPTION_KEYS: Annotated[List[str], NoDecode] = []
+    # Keep decrypting ciphertext written with the SECRET_KEY-derived key. Turn off only
+    # after `python -m backend.app.core.encryption rotate` has re-encrypted everything.
+    ENCRYPTION_LEGACY_SECRET_KEY_FALLBACK: bool = True
+
+    @field_validator("ENCRYPTION_KEYS", mode="before")
+    @classmethod
+    def assemble_encryption_keys(cls, v: Union[str, List[str]]) -> List[str]:
+        items = _split_list(v)
+        if items:
+            # Fail fast on malformed keys (message never echoes key material).
+            from cryptography.fernet import Fernet
+
+            seen = set()
+            for index, entry in enumerate(items):
+                key_id, _, key = entry.partition(":") if ":" in entry else (f"k{index + 1}", "", entry)
+                key_id = key_id.strip()
+                if not key_id or key_id in seen:
+                    raise ValueError(f"ENCRYPTION_KEYS: missing or duplicate key id at position {index + 1}")
+                seen.add(key_id)
+                try:
+                    Fernet(key.strip().encode("utf-8"))
+                except Exception:
+                    raise ValueError(
+                        f"ENCRYPTION_KEYS: key {key_id!r} is not a valid Fernet key (32 url-safe base64 bytes)"
+                    ) from None
+        return items
+
+    # --- Alerting -------------------------------------------------------------------------
+    # Incoming-webhook URL (Slack / Mattermost / Teams / Discord+/slack) receiving
+    # {"text": "..."} alerts from the app (core/alerts.py) and from deploy/*.sh. Empty = off.
+    ALERT_WEBHOOK_URL: str = ""
+    # The same event key alerts at most once per this many seconds per process.
+    ALERT_DEDUP_SECONDS: int = 900
+    ALERT_TIMEOUT_SECONDS: float = 5.0
 
     # --- PostgreSQL Database -------------------------------------------------
     POSTGRES_SERVER: str = "localhost"
@@ -95,20 +214,94 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "rooman_billing"
     DATABASE_URL: str | None = None
+    # Optional separate owner/migration credentials (least privilege, docs/database-security.md).
+    # Alembic and the container entrypoint's migration step use these; the running app uses
+    # the runtime POSTGRES_USER / DATABASE_URL. Unset = migrations use the runtime credentials.
+    MIGRATION_DATABASE_URL: str | None = None
+    MIGRATION_POSTGRES_USER: str | None = None
+    MIGRATION_POSTGRES_PASSWORD: str | None = None
+    # TLS to PostgreSQL (libpq semantics). Unset = libpq default ("prefer"). Use verify-full
+    # (with POSTGRES_SSLROOTCERT) for any database reached over a network you do not control.
+    # Production refuses a non-private DB host without verify-full/verify-ca unless
+    # POSTGRES_REQUIRE_VERIFIED_TLS=false (then it only warns).
+    POSTGRES_SSLMODE: str | None = None
+    POSTGRES_SSLROOTCERT: str | None = None
+    POSTGRES_SSLCERT: str | None = None
+    POSTGRES_SSLKEY: str | None = None
+    POSTGRES_REQUIRE_VERIFIED_TLS: bool = True
     # Per process. The prod stack runs the API (several gunicorn workers), the scheduler and
     # migrations against one PostgreSQL with max_connections=100, so keep
     # (workers x (pool + overflow)) + scheduler comfortably below that.
     DB_POOL_SIZE: int = 5
     DB_MAX_OVERFLOW: int = 5
 
-    @property
-    def sync_database_url(self) -> str:
-        if self.DATABASE_URL:
-            return self.DATABASE_URL
+    def _assemble_url(self, user: str, password: str) -> str:
         return (
-            f"postgresql+psycopg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+            f"postgresql+psycopg://{quote(user, safe='')}:{quote(password, safe='')}"
             f"@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         )
+
+    @property
+    def sync_database_url(self) -> str:
+        """Runtime (application) connection URL."""
+        if self.DATABASE_URL:
+            return self.DATABASE_URL
+        return self._assemble_url(self.POSTGRES_USER, self.POSTGRES_PASSWORD)
+
+    @property
+    def migration_database_url(self) -> str:
+        """Owner connection URL used by Alembic; falls back to the runtime URL when unset."""
+        if self.MIGRATION_DATABASE_URL:
+            return self.MIGRATION_DATABASE_URL
+        if self.MIGRATION_POSTGRES_USER:
+            if self.DATABASE_URL:
+                # Same host/db/options as the runtime DATABASE_URL, owner credentials.
+                from sqlalchemy.engine import make_url
+
+                return (
+                    make_url(self.DATABASE_URL)
+                    .set(username=self.MIGRATION_POSTGRES_USER, password=self.MIGRATION_POSTGRES_PASSWORD or "")
+                    .render_as_string(hide_password=False)
+                )
+            return self._assemble_url(self.MIGRATION_POSTGRES_USER, self.MIGRATION_POSTGRES_PASSWORD or "")
+        return self.sync_database_url
+
+    def db_connect_args(self, url: Optional[str] = None) -> Dict[str, Any]:
+        """DBAPI connect() keyword arguments for `url` (default: the runtime URL).
+
+        PostgreSQL: pins the session to UTC and adds the POSTGRES_SSL* options when set.
+        Options already present in the URL query string (?sslmode=...) still apply.
+        """
+        url = url or self.sync_database_url
+        if url.startswith("sqlite"):
+            return {"check_same_thread": False}
+        # Pin the session to UTC so timestamptz values come back in UTC (API renders "...Z")
+        # and SQL-side date/time comparisons don't depend on the database server's timezone.
+        args: Dict[str, Any] = {"options": "-c timezone=UTC"}
+        for key, value in (
+            ("sslmode", self.POSTGRES_SSLMODE),
+            ("sslrootcert", self.POSTGRES_SSLROOTCERT),
+            ("sslcert", self.POSTGRES_SSLCERT),
+            ("sslkey", self.POSTGRES_SSLKEY),
+        ):
+            if value and value.strip():
+                args[key] = value.strip()
+        return args
+
+    def effective_sslmode(self, url: Optional[str] = None) -> Optional[str]:
+        url = url or self.sync_database_url
+        if self.POSTGRES_SSLMODE and self.POSTGRES_SSLMODE.strip():
+            return self.POSTGRES_SSLMODE.strip().lower()
+        values = parse_qs(urlsplit(url).query).get("sslmode")
+        return values[-1].strip().lower() if values else None
+
+    @staticmethod
+    def db_host(url: str) -> Optional[str]:
+        parts = urlsplit(url)
+        if parts.hostname:
+            return parts.hostname
+        hosts = parse_qs(parts.query).get("host")
+        return hosts[-1] if hosts else None
 
     # --- Payments: Razorpay ----------------------------------------------------
     # Leave empty to run without an online gateway (manual/offline payments only).
@@ -126,10 +319,10 @@ class Settings(BaseSettings):
     # development an invitation link for a brand-new user is shown to the inviting admin.
     # These platform settings are used for every authentication email (signup codes, resets,
     # team invitations) - never an organization's own SMTP integration.
-    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_HOST: str = ""
     SMTP_PORT: int = 587
-    SMTP_USERNAME: str = "akshata.akshu.2004@gmail.com"
-    SMTP_PASSWORD: str = "dktdcyezomwayggk"
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
     SMTP_USE_TLS: bool = True
     SMTP_USE_SSL: bool = False
     # Per-step (connect/STARTTLS/login/send) and whole-conversation SMTP time limits. The total
@@ -137,7 +330,7 @@ class Settings(BaseSettings):
     # otherwise an unreachable mail server turns into a 502 from nginx instead of a clear error.
     SMTP_TIMEOUT_SECONDS: float = 10.0
     SMTP_TOTAL_TIMEOUT_SECONDS: float = 25.0
-    EMAIL_FROM_ADDRESS: str = "akshata.akshu.2004@gmail.com"
+    EMAIL_FROM_ADDRESS: str = "billing@example.com"
     EMAIL_FROM_NAME: str = "Rooman Billing"
 
     @property
@@ -221,12 +414,56 @@ class Settings(BaseSettings):
                     "SMTP_HOST is not set in %s: signup verification codes, invitations and password "
                     "resets cannot be emailed until SMTP_* is configured", self.ENVIRONMENT
                 )
+            if "*" in self.ALLOWED_ORIGINS:
+                problems.append("ALLOWED_ORIGINS must not contain '*' (the API allows credentials)")
+            elif any(not o.startswith("https://") for o in self.ALLOWED_ORIGINS):
+                problems.append("ALLOWED_ORIGINS must only contain https:// origins")
+            if not (self.FRONTEND_URL or "").strip().startswith("https://"):
+                problems.append("FRONTEND_URL must be an https:// URL")
+            if any(h.strip() == "*" for h in self.ALLOWED_HOSTS):
+                problems.append("ALLOWED_HOSTS must list hostnames explicitly, not '*'")
+            elif self.effective_allowed_hosts == list(INTERNAL_HOSTS):
+                problems.append("ALLOWED_HOSTS must be set (or derivable from FRONTEND_URL)")
+            problems.extend(self._database_tls_problems())
             if problems:
                 raise ValueError(
                     "Refusing to start in %s with insecure configuration: %s"
                     % (self.ENVIRONMENT, "; ".join(problems))
                 )
         return self
+
+    def _database_tls_problems(self) -> List[str]:
+        """Remote (non-private) database hosts must authenticate the server certificate."""
+        problems: List[str] = []
+        seen = set()
+        for label, url in (
+            ("DATABASE_URL", self.sync_database_url),
+            ("MIGRATION_DATABASE_URL", self.migration_database_url),
+        ):
+            if url.startswith("sqlite") or url in seen:
+                continue
+            seen.add(url)
+            host = self.db_host(url)
+            if is_private_db_host(host) or self.effective_sslmode(url) in VERIFIED_SSLMODES:
+                continue
+            message = (
+                f"{label} host {host!r} is not on a private network: set POSTGRES_SSLMODE=verify-full "
+                "(and POSTGRES_SSLROOTCERT) so the connection is encrypted and the server authenticated"
+            )
+            if self.POSTGRES_REQUIRE_VERIFIED_TLS:
+                problems.append(message)
+            else:
+                warnings.warn(message + " (POSTGRES_REQUIRE_VERIFIED_TLS=false: continuing)", RuntimeWarning, stacklevel=2)
+        return problems
+
+    @field_validator("POSTGRES_SSLMODE", mode="after")
+    @classmethod
+    def validate_sslmode(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return None
+        if v.strip().lower() not in _VALID_SSLMODES:
+            raise ValueError(f"POSTGRES_SSLMODE must be one of {sorted(_VALID_SSLMODES)}")
+        return v.strip().lower()
 
     def __repr__(self) -> str:
         """Mask sensitive secrets so logging or printing Settings never leaks credentials."""
@@ -238,6 +475,12 @@ class Settings(BaseSettings):
             "SMTP_PASSWORD",
             "GEMINI_API_KEY",
             "REDIS_URL",
+            "DATABASE_URL",
+            "MIGRATION_DATABASE_URL",
+            "MIGRATION_POSTGRES_PASSWORD",
+            "ENCRYPTION_KEYS",
+            "ALERT_WEBHOOK_URL",
+            "SENTRY_DSN",
         }
         parts = []
         for key, value in self.__dict__.items():
@@ -260,6 +503,9 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",
+        # Validation errors must never echo raw values (SECRET_KEY, ENCRYPTION_KEYS, DB URLs)
+        # into startup logs.
+        hide_input_in_errors=True,
     )
 
 

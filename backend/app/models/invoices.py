@@ -1,7 +1,7 @@
 """Invoices and line items."""
 import enum
 
-from sqlalchemy import Column, Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Column, Date, DateTime, Enum, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import relationship
 
 from backend.app.core.database import Base
@@ -19,10 +19,25 @@ class InvoiceStatus(str, enum.Enum):
 
 OPEN_INVOICE_STATUSES = (InvoiceStatus.SENT, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.OVERDUE)
 
+# Must stay identical to PERIOD_INDEX_WHERE in alembic revision e6f7a8b9c0d1 (0019).
+INVOICE_PERIOD_INDEX_WHERE = "status <> 'VOID' AND subscription_id IS NOT NULL AND period_start IS NOT NULL"
+
 
 class Invoice(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "invoices"
-    __table_args__ = (UniqueConstraint("organization_id", "invoice_number", name="uq_invoice_number_per_org"),)
+    __table_args__ = (
+        UniqueConstraint("organization_id", "invoice_number", name="uq_invoice_number_per_org"),
+        # Database-level backstop against double-invoicing a subscription period (migration 0019).
+        # Enum columns store member NAMES, so a void invoice's status is 'VOID'.
+        Index(
+            "uq_invoices_subscription_period",
+            "subscription_id",
+            "period_start",
+            unique=True,
+            postgresql_where=text(INVOICE_PERIOD_INDEX_WHERE),
+            sqlite_where=text(INVOICE_PERIOD_INDEX_WHERE),
+        ),
+    )
 
     invoice_number = Column(String(24), nullable=False)
     customer_id = Column(String(36), ForeignKey("customers.id", ondelete="RESTRICT"), nullable=False, index=True)

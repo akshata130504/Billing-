@@ -14,6 +14,7 @@ from backend.app.models.invoices import Invoice, InvoiceStatus
 from backend.app.models.payments import Payment, PaymentAllocation
 from backend.app.models.projects import BillingMethod, Project, ProjectInvoice, ProjectStatus
 from backend.app.models.timesheets import TimeEntry, TimeEntryStatus
+from backend.app.services import timezones
 from backend.app.services.money import D
 from backend.app.schemas.projects import (
     ProjectCreate,
@@ -217,6 +218,7 @@ def _invoices_payments_transactions(
         .order_by(desc(Payment.paid_at), desc(Payment.created_at))
     ).all()
     payment_rows: List[Dict[str, Any]] = []
+    org_tz = timezones.org_tz_for_id(db, organization_id)
     for alloc, pay in allocations:
         pay_status = pay.status.value if hasattr(pay.status, "value") else str(pay.status)
         paid_on = pay.paid_at or pay.created_at
@@ -225,7 +227,7 @@ def _invoices_payments_transactions(
                 "id": alloc.id,
                 "paymentId": pay.id,
                 "projectId": project_id,
-                "paymentDate": paid_on.date().isoformat() if paid_on else "",
+                "paymentDate": timezones.local_date(paid_on, org_tz).isoformat() if paid_on else "",
                 "reference": pay.reference or pay.payment_number,
                 "invoiceNumber": numbers.get(alloc.invoice_id, ""),
                 "method": pay.method.value if hasattr(pay.method, "value") else str(pay.method),

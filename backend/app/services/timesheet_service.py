@@ -21,6 +21,7 @@ from backend.app.models import (
     utcnow,
 )
 from backend.app.schemas.timesheets import (
+    _MAX_FUTURE_DAYS,
     TimeEntryCreate,
     TimeEntryRead,
     TimeEntrySummaryKPIs,
@@ -31,6 +32,7 @@ from backend.app.schemas.timesheets import (
 )
 from backend.app.services import audit
 from backend.app.services import invoice_service
+from backend.app.services import timezones
 from backend.app.services.money import D, LineInput, q2
 
 
@@ -38,6 +40,17 @@ def _can_manage_all_entries(ctx: CurrentContext) -> bool:
     """Returns True if the current user has FINANCE role or above."""
     role = ctx.membership.role
     return ROLE_RANK.get(role, 0) >= ROLE_RANK.get(MemberRole.FINANCE, 0)
+
+
+def _check_entry_date(value: Optional[date], ctx: CurrentContext) -> None:
+    """Business-day check against the organization's local date (the schema only applies a
+    lenient, timezone-agnostic backstop). One day of slack for users in other timezones."""
+    if value is None:
+        return
+    if (value - timezones.org_today(ctx.organization)).days > _MAX_FUTURE_DAYS:
+        raise ValidationAppError(
+            "Time entry date cannot be in the future.", {"fields": {"date": "in the future"}}
+        )
 
 
 def serialize_time_entry(entry: TimeEntry) -> TimeEntryRead:
@@ -83,6 +96,7 @@ def serialize_time_entry(entry: TimeEntry) -> TimeEntryRead:
 def create_time_entry(db: Session, data: TimeEntryCreate, ctx: CurrentContext) -> TimeEntryRead:
     """Creates a new time entry with tenant isolation and rate/amount calculation."""
     org_id = ctx.organization.id
+    _check_entry_date(data.date, ctx)
 
     customer_id = data.customer_id
     project_name = data.project_name
@@ -192,6 +206,7 @@ def update_time_entry(db: Session, entry_id: str, data: TimeEntryUpdate, ctx: Cu
     if data.project_name is not None:
         entry.project_name = data.project_name or None
     if data.date is not None:
+        _check_entry_date(data.date, ctx)
         entry.date = data.date
     if data.start_time is not None:
         entry.start_time = data.start_time
@@ -583,7 +598,7 @@ def generate_invoice_from_timesheets(
             )
         )
 
-    issue_date = payload.issue_date or date.today()
+    issue_date = payload.issue_date or timezones.org_today(ctx.organization)
     due_date = payload.due_date or (issue_date + timedelta(days=customer.payment_terms_days or 30))
 
     # One transaction: the invoice is built with the non-committing builder, the entries

@@ -6,6 +6,7 @@ import { Input } from '../../../components/common/Input';
 import { Select } from '../../../components/common/Select';
 import { validateSensibleName, validateNonNegativeMoney, validateDateNotBefore, parseStrictNumber } from '../../../utils/validation';
 import { CustomerCombobox } from '../../../components/common/CustomerCombobox';
+import { todayIso, toIsoDate } from '../../../utils/format';
 
 interface ProjectFormModalProps {
   isOpen: boolean;
@@ -67,11 +68,11 @@ export function ProjectFormModal({
       setCustomer('');
       setDescription('');
       setStatus('active');
-      const today = new Date().toISOString().split('T')[0];
+      const today = todayIso();
       setStartDate(today);
       const threeMonthsLater = new Date();
       threeMonthsLater.setMonth(threeMonthsLater.getMonth() + 3);
-      setEndDate(threeMonthsLater.toISOString().split('T')[0]);
+      setEndDate(toIsoDate(threeMonthsLater));
       setBillingMethod('fixed_price');
       setBudget('100000');
       setNotes('');
@@ -216,7 +217,7 @@ export function ProjectFormModal({
               label="Project Budget (₹)"
               type="number"
               min="0"
-              step="1000"
+              step="0.01"
               placeholder="e.g. 150000"
               value={budget}
               onChange={(e) => setBudget(e.target.value)}

@@ -226,6 +226,7 @@ export interface CPQDealOut {
   approved_by: string | null;
   approved_at: string | null;
   converted_quote_id: string | null;
+  created_by_id?: string | null;
   notes: string | null;
   terms: string | null;
   items: CPQDealItemOut[];

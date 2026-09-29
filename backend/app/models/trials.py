@@ -157,7 +157,7 @@ class TrialReminder(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
         index=True,
     )
     reminder_type = Column(String(64), nullable=False)
-    scheduled_for = Column(Date, nullable=False)
+    scheduled_for = Column(Date, nullable=False, index=True)  # ix_trial_reminders_scheduled_for
     sent_at = Column(DateTime(timezone=True), nullable=True)
     notification_delivery_id = Column(String(36), ForeignKey("notification_deliveries.id", ondelete="SET NULL"), nullable=True)
     status = Column(String(32), nullable=False, default="pending")

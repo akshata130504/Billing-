@@ -1,7 +1,7 @@
 """Pydantic schemas for Timesheets and Time Tracking."""
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
@@ -10,12 +10,23 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from backend.app.models.timesheets import TimeEntryStatus
 
 # A day of slack so a user logging time from a different timezone than the
-# server isn't blocked from entering "today".
+# organization isn't blocked from entering "today".
 _MAX_FUTURE_DAYS = 1
+# The furthest ahead of UTC any timezone runs (UTC+14): no organization's local date can
+# be later than the UTC date at now+14h.
+_MAX_TZ_AHEAD = timedelta(hours=14)
+
+
+def latest_local_date_anywhere() -> date:
+    from backend.app.services import timezones
+
+    return (timezones.utc_now() + _MAX_TZ_AHEAD).date()
 
 
 def _reject_far_future(value: Optional[date]) -> Optional[date]:
-    if value is not None and (value - date.today()).days > _MAX_FUTURE_DAYS:
+    # Lenient schema backstop (the organization is not known here): the strict check
+    # against the organization's local business day lives in timesheet_service.
+    if value is not None and (value - latest_local_date_anywhere()).days > _MAX_FUTURE_DAYS:
         raise ValueError("Time entry date cannot be in the future.")
     return value
 

@@ -19,7 +19,7 @@ class QuoteStatus(str, enum.Enum):
     EXPIRED = "expired"
     PARTIALLY_INVOICED = "partially_invoiced"
     INVOICED = "invoiced"
-    CONVERTED = "converted"  # an invoice was generated from it
+    CONVERTED = "converted"  # an invoice (or a subscription) was generated from it
 
 
 class Quote(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
@@ -55,6 +55,13 @@ class Quote(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
     accepted_at = Column(DateTime(timezone=True), nullable=True)
     declined_at = Column(DateTime(timezone=True), nullable=True)
     converted_invoice_id = Column(String(36), nullable=True)
+    # Set when the accepted quote was converted into a subscription (status CONVERTED).
+    converted_subscription_id = Column(
+        String(36),
+        ForeignKey("subscriptions.id", ondelete="SET NULL", name="fk_quotes_converted_subscription_id"),
+        nullable=True,
+        index=True,
+    )
     created_by_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     customer = relationship("Customer")

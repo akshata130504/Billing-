@@ -56,6 +56,7 @@ from backend.app.schemas.customization import (
     WebTabUpdate,
 )
 from backend.app.services import notification_service
+from backend.app.services import timezones
 
 # ---------------------------------------------------------------------------
 # Transaction Number Series
@@ -1261,12 +1262,13 @@ def _as_aware(dt: Optional[datetime]) -> Optional[datetime]:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def _cron_next(cron_expression: str, from_dt: datetime) -> datetime:
-    """Next fire time for a 5-field crontab expression (UTC), via APScheduler's CronTrigger."""
+def _cron_next(cron_expression: str, from_dt: datetime, tz=None) -> datetime:
+    """Next fire time (aware UTC) for a 5-field crontab expression evaluated in ``tz`` (the
+    organization's timezone; UTC when omitted), via APScheduler's CronTrigger."""
     from apscheduler.triggers.cron import CronTrigger
 
     try:
-        trigger = CronTrigger.from_crontab(cron_expression.strip(), timezone=timezone.utc)
+        trigger = CronTrigger.from_crontab(cron_expression.strip(), timezone=tz or timezone.utc)
     except (ValueError, TypeError) as exc:
         raise ValidationAppError(
             f"Invalid cron expression '{cron_expression}': {exc}", {"fields": {"cron_expression": "invalid"}}
@@ -1274,22 +1276,40 @@ def _cron_next(cron_expression: str, from_dt: datetime) -> datetime:
     next_fire = trigger.get_next_fire_time(None, from_dt + timedelta(seconds=1))
     if next_fire is None:
         raise ValidationAppError("Cron expression never fires.", {"fields": {"cron_expression": "invalid"}})
-    return next_fire
+    return next_fire.astimezone(timezone.utc)
 
 
 def compute_next_schedule_date(
     frequency: ScheduleFrequency,
     from_dt: Optional[datetime] = None,
     cron_expression: Optional[str] = None,
+    tz=None,
 ) -> datetime:
-    """Next run after ``from_dt``: the cron expression when set, otherwise the frequency
-    (monthly = same day next calendar month, clamped to month end)."""
+    """Next run (aware UTC) after ``from_dt``: the cron expression when set, otherwise the
+    frequency (monthly = same day next calendar month, clamped to month end).
+
+    ``tz`` is the organization's timezone: cron fields and daily/weekly/monthly steps are
+    calendar-wall-clock in that zone (09:00 stays 09:00 local across DST and the month
+    rollover follows the local date). Hourly is a fixed elapsed hour. Omitted -> UTC.
+    """
     from_dt = _as_aware(from_dt) or utcnow()
+    zone = timezones.resolve_tz(tz) if tz is not None else timezone.utc
     if cron_expression and cron_expression.strip():
-        return _cron_next(cron_expression, from_dt)
+        return _cron_next(cron_expression, from_dt, zone)
+    if frequency == ScheduleFrequency.HOURLY:
+        return (from_dt + _FREQUENCY_DELTAS[ScheduleFrequency.HOURLY]).astimezone(timezone.utc)
+    local = from_dt.astimezone(zone)
     if frequency == ScheduleFrequency.MONTHLY:
-        return _add_one_month(from_dt)
-    return from_dt + _FREQUENCY_DELTAS.get(frequency, timedelta(days=1))
+        nxt = _add_one_month(local.replace(tzinfo=None))
+    else:
+        nxt = local.replace(tzinfo=None) + _FREQUENCY_DELTAS.get(frequency, timedelta(days=1))
+    # Re-attach the zone to the local wall time so zoneinfo picks the offset valid on that
+    # date (DST), then normalize to UTC for storage/comparison.
+    return nxt.replace(tzinfo=zone).astimezone(timezone.utc)
+
+
+def _schedule_tz(db: Session, organization_id: Optional[str]):
+    return timezones.org_tz_for_id(db, organization_id)
 
 
 def _jsonable(value: Any) -> Any:
@@ -1304,9 +1324,10 @@ def _schedule_send_dunning_reminders(db: Session, organization_id: str) -> Dict[
 
 def _schedule_export_reports(db: Session, organization_id: str) -> Dict[str, Any]:
     """Computes the month-to-date KPI snapshot and stores it on the automation log."""
-    from backend.app.services import reports_service
+    from backend.app.services import reports_service, timezones
 
-    report_range = reports_service.resolve_report_range("this_month")
+    tz = timezones.org_tz_for_id(db, organization_id)
+    report_range = reports_service.resolve_report_range("this_month", today=timezones.org_today(tz), tz=tz)
     return {
         "range": {"start": str(report_range.start), "end": str(report_range.end)},
         "kpis": reports_service.kpis(db, organization_id, report_range),
@@ -1330,14 +1351,14 @@ def supported_schedule_target_actions() -> List[str]:
     return sorted(set(SCHEDULE_TARGET_ACTIONS) | set(SCHEDULER_MANAGED_TARGET_ACTIONS))
 
 
-def _validate_schedule_definition(target_action: Optional[str], cron_expression: Optional[str]) -> None:
+def _validate_schedule_definition(target_action: Optional[str], cron_expression: Optional[str], tz=None) -> None:
     if target_action is not None and target_action not in supported_schedule_target_actions():
         raise ValidationAppError(
             f"Unsupported target action '{target_action}'. Supported: {', '.join(supported_schedule_target_actions())}.",
             {"fields": {"target_action": "unsupported"}},
         )
     if cron_expression and cron_expression.strip():
-        _cron_next(cron_expression, utcnow())
+        _cron_next(cron_expression, utcnow(), tz)
 
 
 def list_schedules(db: Session, organization_id: str) -> List[AutomationSchedule]:
@@ -1363,7 +1384,8 @@ def get_schedule(db: Session, schedule_id: str, organization_id: str) -> Automat
 
 
 def create_schedule(db: Session, organization_id: str, data: AutomationScheduleCreate) -> AutomationSchedule:
-    _validate_schedule_definition(data.target_action, data.cron_expression)
+    tz = _schedule_tz(db, organization_id)
+    _validate_schedule_definition(data.target_action, data.cron_expression, tz)
     now = utcnow()
     schedule = AutomationSchedule(
         organization_id=organization_id,
@@ -1374,7 +1396,7 @@ def create_schedule(db: Session, organization_id: str, data: AutomationScheduleC
         target_action=data.target_action,
         status=data.status,
         is_active=data.is_active,
-        next_date=compute_next_schedule_date(data.frequency, now, data.cron_expression),
+        next_date=compute_next_schedule_date(data.frequency, now, data.cron_expression, tz),
     )
     db.add(schedule)
     db.flush()
@@ -1384,12 +1406,13 @@ def create_schedule(db: Session, organization_id: str, data: AutomationScheduleC
 def update_schedule(db: Session, schedule_id: str, organization_id: str, data: AutomationScheduleUpdate) -> AutomationSchedule:
     schedule = get_schedule(db, schedule_id, organization_id)
     payload = data.model_dump(exclude_unset=True)
-    _validate_schedule_definition(payload.get("target_action"), payload.get("cron_expression"))
+    tz = _schedule_tz(db, organization_id)
+    _validate_schedule_definition(payload.get("target_action"), payload.get("cron_expression"), tz)
     for key, value in payload.items():
         setattr(schedule, key, value)
     if "frequency" in payload or "cron_expression" in payload or not schedule.next_date:
         schedule.next_date = compute_next_schedule_date(
-            schedule.frequency, schedule.last_executed_on or utcnow(), schedule.cron_expression
+            schedule.frequency, schedule.last_executed_on or utcnow(), schedule.cron_expression, tz
         )
     db.flush()
     return schedule
@@ -1435,7 +1458,9 @@ def execute_schedule(db: Session, schedule: AutomationSchedule, now: Optional[da
         result["error"] = error
 
     schedule.last_executed_on = now
-    schedule.next_date = compute_next_schedule_date(schedule.frequency, now, schedule.cron_expression)
+    schedule.next_date = compute_next_schedule_date(
+        schedule.frequency, now, schedule.cron_expression, _schedule_tz(db, schedule.organization_id)
+    )
     db.add(
         AutomationLog(
             organization_id=schedule.organization_id,
@@ -1485,10 +1510,11 @@ def run_due_automation_schedules(db: Session, limit: int = 50) -> int:
             AutomationSchedule.next_date.is_(None),
         )
     ).all():
+        tz = _schedule_tz(db, schedule.organization_id)
         try:
-            schedule.next_date = compute_next_schedule_date(schedule.frequency, now, schedule.cron_expression)
+            schedule.next_date = compute_next_schedule_date(schedule.frequency, now, schedule.cron_expression, tz)
         except ValidationAppError:
-            schedule.next_date = compute_next_schedule_date(schedule.frequency, now)
+            schedule.next_date = compute_next_schedule_date(schedule.frequency, now, tz=tz)
     db.commit()
 
     stmt = (
@@ -1507,10 +1533,11 @@ def run_due_automation_schedules(db: Session, limit: int = 50) -> int:
     due = list(db.scalars(stmt).all())
     claimed: List[str] = []
     for schedule in due:
+        tz = _schedule_tz(db, schedule.organization_id)
         try:
-            schedule.next_date = compute_next_schedule_date(schedule.frequency, now, schedule.cron_expression)
+            schedule.next_date = compute_next_schedule_date(schedule.frequency, now, schedule.cron_expression, tz)
         except ValidationAppError:
-            schedule.next_date = compute_next_schedule_date(schedule.frequency, now)
+            schedule.next_date = compute_next_schedule_date(schedule.frequency, now, tz=tz)
         claimed.append(schedule.id)
     db.commit()
 

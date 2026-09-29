@@ -11,6 +11,7 @@ from backend.app.core.exceptions import ValidationAppError
 from backend.app.schemas.audit_logs import AuditLogOut
 from backend.app.schemas.common_refs import PaginatedResponse
 from backend.app.services import audit_query_service as svc
+from backend.app.services import timezones
 from backend.app.services.pagination import PageParams, page_params
 
 router = APIRouter()
@@ -60,7 +61,7 @@ def export_audit_logs(
     fmt = format.lower()
     if fmt not in ("csv", "json"):
         raise ValidationAppError("format must be csv or json", {"fields": {"format": "csv|json"}})
-    stamp = date.today().isoformat()
+    stamp = timezones.org_today(ctx.organization).isoformat()
     if fmt == "csv":
         generator = svc.export_csv(db, ctx.organization_id, filters, getattr(ctx.organization, 'timezone', None))
         media_type = "text/csv; charset=utf-8"

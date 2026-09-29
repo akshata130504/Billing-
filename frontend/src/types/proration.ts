@@ -40,6 +40,9 @@ export interface SubscriptionChangePreviewOut {
   new_plan: ProrationPlanRef;
   old_quantity: string;
   new_quantity: string;
+  /** Per-cycle rate billed today / after the change (FLAT = one unit; tiers re-priced). */
+  old_total_rate?: string;
+  new_total_rate?: string;
   period_start: string;
   period_end: string;
   effective_date: string;

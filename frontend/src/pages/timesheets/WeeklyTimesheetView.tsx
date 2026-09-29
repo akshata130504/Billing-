@@ -13,7 +13,7 @@ import type { WeeklyTimesheetResponse } from '../../types/api';
 import { Button } from '../../components/common/Button';
 import { LoadingState } from '../../components/common/LoadingState';
 import { EmptyState } from '../../components/common/EmptyState';
-import { formatMoney } from '../../utils/format';
+import { formatMoney, toIsoDate } from '../../utils/format';
 
 interface WeeklyTimesheetViewProps {
   onAddEntry: () => void;
@@ -35,7 +35,7 @@ export function WeeklyTimesheetView({ onAddEntry }: WeeklyTimesheetViewProps) {
   const loadWeekly = useCallback(async () => {
     try {
       setLoading(true);
-      const startStr = currentWeekStart.toISOString().split('T')[0];
+      const startStr = toIsoDate(currentWeekStart);
       const data = await timesheetService.weekly(startStr);
       setWeeklyData(data);
     } catch (err) {
@@ -75,7 +75,7 @@ export function WeeklyTimesheetView({ onAddEntry }: WeeklyTimesheetViewProps) {
   const daysList = Array.from({ length: 7 }).map((_, i) => {
     const d = new Date(currentWeekStart);
     d.setDate(d.getDate() + i);
-    const iso = d.toISOString().split('T')[0];
+    const iso = toIsoDate(d);
     const dayNum = d.getDate();
     return { iso, label: `${dayNames[i]} ${dayNum}` };
   });

@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Response, status
 
 from backend.app import __version__
+from backend.app.core.alerts import send_alert
 from backend.app.core.config import settings
 from backend.app.core.database import SessionLocal, check_db_health
 from backend.app.core.logging import logger
@@ -115,6 +116,13 @@ def readiness_check(response: Response) -> ReadinessResponse:
     failures = []
     if not db_ok:
         failures.append("database")
+        # Deduplicated (ALERT_DEDUP_SECONDS) and non-blocking; the probe runs every few seconds.
+        send_alert(
+            "database.unreachable",
+            "Readiness probe cannot reach the database",
+            {"dialect": db_health.get("dialect"), "error": db_health.get("error")},
+            severity="critical",
+        )
     if not migrations_ok:
         failures.append("migrations")
 

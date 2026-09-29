@@ -1,8 +1,8 @@
 """Request/response schemas for /subscriptions (contract §7)."""
 from datetime import date, datetime
-from typing import Optional
+from typing import Any, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.app.models import BillingInterval, SubscriptionStatus
 from backend.app.schemas.common_refs import CustomerRef
@@ -12,7 +12,12 @@ class SubscriptionCreate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     customer_id: str
-    plan_id: str
+    # Exactly one of: a legacy plan, or a recurring Plans & Pricing (catalog) offering.
+    plan_id: Optional[str] = None
+    offering_id: Optional[str] = None
+    # Offering subscriptions only: price with this price book (default: the org's
+    # default active price book, when it has an entry for the offering).
+    price_book_id: Optional[str] = None
     quantity: int = Field(default=1, ge=1)
     start_date: Optional[date] = None
     billing_frequency: Optional[str] = Field(default=None, max_length=32)
@@ -23,6 +28,14 @@ class SubscriptionCreate(BaseModel):
     status: Optional[SubscriptionStatus] = None
     # Default: True when the subscription does not start with a trial.
     generate_first_invoice: Optional[bool] = None
+
+    @model_validator(mode="after")
+    def _one_plan_source(self):
+        if bool(self.plan_id) == bool(self.offering_id):
+            raise ValueError("Provide exactly one of plan_id (legacy plan) or offering_id (Plans & Pricing plan).")
+        if self.price_book_id and not self.offering_id:
+            raise ValueError("price_book_id applies to offering_id subscriptions only.")
+        return self
 
 
 class SubscriptionUpdate(BaseModel):
@@ -53,6 +66,10 @@ class SubscriptionPlanRef(BaseModel):
     currency: str
     product_name: str
     pricing_model: Optional[str] = "flat"
+    # "plan" (legacy plan) or "offering" (Plans & Pricing plan billed via a linked plan).
+    source: str = "plan"
+    offering_id: Optional[str] = None
+    offering_pricing_model: Optional[str] = None
 
 
 class SubscriptionOut(BaseModel):
@@ -86,6 +103,27 @@ class SubscriptionOut(BaseModel):
     mrr: str
     created_at: datetime
     updated_at: datetime
+
+
+class SubscribablePlanOption(BaseModel):
+    """One entry of GET /subscriptions/plan-options: a legacy plan or a recurring offering."""
+
+    id: str
+    source: str  # "plan" | "offering"
+    plan_id: Optional[str] = None
+    offering_id: Optional[str] = None
+    name: str
+    code: str
+    product_name: str = ""
+    billing_interval: Optional[str] = None
+    interval_count: int = 1
+    pricing_model: str
+    unit_amount: str
+    currency: str
+    tax_rate_pct: str
+    trial_days: int = 0
+    pricing_tiers: List[Any] = Field(default_factory=list)
+    is_active: bool = True
 
 
 class SubscriptionSummaryOut(BaseModel):

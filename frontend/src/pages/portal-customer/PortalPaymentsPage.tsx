@@ -9,6 +9,7 @@ import {
 import { LoadingState } from '../../components/common/LoadingState';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { Badge } from '../../components/common/Badge';
+import { humanize, statusVariant } from '../../utils/format';
 
 export const PortalPaymentsPage: React.FC = () => {
   const [payments, setPayments] = useState<PortalPayment[]>([]);
@@ -210,16 +211,8 @@ export const PortalPaymentsPage: React.FC = () => {
                         {p.gateway}
                       </td>
                       <td className="px-5 py-3.5">
-                        <Badge
-                          variant={
-                            p.status === 'succeeded'
-                              ? 'success'
-                              : p.status === 'pending'
-                              ? 'warning'
-                              : 'danger'
-                          }
-                        >
-                          {p.status}
+                        <Badge variant={statusVariant(p.status)}>
+                          {humanize(p.status)}
                         </Badge>
                       </td>
                     </tr>

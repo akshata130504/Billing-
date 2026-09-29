@@ -48,6 +48,25 @@ export function changeStatusVariant(status: string): BadgeVariant {
 }
 
 /** "5.000" → "5", "2.500" → "2.5" */
+/**
+ * Per-cycle rate for the proration preview. Prefer the server's billed rate; unit price x
+ * quantity is only a fallback for older API responses (it is wrong for FLAT plans, which bill
+ * one unit per period, and for volume/tiered/package plans, which are re-priced per quantity).
+ */
+export function previewRate(
+  totalRate: string | null | undefined,
+  unitAmount: string | number | null | undefined,
+  quantity: string | number | null | undefined
+): number {
+  if (totalRate !== null && totalRate !== undefined && totalRate !== '') {
+    const n = Number(totalRate);
+    if (Number.isFinite(n)) return n;
+  }
+  const unit = Number(unitAmount ?? 0);
+  const qty = Number(quantity ?? 0);
+  return Number.isFinite(unit) && Number.isFinite(qty) ? unit * qty : 0;
+}
+
 export function formatQuantity(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === '') return '—';
   const n = Number(value);

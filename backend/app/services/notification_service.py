@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import html
 import re
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import delete, desc, func, select
 
 from backend.app.core.exceptions import NotFoundAppError, ValidationAppError
 from backend.app.core.logging import logger
@@ -15,7 +17,9 @@ from backend.app.models.notifications import (
     NotificationChannel,
     NotificationDelivery,
     NotificationDeliveryStatus,
+    NotificationReadState,
     NotificationTemplate,
+    UserNotificationPreference,
 )
 from backend.app.services.email import enqueue_email, send_email, smtp_available
 
@@ -148,6 +152,27 @@ DEFAULT_NOTIFICATION_TEMPLATES = [
 ]
 
 
+SMS_NOT_SUPPORTED_MESSAGE = "SMS delivery is not supported yet"
+#: Channels that exist in the enum (and possibly in legacy rows) but have no delivery provider.
+UNSUPPORTED_CHANNELS: Dict[NotificationChannel, str] = {NotificationChannel.SMS: SMS_NOT_SUPPORTED_MESSAGE}
+
+
+def ensure_channel_supported(channel: NotificationChannel) -> None:
+    """Raises a 422 ValidationAppError for channels that cannot deliver (SMS)."""
+    channel = NotificationChannel(channel)
+    reason = UNSUPPORTED_CHANNELS.get(channel)
+    if reason:
+        raise ValidationAppError(reason, details={"field": "channel", "channel": channel.value})
+
+
+def list_channels() -> List[Dict[str, Any]]:
+    """Every notification channel and whether it can actually deliver (drives the UI)."""
+    return [
+        {"channel": ch, "supported": ch not in UNSUPPORTED_CHANNELS, "reason": UNSUPPORTED_CHANNELS.get(ch)}
+        for ch in NotificationChannel
+    ]
+
+
 def seed_default_templates_if_none(db: Session, organization_id: str) -> None:
     """Seeds default notification templates if none exist for the organization."""
     existing_count = (
@@ -210,6 +235,7 @@ def create_template(
     description: Optional[str] = None,
     is_active: bool = True,
 ) -> NotificationTemplate:
+    ensure_channel_supported(channel)
     existing = (
         db.query(NotificationTemplate)
         .filter(
@@ -247,6 +273,9 @@ def update_template(
     is_active: Optional[bool] = None,
 ) -> NotificationTemplate:
     tmpl = get_template_by_id(db, organization_id, template_id)
+    if is_active and tmpl.channel in UNSUPPORTED_CHANNELS:
+        # Legacy SMS rows may exist: they can be edited or disabled, never (re-)enabled.
+        ensure_channel_supported(tmpl.channel)
     if name is not None:
         tmpl.name = name
     if subject_template is not None:
@@ -346,6 +375,7 @@ def create_or_update_template(
     is_active: bool = True,
 ) -> NotificationTemplate:
     """Creates a new version of a notification template or updates an inactive one."""
+    ensure_channel_supported(channel)
     latest = (
         db.query(NotificationTemplate)
         .filter(
@@ -506,3 +536,203 @@ def list_deliveries(
     if recipient:
         query = query.filter(NotificationDelivery.recipient.ilike(f"%{recipient}%"))
     return query.order_by(desc(NotificationDelivery.created_at)).limit(limit).all()
+
+
+# --- Per-user notification preferences --------------------------------------------------------------------------------
+#
+# Every function below is scoped by BOTH organization_id and user_id taken from the caller's
+# authenticated context - never from the request body - so a user can only ever see or change
+# their own rows in their current organization.
+#
+# Where preferences are consumed: the header bell (frontend) hides action-center categories the
+# user switched off and hides everything when ``inAppNotifications`` is false. The server does
+# not send any internal-user email for these events today (all email dispatch goes to customers
+# via templates), so ``emailNotifications`` is stored for when such alerts exist.
+
+
+def _merged_preferences(stored: Optional[Dict[str, Any]]) -> Dict[str, bool]:
+    """Defaults overlaid with the stored values, dropping keys that are no longer defined."""
+    from backend.app.schemas.notifications import DEFAULT_NOTIFICATION_PREFERENCES
+
+    merged = dict(DEFAULT_NOTIFICATION_PREFERENCES)
+    for key, value in (stored or {}).items():
+        if key in merged and isinstance(value, bool):
+            merged[key] = value
+    return merged
+
+
+def get_user_preferences(db: Session, organization_id: str, user_id: str) -> Dict[str, Any]:
+    row = db.scalars(
+        select(UserNotificationPreference).where(
+            UserNotificationPreference.organization_id == organization_id,
+            UserNotificationPreference.user_id == user_id,
+        )
+    ).first()
+    return {
+        "preferences": _merged_preferences(row.preferences if row else None),
+        "updated_at": row.updated_at if row else None,
+    }
+
+
+def update_user_preferences(
+    db: Session, organization_id: str, user_id: str, changes: Dict[str, bool]
+) -> Dict[str, Any]:
+    """Merges ``changes`` (already validated: known keys, strict booleans) into the stored map."""
+    row = db.scalars(
+        select(UserNotificationPreference).where(
+            UserNotificationPreference.organization_id == organization_id,
+            UserNotificationPreference.user_id == user_id,
+        )
+    ).first()
+    merged = _merged_preferences(row.preferences if row else None)
+    merged.update({k: v for k, v in changes.items() if v is not None})
+    if row is None:
+        row = UserNotificationPreference(organization_id=organization_id, user_id=user_id, preferences=merged)
+        db.add(row)
+        try:
+            with db.begin_nested():
+                db.flush()
+        except IntegrityError:
+            # A concurrent first save won the unique (organization_id, user_id) race - update that row.
+            row = db.scalars(
+                select(UserNotificationPreference).where(
+                    UserNotificationPreference.organization_id == organization_id,
+                    UserNotificationPreference.user_id == user_id,
+                )
+            ).one()
+            row.preferences = merged
+    else:
+        # Assign a new dict so the JSON column is detected as changed.
+        row.preferences = merged
+        row.updated_at = utcnow()
+    db.flush()
+    return {"preferences": merged, "updated_at": row.updated_at}
+
+
+# --- Header notification read / dismissed state -----------------------------------------------------------------------
+
+#: Markers not touched for this long are pruned (action-center items resolve long before this).
+READ_STATE_RETENTION_DAYS = 180
+#: Upper bound on rows returned by GET (the header only ever shows a handful of items).
+READ_STATE_LIST_LIMIT = 1000
+
+
+def list_read_states(db: Session, organization_id: str, user_id: str) -> List[Dict[str, Any]]:
+    rows = db.scalars(
+        select(NotificationReadState)
+        .where(
+            NotificationReadState.organization_id == organization_id,
+            NotificationReadState.user_id == user_id,
+        )
+        .order_by(desc(NotificationReadState.updated_at))
+        .limit(READ_STATE_LIST_LIMIT)
+    ).all()
+    return [
+        {"key": r.notification_key, "read_at": r.read_at, "dismissed_at": r.dismissed_at} for r in rows
+    ]
+
+
+def _current_action_center_keys(db: Session, organization_id: str) -> List[str]:
+    """Ids of every item currently in the organization's action center (what the bell shows)."""
+    from backend.app.services import dashboard_service
+
+    data = dashboard_service.action_center(db, organization_id)
+    return [str(item["id"]) for item in (data or {}).get("items", []) if item.get("id")]
+
+
+def mark_read_state(
+    db: Session,
+    organization_id: str,
+    user_id: str,
+    action: str,
+    keys: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Marks ``keys`` read (``read`` / ``read_all``) or dismissed (``dismiss``, which implies read).
+
+    Idempotent: an existing ``read_at`` / ``dismissed_at`` keeps its original timestamp. Uses a
+    dialect-native INSERT .. ON CONFLICT upsert so concurrent tabs cannot trip the unique key.
+    ``read_all`` without keys marks every item currently in the action center.
+    """
+    if action == "read_all" and not keys:
+        keys = _current_action_center_keys(db, organization_id)
+    unique_keys = list(dict.fromkeys(keys or []))
+    now = utcnow()
+
+    if unique_keys:
+        dismiss = action == "dismiss"
+        table = NotificationReadState.__table__
+        rows = [
+            {
+                "id": str(uuid.uuid4()),
+                "organization_id": organization_id,
+                "user_id": user_id,
+                "notification_key": key,
+                "read_at": now,
+                "dismissed_at": now if dismiss else None,
+                "created_at": now,
+                "updated_at": now,
+            }
+            for key in unique_keys
+        ]
+        dialect = db.get_bind().dialect.name
+        if dialect == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as dialect_insert
+        elif dialect == "sqlite":
+            from sqlalchemy.dialects.sqlite import insert as dialect_insert
+        else:  # pragma: no cover - only PostgreSQL and SQLite are supported
+            dialect_insert = None
+
+        if dialect_insert is not None:
+            stmt = dialect_insert(table).values(rows)
+            set_ = {
+                "read_at": func.coalesce(table.c.read_at, stmt.excluded.read_at),
+                "updated_at": stmt.excluded.updated_at,
+            }
+            if dismiss:
+                set_["dismissed_at"] = func.coalesce(table.c.dismissed_at, stmt.excluded.dismissed_at)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["organization_id", "user_id", "notification_key"], set_=set_
+            )
+            db.execute(stmt)
+        else:  # pragma: no cover
+            for row in rows:
+                existing = db.scalars(
+                    select(NotificationReadState).where(
+                        NotificationReadState.organization_id == organization_id,
+                        NotificationReadState.user_id == user_id,
+                        NotificationReadState.notification_key == row["notification_key"],
+                    )
+                ).first()
+                if existing is None:
+                    db.add(NotificationReadState(**row))
+                else:
+                    existing.read_at = existing.read_at or now
+                    if dismiss:
+                        existing.dismissed_at = existing.dismissed_at or now
+                    existing.updated_at = now
+            db.flush()
+        # The Core upsert bypasses the identity map; make sure later ORM reads see fresh values.
+        db.expire_all()
+
+    # Cheap housekeeping so the table cannot grow without bound for a long-lived user.
+    db.execute(
+        delete(NotificationReadState).where(
+            NotificationReadState.organization_id == organization_id,
+            NotificationReadState.user_id == user_id,
+            NotificationReadState.updated_at < now - timedelta(days=READ_STATE_RETENTION_DAYS),
+        )
+    )
+    db.flush()
+
+    if not unique_keys:
+        return []
+    result = db.scalars(
+        select(NotificationReadState).where(
+            NotificationReadState.organization_id == organization_id,
+            NotificationReadState.user_id == user_id,
+            NotificationReadState.notification_key.in_(unique_keys),
+        )
+    ).all()
+    return [
+        {"key": r.notification_key, "read_at": r.read_at, "dismissed_at": r.dismissed_at} for r in result
+    ]

@@ -20,6 +20,7 @@ import type {
   OutstandingInvoice,
 } from './types';
 import type { RecordPaymentInput } from './PaymentsContext';
+import { paidAtForLocalDate } from '../../utils/format';
 
 /**
  * Maps frontend UI PaymentMethod to backend ManualPaymentMethod.
@@ -170,9 +171,7 @@ export class OverAllocationError extends Error {
 
 export function uiToPaymentIn(input: RecordPaymentInput): PaymentIn {
   const backendMethod = toBackendPaymentMethod(input.paymentMethod);
-  const paidAt = input.paymentDate
-    ? new Date(`${input.paymentDate}T12:00:00Z`).toISOString()
-    : new Date().toISOString();
+  const paidAt = paidAtForLocalDate(input.paymentDate);
 
   const allocations =
     input.paymentType === 'invoice_payment' && input.allocations.length > 0

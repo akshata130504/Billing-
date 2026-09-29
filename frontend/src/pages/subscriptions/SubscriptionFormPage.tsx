@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Repeat,
   ArrowLeft,
@@ -13,10 +13,11 @@ import {
 } from 'lucide-react';
 import { subscriptionService } from '../../services/subscriptionService';
 import { customerService } from '../../services/customerService';
-import { catalogService } from '../../services/catalogService';
+import { planPricingService } from '../../services/planPricingService';
 import type {
   CustomerOut,
   PlanOut,
+  SubscribablePlanOption,
   SubscriptionIn,
   SubscriptionStatus,
 } from '../../types/api';
@@ -27,12 +28,39 @@ import { formatMoney, todayIso } from '../../utils/format';
 import { validatePositiveInteger } from '../../utils/validation';
 import { NewPlanModal } from './NewPlanModal';
 
+/** Stable select key: legacy plans and catalog offerings live in different tables. */
+const optionKey = (o: Pick<SubscribablePlanOption, 'source' | 'id'>) => `${o.source}:${o.id}`;
+
+function planToOption(plan: PlanOut): SubscribablePlanOption {
+  return {
+    id: plan.id,
+    source: 'plan',
+    plan_id: plan.id,
+    offering_id: null,
+    name: plan.name,
+    code: plan.code,
+    product_name: '',
+    billing_interval: plan.billing_interval,
+    interval_count: plan.interval_count || 1,
+    pricing_model: plan.pricing_model,
+    unit_amount: plan.unit_amount,
+    currency: plan.currency,
+    tax_rate_pct: '18.00',
+    trial_days: plan.trial_days || 0,
+    pricing_tiers: [],
+    is_active: true,
+  };
+}
+
 export function SubscriptionFormPage() {
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const [searchParams] = useSearchParams();
 
   const [customers, setCustomers] = useState<CustomerOut[]>([]);
-  const [plans, setPlans] = useState<PlanOut[]>([]);
+  const [plans, setPlans] = useState<SubscribablePlanOption[]>([]);
+  // Engine-priced preview for volume / tiered / package offerings (per period, pre-tax).
+  const [enginePreview, setEnginePreview] = useState<{ unitRate: number; subtotal: number } | null>(null);
   const [loadingData, setLoadingData] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,18 +82,25 @@ export function SubscriptionFormPage() {
     async function loadData() {
       try {
         setLoadingData(true);
-        const [custRes, planRes] = await Promise.all([
+        const [custRes, options] = await Promise.all([
           customerService.list({ page_size: 100 }),
-          catalogService.listPlans({ page_size: 100, is_active: true }),
+          subscriptionService.planOptions(),
         ]);
         setCustomers(custRes.items || []);
-        setPlans(planRes.items || []);
+        setPlans(options);
         if (custRes.items?.length > 0) {
           setCustomerId(custRes.items[0].id);
         }
-        if (planRes.items?.length > 0) {
-          setPlanId(planRes.items[0].id);
-          const initialTrial = planRes.items[0].trial_days || 0;
+        // Deep links from Plans & Pricing (?offering_id=) or the legacy plan list (?plan_id=).
+        const wantedOffering = searchParams.get('offering_id');
+        const wantedPlan = searchParams.get('plan_id');
+        const initial =
+          options.find((o) => wantedOffering && o.source === 'offering' && o.id === wantedOffering) ||
+          options.find((o) => wantedPlan && o.source === 'plan' && o.id === wantedPlan) ||
+          options[0];
+        if (initial) {
+          setPlanId(optionKey(initial));
+          const initialTrial = initial.trial_days || 0;
           setTrialDays(initialTrial);
           if (initialTrial > 0) {
             setGenerateFirstInvoice(false);
@@ -78,6 +113,7 @@ export function SubscriptionFormPage() {
       }
     }
     loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Selected customer & plan objects
@@ -87,14 +123,39 @@ export function SubscriptionFormPage() {
   );
 
   const selectedPlan = useMemo(
-    () => plans.find((p) => p.id === planId),
+    () => plans.find((p) => optionKey(p) === planId),
     [plans, planId]
   );
+
+  const needsEngine =
+    selectedPlan?.source === 'offering' && !['flat', 'per_unit'].includes(selectedPlan.pricing_model);
+
+  useEffect(() => {
+    if (!selectedPlan || !needsEngine) {
+      setEnginePreview(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      planPricingService
+        .calculatePrice({ offering_id: selectedPlan.id, quantity: Math.max(1, quantity || 1) })
+        .then((r) => {
+          if (!cancelled) setEnginePreview({ unitRate: r.unit_rate, subtotal: r.subtotal });
+        })
+        .catch(() => {
+          if (!cancelled) setEnginePreview(null);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [selectedPlan, needsEngine, quantity]);
 
   const handlePlanChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const pId = e.target.value;
     setPlanId(pId);
-    const p = plans.find((plan) => plan.id === pId);
+    const p = plans.find((plan) => optionKey(plan) === pId);
     if (p && !hasTrialOverride) {
       const pTrial = p.trial_days || 0;
       setTrialDays(pTrial);
@@ -107,8 +168,9 @@ export function SubscriptionFormPage() {
   };
 
   const handlePlanCreated = (plan: PlanOut) => {
-    setPlans((prev) => [...prev, plan]);
-    setPlanId(plan.id);
+    const option = planToOption(plan);
+    setPlans((prev) => [...prev, option]);
+    setPlanId(optionKey(option));
     setHasTrialOverride(false);
     const pTrial = plan.trial_days || 0;
     setTrialDays(pTrial);
@@ -128,12 +190,16 @@ export function SubscriptionFormPage() {
       };
     }
 
-    const unitPrice = parseFloat(selectedPlan.unit_amount || '0') || 0;
     const qty = Math.max(1, quantity || 1);
-    const subtotal = selectedPlan.pricing_model === 'flat' ? unitPrice : unitPrice * qty;
+    let unitPrice = parseFloat(selectedPlan.unit_amount || '0') || 0;
+    let subtotal = selectedPlan.pricing_model === 'flat' ? unitPrice : unitPrice * qty;
+    if (needsEngine && enginePreview) {
+      unitPrice = enginePreview.unitRate;
+      subtotal = enginePreview.subtotal;
+    }
 
     const isTaxExempt = selectedCustomer?.tax_exempt || false;
-    const taxRate = isTaxExempt ? 0 : 18.0; // Standard GST or catalog tax
+    const taxRate = isTaxExempt ? 0 : parseFloat(selectedPlan.tax_rate_pct || '0') || 0;
     const taxAmount = (subtotal * taxRate) / 100;
     const totalAmount = subtotal + taxAmount;
 
@@ -155,7 +221,7 @@ export function SubscriptionFormPage() {
       totalAmount,
       mrr,
     };
-  }, [selectedPlan, selectedCustomer, quantity]);
+  }, [selectedPlan, selectedCustomer, quantity, needsEngine, enginePreview]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -163,7 +229,7 @@ export function SubscriptionFormPage() {
       showToast('error', 'Validation Error', 'Please select a customer.');
       return;
     }
-    if (!planId) {
+    if (!selectedPlan) {
       showToast('error', 'Validation Error', 'Please select a plan.');
       return;
     }
@@ -180,7 +246,9 @@ export function SubscriptionFormPage() {
 
       const payload: SubscriptionIn = {
         customer_id: customerId,
-        plan_id: planId,
+        ...(selectedPlan.source === 'offering'
+          ? { offering_id: selectedPlan.id }
+          : { plan_id: selectedPlan.id }),
         quantity: Math.max(1, quantity || 1),
         status: status,
         start_date: startDate || todayIso(),
@@ -324,17 +392,38 @@ export function SubscriptionFormPage() {
                   required
                   className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 text-slate-900"
                 >
-                  {plans.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.code}) - {formatMoney(p.unit_amount, p.currency)} / {p.billing_interval}
-                    </option>
-                  ))}
+                  {(['offering', 'plan'] as const).map((source) => {
+                    const group = plans.filter((p) => p.source === source);
+                    if (group.length === 0) return null;
+                    return (
+                      <optgroup
+                        key={source}
+                        label={source === 'offering' ? 'Plans & Pricing plans' : 'Legacy plans'}
+                      >
+                        {group.map((p) => (
+                          <option key={optionKey(p)} value={optionKey(p)}>
+                            {source === 'offering' ? '[Plans & Pricing] ' : '[Legacy] '}
+                            {p.name} ({p.code}) - {formatMoney(p.unit_amount, p.currency)} / {p.billing_interval}
+                            {source === 'offering' && !['flat', 'per_unit'].includes(p.pricing_model)
+                              ? ` (${p.pricing_model} pricing)`
+                              : ''}
+                          </option>
+                        ))}
+                      </optgroup>
+                    );
+                  })}
                 </select>
               )}
             </div>
 
             {selectedPlan && (
               <div className="p-3 bg-slate-50/80 rounded-lg border border-slate-100 text-xs space-y-1">
+                <div className="flex justify-between text-slate-600">
+                  <span>Source:</span>
+                  <span className="font-semibold text-slate-800">
+                    {selectedPlan.source === 'offering' ? 'Plans & Pricing (catalog)' : 'Legacy plan'}
+                  </span>
+                </div>
                 <div className="flex justify-between text-slate-600">
                   <span>Interval:</span>
                   <span className="font-semibold text-slate-800 capitalize">

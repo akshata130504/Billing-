@@ -44,7 +44,7 @@ from backend.app.schemas.ai import (
     AIWritingRequest,
     AIWritingResponse,
 )
-from backend.app.services import audit, credit_service
+from backend.app.services import audit, credit_service, timezones
 
 DRAFT_TTL_MINUTES = 30
 
@@ -154,7 +154,7 @@ def _tool_mrr_summary(db: Session, organization_id: str) -> Tuple[str, Dict[str,
 def _tool_overdue_beyond_average_cycle(
     db: Session, organization_id: str, today: Optional[date] = None
 ) -> Tuple[str, Dict[str, Any], List[Dict[str, Any]]]:
-    today = today or date.today()
+    today = today or timezones.org_today_for_id(db, organization_id)
     overdue = list(
         db.scalars(
             select(Invoice)

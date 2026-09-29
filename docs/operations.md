@@ -346,6 +346,16 @@ A backup you have never restored is not a backup. Do this on a scratch host, not
       RPO (24 h with the default cron; tighten it if that is not acceptable for billing data).
 - [ ] Calendar reminder to repeat the drill quarterly.
 
+Last scripted drill (2026-09-27, local, not production): the real `deploy/backup.sh` backed up a
+seeded database plus an uploads folder with private receipts. The dump and uploads tarball were
+copied through the rclone code path (a local-disk remote, **not** real offsite storage), downloaded
+back byte-identical, and restored into an isolated database. Result: identical schema (92 tables, 229 FKs,
+436 indexes), migration version, row counts in every table, 46 money-column sums and sha256 of every
+upload. Controlled failures: an unreachable database and a failing required offsite upload both exit 1
+and POST an alert; an unreachable alert endpoint still exits 1 and logs the webhook failure;
+`OFFSITE_REQUIRED=false` alerts but exits 0. **Real offsite storage has not been verified** - it
+needs `OFFSITE_BACKUP_REMOTE` + `OFFSITE_S3_*` on the server and one run of `make backup-now`.
+
 ### Razorpay live-key switchover
 
 Test keys (`rzp_test_*`) fail silently against live traffic; do this deliberately:

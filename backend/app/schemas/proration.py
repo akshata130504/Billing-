@@ -18,6 +18,8 @@ class SubscriptionChangePreviewIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     target_plan_id: Optional[str] = None
+    # Move to a recurring Plans & Pricing offering instead of a legacy plan.
+    target_offering_id: Optional[str] = None
     target_quantity: Optional[Decimal] = Field(default=None, gt=0)
     effective_date: Optional[date] = None
 
@@ -35,6 +37,10 @@ class SubscriptionChangePreviewOut(BaseModel):
     new_plan: PlanRef
     old_quantity: str
     new_quantity: str
+    # Per-cycle rate actually billed before/after the change (not unit price x quantity:
+    # FLAT plans bill one unit and Plans & Pricing plans are re-priced per quantity).
+    old_total_rate: Optional[str] = None
+    new_total_rate: Optional[str] = None
     period_start: str
     period_end: str
     effective_date: str
@@ -51,6 +57,7 @@ class SubscriptionChangeApplyIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     target_plan_id: Optional[str] = None
+    target_offering_id: Optional[str] = None
     target_quantity: Optional[Decimal] = Field(default=None, gt=0)
     effective_type: ProrationEffectiveType = ProrationEffectiveType.IMMEDIATE
     effective_date: Optional[date] = None

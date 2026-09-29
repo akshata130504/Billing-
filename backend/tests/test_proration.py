@@ -680,3 +680,35 @@ def test_flat_plan_quantity_change_has_no_proration(client, tenant, auth_headers
     assert resp.status_code == 201, resp.text
     assert Decimal(resp.json()["net_amount"]) == 0
     assert resp.json()["invoice_id"] is None
+
+
+def test_preview_returns_billed_per_cycle_rates_for_flat_target(client, tenant, auth_headers, db):
+    """Browser QA regression: the preview card multiplied unit price x quantity and promised
+    "New recurring at renewal 24,995" for 5 seats moving to a FLAT 4,999 plan. The preview
+    now returns the per-cycle rates the proration (and renewal) actually use."""
+    from backend.app.models import PricingModel
+
+    customer = tenant.customer()
+    _, per_unit = tenant.product_with_plan(unit_amount="650.00")
+    _, flat = tenant.product_with_plan(unit_amount="4999.00")
+    flat.pricing_model = PricingModel.FLAT
+    db.commit()
+    sub_id = _new_sub(client, auth_headers, customer, per_unit, quantity=5)
+
+    preview = client.post(
+        f"/api/v1/subscriptions/{sub_id}/changes/preview",
+        json={"target_plan_id": flat.id, "target_quantity": 5},
+        headers=auth_headers,
+    )
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    assert Decimal(body["old_total_rate"]) == Decimal("3250.00")
+    assert Decimal(body["new_total_rate"]) == Decimal("4999.00")
+
+    scheduled = client.post(
+        f"/api/v1/subscriptions/{sub_id}/changes",
+        json={"target_plan_id": flat.id, "target_quantity": 5, "effective_type": "end_of_term"},
+        headers=auth_headers,
+    )
+    assert scheduled.status_code == 201, scheduled.text
+    assert Decimal(scheduled.json()["new_plan_amount"]) == Decimal(body["new_total_rate"])

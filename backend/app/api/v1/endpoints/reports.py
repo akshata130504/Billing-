@@ -17,6 +17,7 @@ from backend.app.schemas.reports import (
     RevenueAnalyticsOut,
 )
 from backend.app.services import reports_service as svc
+from backend.app.services import timezones
 
 router = APIRouter()
 
@@ -25,9 +26,14 @@ def report_range(
     range: str = Query("this_month", description="One of: " + ", ".join(svc.REPORT_RANGE_KEYS)),
     start: date | None = Query(None, description="Required when range=custom"),
     end: date | None = Query(None, description="Required when range=custom"),
+    ctx: CurrentContext = Depends(require_viewer),
 ) -> svc.ReportRange:
+    # Ranges are the organization's local business days ("this month" in Asia/Kolkata
+    # starts at 00:00 IST, not 00:00 UTC).
     try:
-        return svc.resolve_report_range(range, start=start, end=end)
+        return svc.resolve_report_range(
+            range, start=start, end=end, today=timezones.org_today(ctx.organization), tz=ctx.organization
+        )
     except ValueError as exc:
         raise ValidationAppError(str(exc), {"fields": {"range": str(exc)}})
 
@@ -113,7 +119,7 @@ def export_report(
     if section not in svc.EXPORTABLE_SECTIONS:
         raise ValidationAppError(f"Unknown export section '{section}'.", {"fields": {"section": "invalid"}})
     generator = svc.export_section_csv(db, ctx.organization_id, section, r)
-    filename = f"report-{section}-{date.today().isoformat()}.csv"
+    filename = f"report-{section}-{timezones.org_today(ctx.organization).isoformat()}.csv"
     return StreamingResponse(
         generator,
         media_type="text/csv; charset=utf-8",

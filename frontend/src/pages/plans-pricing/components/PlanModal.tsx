@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2, Calculator, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Button } from '../../../components/common/Button';
 import { validateSensibleName, validateSku, validatePercentage, validateNonNegativeMoney } from '../../../utils/validation';
+import { calculatePricePreview } from './planPricePreview';
 import { currencySymbol } from '../../../utils/format';
+import { errorSummary } from '../../../services/apiClient';
 import type {
   PlanPricingItem,
   CreatePlanPricingInput,
@@ -96,90 +98,21 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
     setTiers(updated);
   };
 
-  // Every amount shown in the editor uses the plan's selected currency (never a hardcoded ₹).
   const sym = currencySymbol(currency);
   const locale = currency === 'INR' ? 'en-IN' : 'en-US';
-  const money = (val: number) =>
+  const formatPreview = (val: number) =>
     `${sym}${val.toLocaleString(locale, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 
-  // Compute live price preview
-  const calculatePreviewPrice = (qty: number): { subtotal: number; tax: number; total: number; note: string } => {
-    let subtotal = 0;
-    let note = '';
-
-    if (pricingModel === 'flat') {
-      subtotal = basePrice;
-      note = `Fixed ${money(basePrice)} regardless of quantity (${qty} units)`;
-    } else if (pricingModel === 'per_unit') {
-      subtotal = basePrice * qty;
-      note = `${qty} units × ${money(basePrice)}`;
-    } else if (pricingModel === 'volume') {
-      let appliedPrice = basePrice;
-      let matched = false;
-      for (const t of tiers) {
-        const minQ = t.min_qty || 0;
-        const maxQ = t.max_qty;
-        if (qty >= minQ && (maxQ === undefined || maxQ === null || qty <= maxQ)) {
-          appliedPrice = t.unit_price ?? basePrice;
-          matched = true;
-          note = `Volume tier [${minQ} - ${maxQ || '∞'}]: All ${qty} units @ ${money(appliedPrice)}/unit`;
-          break;
-        }
-      }
-      if (!matched) {
-        note = `Base rate: All ${qty} units @ ${money(basePrice)}/unit`;
-      }
-      subtotal = appliedPrice * qty;
-    } else if (pricingModel === 'tiered') {
-      let remaining = qty;
-      let accum = 0;
-      const sorted = [...tiers].sort((a, b) => (a.min_qty || 0) - (b.min_qty || 0));
-      const logs: string[] = [];
-
-      for (const t of sorted) {
-        const minQ = t.min_qty || 0;
-        const maxQ = t.max_qty;
-        const tPrice = t.unit_price ?? basePrice;
-        const capacity = maxQ !== undefined && maxQ !== null ? (minQ === 0 ? maxQ : maxQ - minQ + 1) : remaining;
-        const inBracket = Math.min(remaining, capacity);
-        if (inBracket > 0) {
-          accum += inBracket * tPrice;
-          remaining -= inBracket;
-          logs.push(`${inBracket} @ ${money(tPrice)}`);
-        }
-        if (remaining <= 0) break;
-      }
-      if (remaining > 0) {
-        accum += remaining * basePrice;
-        logs.push(`${remaining} @ ${money(basePrice)} (base)`);
-      }
-      subtotal = accum;
-      note = `Graduated brackets: ${logs.join(' + ')}`;
-    } else if (pricingModel === 'package') {
-      const sorted = [...tiers].sort((a, b) => (a.package_qty || 0) - (b.package_qty || 0));
-      if (sorted.length === 0) {
-        subtotal = basePrice;
-        note = `Default package: ${money(basePrice)}`;
-      } else {
-        let best = sorted[0];
-        for (const t of sorted) {
-          if ((t.package_qty || 0) >= qty) {
-            best = t;
-            break;
-          }
-          best = t;
-        }
-        subtotal = best.package_price ?? basePrice;
-        note = `Covered by package of ${best.package_qty} units for ${money((best.package_price ?? 0))}`;
-      }
-    }
-
-    const tax = (subtotal * taxRatePct) / 100;
-    const total = subtotal + tax;
-    return { subtotal, tax, total, note };
-  };
-
-  const preview = calculatePreviewPrice(previewQty);
+  // Live price preview (same bracket semantics as backend pricing_engine).
+  const preview = calculatePricePreview({
+    pricingModel,
+    basePrice,
+    taxRatePct,
+    tiers,
+    quantity: previewQty,
+    currency,
+    symbol: sym,
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -224,8 +157,8 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
         pricing_tiers: (pricingModel === 'volume' || pricingModel === 'tiered' || pricingModel === 'package') && tiers.length > 0 ? tiers : undefined,
       });
       onClose();
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || err?.message || 'Failed to save plan');
+    } catch (err) {
+      setError(errorSummary(err) || 'Failed to save plan');
     } finally {
       setIsSubmitting(false);
     }
@@ -590,15 +523,15 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs bg-white p-3 rounded-lg border border-emerald-100">
               <div>
                 <p className="text-slate-400 text-[11px]">Calculated Subtotal</p>
-                <p className="font-bold text-slate-900 text-sm">{money(preview.subtotal)}</p>
+                <p className="font-bold text-slate-900 text-sm">{formatPreview(preview.subtotal)}</p>
               </div>
               <div>
                 <p className="text-slate-400 text-[11px]">Taxes ({taxRatePct}% GST)</p>
-                <p className="font-bold text-slate-900 text-sm">{money(preview.tax)}</p>
+                <p className="font-bold text-slate-900 text-sm">{formatPreview(preview.tax)}</p>
               </div>
               <div>
                 <p className="text-slate-400 text-[11px]">Final Total Amount</p>
-                <p className="font-bold text-emerald-600 text-base">{money(preview.total)}</p>
+                <p className="font-bold text-emerald-600 text-base">{formatPreview(preview.total)}</p>
               </div>
             </div>
             <p className="text-[11px] text-emerald-700 font-medium italic">

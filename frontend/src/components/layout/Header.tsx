@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Menu,
@@ -20,11 +20,18 @@ import {
   AlertCircle,
   Clock,
 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '../common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { toApiError } from '../../services/apiClient';
 import { controlCenterService } from '../../services/controlCenterService';
+import {
+  notificationQueryKeys,
+  notificationService,
+  type NotificationPreferences,
+  type NotificationReadStateAction,
+  type NotificationReadStateItem,
+} from '../../services/notificationService';
 import { queryKeys } from '../../hooks/queries';
 import { cn } from '../../utils/cn';
 import { initials, ROLE_LABELS } from '../../utils/format';
@@ -41,36 +48,52 @@ interface NotificationState {
 }
 
 const EMPTY_NOTIFICATION_STATE: NotificationState = { read: [], dismissed: [] };
-/** Cap stored ids so the per-user record cannot grow without bound. */
-const MAX_TRACKED_IDS = 200;
+/** Must match the backend's NOTIFICATION_KEY_PATTERN / per-request cap. */
+const NOTIFICATION_KEY_RE = /^[A-Za-z0-9_.:-]{1,160}$/;
+const MAX_KEYS_PER_REQUEST = 200;
 
-function loadNotificationState(key: string | null): NotificationState {
-  if (!key) return EMPTY_NOTIFICATION_STATE;
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return EMPTY_NOTIFICATION_STATE;
-    const parsed = JSON.parse(raw) as Partial<NotificationState>;
-    return {
-      read: Array.isArray(parsed.read) ? parsed.read : [],
-      dismissed: Array.isArray(parsed.dismissed) ? parsed.dismissed : [],
-    };
-  } catch {
-    return EMPTY_NOTIFICATION_STATE;
+/** Action-center categories that a notification preference can switch off in the bell. */
+const CATEGORY_PREFERENCE: Partial<Record<string, keyof NotificationPreferences>> = {
+  overdue: 'invoiceOverdue',
+  failed_payment: 'paymentFailed',
+  expiring_trial: 'trialEnding',
+};
+
+function toNotificationState(items: NotificationReadStateItem[] | undefined): NotificationState {
+  const state: NotificationState = { read: [], dismissed: [] };
+  for (const item of items ?? []) {
+    if (item.read_at) state.read.push(item.key);
+    if (item.dismissed_at) state.dismissed.push(item.key);
   }
+  return state;
 }
 
-function saveNotificationState(key: string | null, state: NotificationState): void {
-  if (!key) return;
+function mergeReadItems(
+  prev: NotificationReadStateItem[] | undefined,
+  updates: NotificationReadStateItem[]
+): NotificationReadStateItem[] {
+  const byKey = new Map((prev ?? []).map((item) => [item.key, item]));
+  updates.forEach((item) => byKey.set(item.key, item));
+  return [...byKey.values()];
+}
+
+/**
+ * Read/dismissed ids used to live in localStorage (per user + org). Returns them once so they can
+ * be moved to the server; the caller removes the key after a successful upload.
+ */
+function takeLegacyNotificationState(key: string | null): NotificationState | null {
+  if (!key) return null;
   try {
-    window.localStorage.setItem(
-      key,
-      JSON.stringify({
-        read: state.read.slice(-MAX_TRACKED_IDS),
-        dismissed: state.dismissed.slice(-MAX_TRACKED_IDS),
-      })
-    );
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<NotificationState>;
+    const clean = (ids: unknown) =>
+      Array.isArray(ids)
+        ? ids.filter((id): id is string => typeof id === 'string' && NOTIFICATION_KEY_RE.test(id)).slice(-MAX_KEYS_PER_REQUEST)
+        : [];
+    return { read: clean(parsed.read), dismissed: clean(parsed.dismissed) };
   } catch {
-    // Storage unavailable - read state simply won't persist across reloads.
+    return null;
   }
 }
 
@@ -118,28 +141,80 @@ export function Header({ onMenuClick, onQuickCreateClick, onOpenSearch }: Header
   const notificationsRef = useRef<HTMLDivElement>(null);
   useDismiss(notificationsOpen, () => setNotificationsOpen(false), notificationsRef);
 
-  // Read / dismissed ids are remembered per user + organization so the 60s
-  // refetch below doesn't flip everything back to unread. (Action-center items
-  // are computed server-side and have no read endpoint.)
-  const notificationStorageKey =
-    user?.id && organization?.id ? `rooman.header_notifications.${user.id}.${organization.id}` : null;
-  const [notificationState, setNotificationState] = useState<NotificationState>(() =>
-    loadNotificationState(notificationStorageKey)
-  );
-  useEffect(() => {
-    setNotificationState(loadNotificationState(notificationStorageKey));
-  }, [notificationStorageKey]);
+  // Read / dismissed state is stored server-side per user + organization, so it survives a
+  // refresh and follows the user to another browser. Updates are optimistic: `localState` holds
+  // this session's changes (so the 60s refetch never flips an item back to unread) and is
+  // persisted to the server; if that fails the user gets a toast and the change lasts only for
+  // this session.
+  const queryClient = useQueryClient();
+  const readStateKey = notificationQueryKeys.readState(user?.id, organization?.id);
+  const hasContext = Boolean(user?.id && organization?.id);
+  const readStateQuery = useQuery({
+    queryKey: readStateKey,
+    queryFn: () => notificationService.getReadState(),
+    enabled: hasContext,
+    staleTime: 60000,
+  });
+  const preferencesQuery = useQuery({
+    queryKey: notificationQueryKeys.preferences(user?.id, organization?.id),
+    queryFn: () => notificationService.getPreferences(),
+    enabled: hasContext,
+    staleTime: 5 * 60000,
+  });
+  const preferences = preferencesQuery.data?.preferences;
+  const inAppEnabled = preferences?.inAppNotifications !== false;
 
-  const updateNotificationState = useCallback(
-    (update: (prev: NotificationState) => NotificationState) => {
-      setNotificationState((prev) => {
-        const next = update(prev);
-        saveNotificationState(notificationStorageKey, next);
-        return next;
-      });
+  const [localState, setLocalState] = useState<NotificationState>(EMPTY_NOTIFICATION_STATE);
+  useEffect(() => {
+    setLocalState(EMPTY_NOTIFICATION_STATE);
+  }, [user?.id, organization?.id]);
+
+  const readStateMutation = useMutation({
+    mutationFn: ({ action, keys }: { action: NotificationReadStateAction; keys?: string[]; cacheKey: readonly unknown[] }) =>
+      notificationService.updateReadState(action, keys),
+    onSuccess: (items, { cacheKey }) => {
+      // cacheKey is captured at mutate time, so an org switch mid-request cannot leak state across orgs.
+      queryClient.setQueryData<NotificationReadStateItem[]>(cacheKey, (prev) => mergeReadItems(prev, items));
     },
-    [notificationStorageKey]
-  );
+    onError: (err) => {
+      showToast(
+        'warning',
+        'Could not save notification status',
+        `${toApiError(err).message} The change applies to this session only.`
+      );
+    },
+  });
+  const persistReadState = readStateMutation.mutate;
+
+  // One-time move of the old browser-only read state to the server.
+  const legacyStorageKey = hasContext ? `rooman.header_notifications.${user?.id}.${organization?.id}` : null;
+  useEffect(() => {
+    const legacy = takeLegacyNotificationState(legacyStorageKey);
+    if (!legacyStorageKey || !legacy) return;
+    const uploads: Promise<unknown>[] = [];
+    if (legacy.read.length) uploads.push(notificationService.updateReadState('read', legacy.read));
+    if (legacy.dismissed.length) uploads.push(notificationService.updateReadState('dismiss', legacy.dismissed));
+    Promise.all(uploads)
+      .then(() => {
+        try {
+          window.localStorage.removeItem(legacyStorageKey);
+        } catch {
+          // ignore - storage unavailable
+        }
+        void queryClient.invalidateQueries({ queryKey: notificationQueryKeys.readState(user?.id, organization?.id) });
+      })
+      .catch(() => {
+        // Keep the legacy key and retry on the next load.
+      });
+  }, [legacyStorageKey, queryClient, user?.id, organization?.id]);
+
+  const notificationState = useMemo<NotificationState>(() => {
+    const server = toNotificationState(readStateQuery.data);
+    return {
+      read: [...server.read, ...localState.read],
+      dismissed: [...server.dismissed, ...localState.dismissed],
+    };
+  }, [readStateQuery.data, localState]);
 
   const actionCenterQuery = useQuery({
     queryKey: queryKeys.controlCenter.actionCenter(),
@@ -152,8 +227,13 @@ export function Header({ onMenuClick, onQuickCreateClick, onOpenSearch }: Header
     const items = actionCenterQuery.data?.items ?? [];
     const readIds = new Set(notificationState.read);
     const dismissedIds = new Set(notificationState.dismissed);
+    if (!inAppEnabled) return [];
     return items
       .filter((item) => !dismissedIds.has(item.id))
+      .filter((item) => {
+        const prefKey = CATEGORY_PREFERENCE[item.category];
+        return !prefKey || !preferences || preferences[prefKey] !== false;
+      })
       .slice(0, 5)
       .map((item) => {
         let link = '/invoices';
@@ -182,20 +262,22 @@ export function Header({ onMenuClick, onQuickCreateClick, onOpenSearch }: Header
           link,
         };
       });
-  }, [actionCenterQuery.data, notificationState]);
+  }, [actionCenterQuery.data, notificationState, inAppEnabled, preferences]);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   const markRead = (ids: string[]) => {
-    updateNotificationState((prev) => {
-      const read = new Set(prev.read);
-      ids.forEach((id) => read.add(id));
-      return { ...prev, read: [...read] };
-    });
+    const fresh = ids.filter((id) => !notificationState.read.includes(id));
+    if (!fresh.length) return;
+    setLocalState((prev) => ({ ...prev, read: [...new Set([...prev.read, ...fresh])] }));
+    persistReadState({ action: 'read', keys: fresh.slice(0, MAX_KEYS_PER_REQUEST), cacheKey: readStateKey });
   };
 
   const handleMarkAllRead = () => {
-    markRead(notifications.map((n) => n.id));
+    const ids = (actionCenterQuery.data?.items ?? []).map((item) => item.id);
+    setLocalState((prev) => ({ ...prev, read: [...new Set([...prev.read, ...ids])] }));
+    // No keys: the server marks every item currently in the action center as read.
+    persistReadState({ action: 'read_all', cacheKey: readStateKey });
     showToast('info', 'Notifications Updated', 'All notifications marked as read.');
   };
 
@@ -207,7 +289,11 @@ export function Header({ onMenuClick, onQuickCreateClick, onOpenSearch }: Header
 
   const handleDismissNotification = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    updateNotificationState((prev) => ({ ...prev, dismissed: [...prev.dismissed, id] }));
+    setLocalState((prev) => ({
+      read: [...new Set([...prev.read, id])],
+      dismissed: [...new Set([...prev.dismissed, id])],
+    }));
+    persistReadState({ action: 'dismiss', keys: [id], cacheKey: readStateKey });
   };
 
   const displayedNotifications =
@@ -479,8 +565,14 @@ export function Header({ onMenuClick, onQuickCreateClick, onOpenSearch }: Header
                     <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-600 mx-auto flex items-center justify-center mb-2">
                       <Check className="w-5 h-5" />
                     </div>
-                    <p className="text-xs font-semibold text-slate-700">All caught up!</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">No new notifications to show.</p>
+                    <p className="text-xs font-semibold text-slate-700">
+                      {inAppEnabled ? 'All caught up!' : 'In-app notifications are off'}
+                    </p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      {inAppEnabled
+                        ? 'No new notifications to show.'
+                        : 'Turn them back on in Settings > Notifications.'}
+                    </p>
                   </div>
                 ) : (
                   displayedNotifications.map((notif) => (

@@ -1,15 +1,14 @@
 """Service layer for tenant integrations: Razorpay, SMTP, Webhooks, and Stub connectors.
 
 Features:
-- AES-128 authenticated encryption at rest (Fernet) using server SECRET_KEY.
+- Authenticated encryption at rest (Fernet keyring, core/encryption.py: ENCRYPTION_KEYS,
+  legacy SECRET_KEY-derived key accepted for decryption).
 - Strict secret masking: keys/passwords/signing secrets are never returned in plaintext.
 - Precedence rule: Organization DB integration -> Server environment fallback.
 - Live, read-only authentication tests against real providers without dummy responses.
 """
 from __future__ import annotations
 
-import base64
-import hashlib
 import json
 import smtplib
 import ssl
@@ -18,11 +17,11 @@ from email.utils import formataddr
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
-from cryptography.fernet import Fernet
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
+from backend.app.core.encryption import DecryptionError, decrypt_str, encrypt_str
 from backend.app.core.exceptions import AppException
 from backend.app.core.logging import logger
 from backend.app.models.base import utcnow
@@ -43,27 +42,22 @@ from backend.app.schemas.integrations import (
 # Encryption & Masking Helpers
 # ---------------------------------------------------------------------------
 
-def _get_fernet() -> Fernet:
-    """Derives a deterministic Fernet key from the server SECRET_KEY."""
-    raw_key = hashlib.sha256(settings.SECRET_KEY.encode("utf-8")).digest()
-    return Fernet(base64.urlsafe_b64encode(raw_key))
-
-
 def encrypt_config(data: Dict[str, Any]) -> str:
-    """Encrypts a dictionary of credentials into a Fernet ciphertext token."""
-    serialized = json.dumps(data).encode("utf-8")
-    return _get_fernet().encrypt(serialized).decode("utf-8")
+    """Encrypts a dictionary of credentials with the primary key of the keyring (core/encryption)."""
+    return encrypt_str(json.dumps(data))
 
 
 def decrypt_config(token: Optional[str]) -> Dict[str, Any]:
-    """Decrypts a Fernet ciphertext token into a dictionary. Returns empty dict on error."""
+    """Decrypts a stored config (any keyring key, incl. the legacy SECRET_KEY key). {} on error."""
     if not token:
         return {}
     try:
-        decrypted = _get_fernet().decrypt(token.encode("utf-8"))
-        return json.loads(decrypted.decode("utf-8"))
-    except Exception as exc:
-        logger.error("Failed to decrypt integration credentials: %s", exc)
+        return json.loads(decrypt_str(token))
+    except DecryptionError:
+        logger.error("Failed to decrypt integration credentials: no configured encryption key matches")
+        return {}
+    except ValueError:
+        logger.error("Failed to decode integration credentials: stored payload is not valid JSON")
         return {}
 
 

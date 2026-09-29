@@ -56,7 +56,7 @@ class TransactionNumberSeries(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, 
         UniqueConstraint("organization_id", "module", "name", name="uq_number_series_name_per_module"),
     )
 
-    module = Column(String(50), nullable=False)  # invoice, quote, credit_note, customer_payment, etc.
+    module = Column(String(50), nullable=False, index=True)  # ix_transaction_number_series_module; invoice, quote, credit_note, customer_payment, etc.
     name = Column(String(100), nullable=False, default="Default Series")
     prefix = Column(String(20), nullable=False, default="")
     starting_number = Column(Integer, nullable=False, default=1)

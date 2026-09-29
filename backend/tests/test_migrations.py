@@ -16,7 +16,7 @@ def test_alembic_migrations_upgrade_and_downgrade(tmp_path):
     assert alembic_ini_path.exists(), f"Missing alembic.ini at {alembic_ini_path}"
 
     alembic_cfg = Config(str(alembic_ini_path))
-    alembic_cfg.set_main_option("sqlalchemy.url", test_db_url)
+    alembic_cfg.set_main_option("sqlalchemy.url", test_db_url.replace("%", "%%"))
     alembic_cfg.set_main_option("script_location", str(repo_root / "backend" / "alembic"))
 
     # Upgrade to head
@@ -72,7 +72,7 @@ def test_postgres_enums_match_python_enums():
     try:
         repo_root = Path(__file__).resolve().parents[2]
         cfg = Config(str(repo_root / "backend" / "alembic.ini"))
-        cfg.set_main_option("sqlalchemy.url", scratch_url.render_as_string(hide_password=False))
+        cfg.set_main_option("sqlalchemy.url", scratch_url.render_as_string(hide_password=False).replace("%", "%%"))
         cfg.set_main_option("script_location", str(repo_root / "backend" / "alembic"))
         command.upgrade(cfg, "head")
 
@@ -119,5 +119,135 @@ def test_postgres_enums_match_python_enums():
                 ),
                 {"name": scratch_name},
             )
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{scratch_name}"'))
+        admin.dispose()
+
+
+# --------------------------------------------------------------------------- #
+# Model <-> migration drift (the programmatic equivalent of `alembic check`)
+# --------------------------------------------------------------------------- #
+
+
+def _alembic_config(url: str) -> Config:
+    repo_root = Path(__file__).resolve().parents[2]
+    cfg = Config(str(repo_root / "backend" / "alembic.ini"))
+    cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
+    cfg.set_main_option("script_location", str(repo_root / "backend" / "alembic"))
+    return cfg
+
+
+def _metadata_diffs(engine):
+    """Diffs autogenerate would emit for `engine` vs the models, with the same (default)
+    comparison options backend/alembic/env.py uses for `alembic check`."""
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+
+    from backend.app.core.database import Base
+    import backend.app.models  # noqa: F401  (register every model)
+
+    with engine.connect() as conn:
+        return compare_metadata(MigrationContext.configure(conn), Base.metadata)
+
+
+def test_models_declare_no_duplicate_indexes():
+    """Two indexes over the same column list on one table (e.g. an explicit named Index plus a
+    column's index=True) double write cost and make `alembic check` drift-prone."""
+    from backend.app.core.database import Base
+    import backend.app.models  # noqa: F401
+
+    duplicates = []
+    for table in Base.metadata.sorted_tables:
+        seen = {}
+        for index in table.indexes:
+            key = (tuple(c.name for c in index.columns), bool(index.unique))
+            if key in seen:
+                duplicates.append(f"{table.name}{list(key[0])}: {seen[key]} and {index.name}")
+            seen[key] = index.name
+    assert not duplicates, "Duplicate indexes declared in models:\n  " + "\n  ".join(duplicates)
+
+
+def test_sqlite_migrated_schema_matches_models(tmp_path):
+    """`alembic upgrade head` on a blank SQLite DB must leave nothing for autogenerate to do."""
+    from sqlalchemy import create_engine
+
+    url = f"sqlite:///{(tmp_path / 'drift_check.sqlite3').as_posix()}"
+    command.upgrade(_alembic_config(url), "head")
+    engine = create_engine(url)
+    try:
+        diffs = _metadata_diffs(engine)
+    finally:
+        engine.dispose()
+    assert diffs == [], f"Models drifted from migrations (run `alembic check`): {diffs}"
+
+
+@pytest.mark.skipif(_postgres_test_url() is None, reason="needs TEST_DATABASE_URL pointing at PostgreSQL")
+def test_postgres_migrated_schema_matches_models():
+    """`alembic check` on PostgreSQL: after `alembic upgrade head` into a scratch database the
+    models and the migrated schema must match exactly (index names, columns, uniqueness...)."""
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.engine import make_url
+
+    base_url = make_url(_postgres_test_url())
+    scratch_name = f"{base_url.database}_driftcheck"
+    admin = create_engine(base_url.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    with admin.connect() as conn:
+        conn.execute(text(f'DROP DATABASE IF EXISTS "{scratch_name}"'))
+        conn.execute(text(f'CREATE DATABASE "{scratch_name}"'))
+
+    scratch_url = base_url.set(database=scratch_name)
+    try:
+        command.upgrade(_alembic_config(scratch_url.render_as_string(hide_password=False)), "head")
+        engine = create_engine(scratch_url)
+        try:
+            diffs = _metadata_diffs(engine)
+        finally:
+            engine.dispose()
+        assert diffs == [], f"Models drifted from migrations (run `alembic check`): {diffs}"
+    finally:
+        with admin.connect() as conn:
+            conn.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :name AND pid <> pg_backend_pid()"
+                ),
+                {"name": scratch_name},
+            )
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{scratch_name}"'))
+        admin.dispose()
+
+
+@pytest.mark.skipif(_postgres_test_url() is None, reason="needs TEST_DATABASE_URL pointing at PostgreSQL")
+def test_0023_drops_legacy_duplicate_integration_indexes_only_when_replaced():
+    """Databases created before the models declared explicit index names carry auto-named
+    duplicates on organization_integrations; 0023 must drop them (keeping the replacements)
+    and leave the schema free of drift."""
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.engine import make_url
+
+    base_url = make_url(_postgres_test_url())
+    scratch_name = f"{base_url.database}_idx0023"
+    admin = create_engine(base_url.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    with admin.connect() as conn:
+        conn.execute(text(f'DROP DATABASE IF EXISTS "{scratch_name}"'))
+        conn.execute(text(f'CREATE DATABASE "{scratch_name}"'))
+    scratch_url = base_url.set(database=scratch_name)
+    cfg = _alembic_config(scratch_url.render_as_string(hide_password=False))
+    engine = create_engine(scratch_url)
+    try:
+        command.upgrade(cfg, "b9c0d1e2f3a4")
+        with engine.begin() as conn:  # recreate the legacy auto-named duplicates
+            conn.execute(text("CREATE INDEX ix_organization_integrations_organization_id ON organization_integrations (organization_id)"))
+            conn.execute(text("CREATE INDEX ix_organization_integrations_provider ON organization_integrations (provider)"))
+        command.upgrade(cfg, "head")
+        with engine.connect() as conn:
+            names = {r[0] for r in conn.execute(text("SELECT indexname FROM pg_indexes WHERE tablename = 'organization_integrations'"))}
+        assert "ix_organization_integrations_organization_id" not in names
+        assert "ix_organization_integrations_provider" not in names
+        assert {"ix_org_integrations_org_id", "ix_org_integrations_provider"} <= names
+        assert _metadata_diffs(engine) == []
+    finally:
+        engine.dispose()
+        with admin.connect() as conn:
+            conn.execute(text("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :n AND pid <> pg_backend_pid()"), {"n": scratch_name})
             conn.execute(text(f'DROP DATABASE IF EXISTS "{scratch_name}"'))
         admin.dispose()

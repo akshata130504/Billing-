@@ -8,10 +8,8 @@ import { useAuth } from '../../hooks/useAuth';
 import { fieldErrors, toApiError } from '../../services/apiClient';
 import { FormErrorBanner } from './AuthShell';
 import { RoomanLogo } from '../../components/common/RoomanLogo';
+import { postLoginRedirect } from '../../utils/redirect';
 
-interface LocationState {
-  from?: { pathname?: string; search?: string };
-}
 
 export function LoginPage() {
   const { login, completeMfaLogin, isAuthenticated, isLoading } = useAuth();
@@ -29,8 +27,8 @@ export function LoginPage() {
   const [mfaToken, setMfaToken] = useState<string | null>(null);
   const [mfaCode, setMfaCode] = useState('');
 
-  const from = (location.state as LocationState | null)?.from;
-  const redirectTo = from?.pathname ? `${from.pathname}${from.search ?? ''}` : '/dashboard';
+  // Same-origin app paths only (see utils/redirect for the open-redirect guard).
+  const redirectTo = postLoginRedirect(location.state);
 
   if (isLoading) return <LoadingState message="Checking your session..." />;
   if (isAuthenticated) return <Navigate to={redirectTo} replace />;

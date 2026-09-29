@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, joinedload
 
-from backend.app.core.exceptions import NotFoundAppError, ValidationAppError
+from backend.app.core.exceptions import ConflictError, NotFoundAppError, ValidationAppError
 from backend.app.core.logging import logger
 from backend.app.models.base import utcnow
 from backend.app.models.catalog import Plan
@@ -44,13 +44,15 @@ from backend.app.schemas.trials import (
     TrialReportPlanStat,
     TrialReportsOut,
 )
-from backend.app.services import audit, payment_service, razorpay_gateway
+from backend.app.services import audit, payment_service, razorpay_gateway, timezones
 from backend.app.services.gateways.registry import get_gateway_adapter
 from backend.app.services.notification_service import dispatch_notification
 from backend.app.services.numbering import next_number
 from backend.app.services.subscription_service import (
     apply_plan_terms,
+    claim_status_transition,
     convert_trial,
+    lock_and_reload,
     end_cancelled_trial,
     generate_period_invoice,
     interval_months,
@@ -232,11 +234,19 @@ def convert_trial_to_live(
     if attempt_type == TrialConversionAttemptType.CUSTOMER_EARLY_CONVERSION and not tp.allow_early_conversion:
         raise ValidationAppError("Early trial conversion is disabled for this subscription.")
 
+    # Serialise concurrent conversions (double click, portal + admin, scheduler): re-read
+    # under the row lock and claim the status change with a conditional UPDATE. Only the
+    # request that performed the transition invoices, charges and audits TRIAL_CONVERTED.
+    convertible = (SubscriptionStatus.TRIALING, SubscriptionStatus.TRIAL_EXPIRED)
+    lock_and_reload(db, subscription)
+    if subscription.status not in convertible:
+        raise ConflictError("This trial has already been converted.")
     before_sub = snapshot(subscription)
-    today = date.today()
+    today = timezones.org_today_for_id(db, subscription.organization_id)
 
     # Move subscription to active
-    subscription.status = SubscriptionStatus.ACTIVE
+    if not claim_status_transition(db, subscription, convertible, SubscriptionStatus.ACTIVE):
+        raise ConflictError("This trial has already been converted.")
     subscription.current_period_start = today
     subscription.current_period_end = period_end_for(today, subscription.plan, today.day)
     subscription.next_billing_date = subscription.current_period_end
@@ -528,7 +538,7 @@ def move_to_fallback_plan(
     interval_months(target_plan)  # 422 for one-time plans
 
     before = snapshot(subscription)
-    today = date.today()
+    today = timezones.org_today_for_id(db, subscription.organization_id)
 
     # Plan, item and a fresh price snapshot move together so renewals bill the fallback plan.
     apply_plan_terms(db, subscription, target_plan, int(subscription.quantity or 1))
@@ -642,7 +652,7 @@ def evaluate_expiring_trials(
       * no payment method -> fallback plan if configured, else convert and issue the
         first invoice for manual payment
     """
-    today = today or date.today()
+    today = today or (timezones.org_today_for_id(db, org_id) if org_id else timezones.utc_today())
     stats = {
         "evaluated": 0,
         "converted": 0,
@@ -780,7 +790,7 @@ def get_trial_reports(
     end_date: Optional[date] = None,
 ) -> TrialReportsOut:
     """Computes Acquisition Insights reports: active/inactive trials, conversions, and sales cycle."""
-    today = date.today()
+    today = timezones.org_today_for_id(db, org_id)
 
     # Active trials: subscriptions currently in TRIALING
     active_trials = db.scalars(
@@ -833,10 +843,11 @@ def get_trial_reports(
             )
         ).all()
     )
+    org_tz = timezones.org_tz_for_id(db, org_id)
     cycle_days = [
-        (rec.converted_at.date() - rec.trial_start_date).days
+        (timezones.local_date(rec.converted_at, org_tz) - rec.trial_start_date).days
         for rec in converted_records
-        if rec.converted_at and (rec.converted_at.date() - rec.trial_start_date).days >= 0
+        if rec.converted_at and (timezones.local_date(rec.converted_at, org_tz) - rec.trial_start_date).days >= 0
     ]
     avg_cycle = round(sum(cycle_days) / len(cycle_days), 1) if cycle_days else 0.0
 

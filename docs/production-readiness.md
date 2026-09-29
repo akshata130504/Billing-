@@ -34,11 +34,16 @@ DATABASE_URL=postgresql://rooman:<STRONG_RANDOM_PASSWORD>@db:5432/rooman_billing
 REDIS_URL=redis://redis:6379/0
 ```
 
-### URLs & CORS
+Optional hardening: `APP_POSTGRES_USER`/`APP_POSTGRES_PASSWORD` make the app run as a DML-only runtime role while migrations keep running as `POSTGRES_USER`. `POSTGRES_SSLMODE=verify-full` plus `POSTGRES_SSLROOTCERT` are **required** for a non-private DB host. `ENCRYPTION_KEYS` sets the keyring for stored secrets. See [`database-security.md`](database-security.md).
+
+### URLs, CORS, hosts & proxies
 ```env
-FRONTEND_URL=https://billing.example.com
-ALLOWED_ORIGINS=https://billing.example.com
+FRONTEND_URL=https://billing.example.com          # must be https in production
+ALLOWED_ORIGINS=https://billing.example.com       # https only, no '*'
+ALLOWED_HOSTS=billing.example.com                 # optional; derived from FRONTEND_URL if empty; '*' refused
+TRUSTED_PROXIES=                                  # optional; default private + loopback CIDRs
 SECURE_COOKIES=true
+ALERT_WEBHOOK_URL=https://hooks.slack.com/...     # app + deploy + backup alerts
 ```
 
 ### Outbound SMTP Relay (Global Fallback)
@@ -106,7 +111,7 @@ docker compose --env-file .env.production -f docker-compose.prod.yml ps
 
 ## 5. Database Setup & Migrations
 
-- Migrations run automatically on API startup via Alembic (`RUN_MIGRATIONS=true`).
+- Migrations run automatically on API startup via Alembic (`RUN_MIGRATIONS=true`). They run as the owner role (`MIGRATION_*`, which is `POSTGRES_USER` in compose). The API itself can run as a DML-only role. The entrypoint unsets the owner credentials before gunicorn starts. See [`database-security.md`](database-security.md).
 - To manually execute migrations:
 ```bash
 docker compose --env-file .env.production -f docker-compose.prod.yml exec backend alembic upgrade head
@@ -195,6 +200,16 @@ The following items are deliberately maintained without modification and require
 - [x] pip-audit / npm audit (high) - **non-blocking** for now.
 - [ ] `alembic check` still a warning: declare the 5 known indexes in the models (`ix_subscriptions_org_status`, `ix_org_integrations_org_id`, `ix_org_integrations_provider`), then make it blocking.
 - [x] Runtime deps pinned exactly in `backend/requirements.txt`; test/lint tools in `backend/requirements-dev.txt` (not in the image).
+
+**Security hardening** ([`database-security.md`](database-security.md), [`security-roadmap.md`](security-roadmap.md))
+- [x] Startup refuses non-https `FRONTEND_URL`/origins, `*` origins or hosts, and a remote DB without verified TLS. Validation errors hide input values.
+- [x] `TrustedHostMiddleware` (`ALLOWED_HOSTS`), `TRUSTED_PROXIES` for `X-Real-IP`, explicit CORS methods and headers, `Cache-Control: no-store` on API responses.
+- [x] Log redaction covers `%`-args and tracebacks (passwords, OTPs, tokens, API keys, Authorization, card numbers).
+- [x] App alerts via `core/alerts.send_alert`: login/MFA lockouts and readiness DB failures. Deduplicated and redacted.
+- [x] Encryption keyring (`ENCRYPTION_KEYS`) plus a `python -m backend.app.core.encryption rotate` helper. Backwards compatible.
+- [ ] Least-privilege runtime role enabled in production (`APP_POSTGRES_*` + `sh deploy/db-least-privilege.sh`).
+- [ ] Cookie-based auth + CSRF (designed in `security-roadmap.md`; **not implemented**).
+- [ ] KMS-backed keys. Production KMS provider integration requires infrastructure configuration.
 
 **Secrets / settings to provide**
 - [ ] `ALERT_WEBHOOK_URL`, `OFFSITE_*`, `GITHUB_PAT` (Contents: read) in `.env.production`.

@@ -22,10 +22,13 @@ export function AcceptInvitationPage() {
   const { showToast } = useToast();
   const { applyTokens, logout, isAuthenticated } = useAuth();
 
+  // Once accepted the token is spent: applyTokens() clears the query cache while this page is
+  // still mounted, and re-fetching the preview would 404 (a red error on every acceptance).
+  const [accepted, setAccepted] = useState(false);
   const invitation = useQuery({
     queryKey: queryKeys.auth.invitation(token),
     queryFn: () => authService.getInvitation(token),
-    enabled: token.length > 0,
+    enabled: token.length > 0 && !accepted,
     retry: false,
   });
 
@@ -72,6 +75,7 @@ export function AcceptInvitationPage() {
           ? { token, full_name: fullName.trim(), password }
           : { token, password, ...(totpCode.trim() ? { totp_code: totpCode.trim() } : {}) }
       );
+      setAccepted(true);
       const me = await applyTokens(tokens);
       showToast('success', 'Invitation accepted', `You have joined ${me.organization.name}.`);
       navigate('/dashboard', { replace: true });

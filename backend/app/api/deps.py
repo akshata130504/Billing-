@@ -1,6 +1,7 @@
 """FastAPI dependencies: database session, authenticated user, tenant context, RBAC."""
 import ipaddress
 from dataclasses import dataclass
+from functools import lru_cache
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
@@ -10,6 +11,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.app.core.config import settings
 from backend.app.core.database import get_db
 from backend.app.core.exceptions import ForbiddenError, UnauthorizedError
 from backend.app.core.security import decode_access_token
@@ -46,12 +48,20 @@ class CurrentContext:
 
 def _is_trusted_proxy_peer(host: str) -> bool:
     """Our own reverse proxy (the nginx `frontend` container) reaches the API over the private
-    compose network, so only private/loopback peers may vouch for the client address."""
+    compose network, so only peers inside settings.TRUSTED_PROXIES (default: RFC 1918,
+    loopback and IPv6 ULA ranges) may vouch for the client address."""
     try:
         addr = ipaddress.ip_address(host)
     except ValueError:
         return False
-    return addr.is_private or addr.is_loopback
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        addr = addr.ipv4_mapped
+    return any(addr.version == net.version and addr in net for net in _trusted_networks(tuple(settings.TRUSTED_PROXIES)))
+
+
+@lru_cache(maxsize=8)
+def _trusted_networks(cidrs: tuple) -> tuple:
+    return tuple(ipaddress.ip_network(c, strict=False) for c in cidrs)
 
 
 def client_ip(request: Request) -> Optional[str]:
@@ -61,8 +71,8 @@ def client_ip(request: Request) -> Optional[str]:
     pick their own rate-limit bucket. Instead we read X-Real-IP, which frontend/docker/nginx.conf
     overwrites on every request with the address nginx itself resolved (the TCP peer, or - when
     Caddy fronts nginx - Caddy's peer via the realip module). It is only honoured when the
-    request's TCP peer is on a private network (i.e. came through our proxy); a directly exposed
-    API ignores it and uses the socket address.
+    request's TCP peer is inside TRUSTED_PROXIES (i.e. came through our proxy); a directly
+    exposed API ignores it and uses the socket address.
     """
     peer = request.client.host if request.client else None
     if peer and _is_trusted_proxy_peer(peer):

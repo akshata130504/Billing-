@@ -5,7 +5,7 @@
  * everything on submit, but this gives users inline errors before they hit it.
  */
 
-import { isValidPhoneNumber } from 'react-phone-number-input';
+import { isValidPhoneNumber, parsePhoneNumber, type Country } from 'react-phone-number-input';
 
 export type ValidationResult = string | null;
 
@@ -79,6 +79,23 @@ export function validatePhone(value: string | null | undefined, options: { requi
     return 'Phone number must contain between 7 and 15 digits.';
   }
   return null;
+}
+
+/**
+ * The country-code phone field only accepts E.164 ("+919876543210"), but the backend also
+ * stores numbers typed with spaces, dashes or without a country code ("+91 98716 62963",
+ * "098716 62963"). Convert those for display; anything unparseable is dropped to undefined
+ * rather than handed to the widget (which logs a console error for non-E.164 values).
+ */
+export function toE164Phone(value: string | null | undefined, defaultCountry: Country = 'IN'): string | undefined {
+  const val = (value ?? '').trim();
+  if (val === '') return undefined;
+  if (/^\+[1-9]\d{6,14}$/.test(val)) return val;
+  try {
+    return parsePhoneNumber(val, defaultCountry)?.number ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function validateUrl(value: string | null | undefined, options: { required?: boolean } = {}): ValidationResult {

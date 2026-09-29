@@ -21,6 +21,7 @@ from backend.app.models.expenses import (
     RecurringExpenseStatus,
 )
 from backend.app.models.projects import Project
+from backend.app.services import timezones
 from backend.app.services.money import D, q2
 from backend.app.schemas.expenses import (
     ExpenseCreate,
@@ -732,7 +733,8 @@ def execute_recurring_expense(
     and handles end_date / status. Fully idempotent: if already executed for this occurrence date,
     does not create duplicate Expense records.
     """
-    today = today or date.today()
+    # The organization's business day, not the server's (date.today() is UTC in production).
+    today = today or timezones.org_today_for_id(db, rec.organization_id)
     if rec.status != RecurringExpenseStatus.ACTIVE:
         return None
     if not rec.next_run or rec.next_run > today:
@@ -798,23 +800,35 @@ def execute_recurring_expense(
     return expense
 
 
-def process_due_recurring_expenses(db: Session, *, today: Optional[date] = None) -> int:
-    """Process all active recurring expenses due on or before `today`."""
-    today = today or date.today()
-    due_recs = list(
-        db.scalars(
-            select(RecurringExpense).where(
-                RecurringExpense.status == RecurringExpenseStatus.ACTIVE,
-                RecurringExpense.next_run.is_not(None),
-                RecurringExpense.next_run <= today,
-            )
-        ).all()
+def process_due_recurring_expenses(
+    db: Session, *, today: Optional[date] = None, organization_id: Optional[str] = None
+) -> int:
+    """Process active recurring expenses due on or before `today`.
+
+    `today` defaults to each profile's organization-local date. `organization_id` limits the
+    run to one organization (the scheduler calls this per organization with its local date).
+    """
+    if today is not None:
+        horizon = today
+    elif organization_id:
+        horizon = timezones.org_today_for_id(db, organization_id)
+    else:
+        # Latest date on Earth bounds the query; each row is re-checked on its org's date.
+        horizon = timezones.utc_today() + timedelta(days=1)
+    stmt = select(RecurringExpense).where(
+        RecurringExpense.status == RecurringExpenseStatus.ACTIVE,
+        RecurringExpense.next_run.is_not(None),
+        RecurringExpense.next_run <= horizon,
     )
+    if organization_id:
+        stmt = stmt.where(RecurringExpense.organization_id == organization_id)
+    due_recs = list(db.scalars(stmt).all())
 
     processed = 0
     for rec in due_recs:
         try:
-            exp = execute_recurring_expense(db, rec, today=today)
+            run_day = today or (horizon if organization_id else timezones.org_today_for_id(db, rec.organization_id))
+            exp = execute_recurring_expense(db, rec, today=run_day)
             db.commit()
             if exp is not None:
                 processed += 1

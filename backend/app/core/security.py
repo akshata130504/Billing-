@@ -5,7 +5,6 @@ organization id. Refresh, invite and password-reset tokens are opaque random
 strings; only their SHA-256 hash is persisted so a database leak cannot be
 replayed.
 """
-import base64
 import hashlib
 import hmac
 import secrets
@@ -14,9 +13,8 @@ from typing import Any, Dict, Optional
 
 import bcrypt
 import jwt
-from cryptography.fernet import Fernet, InvalidToken
-
 from backend.app.core.config import settings
+from backend.app.core.encryption import DecryptionError, decrypt_str, encrypt_str
 
 ACCESS_TOKEN_TYPE = "access"
 MFA_TOKEN_TYPE = "mfa"
@@ -140,23 +138,19 @@ def password_reset_expiry() -> datetime:
 
 
 # --- Symmetric encryption for small secrets at rest (e.g. TOTP seeds) -----------------
-
-
-def _fernet() -> Fernet:
-    # Same derivation as integrations_service so there is a single key to rotate (SECRET_KEY).
-    raw_key = hashlib.sha256(settings.SECRET_KEY.encode("utf-8")).digest()
-    return Fernet(base64.urlsafe_b64encode(raw_key))
+# Delegates to the keyring provider in core/encryption.py (ENCRYPTION_KEYS, with the legacy
+# SECRET_KEY-derived key as a decrypt fallback), shared with integrations_service.
 
 
 def encrypt_secret(value: str) -> str:
-    return _fernet().encrypt(value.encode("utf-8")).decode("utf-8")
+    return encrypt_str(value)
 
 
 def decrypt_secret(token: Optional[str]) -> Optional[str]:
-    """Return the plaintext, or None when missing or undecryptable (e.g. SECRET_KEY rotated)."""
+    """Return the plaintext, or None when missing or undecryptable (no configured key fits)."""
     if not token:
         return None
     try:
-        return _fernet().decrypt(token.encode("utf-8")).decode("utf-8")
-    except (InvalidToken, ValueError):
+        return decrypt_str(token)
+    except DecryptionError:
         return None

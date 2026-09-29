@@ -61,7 +61,9 @@ from backend.app.models.notifications import (
     NotificationChannel,
     NotificationDelivery,
     NotificationDeliveryStatus,
+    NotificationReadState,
     NotificationTemplate,
+    UserNotificationPreference,
 )
 from backend.app.models.payments import (
     CustomerPaymentMethod,
@@ -249,6 +251,8 @@ __all__ = [
     "NotificationDelivery",
     "NotificationChannel",
     "NotificationDeliveryStatus",
+    "NotificationReadState",
+    "UserNotificationPreference",
     "ApprovalRequest",
     "ApprovalType",
     "ApprovalStatus",

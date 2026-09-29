@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.app import __version__
@@ -36,6 +37,18 @@ SECURITY_HEADERS = {
     ),
 }
 HSTS_HEADER = "max-age=31536000; includeSubDomains"
+CORS_ALLOWED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+CORS_ALLOWED_HEADERS = [
+    "Authorization",
+    "Content-Type",
+    "Accept",
+    "Accept-Language",
+    "Idempotency-Key",
+    "X-Portal-Token",
+    "X-Request-ID",
+    "X-Correlation-ID",
+]
+CORS_EXPOSED_HEADERS = ["X-Request-ID", "Content-Disposition", "Retry-After"]
 _DOCS_PATHS = {f"{settings.API_V1_STR}/docs", f"{settings.API_V1_STR}/redoc", f"{settings.API_V1_STR}/docs/oauth2-redirect"}
 
 
@@ -134,13 +147,17 @@ def create_application() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Configure CORS for frontend access
+    # CORS for the SPA. Explicit methods/headers; a wildcard origin never gets credentials
+    # (production refuses "*" and non-https origins at startup, see config.py).
+    wildcard_origin = "*" in settings.ALLOWED_ORIGINS
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.ALLOWED_ORIGINS,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_credentials=not wildcard_origin,
+        allow_methods=CORS_ALLOWED_METHODS,
+        allow_headers=CORS_ALLOWED_HEADERS,
+        expose_headers=CORS_EXPOSED_HEADERS,
+        max_age=600,
     )
 
     @app.middleware("http")
@@ -155,6 +172,10 @@ def create_application() -> FastAPI:
             response.headers.setdefault(header, value)
         if settings.SECURE_COOKIES:
             response.headers.setdefault("Strict-Transport-Security", HSTS_HEADER)
+        path = request.url.path
+        if path.startswith(settings.API_V1_STR) and not path.startswith(f"{settings.API_V1_STR}/uploads"):
+            # API responses carry tokens and tenant data: never store them in shared caches.
+            response.headers.setdefault("Cache-Control", "no-store")
         return response
 
     @app.middleware("http")
@@ -213,6 +234,11 @@ def create_application() -> FastAPI:
 
     # Mount API routers
     app.include_router(api_router, prefix=settings.API_V1_STR)
+
+    # Host-header allowlist (outermost middleware). "*" (development/test default) = disabled.
+    allowed_hosts = settings.effective_allowed_hosts
+    if allowed_hosts != ["*"]:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
     # Static files for avatars / uploads
     import os

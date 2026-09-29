@@ -1,4 +1,4 @@
-"""0018_payment_integrity_and_credit_note_gst
+﻿"""0018_payment_integrity_and_credit_note_gst
 
 - payments.gateway_payment_id: guarantee a UNIQUE index (NULLs allowed, so offline
   payments without a gateway id are unaffected). One Razorpay payment can then never

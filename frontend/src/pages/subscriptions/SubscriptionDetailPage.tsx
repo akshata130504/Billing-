@@ -638,6 +638,11 @@ export function SubscriptionDetailPage() {
                 </span>
                 <span className="font-semibold text-slate-900">
                   {subscription.plan?.name} <span className="text-slate-400 font-mono text-[11px]">({subscription.plan?.code})</span>
+                  {subscription.plan?.source === 'offering' && (
+                    <span className="ml-1.5 text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded px-1.5 py-0.5">
+                      Plans &amp; Pricing{subscription.plan?.offering_pricing_model ? ` · ${subscription.plan.offering_pricing_model}` : ''}
+                    </span>
+                  )}
                 </span>
               </div>
               <div>

@@ -3,6 +3,7 @@ import type {
   InvoiceOut,
   PageParams,
   Paginated,
+  SubscribablePlanOption,
   SubscriptionCancelRequest,
   SubscriptionIn,
   SubscriptionListParams,
@@ -60,6 +61,12 @@ export const subscriptionService = {
     const { data } = await apiClient.get<Paginated<SubscriptionOut>>('/subscriptions', {
       params: cleanParams(params),
     });
+    return data;
+  },
+
+  /** Legacy plans + recurring Plans & Pricing offerings a subscription can be created on. */
+  planOptions: async (): Promise<SubscribablePlanOption[]> => {
+    const { data } = await apiClient.get<SubscribablePlanOption[]>('/subscriptions/plan-options');
     return data;
   },
 

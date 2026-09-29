@@ -1,4 +1,4 @@
-import { toApiError } from '../../../services/apiClient';
+import { errorSummary } from '../../../services/apiClient';
 import { useState } from 'react';
 import { X, Plus, Trash2, Layers, AlertCircle } from 'lucide-react';
 import { Button } from '../../../components/common/Button';
@@ -106,7 +106,7 @@ export const OfferingModal: React.FC<OfferingModalProps> = ({
       await onSave(payload);
       onClose();
     } catch (err) {
-      setError(toApiError(err).message || 'Failed to save offering.');
+      setError(errorSummary(err) || 'Failed to save offering.');
     } finally {
       setIsSubmitting(false);
     }

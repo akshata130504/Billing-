@@ -8,6 +8,7 @@ import {
   EXPENSE_PAYMENT_METHODS,
 } from '../types';
 import { triggerBlobDownload } from '../../../services/download';
+import { todayIso } from '../../../utils/format';
 
 interface ImportExpenseModalProps {
   isOpen: boolean;
@@ -73,7 +74,7 @@ export function ImportExpenseModal({ isOpen, onClose, onImport }: ImportExpenseM
 
       const rows: Omit<Expense, 'id' | 'createdAt'>[] = [];
       const warnings: string[] = [];
-      const defaultDate = new Date().toISOString().split('T')[0];
+      const defaultDate = todayIso();
 
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i];

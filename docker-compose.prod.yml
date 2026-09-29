@@ -4,7 +4,9 @@
 #   docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
 #
 # Services
-#   db         PostgreSQL 16 with a named volume (not published to the host)
+#   db         PostgreSQL 16 with a named volume (not published to the host). POSTGRES_USER is
+#              the bootstrap superuser / schema owner; optionally the app runs as a separate
+#              DML-only role (APP_POSTGRES_USER, see deploy/db-least-privilege.sh).
 #   backend    FastAPI via gunicorn/uvicorn; runs migrations on start; SCHEDULER_ENABLED=false
 #   scheduler  same image, one instance, SCHEDULER_ENABLED=true - runs renewals /
 #              trial conversion / overdue marking / dunning. REQUIRED: nothing else runs them.
@@ -86,15 +88,15 @@ services:
       RUN_MIGRATIONS: "true"
       POSTGRES_SERVER: db
       POSTGRES_PORT: "5432"
+      # Least privilege (opt-in, docs/database-security.md): with APP_POSTGRES_USER/PASSWORD
+      # set, the API connects as that DML-only role while the entrypoint's Alembic step runs
+      # as the owner (POSTGRES_USER). The entrypoint unsets MIGRATION_* before gunicorn
+      # starts. Unset = both use POSTGRES_USER (previous behaviour).
+      POSTGRES_USER: ${APP_POSTGRES_USER:-${POSTGRES_USER:?set POSTGRES_USER in .env.production}}
+      POSTGRES_PASSWORD: ${APP_POSTGRES_PASSWORD:-${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}}
+      MIGRATION_POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env.production}
+      MIGRATION_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USERNAME: ${SMTP_USERNAME:-akshata.akshu.2004@gmail.com}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-dktdcyezomwayggk}
-      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
-      SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
-      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-akshata.akshu.2004@gmail.com}
-      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-"Rooman Billing"}
     volumes:
       - uploads_data:/app/backend/uploads
       # Expense receipts - private (never served by nginx), see expense_service._receipt_root.
@@ -132,15 +134,10 @@ services:
       RUN_MIGRATIONS: "false"      # backend already migrated; avoid two migrators racing
       POSTGRES_SERVER: db
       POSTGRES_PORT: "5432"
+      # Runtime role only (see backend); the scheduler never needs the owner credentials.
+      POSTGRES_USER: ${APP_POSTGRES_USER:-${POSTGRES_USER:?set POSTGRES_USER in .env.production}}
+      POSTGRES_PASSWORD: ${APP_POSTGRES_PASSWORD:-${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USERNAME: ${SMTP_USERNAME:-akshata.akshu.2004@gmail.com}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-dktdcyezomwayggk}
-      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
-      SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
-      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-akshata.akshu.2004@gmail.com}
-      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-"Rooman Billing"}
     volumes:
       - uploads_data:/app/backend/uploads
       # Expense receipts - private (never served by nginx), see expense_service._receipt_root.
@@ -236,6 +233,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_SUPPORT_EMAIL: ${VITE_SUPPORT_EMAIL:-}
     # Pulled from GHCR by deploy/deploy-poll.sh in normal operation; `build:` above is
     # kept so `docker compose up -d --build` still works for a manual/local rebuild.
     image: ghcr.io/rooman-itsd/rooman-billing-web:${IMAGE_TAG:-latest}

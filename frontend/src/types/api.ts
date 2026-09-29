@@ -494,6 +494,7 @@ export interface QuoteOut {
   accepted_at: string | null;
   declined_at: string | null;
   converted_invoice_id: string | null;
+  converted_subscription_id?: string | null;
   approval_request_id: string | null;
   created_by: UserRef | null;
   created_at: string;
@@ -540,6 +541,31 @@ export interface SubscriptionPlanRef {
   unit_amount: string;
   currency: string;
   product_name: string;
+  pricing_model?: string | null;
+  /** 'plan' = legacy plan; 'offering' = Plans & Pricing plan (billed through a linked plan). */
+  source?: 'plan' | 'offering';
+  offering_id?: string | null;
+  offering_pricing_model?: string | null;
+}
+
+/** GET /subscriptions/plan-options entry: a legacy plan or a recurring Plans & Pricing offering. */
+export interface SubscribablePlanOption {
+  id: string;
+  source: 'plan' | 'offering';
+  plan_id: string | null;
+  offering_id: string | null;
+  name: string;
+  code: string;
+  product_name: string;
+  billing_interval: BillingInterval | null;
+  interval_count: number;
+  pricing_model: string;
+  unit_amount: string;
+  currency: string;
+  tax_rate_pct: string;
+  trial_days: number;
+  pricing_tiers: Array<Record<string, number | null>>;
+  is_active: boolean;
 }
 
 export interface SubscriptionOut {
@@ -578,7 +604,11 @@ export interface SubscriptionOut {
 
 export interface SubscriptionIn {
   customer_id: string;
-  plan_id: string;
+  /** Exactly one of plan_id (legacy plan) or offering_id (Plans & Pricing plan). */
+  plan_id?: string;
+  offering_id?: string;
+  /** Offering subscriptions only. */
+  price_book_id?: string;
   quantity?: number;
   status?: SubscriptionStatus;
   billing_frequency?: string;

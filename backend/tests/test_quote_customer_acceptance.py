@@ -246,7 +246,8 @@ def test_repeated_accept_is_idempotent_without_side_effects(client, tenant, auth
     assert _audit_count(db, quote["id"], "QUOTE_ACCEPTED") == 1
     # acceptance alone never raises an invoice or a subscription
     assert db.query(Invoice).filter_by(quote_id=quote["id"]).count() == 0
-    assert db.get(Quote, quote["id"]).converted_invoice_id is None
+    row = db.get(Quote, quote["id"])
+    assert row.converted_invoice_id is None and row.converted_subscription_id is None
     assert db.query(Subscription).filter_by(customer_id=customer_id).count() == 0
 
     # After staff convert it, a late repeat accept still does nothing extra.

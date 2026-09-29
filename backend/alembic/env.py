@@ -23,8 +23,10 @@ def get_url():
     configured_url = config.get_main_option("sqlalchemy.url")
     if configured_url:
         return configured_url
-    return settings.sync_database_url
-
+    # The owner/migration role (MIGRATION_DATABASE_URL or MIGRATION_POSTGRES_USER/PASSWORD);
+    # falls back to the runtime credentials when those are unset. The runtime app role has
+    # no DDL rights under deploy/sql/least_privilege.sql, so it cannot run migrations.
+    return settings.migration_database_url
 
 
 def run_migrations_offline() -> None:
@@ -42,12 +44,15 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     configuration = config.get_section(config.config_ini_section) or {}
-    configuration["sqlalchemy.url"] = get_url()
+    url = get_url()
+    configuration["sqlalchemy.url"] = url
 
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        # UTC session + POSTGRES_SSL* (TLS to a remote database applies to migrations too).
+        connect_args=settings.db_connect_args(url),
     )
 
     with connectable.connect() as connection:

@@ -10,7 +10,7 @@ from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from sqlalchemy import Select, or_, select, update
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, object_session, selectinload
 
 from backend.app.api.deps import CurrentContext
 from backend.app.core.config import settings
@@ -28,6 +28,7 @@ from backend.app.models import (
     InvoiceStatus,
     Organization,
     Plan,
+    PricingModel,
     Product,
     Quote,
     QuoteItem,
@@ -36,11 +37,12 @@ from backend.app.models import (
     utcnow,
 )
 from backend.app.schemas.common_refs import LineItemIn, customer_ref, enum_value, iso_dt, line_items_out, money_str, user_ref
-from backend.app.schemas.quotes import QuoteConvertIn, QuoteCreate, QuoteUpdate
+from backend.app.schemas.quotes import QuoteConvertIn, QuoteCreate, QuoteToSubscriptionIn, QuoteUpdate
 from backend.app.services import audit
 from backend.app.services.email import frontend_url, send_email
-from backend.app.services.money import D, LineInput, Totals, compute_totals
+from backend.app.services.money import D, LineInput, Totals, compute_totals, q2
 from backend.app.services import gst
+from backend.app.services import timezones
 from backend.app.services.numbering import next_number
 from backend.app.services.pagination import Page, PageParams, apply_sort, paginate
 
@@ -66,6 +68,7 @@ QUOTE_SNAPSHOT_FIELDS = (
     "accepted_at",
     "declined_at",
     "converted_invoice_id",
+    "converted_subscription_id",
 )
 
 # Statuses in which PATCH is accepted at all. Only DRAFT keeps its status on a
@@ -102,7 +105,7 @@ def expire_stale_quotes(db: Session, organization_id: str, quote_id: Optional[st
             Quote.organization_id == organization_id,
             Quote.status.in_(OPEN_FOR_CUSTOMER_STATUSES),
             Quote.expiry_date.is_not(None),
-            Quote.expiry_date < date.today(),
+            Quote.expiry_date < timezones.org_today_for_id(db, organization_id),
         )
         .values(status=QuoteStatus.EXPIRED, updated_at=utcnow())
         .execution_options(synchronize_session="fetch")
@@ -183,22 +186,49 @@ def _validate_refs(db: Session, organization_id: str, items: Sequence[LineItemIn
         )
         for oid in offering_ids - found_off:
             fields[f"items.offering_id.{oid}"] = "unknown offering"
+    # quote_items.product_id / plan_id are foreign keys to products / plans, so only a legacy
+    # Product / Plan of this organization is accepted there. A catalog offering id belongs in
+    # offering_id - accepting it in plan_id/product_id used to pass validation and then fail
+    # on the foreign key at flush time (a 500 instead of a 422).
+    misplaced_offering = False
     if product_ids:
         found_prod = set(
             db.scalars(select(Product.id).where(Product.organization_id == organization_id, Product.id.in_(product_ids)))
         )
-        found_off_prod = set(
-            db.scalars(select(Offering.id).where(Offering.organization_id == organization_id, Offering.id.in_(product_ids)))
-        )
-        for pid in product_ids - (found_prod | found_off_prod):
-            fields[f"items.product_id.{pid}"] = "unknown product"
+        missing = product_ids - found_prod
+        offering_like = _offering_ids(db, organization_id, missing)
+        for pid in missing:
+            if pid in offering_like:
+                misplaced_offering = True
+                fields[f"items.product_id.{pid}"] = "this is a catalog offering id - send it as offering_id"
+            else:
+                fields[f"items.product_id.{pid}"] = "unknown product"
     if plan_ids:
         found_plan = set(db.scalars(select(Plan.id).where(Plan.organization_id == organization_id, Plan.id.in_(plan_ids))))
-        found_off_plan = set(db.scalars(select(Offering.id).where(Offering.organization_id == organization_id, Offering.id.in_(plan_ids))))
-        for pid in plan_ids - (found_plan | found_off_plan):
-            fields[f"items.plan_id.{pid}"] = "unknown plan"
+        missing = plan_ids - found_plan
+        offering_like = _offering_ids(db, organization_id, missing)
+        for pid in missing:
+            if pid in offering_like:
+                misplaced_offering = True
+                fields[f"items.plan_id.{pid}"] = "this is a catalog offering id - send it as offering_id"
+            else:
+                fields[f"items.plan_id.{pid}"] = "unknown plan"
     if fields:
-        raise ValidationAppError("One or more line items reference an unknown product, offering or plan.", {"fields": fields})
+        message = "One or more line items reference an unknown product, offering or plan."
+        if misplaced_offering:
+            message = (
+                "plan_id/product_id must reference a plan/product of this organization; "
+                "a catalog offering must be sent as offering_id."
+            )
+        raise ValidationAppError(message, {"fields": fields})
+
+
+def _offering_ids(db: Session, organization_id: str, ids) -> set:
+    if not ids:
+        return set()
+    return set(
+        db.scalars(select(Offering.id).where(Offering.organization_id == organization_id, Offering.id.in_(ids)))
+    )
 
 
 def compute_quote_totals(items: Iterable[LineItemIn], discount_pct, supply=None) -> Totals:
@@ -274,11 +304,18 @@ def _customer_or_404(db: Session, organization_id: str, customer_id: str) -> Cus
 
 
 def create_quote(db: Session, ctx: CurrentContext, data: QuoteCreate) -> Quote:
+    today = timezones.org_today(ctx.organization)
+    # The schema only rejects dates in the past everywhere on Earth; "the past" is the
+    # organization's local business day.
+    if data.issue_date and data.issue_date < today:
+        raise ValidationAppError(
+            "Issue date cannot be in the past.", {"fields": {"issue_date": "Issue date cannot be in the past."}}
+        )
     customer = _customer_or_404(db, ctx.organization_id, data.customer_id)
     _validate_refs(db, ctx.organization_id, data.items)
     supply = gst.resolve_supply(ctx.organization, customer)
     totals = compute_quote_totals(data.items, data.discount_pct, supply=supply)
-    issue_dt = data.issue_date or date.today()
+    issue_dt = data.issue_date or timezones.org_today(ctx.organization)
     validity_days = None
     if issue_dt and data.expiry_date:
         diff = (data.expiry_date - issue_dt).days
@@ -740,7 +777,10 @@ def mark_declined(db: Session, ctx: CurrentContext, quote_id: str, reason: Optio
 
 
 def _is_past_expiry(quote: Quote) -> bool:
-    return quote.expiry_date is not None and quote.expiry_date < date.today()
+    if quote.expiry_date is None:
+        return False
+    # Valid through the expiry date in the organization's timezone.
+    return quote.expiry_date < timezones.org_today_for_id(object_session(quote), quote.organization_id)
 
 
 def _claim_transition(
@@ -784,7 +824,7 @@ def _lock_quote(db: Session, organization_id: str, quote_id: str) -> Quote:
 def _create_invoice_from_quote(db: Session, ctx: CurrentContext, quote: Quote, data: QuoteConvertIn) -> Invoice:
     """Small local invoice factory (the invoice module owns the general one)."""
     customer = quote.customer
-    issue_date = data.issue_date or date.today()
+    issue_date = data.issue_date or timezones.org_today(ctx.organization)
     terms_days = int(customer.payment_terms_days if customer and customer.payment_terms_days is not None else 30)
     due_date = data.due_date or issue_date + timedelta(days=terms_days)
     if due_date < issue_date:
@@ -982,6 +1022,232 @@ def convert_quote(db: Session, ctx: CurrentContext, quote_id: str, data: QuoteCo
 convert_to_invoice = convert_quote
 
 
+# --- conversion to a subscription ---------------------------------------------------------------------------
+
+
+def assert_discount_approved(db: Session, ctx: CurrentContext, quote: Quote) -> None:
+    """A discount above the organization's approval threshold must be covered by a live
+    (non-superseded) QUOTE_DISCOUNT approval that someone other than the requester and the
+    quote's author decided - the same rule approval_service enforces, re-checked here so a
+    conversion can never bypass it."""
+    threshold = D(ctx.organization.discount_approval_threshold_pct)
+    discount = D(quote.discount_pct)
+    if discount <= threshold:
+        return
+    for request in _discount_requests(db, quote, [ApprovalStatus.APPROVED]):
+        if _is_superseded(request):
+            continue
+        payload = request.payload or {}
+        raw = payload.get("approved_discount_pct", payload.get("discount_pct"))
+        try:
+            approved = D(raw) if raw is not None else None
+        except Exception:  # a malformed payload never counts as an approval
+            approved = None
+        if approved is None or discount > approved:
+            continue
+        reviewer = request.reviewed_by_id
+        if not reviewer or reviewer == request.requested_by_id or reviewer == quote.created_by_id:
+            continue  # self-approval never counts
+        return
+    raise InvalidStateError(
+        f"The {money_str(discount)}% discount on this quote exceeds the {money_str(threshold)}% approval "
+        "threshold and has no valid approval; it cannot be converted into a subscription.",
+        {"fields": {"discount_pct": "discount approval required"}},
+    )
+
+
+def _quote_subscription_terms(db: Session, ctx: CurrentContext, quote: Quote) -> list:
+    """Map every quote line to a recurring plan and freeze its approved pricing.
+
+    Mapping (in order): ``plan_id`` naming a legacy plan; ``plan_id`` / ``offering_id``
+    naming a recurring Plans & Pricing offering (billed through its linked plan). Lines
+    without a recurring plan (one-time products, free-text lines, one-time offerings) are
+    rejected - convert such quotes to an invoice instead. Each line keeps the quote's
+    price, quantity, GST rate and document discount: the per-period amount is the line's
+    taxable value (amount less its share of the discount), so the first invoice and every
+    renewal bill exactly what was approved.
+    """
+    from backend.app.services import offering_subscription_service as offering_svc
+    from backend.app.services.subscription_service import ItemTerms, interval_months
+
+    lines = sorted(quote.items, key=lambda x: x.position or 0)
+    if not lines:
+        raise ValidationAppError("This quote has no lines to subscribe to.", {"fields": {"items": "empty"}})
+    disc = D(quote.discount_pct)
+    currency = (quote.currency or "").upper()
+    problems: Dict[str, str] = {}
+    terms: list = []
+    for index, line in enumerate(lines, start=1):
+        key = f"items.{index}"
+        plan: Optional[Plan] = None
+        offering = None
+        if line.plan_id:
+            plan = db.scalars(
+                select(Plan).where(Plan.id == line.plan_id, Plan.organization_id == quote.organization_id)
+            ).first()
+            if plan is None:
+                offering = db.scalars(
+                    select(Offering).where(Offering.id == line.plan_id, Offering.organization_id == quote.organization_id)
+                ).first()
+        if plan is None and offering is None and getattr(line, "offering_id", None):
+            offering = db.scalars(
+                select(Offering).where(Offering.id == line.offering_id, Offering.organization_id == quote.organization_id)
+            ).first()
+        if plan is not None and plan.offering_id:
+            offering = offering_svc.linked_offering(db, plan)
+            if offering is None:
+                problems[key] = f"'{line.description}': its catalog plan no longer exists."
+                continue
+        if offering is not None:
+            reason = offering_svc._not_subscribable_reason(offering)
+            if reason:
+                problems[key] = f"'{line.description}': {reason}"
+                continue
+            plan = offering_svc.ensure_linked_plan(db, quote.organization_id, offering)
+        elif plan is None:
+            problems[key] = (
+                f"'{line.description}' is not linked to a recurring plan or Plans & Pricing plan; "
+                "only recurring lines can become a subscription."
+            )
+            continue
+        else:
+            if not plan.is_active:
+                problems[key] = f"'{line.description}': the plan '{plan.name}' is inactive."
+                continue
+            try:
+                interval_months(plan)
+            except ValidationAppError:
+                problems[key] = f"'{line.description}': the plan '{plan.name}' is one-time, not recurring."
+                continue
+        qty = D(line.quantity)
+        if qty < 1 or qty != qty.to_integral_value():
+            problems[key] = f"'{line.description}': a subscription needs a whole quantity of at least 1."
+            continue
+        if (plan.currency or "").upper() != currency:
+            problems[key] = f"'{line.description}': the plan is priced in {plan.currency}, the quote in {quote.currency}."
+            continue
+        amount = q2(qty * D(line.unit_price))
+        taxable = amount - q2(amount * disc / Decimal("100"))
+        per_unit = plan.pricing_model == PricingModel.PER_UNIT
+        unit_amount = q2(taxable / qty) if per_unit else taxable
+        metadata: Dict[str, Any] = {
+            "source": "quote",
+            "quote_id": quote.id,
+            "quote_number": quote.quote_number,
+            "quote_item_id": line.id,
+            "quote_unit_price": str(q2(line.unit_price)),
+            "quote_quantity": str(qty),
+            "quote_discount_pct": str(q2(disc)),
+            "quote_line_taxable": str(taxable),
+        }
+        if offering is not None:
+            metadata.update(
+                {
+                    "offering_id": offering.id,
+                    "offering_sku": offering.sku,
+                    "offering_pricing_model": enum_value(offering.pricing_model),
+                    "quantity": int(qty),
+                }
+            )
+            if disc:
+                metadata["discount_pct"] = str(disc)
+        terms.append(
+            ItemTerms(
+                plan=plan,
+                quantity=int(qty),
+                unit_amount=unit_amount,
+                tax_rate_pct=D(line.tax_rate_pct),
+                metadata=metadata,
+            )
+        )
+    if problems:
+        raise ValidationAppError(
+            "This quote cannot be converted into a subscription: " + " ".join(problems.values()),
+            {"fields": problems},
+        )
+    if not terms:
+        raise ValidationAppError(
+            "This quote has no recurring line to subscribe to.", {"fields": {"items": "no recurring line"}}
+        )
+    return terms
+
+
+def convert_quote_to_subscription(
+    db: Session, ctx: CurrentContext, quote_id: str, data: QuoteToSubscriptionIn
+):
+    """POST /quotes/{id}/convert-to-subscription. Returns (subscription, created).
+
+    Idempotent and race-safe: the quote row is locked and claimed ACCEPTED -> CONVERTED in
+    one conditional UPDATE; a repeated (or concurrent, losing) call finds the stored
+    ``converted_subscription_id`` and returns that same subscription with created=False,
+    without auditing or invoicing again.
+    """
+    from backend.app.services import subscription_service
+
+    get_quote(db, ctx, quote_id)  # 404 across tenants + persist any pending expiry first
+    quote = _lock_quote(db, ctx.organization_id, quote_id)
+    if quote.converted_subscription_id:
+        return subscription_service.get_subscription(db, ctx.organization_id, quote.converted_subscription_id), False
+    if quote.status != QuoteStatus.ACCEPTED:
+        raise InvalidStateError(
+            f"Only accepted quotes can be converted into a subscription (current status '{enum_value(quote.status)}')."
+        )
+    if _is_past_expiry(quote):
+        raise InvalidStateError("This quote has expired; it cannot be converted.")
+    customer = _customer_or_404(db, ctx.organization_id, quote.customer_id)
+    assert_discount_approved(db, ctx, quote)
+    items = _quote_subscription_terms(db, ctx, quote)
+
+    before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
+    if not _claim_transition(db, quote, (QuoteStatus.ACCEPTED,), QuoteStatus.CONVERTED):
+        # Lost a race the row lock could not prevent (e.g. SQLite): report the winner's result.
+        winner = get_quote_or_404(db, ctx.organization_id, quote_id)
+        if winner.converted_subscription_id:
+            return subscription_service.get_subscription(db, ctx.organization_id, winner.converted_subscription_id), False
+        raise InvalidStateError("This quote has already been converted.")
+
+    subscription = subscription_service.build_subscription(
+        db,
+        ctx,
+        customer=customer,
+        items=items,
+        start=data.start_date or timezones.org_today(ctx.organization),
+        trial_days=data.trial_days,
+        auto_renewal=bool(data.auto_renewal),
+        notes=data.notes or f"Created from quote {quote.quote_number}",
+        generate_first_invoice=data.generate_first_invoice,
+        currency=quote.currency,
+        audit_extra={"quote_id": quote.id, "quote_number": quote.quote_number},
+    )
+    quote.converted_subscription_id = subscription.id
+    first_invoice = db.scalars(
+        select(Invoice).where(Invoice.subscription_id == subscription.id, Invoice.status != InvoiceStatus.VOID)
+    ).first()
+    if first_invoice is not None:
+        # Link the one invoice this conversion produced to the quote (no second invoice:
+        # the quote is CONVERTED, so /convert-to-invoice is rejected from now on).
+        first_invoice.quote_id = quote.id
+        quote.converted_invoice_id = first_invoice.id
+    db.flush()
+    audit.record(
+        db,
+        ctx=ctx,
+        action="QUOTE_CONVERTED",
+        entity_type="quote",
+        entity_id=quote.id,
+        entity_label=quote.quote_number,
+        before=before,
+        after={
+            **audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS),
+            "converted_subscription_id": subscription.id,
+            "subscription_number": subscription.subscription_number,
+            "target": "subscription",
+        },
+    )
+    db.commit()
+    return subscription_service.get_subscription(db, ctx.organization_id, subscription.id), True
+
+
 # --- public hosted page -----------------------------------------------------------------------------------
 
 
@@ -1158,6 +1424,7 @@ def serialize_quote(
         "accepted_at": iso_dt(quote.accepted_at),
         "declined_at": iso_dt(quote.declined_at),
         "converted_invoice_id": quote.converted_invoice_id,
+        "converted_subscription_id": getattr(quote, "converted_subscription_id", None),
         "approval_request_id": approval_request_id,
         "email_sent": getattr(quote, "_email_sent", None),
         "created_by": created_by,

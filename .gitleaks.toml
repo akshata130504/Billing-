@@ -1,0 +1,27 @@
+# gitleaks configuration (used by the secret-scan CI job and `gitleaks dir|git .` locally).
+# Extends the default ruleset with a rule the defaults miss: a literal SMTP/mail password
+# written into source, shell or compose files - e.g. `SMTP_PASSWORD: ${SMTP_PASSWORD:-xxxx}`,
+# `export SMTP_PASSWORD=xxxx` or `SMTP_PASSWORD: str = "xxxx"`. Credentials must only ever come
+# from the server's untracked .env.production.
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "smtp-password-literal"
+description = "Literal SMTP/mail password committed to the repository"
+regex = '''(?i)\b(?:SMTP|MAIL|EMAIL)_?PASS(?:WORD)?\b["']?\s*(?:=|:)\s*(?:str\s*=\s*)?(?:\$\{\s*\w+\s*:?-\s*)?["']?([A-Za-z0-9][^\s"'${}#]{7,})'''
+secretGroup = 1
+keywords = ["smtp_pass", "smtp_password", "mail_pass", "mail_password", "email_pass", "email_password", "smtppass"]
+
+[allowlist]
+description = "Fabricated credentials used by tests and documentation placeholders"
+paths = [
+  '''^backend/tests/''',
+  '''(^|/)__pycache__/''',
+  '''\.env(\.[a-z]+)?\.example$''',
+  '''(^|/)package-lock\.json$''',
+]
+regexes = [
+  '''(?i)^(change[-_]?me|your[-_].*|placeholder|example|<[^>]+>|\*+|x{6,}|dummy.*|test.*)$''',
+]

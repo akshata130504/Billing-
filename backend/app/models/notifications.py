@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -72,3 +73,39 @@ class NotificationDelivery(UUIDPrimaryKeyMixin, TenantMixin, Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
 
     template = relationship("NotificationTemplate", back_populates="deliveries")
+
+
+# --- Per-user, per-organization notification state -------------------------------------------------------------
+
+
+class UserNotificationPreference(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
+    """A user's in-app notification preferences inside one organization.
+
+    ``preferences`` holds a flat ``{key: bool}`` map validated against
+    ``schemas.notifications.NotificationPreferencesIn`` (unknown keys are rejected).
+    A user who belongs to several organizations has one row per organization.
+    """
+    __tablename__ = "user_notification_preferences"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "user_id", name="uq_user_notif_prefs_org_user"),
+    )
+
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    preferences = Column(JSON, nullable=False, default=dict)
+
+
+class NotificationReadState(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
+    """Read / dismissed marker for one header (action-center) notification, per user and organization.
+
+    ``notification_key`` is the stable action-center item id (e.g. ``overdue:<invoice id>``).
+    """
+    __tablename__ = "notification_read_states"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "user_id", "notification_key", name="uq_notif_read_state_org_user_key"),
+        Index("ix_notif_read_states_user_org_updated", "user_id", "organization_id", "updated_at"),
+    )
+
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    notification_key = Column(String(160), nullable=False)
+    read_at = Column(DateTime(timezone=True), nullable=True)
+    dismissed_at = Column(DateTime(timezone=True), nullable=True)

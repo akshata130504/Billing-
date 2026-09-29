@@ -23,6 +23,7 @@ import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
 import { useToast } from '../../components/common/Toast';
 import { SettingsSection } from './settingsShared';
+import { SUPPORT_EMAIL, buildSupportMailto } from '../../utils/supportEmail';
 
 const QUICK_LINKS = [
   {
@@ -112,21 +113,15 @@ const FAQS = [
   },
 ];
 
-/**
- * Support mailbox for the "Contact support" / "Report an issue" forms, set per
- * deployment via VITE_SUPPORT_EMAIL. There is no in-app ticketing backend, so
- * the forms open the user's mail client instead of pretending to submit.
+/*
+ * Support is by email only: there is no in-app ticketing backend, so these forms draft an email
+ * in the user's mail client (to VITE_SUPPORT_EMAIL) and never claim a ticket was created.
  */
-const SUPPORT_EMAIL = ((import.meta.env.VITE_SUPPORT_EMAIL as string | undefined) || '').trim();
-
-function buildMailto(subject: string, body: string): string {
-  return `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-}
 
 function SupportContactNote() {
   return SUPPORT_EMAIL ? (
     <p className="text-[11px] text-slate-500">
-      This opens your email app addressed to{' '}
+      This opens your email app with a draft addressed to{' '}
       <a href={`mailto:${SUPPORT_EMAIL}`} className="font-semibold text-brand-600 hover:underline">
         {SUPPORT_EMAIL}
       </a>
@@ -134,7 +129,7 @@ function SupportContactNote() {
     </p>
   ) : (
     <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
-      No support mailbox is configured for this workspace. Contact your administrator.
+      Contact your administrator. No support email address is configured for this workspace.
     </p>
   );
 }
@@ -155,12 +150,13 @@ export function HelpTab() {
   );
 
   const openMail = (subject: string, body: string) => {
-    if (!SUPPORT_EMAIL) {
-      showToast('warning', 'Support email not configured', 'Contact your administrator.');
+    const href = buildSupportMailto(SUPPORT_EMAIL, subject, `${body}\n\n---\nPage: ${window.location.href}`);
+    if (!href) {
+      showToast('warning', 'Contact your administrator', 'No support email address is configured.');
       return false;
     }
-    window.location.href = buildMailto(subject, `${body}\n\n---\nPage: ${window.location.href}`);
-    showToast('info', 'Opening your email app', `Send the drafted email to ${SUPPORT_EMAIL} to reach support.`);
+    window.location.href = href;
+    showToast('info', 'Opening your email app', `Nothing is sent until you send the draft to ${SUPPORT_EMAIL}.`);
     return true;
   };
 
@@ -284,10 +280,12 @@ export function HelpTab() {
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-slate-900 font-semibold text-xs">
               <MessageSquare className="w-4 h-4 text-brand-600" />
-              <span>Contact Support</span>
+              <span>Contact support by email</span>
             </div>
             <p className="text-[11px] text-slate-500 leading-normal">
-              Have questions regarding setup or payment reconciliation? Reach our support team directly.
+              {SUPPORT_EMAIL
+                ? 'Questions about setup or payment reconciliation? Draft an email to our support team.'
+                : 'Contact your administrator for help - no support email address is configured.'}
             </p>
           </div>
           <Button
@@ -295,9 +293,10 @@ export function HelpTab() {
             variant="outline"
             size="sm"
             onClick={() => setIsSupportOpen(true)}
+            disabled={!SUPPORT_EMAIL}
             className="w-full justify-center"
           >
-            Get in touch
+            Email support
           </Button>
         </div>
 
@@ -306,10 +305,12 @@ export function HelpTab() {
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-slate-900 font-semibold text-xs">
               <AlertTriangle className="w-4 h-4 text-amber-600" />
-              <span>Report an Issue</span>
+              <span>Report an issue by email</span>
             </div>
             <p className="text-[11px] text-slate-500 leading-normal">
-              Encountered a bug or unexpected behavior in a module? Submit details to our engineering team.
+              {SUPPORT_EMAIL
+                ? 'Found a bug or unexpected behavior? Draft an email with the details to our support team.'
+                : 'Contact your administrator to report a problem - no support email address is configured.'}
             </p>
           </div>
           <Button
@@ -317,9 +318,10 @@ export function HelpTab() {
             variant="outline"
             size="sm"
             onClick={() => setIsReportOpen(true)}
+            disabled={!SUPPORT_EMAIL}
             className="w-full justify-center"
           >
-            Report Problem
+            Email a problem report
           </Button>
         </div>
 
@@ -345,8 +347,8 @@ export function HelpTab() {
       <Modal
         isOpen={isSupportOpen}
         onClose={() => setIsSupportOpen(false)}
-        title="Contact Rooman Support"
-        description="Draft an email to the support team."
+        title="Contact support by email"
+        description="Draft an email to the support team in your email app."
         size="md"
       >
         <form onSubmit={handleSendSupport} className="space-y-4">
@@ -378,7 +380,7 @@ export function HelpTab() {
       <Modal
         isOpen={isReportOpen}
         onClose={() => setIsReportOpen(false)}
-        title="Report a Problem"
+        title="Report a problem by email"
         description="Draft an email describing unexpected behavior or a bug."
         size="md"
       >

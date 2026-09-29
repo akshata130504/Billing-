@@ -148,6 +148,37 @@ def test_disable_totp_requires_password_and_code(client, db, tenant):
     assert "access_token" in login(client, user.email).json()
 
 
+def test_password_and_code_field_errors_are_readable_sentences(client, db, tenant):
+    """Browser QA regression: the Settings > Security forms render `details.fields` under the
+    inputs instead of the banner, so a bare code ("incorrect", "invalid") was all users saw."""
+    user = tenant.add_member("mfamsg", MemberRole.VIEWER)
+    db.commit()
+    secret, tokens = enrol(client, db, user)
+    headers = bearer(tokens["access_token"])
+
+    wrong_pw = client.post(f"{API}/auth/2fa/disable", json={"password": "Wr0ngPassword!", "code": totp(secret)}, headers=headers)
+    assert wrong_pw.status_code == 422
+    assert wrong_pw.json()["error"]["details"]["fields"]["password"] == "The password is incorrect."
+
+    wrong_code = client.post(f"{API}/auth/2fa/disable", json={"password": PASSWORD, "code": "000000"}, headers=headers)
+    assert wrong_code.status_code == 422
+    code_msg = wrong_code.json()["error"]["details"]["fields"]["code"]
+    assert " " in code_msg and code_msg == wrong_code.json()["error"]["message"]
+
+    bad_current = client.post(
+        f"{API}/auth/change-password",
+        json={"current_password": "Wr0ngPassword!", "new_password": "An0therStrongPass!"},
+        headers=headers,
+    )
+    assert bad_current.status_code == 422
+    assert bad_current.json()["error"]["details"]["fields"]["current_password"] == "The current password is incorrect."
+
+    same = client.post(
+        f"{API}/auth/change-password", json={"current_password": PASSWORD, "new_password": PASSWORD}, headers=headers
+    )
+    assert same.status_code == 422
+    assert same.json()["error"]["details"]["fields"]["new_password"] == "The new password must differ from the current one."
+
 def test_accept_invitation_for_2fa_account_requires_code(client, db, tenant, auth_headers, monkeypatch):
     from backend.tests.conftest import Tenant
     from backend.app.services import organization_service

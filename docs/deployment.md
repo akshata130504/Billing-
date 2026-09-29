@@ -57,6 +57,10 @@ Edit and set at minimum:
 | `SMTP_*`, `EMAIL_FROM_*` | your relay (optional but strongly recommended) |
 | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` | live keys (optional; can be added later) |
 | `DOMAIN`, `ACME_EMAIL`, `FRONTEND_BIND=127.0.0.1:8080` | only when using the Caddy overlay |
+| `ALLOWED_HOSTS` | optional; defaults to the host of `FRONTEND_URL` (`*` is refused) |
+| `ALERT_WEBHOOK_URL` | recommended; app, deploy and backup alerts (`{"text": ...}`) |
+| `APP_POSTGRES_USER`, `APP_POSTGRES_PASSWORD` | optional least-privilege runtime role; run `sh deploy/db-least-privilege.sh` once, see [`database-security.md`](database-security.md) |
+| `POSTGRES_SSLMODE=verify-full`, `POSTGRES_SSLROOTCERT` | required when the DB is **not** on the compose network (managed or remote PostgreSQL) |
 
 `ENVIRONMENT=production` and `DEBUG=false` are already set in the template. The API validates
 the file on boot and exits with a clear message if something is insecure.
@@ -207,6 +211,8 @@ The `db` and `backup` containers no longer read `.env.production` wholesale; the
 | `POSTGRES_PASSWORD` | `ALTER USER rooman WITH PASSWORD '...'` inside `db`, then update the env file and restart `backend`/`scheduler` | seconds of API errors during restart. The `db` container only reads the variable on first init. |
 | Razorpay keys / webhook secret | regenerate in the dashboard, update env, `up -d backend scheduler` | in-flight checkouts created with old keys may fail; do it during a quiet period. |
 | SMTP credentials | update env, restart | none. |
+| `APP_POSTGRES_PASSWORD` | update env, `sh deploy/db-least-privilege.sh` (sets the new password), `up -d backend scheduler` | seconds of API errors during restart. |
+| `ENCRYPTION_KEYS` | prepend a new key, restart, `exec backend python -m backend.app.core.encryption rotate`, then drop the old key | none; see [`database-security.md`](database-security.md) section 3. If you rotate `SECRET_KEY` without a keyring, stored integration credentials and TOTP seeds become undecryptable. |
 
 Before the first real customer, work through the **pre-launch checklist** in
 [`operations.md`](operations.md) section 9 - secrets rotation, a rehearsed backup restore, and the
@@ -250,6 +256,9 @@ Razorpay test-to-live key switchover.
 - [ ] `/api/v1/health/ready` returns 200 and is wired to an alert.
 - [ ] Exactly one process with `SCHEDULER_ENABLED=true`.
 - [ ] `OFFSITE_BACKUP_REMOTE` set, `backup` container healthy, restore drill done (see `operations.md`).
-- [ ] `ALERT_WEBHOOK_URL` set and tested; `rooman-billing-alert@.service` installed.
+- [ ] `ALERT_WEBHOOK_URL` set and tested; `rooman-billing-alert@.service` installed. The API also
+      alerts on login lockouts and on readiness DB failures (deduplicated, secrets redacted).
+- [ ] Least-privilege runtime role enabled (`APP_POSTGRES_*`, `deploy/db-least-privilege.sh`).
+- [ ] Remote/managed DB: `POSTGRES_SSLMODE=verify-full` with a mounted CA bundle.
 - [ ] Razorpay live keys restricted to the production account; webhook secret set.
 - [ ] Docker and base images updated on a schedule (`docker compose pull db caddy`, rebuild app images).

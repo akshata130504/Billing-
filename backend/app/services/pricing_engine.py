@@ -28,7 +28,24 @@ def round_money(val: Decimal) -> Decimal:
     return val.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-from datetime import date
+from datetime import date  # noqa: E402
+
+from backend.app.services import timezones  # noqa: E402
+
+
+def _org_today_for(obj: Any) -> date:
+    """The organization-local business day for a tenant-owned ORM object (price book)."""
+    try:
+        from sqlalchemy.orm import object_session
+
+        session = object_session(obj)
+    except Exception:  # not a mapped instance (plain objects in unit tests)
+        session = None
+    org_id = getattr(obj, "organization_id", None)
+    if session is None or not org_id:
+        return timezones.org_today(None)
+    return timezones.org_today_for_id(session, org_id)
+
 
 _CURRENCY_SYMBOLS = {"INR": "₹", "USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥", "AUD": "A$", "CAD": "C$", "SGD": "S$", "AED": "AED "}
 
@@ -37,6 +54,110 @@ def currency_symbol(code: Optional[str]) -> str:
     """Display symbol for explanation strings (was hard-coded to ₹ for every currency)."""
     code = (code or "INR").upper()
     return _CURRENCY_SYMBOLS.get(code, f"{code} ")
+
+
+def _dec_or_none(val: Any) -> Optional[Decimal]:
+    if val is None or val == "":
+        return None
+    try:
+        return Decimal(str(val))
+    except Exception:  # noqa: BLE001 - malformed stored JSON is treated as absent
+        return None
+
+
+def _is_package_shaped(tier: Dict[str, Any]) -> bool:
+    return (
+        ("package_qty" in tier or "package_price" in tier)
+        and tier.get("min_qty") is None
+        and tier.get("max_qty") is None
+    )
+
+
+def validate_pricing_tiers(tiers: Optional[List[Any]]) -> None:
+    """Configuration-time validation of volume/tiered brackets.
+
+    Bracket semantics (shared by volume and graduated pricing):
+    brackets are ordered by ``min_qty`` and each bracket owns every quantity
+    ``q`` with ``previous max_qty < q <= max_qty`` — so a fractional quantity
+    that falls in a gap between two configured brackets (e.g. 10.5 with
+    1-10 / 11-50) belongs to the *next* bracket. Only the last bracket may be
+    open-ended (``max_qty`` omitted).
+
+    Raises ``ValueError`` for: ``max_qty < min_qty``, overlapping or duplicate
+    brackets (``min_qty <= previous max_qty``), an open-ended bracket that is
+    not the last one. Package-style tiers (``package_qty``/``package_price``
+    without min/max) are not brackets and are ignored.
+    """
+    if not tiers:
+        return
+    parsed: List[Tuple[Decimal, Optional[Decimal]]] = []
+    for raw in tiers:
+        t = raw if isinstance(raw, dict) else (raw.model_dump() if hasattr(raw, "model_dump") else dict(raw))
+        if _is_package_shaped(t):
+            continue
+        min_q = _dec_or_none(t.get("min_qty")) or Decimal("0")
+        max_q = _dec_or_none(t.get("max_qty"))
+        if min_q < 0 or (max_q is not None and max_q < 0):
+            raise ValueError("Pricing tier quantities must be non-negative.")
+        if max_q is not None and max_q < min_q:
+            raise ValueError(f"Pricing tier max_qty ({max_q}) must be >= min_qty ({min_q}).")
+        price = _dec_or_none(t.get("unit_price"))
+        if price is not None and price < 0:
+            raise ValueError("Pricing tier unit_price must be non-negative.")
+        parsed.append((min_q, max_q))
+
+    parsed.sort(key=lambda p: p[0])
+    for idx in range(1, len(parsed)):
+        prev_min, prev_max = parsed[idx - 1]
+        cur_min, _ = parsed[idx]
+        if prev_max is None:
+            raise ValueError("Only the last pricing tier may be open-ended (no max_qty).")
+        if cur_min <= prev_max:
+            raise ValueError(
+                f"Pricing tiers overlap: a tier starting at {cur_min} begins at or before the previous tier's max_qty ({prev_max})."
+            )
+
+
+def _normalize_brackets(
+    tiers: Optional[List[Dict[str, Any]]],
+    default_price: Decimal,
+    pb_discount_pct: Decimal,
+) -> List[Tuple[Decimal, Optional[Decimal], Decimal]]:
+    """Return a deterministic list of (min_qty, upper_bound|None, unit_price).
+
+    Stored tiers are *not* trusted to be valid (they may predate validation):
+    - sorted by (min_qty, max_qty) so input order never matters;
+    - tiers with max_qty < min_qty or negative values are skipped;
+    - a tier whose upper bound is already covered by an earlier tier
+      (overlap) is skipped — the earlier (lower) bracket wins;
+    - anything after the first open-ended tier is ignored.
+    """
+    rows = []
+    for t in tiers or []:
+        if not isinstance(t, dict) or _is_package_shaped(t):
+            continue
+        min_q = _dec_or_none(t.get("min_qty")) or Decimal("0")
+        max_q = _dec_or_none(t.get("max_qty"))
+        price = _dec_or_none(t.get("unit_price"))
+        if price is None:
+            price = default_price
+        if min_q < 0 or price < 0 or (max_q is not None and max_q < min_q):
+            continue
+        if pb_discount_pct > 0:
+            price = max(Decimal("0"), price * (Decimal("1") - pb_discount_pct / Decimal("100")))
+        rows.append((min_q, max_q, price))
+
+    rows.sort(key=lambda r: (r[0], r[1] is None, r[1] if r[1] is not None else Decimal("0")))
+    brackets: List[Tuple[Decimal, Optional[Decimal], Decimal]] = []
+    prev_upper: Optional[Decimal] = Decimal("-1")
+    for min_q, max_q, price in rows:
+        if brackets and brackets[-1][1] is None:
+            break  # nothing can follow an open-ended bracket
+        if max_q is not None and prev_upper is not None and max_q <= prev_upper:
+            continue  # fully overlapped by an earlier bracket
+        brackets.append((min_q, max_q, price))
+        prev_upper = max_q
+    return brackets
 
 
 def calculate_line_item_pricing(
@@ -96,7 +217,7 @@ def calculate_line_item_pricing(
 
     if price_book_entry and price_book_entry.is_active:
         pb = getattr(price_book_entry, "price_book", None)
-        today = date.today()
+        today = _org_today_for(pb) if pb is not None else timezones.utc_today()
         if pb:
             if pb.status != PriceBookStatus.ACTIVE:
                 is_expired = True
@@ -135,65 +256,63 @@ def calculate_line_item_pricing(
         tier_note = "Flat pricing: fixed amount regardless of quantity"
 
     elif pricing_model == OfferingPricingModel.VOLUME:
-        # Check volume brackets in pricing_tiers
-        tiers = offering.pricing_tiers or []
-        bracket_found = False
-        for tier in tiers:
-            min_q = Decimal(str(tier.get("min_qty", 0)))
-            max_q = Decimal(str(tier.get("max_qty"))) if tier.get("max_qty") is not None else None
-            t_price = Decimal(str(tier.get("unit_price", step_price)))
-            if pb_discount_pct > 0:
-                t_price = max(Decimal("0"), t_price * (Decimal("1") - pb_discount_pct / Decimal("100")))
-
-            if qty >= min_q and (max_q is None or qty <= max_q):
-                effective_unit_price = t_price
-                bracket_found = True
-                tier_note = f"Volume bracket [{min_q} - {max_q or '∞'}]: {sym}{t_price}/unit for all {qty} units"
-                break
-
-        if not bracket_found:
+        # Volume: the WHOLE quantity is priced at the bracket containing it.
+        # A bracket owns (previous max_qty, max_qty]; quantities below the
+        # first bracket use the first bracket, quantities in a gap between
+        # brackets (e.g. 10.5 with 1-10 / 11-50) use the next bracket, and
+        # quantities above a closed final bracket use the final bracket.
+        brackets = _normalize_brackets(offering.pricing_tiers, step_price, pb_discount_pct)
+        if not brackets:
             effective_unit_price = step_price
+            tier_note = f"Volume pricing (no brackets configured): {sym}{step_price}/unit"
+        else:
+            chosen = next((b for b in brackets if b[1] is None or qty <= b[1]), brackets[-1])
+            min_q, max_q, t_price = chosen
+            effective_unit_price = t_price
+            beyond = max_q is not None and qty > max_q
+            tier_note = (
+                f"Volume bracket [{min_q} - {max_q if max_q is not None else '∞'}]: "
+                f"{sym}{t_price}/unit for all {qty} units"
+                + (" (quantity above the final bracket; final bracket rate applied)" if beyond else "")
+            )
         subtotal_pre_discount = effective_unit_price * qty
 
     elif pricing_model == OfferingPricingModel.TIERED:
-        # Graduated tier brackets
-        tiers = offering.pricing_tiers or []
-        if not tiers:
+        # Graduated: each bracket prices only the units that fall inside it.
+        # Bracket i covers (upper_{i-1}, upper_i] (upper_{-1} = 0), which keeps
+        # the historical integer semantics (1-10 = 10 units, 11-50 = 40 units)
+        # while pricing fractional/gap units deterministically. Units beyond a
+        # closed final bracket are priced at the final bracket's rate.
+        brackets = _normalize_brackets(offering.pricing_tiers, step_price, pb_discount_pct)
+        if not brackets:
             effective_unit_price = step_price
             subtotal_pre_discount = step_price * qty
+            tier_note = f"Graduated pricing (no brackets configured): {sym}{step_price}/unit"
         else:
             accumulated_subtotal = Decimal("0")
             remaining_qty = qty
-            sorted_tiers = sorted(tiers, key=lambda t: Decimal(str(t.get("min_qty", 0))))
+            prev_upper = Decimal("0")
             tier_logs = []
-
-            for tier in sorted_tiers:
-                min_q = Decimal(str(tier.get("min_qty", 0)))
-                max_q = Decimal(str(tier.get("max_qty"))) if tier.get("max_qty") is not None else None
-                t_price = Decimal(str(tier.get("unit_price", step_price)))
-                if pb_discount_pct > 0:
-                    t_price = max(Decimal("0"), t_price * (Decimal("1") - pb_discount_pct / Decimal("100")))
-
-                if min_q == 0 and max_q is not None:
-                    bracket_capacity = max_q
-                elif max_q is not None:
-                    bracket_capacity = max_q - min_q + Decimal("1")
-                else:
-                    bracket_capacity = remaining_qty
-
-                units_in_bracket = min(remaining_qty, bracket_capacity)
-                if units_in_bracket > 0:
-                    tier_cost = units_in_bracket * t_price
-                    accumulated_subtotal += tier_cost
-                    remaining_qty -= units_in_bracket
-                    tier_logs.append(f"{units_in_bracket} units @ {sym}{t_price}")
-
+            for min_q, max_q, t_price in brackets:
                 if remaining_qty <= 0:
                     break
+                if max_q is None:
+                    units_in_bracket = remaining_qty
+                else:
+                    units_in_bracket = min(remaining_qty, max(Decimal("0"), max_q - prev_upper))
+                    prev_upper = max(prev_upper, max_q)
+                if units_in_bracket > 0:
+                    accumulated_subtotal += units_in_bracket * t_price
+                    remaining_qty -= units_in_bracket
+                    tier_logs.append(f"{units_in_bracket} units @ {sym}{t_price}")
+            if remaining_qty > 0:
+                last_price = brackets[-1][2]
+                accumulated_subtotal += remaining_qty * last_price
+                tier_logs.append(f"{remaining_qty} units @ {sym}{last_price} (above final bracket)")
 
             subtotal_pre_discount = accumulated_subtotal
             effective_unit_price = round_money(accumulated_subtotal / qty) if qty > 0 else step_price
-            tier_note = f"Graduated tiers: " + ", ".join(tier_logs)
+            tier_note = "Graduated tiers: " + ", ".join(tier_logs)
 
     elif pricing_model == OfferingPricingModel.PACKAGE:
         # Package / Block pricing: items sold in package blocks (e.g. 10 for ₹5k, 25 for ₹10k, 50 for ₹18k)

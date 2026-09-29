@@ -14,8 +14,10 @@ from backend.app.schemas.quotes import (
     QuoteDeclineIn,
     QuoteOut,
     QuoteOverrideIn,
+    QuoteToSubscriptionIn,
     QuoteUpdate,
 )
+from backend.app.schemas.subscriptions import SubscriptionOut
 from sqlalchemy import select
 from backend.app.services import quote_service as svc
 from backend.app.services.pagination import PageParams, page_params
@@ -231,3 +233,25 @@ def convert_quote(
 ):
     invoice = svc.convert_quote(db, ctx, quote_id, body)
     return svc.serialize_invoice(db, invoice)
+
+
+@router.post(
+    "/{quote_id}/convert-to-subscription",
+    response_model=SubscriptionOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Convert an accepted quote with recurring lines into a subscription (idempotent)",
+    responses={200: {"description": "Already converted: the existing subscription is returned"}},
+)
+def convert_quote_to_subscription(
+    quote_id: str,
+    response: Response,
+    body: QuoteToSubscriptionIn = Body(default=QuoteToSubscriptionIn()),
+    ctx: CurrentContext = Depends(require_finance),
+    db: Session = Depends(get_db),
+):
+    from backend.app.services import subscription_service
+
+    subscription, created = svc.convert_quote_to_subscription(db, ctx, quote_id, body)
+    if not created:
+        response.status_code = status.HTTP_200_OK
+    return subscription_service.serialize_subscription(subscription)

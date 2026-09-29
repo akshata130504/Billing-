@@ -1555,7 +1555,7 @@ function PaymentMethodsTab({ customerId, canWrite }: { customerId: string; canWr
       <EmptyState
         icon={<CreditCard className="w-6 h-6 stroke-1" />}
         title="No saved payment methods"
-        description="Cards and mandates the customer saves during hosted checkout or in their portal are vaulted at the gateway and listed here for auto-charge."
+        description="Cards and payment methods saved during checkout or in the customer portal are stored securely at the gateway for customer-initiated payments."
       />
     );
   }
@@ -1595,7 +1595,7 @@ function PaymentMethodsTab({ customerId, canWrite }: { customerId: string; canWr
                       {humanize(pm.gateway)}
                       {expiry ? ` · Expires ${expiry}` : ''}
                       {` · Added ${formatDate(pm.created_at)}`}
-                      {pm.is_autocharge_eligible ? ' · Auto-charge eligible' : ' · Manual charge only'}
+                      {pm.is_autocharge_eligible ? ' · Saved for customer checkout' : ' · Manual record'}
                     </div>
                   </div>
                 </div>
@@ -1632,7 +1632,7 @@ function PaymentMethodsTab({ customerId, canWrite }: { customerId: string; canWr
         title="Remove payment method?"
         description={
           revokeTarget
-            ? `${describeMethod(revokeTarget)} will be revoked and can no longer be used for auto-charge. The customer can save a new method at checkout.`
+            ? `${describeMethod(revokeTarget)} will be revoked and can no longer be used for checkout. The customer can save a new method at checkout.`
             : undefined
         }
         confirmLabel="Remove"

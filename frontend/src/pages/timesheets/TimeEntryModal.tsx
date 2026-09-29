@@ -4,6 +4,7 @@ import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
 import { customerService } from '../../services/customerService';
 import { validateDescription, validateNonNegativeMoney, parseStrictNumber } from '../../utils/validation';
+import { todayIso } from '../../utils/format';
 
 interface TimeEntryModalProps {
   isOpen: boolean;
@@ -23,7 +24,7 @@ export function TimeEntryModal({
   const [customers, setCustomers] = useState<Array<{ id: string; display_name: string; customer_number: string }>>([]);
   const [customerId, setCustomerId] = useState('');
   const [projectTitle, setProjectTitle] = useState('');
-  const [dateStr, setDateStr] = useState(new Date().toISOString().split('T')[0]);
+  const [dateStr, setDateStr] = useState(todayIso());
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [durationHours, setDurationHours] = useState<number | string>(1);
@@ -52,7 +53,7 @@ export function TimeEntryModal({
     } else {
       setCustomerId('');
       setProjectTitle('');
-      setDateStr(new Date().toISOString().split('T')[0]);
+      setDateStr(todayIso());
       setStartTime('');
       setEndTime('');
       setDurationHours(1);
@@ -231,8 +232,11 @@ export function TimeEntryModal({
             </label>
             <input
               type="number"
-              step="0.25"
-              min="0.1"
+              // Any 2-decimal value: start/end times auto-fill e.g. 2.5 or 0.33 h. A 0.25 step
+              // offset from a 0.1 minimum only allowed 0.1, 0.35, 0.6 ... so the browser blocked
+              // whole hours and every auto-calculated duration.
+              step="0.01"
+              min="0.01"
               max="24"
               required
               value={durationHours}

@@ -162,6 +162,18 @@ export function toIsoDate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * `paid_at` for a payment the user dated with a local calendar day (YYYY-MM-DD).
+ * Past days are anchored at noon UTC so the date survives timezone conversion. Today uses the
+ * current instant: in UTC+ zones just after midnight (00:00-05:30 in India) the UTC date is
+ * still "yesterday", so any `...T00:00Z`/`...T12:00Z` stamp on today's date is in the future
+ * for the server and was rejected with "Payment date cannot be in the future".
+ */
+export function paidAtForLocalDate(date: string | null | undefined, now: Date = new Date()): string {
+  if (!date || date === toIsoDate(now)) return now.toISOString();
+  return new Date(`${date}T12:00:00Z`).toISOString();
+}
+
 export function addDays(iso: string, days: number): string {
   const d = toDate(iso);
   if (!d) return iso;

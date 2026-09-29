@@ -24,13 +24,16 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
-from sqlalchemy.exc import OperationalError
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_db
+from backend.app.core.alerts import send_alert
 from backend.app.core.exceptions import AppException
 from backend.app.core.logging import logger
 from backend.app.models import AuditStatus, Invoice, InvoiceStatus, Payment, PaymentStatus, RefundStatus, WebhookEvent, utcnow
@@ -44,6 +47,63 @@ EVENT_ID_HEADER = "X-Razorpay-Event-Id"
 
 # How long a "record not found" is considered a race worth retrying (seconds).
 RETRY_WINDOW_SECONDS = 30 * 60
+
+# Alert when this many signature failures arrive within the window (a burst
+# usually means a rotated/mis-configured secret or someone probing the endpoint).
+SIGNATURE_FAILURE_ALERT_THRESHOLD = 5
+SIGNATURE_FAILURE_WINDOW_SECONDS = 5 * 60
+
+
+def mask_identifier(value: Optional[str]) -> str:
+    """Keep only enough of a gateway/event id to correlate logs (``evt_…a1b2``)."""
+    text = str(value or "")
+    if not text:
+        return ""
+    if len(text) <= 8:
+        return "…" + text[-2:]
+    return f"{text[:4]}…{text[-4:]}"
+
+
+def _duplicate_ack() -> JSONResponse:
+    """Deterministic answer for an event id we already stored (or a concurrent
+    delivery of it that won the race): acknowledged, not re-processed."""
+    return JSONResponse(status_code=200, content={"received": True, "status": "duplicate"})
+
+
+def _alert_signature_burst(db: Session, event_type: str) -> None:
+    try:
+        since = utcnow() - timedelta(seconds=SIGNATURE_FAILURE_WINDOW_SECONDS)
+        count = db.scalar(
+            select(func.count(WebhookEvent.id)).where(
+                WebhookEvent.signature_valid.is_(False),
+                WebhookEvent.received_at >= since,
+            )
+        ) or 0
+    except Exception:  # alerting must never break the webhook
+        return
+    if count >= SIGNATURE_FAILURE_ALERT_THRESHOLD:
+        send_alert(
+            "payment.webhook_signature_failures",
+            f"{count} Razorpay webhook signature failures in the last {SIGNATURE_FAILURE_WINDOW_SECONDS // 60} minutes",
+            {"count": int(count), "window_seconds": SIGNATURE_FAILURE_WINDOW_SECONDS, "last_event_type": event_type},
+            severity="critical",
+            dedup_key="payment.webhook_signature_failures",
+        )
+
+
+def _alert_processing_failure(event_id: str, event_type: str, error: str, *, retryable: bool) -> None:
+    send_alert(
+        "payment.webhook_failed",
+        f"Razorpay webhook {event_type} {'deferred for retry' if retryable else 'processing failed'}",
+        {
+            "event_id": mask_identifier(event_id),
+            "event_type": event_type,
+            "error": str(error)[:300],
+            "retryable": retryable,
+        },
+        severity="warning" if retryable else "error",
+        dedup_key=f"payment.webhook_failed:{event_type}:{'retry' if retryable else 'permanent'}",
+    )
 
 
 class RetryableWebhookError(Exception):
@@ -314,6 +374,7 @@ async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
             status=AuditStatus.DENIED,
         )
         db.commit()
+        _alert_signature_burst(db, event_type)
         return JSONResponse(
             status_code=400,
             content={"error": {"code": "UNAUTHORIZED", "message": "Webhook signature verification failed.", "details": {}}},
@@ -322,7 +383,7 @@ async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
     # Idempotency: a verified event we have already stored is acknowledged without re-processing.
     existing = db.scalars(select(WebhookEvent).where(WebhookEvent.event_id == event_id)).first()
     if existing is not None:
-        return {"received": True}
+        return _duplicate_ack()
 
     event = WebhookEvent(
         provider="razorpay",
@@ -333,8 +394,25 @@ async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
         organization_id=verified_org_id,
     )
     event._verified_org_id = verified_org_id
-    db.add(event)
-    db.flush()
+    try:
+        # A concurrent delivery of the same event id that inserted first makes
+        # this INSERT fail on the unique event_id (on PostgreSQL it waits for
+        # the winner's commit). That loser is a duplicate, not a 500.
+        # PostgreSQL: inside a SAVEPOINT. SQLite (pysqlite) cannot nest one in
+        # an un-begun transaction - RELEASE would COMMIT the row, so a later
+        # retryable 503 rollback could not remove it - and it serialises
+        # writers anyway, so a plain flush is used there.
+        if db.get_bind().dialect.name == "sqlite":
+            db.add(event)
+            db.flush()
+        else:
+            with db.begin_nested():
+                db.add(event)
+                db.flush()
+    except IntegrityError:
+        db.rollback()
+        logger.info("Razorpay webhook %s (%s) duplicate delivery lost the insert race", event_id, event_type)
+        return _duplicate_ack()
 
     handler = HANDLERS.get(event_type)
     try:
@@ -348,6 +426,8 @@ async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
         if _is_retryable(exc, payload):
             # Not stored: the redelivery must be processed, not short-circuited as a duplicate.
             logger.warning("Razorpay webhook %s (%s) deferred for retry: %s", event_id, event_type, exc)
+            if not isinstance(exc, LookupError):  # a not-yet-visible record is routine; DB/lock errors are not
+                _alert_processing_failure(event_id, event_type, type(exc).__name__, retryable=True)
             return JSONResponse(
                 status_code=503,
                 content={"error": {"code": "RETRY_LATER", "message": "Event could not be processed yet; please retry.", "details": {}}},
@@ -355,6 +435,7 @@ async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
         # Permanent: store the failure and acknowledge so Razorpay stops retrying.
         logger.warning("Razorpay webhook %s (%s) rejected: %s", event_id, event_type, exc)
         message = exc.message if isinstance(exc, AppException) and getattr(exc, "message", None) else str(exc)
+        _alert_processing_failure(event_id, event_type, message, retryable=False)
         event = WebhookEvent(
             provider="razorpay",
             event_id=event_id,
@@ -378,5 +459,13 @@ async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
         after={"event_id": event_id, "event_type": event_type, "error": event.error},
         status=AuditStatus.WARNING if event.error and not event.error.startswith("ignored") else AuditStatus.SUCCESS,
     )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Only reachable on the permanent-failure path: our first insert was
+        # rolled back and a concurrent delivery stored the same event id meanwhile.
+        db.rollback()
+        if db.scalars(select(WebhookEvent.id).where(WebhookEvent.event_id == event_id)).first():
+            return _duplicate_ack()
+        raise
     return {"received": True}

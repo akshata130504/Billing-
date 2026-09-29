@@ -1,0 +1,11 @@
+# Historical findings that cannot be removed without rewriting published history.
+# b858418: Gmail app password hardcoded in config.py / entrypoint.sh / docker-compose.prod.yml.
+#          That credential is exposed and MUST be revoked in the Google account; the code no
+#          longer contains it (credentials come only from the server's .env.production).
+# edf4d3b: example SendGrid-style key in docs/email-setup-guide.md (replaced by a placeholder).
+# Never add a fingerprint here for a live credential - revoke it first.
+b858418f74a25f0f9d323df1abd26fe851d5cd8b:backend/app/core/config.py:smtp-password-literal:132
+b858418f74a25f0f9d323df1abd26fe851d5cd8b:backend/docker/entrypoint.sh:smtp-password-literal:19
+b858418f74a25f0f9d323df1abd26fe851d5cd8b:docker-compose.prod.yml:smtp-password-literal:139
+b858418f74a25f0f9d323df1abd26fe851d5cd8b:docker-compose.prod.yml:smtp-password-literal:93
+edf4d3ba13cb5eb8cbd9c386be2b2d29f1b2994a:docs/email-setup-guide.md:smtp-password-literal:78

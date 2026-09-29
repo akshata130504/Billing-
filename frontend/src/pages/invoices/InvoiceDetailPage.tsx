@@ -15,6 +15,7 @@ import {
   ExternalLink,
   Globe,
   ReceiptText,
+  Download,
 } from 'lucide-react';
 import { invoiceService } from '../../services/invoiceService';
 import type { Invoice, InvoiceStatus, PaymentRecordIn } from '../../types/invoices';
@@ -27,6 +28,7 @@ import { validateDateNotFuture } from '../../utils/validation';
 import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { toApiError } from '../../services/apiClient';
+import { todayIso } from '../../utils/format';
 
 export const InvoiceDetailPage = () => {
   const { id } = useParams<{ id: string }>();
@@ -44,7 +46,7 @@ export const InvoiceDetailPage = () => {
   // Record Payment Modal State
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [paymentDate, setPaymentDate] = useState(todayIso());
   const [paymentMethod, setPaymentMethod] = useState<string>('bank_transfer');
   const [paymentRef, setPaymentRef] = useState('');
   const [paymentNotes, setPaymentNotes] = useState('');
@@ -55,6 +57,19 @@ export const InvoiceDetailPage = () => {
 
   // Send Confirmation State
   const [showSendConfirm, setShowSendConfirm] = useState(false);
+
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const handleDownloadPdf = async () => {
+    if (!invoice) return;
+    try {
+      setDownloadingPdf(true);
+      await invoiceService.downloadPdf(invoice.id, invoice.invoice_number);
+    } catch (err) {
+      showToast('error', 'Failed to download invoice PDF', toApiError(err).message);
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
 
   // Hosted Payment Link State
   const [copied, setCopied] = useState(false);
@@ -264,6 +279,14 @@ export const InvoiceDetailPage = () => {
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="secondary" onClick={handlePrint}>
             <Printer className="w-4 h-4 mr-1.5" /> Print
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => void handleDownloadPdf()}
+            disabled={downloadingPdf}
+            title="Download the GST tax-invoice PDF"
+          >
+            <Download className="w-4 h-4 mr-1.5" /> {downloadingPdf ? 'Generating...' : 'Download PDF'}
           </Button>
 
           {paymentUrl && (
@@ -586,7 +609,7 @@ export const InvoiceDetailPage = () => {
                       </span>
                     </div>
                     <div className="flex justify-between text-xs text-gray-500">
-                      <span>{p.payment_date || p.paid_at || new Date().toISOString().split('T')[0]}</span>
+                      <span>{p.payment_date || p.paid_at || todayIso()}</span>
                       {p.reference_number && <span>Ref: {p.reference_number}</span>}
                     </div>
                     {p.notes && <div className="text-xs text-gray-600 pt-1">{p.notes}</div>}
@@ -689,7 +712,7 @@ export const InvoiceDetailPage = () => {
               <input
                 type="date"
                 value={paymentDate}
-                max={new Date().toISOString().split('T')[0]}
+                max={todayIso()}
                 onChange={(e) => setPaymentDate(e.target.value)}
                 required
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
