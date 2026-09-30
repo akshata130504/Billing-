@@ -69,6 +69,11 @@ TOO_MANY_ATTEMPTS = "Too many failed sign-in attempts. Please wait a few minutes
 CHALLENGE_INVALID = "This sign-in attempt is invalid or has expired. Please sign in again."
 INVALID_CODE = "The authentication code is invalid or has already been used."
 SESSION_INVALID = "Your platform session has ended. Please sign in again."
+STEP_UP_REQUIRED_MESSAGE = "Confirm it's you with a fresh authenticator code to continue."
+STEP_UP_INVALID_CODE = "The authentication code is invalid or has already been used."
+# Hard ceiling on a step-up's lifetime, whatever PLATFORM_STEP_UP_MINUTES says (config also refuses
+# larger values at startup).
+MAX_STEP_UP_MINUTES = 15
 
 
 class PlatformAuthDisabledError(AppException):
@@ -77,6 +82,24 @@ class PlatformAuthDisabledError(AppException):
             message="Platform sign-in is not configured on this server.",
             code="PLATFORM_AUTH_DISABLED",
             status_code=503,
+        )
+
+
+class StepUpRequiredError(AppException):
+    """A sensitive platform action needs a recent step-up on the current session."""
+
+    def __init__(self) -> None:
+        super().__init__(message=STEP_UP_REQUIRED_MESSAGE, code="STEP_UP_REQUIRED", status_code=403)
+
+
+class StepUpFailedError(AppException):
+    """A step-up code was wrong or replayed. 403, not 401: the session itself is still valid."""
+
+    def __init__(self, message: str = STEP_UP_INVALID_CODE, *, throttled: bool = False) -> None:
+        super().__init__(
+            message=TOO_MANY_ATTEMPTS if throttled else message,
+            code="TOO_MANY_ATTEMPTS" if throttled else "STEP_UP_FAILED",
+            status_code=429 if throttled else 403,
         )
 
 
@@ -323,6 +346,7 @@ def refresh(db: Session, refresh_secret: str, ip: Optional[str], user_agent: Opt
             if reused.revoked_at is None:
                 reused.revoked_at = now
                 reused.revoke_reason = "refresh_reuse_detected"
+            reused.step_up_expires_at = None
             platform_audit.record(
                 db, action=platform_audit.REFRESH_REUSE_DETECTED, result=platform_audit.DENIED, staff=staff,
                 session_id=reused.id, ip_address=ip, user_agent=user_agent,
@@ -401,6 +425,7 @@ def logout(db: Session, staff: PlatformStaff, session: PlatformSession, ip: Opti
     if session.revoked_at is None:
         session.revoked_at = utcnow()
         session.revoke_reason = "logout"
+    session.step_up_expires_at = None
     platform_audit.record(
         db, action=platform_audit.LOGOUT, result=platform_audit.SUCCESS, staff=staff, session_id=session.id,
         ip_address=ip, user_agent=user_agent,
@@ -419,6 +444,7 @@ def revoke_session(
     if target.revoked_at is None:
         target.revoked_at = utcnow()
         target.revoke_reason = "revoked_by_owner"
+    target.step_up_expires_at = None
     platform_audit.record(
         db, action=platform_audit.SESSION_REVOKED, result=platform_audit.SUCCESS, staff=staff, session_id=current.id,
         ip_address=ip, user_agent=user_agent, details={"revoked_session_id": target.id},
@@ -431,7 +457,7 @@ def _revoke_all(db: Session, staff: PlatformStaff, reason: str) -> int:
     result = db.execute(
         update(PlatformSession)
         .where(PlatformSession.staff_id == staff.id, PlatformSession.revoked_at.is_(None))
-        .values(revoked_at=now, revoke_reason=reason)
+        .values(revoked_at=now, revoke_reason=reason, step_up_expires_at=None)
         .execution_options(synchronize_session=False)
     )
     staff.tokens_valid_after = now
@@ -446,6 +472,89 @@ def logout_all(db: Session, staff: PlatformStaff, current: PlatformSession, ip: 
     )
     db.commit()
     return count
+
+
+# --- step-up re-authentication ------------------------------------------------------------------------
+
+
+def step_up_minutes() -> int:
+    return max(1, min(int(settings.PLATFORM_STEP_UP_MINUTES), MAX_STEP_UP_MINUTES))
+
+
+def step_up(
+    db: Session, staff: PlatformStaff, session: PlatformSession, code: str, ip: Optional[str], user_agent: Optional[str]
+) -> datetime:
+    """Record a fresh TOTP confirmation on THIS session; returns when it lapses.
+
+    The code is checked exactly like the sign-in second step: replay-protected (a code, or an older
+    one, can never be used twice - including one already used to sign in) and throttled on the same
+    per-account MFA budget, so step-up adds no extra guesses. Each success starts a new, fixed
+    window; nothing ever extends an existing one. Issues no token of any kind.
+    """
+    ensure_enabled()
+    now = utcnow()
+    staff = _locked(db, PlatformStaff, staff.id)
+    session = _locked(db, PlatformSession, session.id)
+    if not _session_usable(session, staff, now):
+        db.rollback()
+        raise UnauthorizedError(SESSION_INVALID)
+
+    def fail(reason: str, *, count: bool) -> None:
+        blocked = throttle_register_failure(db, MFA_SCOPE, staff.id, None) if count else False
+        platform_audit.record(
+            db, action=platform_audit.STEP_UP_FAILED, result=platform_audit.FAILURE, staff=staff,
+            session_id=session.id, ip_address=ip, user_agent=user_agent, details={"reason": reason, "locked": blocked},
+        )
+        if blocked:
+            platform_audit.record(
+                db, action=platform_audit.ACCOUNT_LOCKED, result=platform_audit.DENIED, staff=staff,
+                session_id=session.id, ip_address=ip, user_agent=user_agent,
+                details={"scope": MFA_SCOPE, "locked_minutes": LOCKOUT_MINUTES},
+            )
+        db.commit()
+        raise StepUpFailedError(throttled=blocked or reason == "throttled")
+
+    if throttle_is_locked(db, MFA_SCOPE, staff.id, None):
+        fail("throttled", count=False)
+    secret = decrypt_secret(staff.totp_secret)
+    step = verify_totp(secret, (code or "").strip()) if secret else None
+    if step is None or (staff.totp_last_used_step is not None and step <= staff.totp_last_used_step):
+        fail("bad_or_replayed_code", count=True)
+
+    staff.totp_last_used_step = step
+    throttle_clear(db, MFA_SCOPE, staff.id)
+    expires = min(now + timedelta(minutes=step_up_minutes()), _aware(session.expires_at))
+    session.step_up_at = now
+    session.step_up_expires_at = expires
+    platform_audit.record(
+        db, action=platform_audit.STEP_UP_SUCCEEDED, result=platform_audit.SUCCESS, staff=staff,
+        session_id=session.id, ip_address=ip, user_agent=user_agent,
+        details={"method": "totp", "valid_seconds": int((expires - now).total_seconds())},
+    )
+    db.commit()
+    return expires
+
+
+def has_recent_step_up(staff: PlatformStaff, session: PlatformSession, now: Optional[datetime] = None) -> bool:
+    """True only if THIS live session completed a step-up recently enough.
+
+    The window is re-derived from step_up_at with the current (capped) setting, so lowering
+    PLATFORM_STEP_UP_MINUTES shortens windows already granted and nothing can lengthen one. Any
+    revocation of the session, and anything that moves staff.tokens_valid_after (logout-all,
+    password reset, 2FA reset), ends it.
+    """
+    now = now or utcnow()
+    if not _session_usable(session, staff, now):
+        return False
+    at, expires = _aware(session.step_up_at), _aware(session.step_up_expires_at)
+    if at is None or expires is None or at > now:
+        return False
+    if now >= min(expires, at + timedelta(minutes=step_up_minutes()), _aware(session.expires_at)):
+        return False
+    valid_after = _aware(staff.tokens_valid_after)
+    if valid_after is not None and at < valid_after:
+        return False
+    return True
 
 
 # --- staff management (server-side bootstrap CLI only; there is no HTTP endpoint for this) --------------

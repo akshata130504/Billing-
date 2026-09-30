@@ -12,6 +12,8 @@ tokens are not accepted anywhere here, and nothing here can reach tenant data.
     DELETE /sessions/{id}             revoke one of the caller's sessions
     POST /logout    end this session
     POST /logout-all end every session of the caller
+    POST /step-up   fresh TOTP        -> this session may perform sensitive actions for a few
+                                         minutes (require_recent_platform_step_up)
 """
 from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.orm import Session
@@ -31,6 +33,7 @@ from backend.app.core.config import settings
 from backend.app.core.exceptions import UnauthorizedError
 from backend.app.core.rate_limit import auth_rate_limit, limiter
 from backend.app.core.security import generate_opaque_token
+from backend.app.models.base import utcnow
 from backend.app.schemas.platform import (
     PlatformLoginChallengeOut,
     PlatformLoginRequest,
@@ -38,6 +41,8 @@ from backend.app.schemas.platform import (
     PlatformMeOut,
     PlatformSessionOut,
     PlatformSessionsOut,
+    PlatformStepUpOut,
+    PlatformStepUpRequest,
     PlatformStaffOut,
     PlatformTwoFactorRequest,
 )
@@ -142,3 +147,16 @@ def platform_logout_all(response: Response, ctx: PlatformContext = Depends(requi
     clear_session_cookies(response)
     return PlatformLogoutAllOut(sessions_revoked=count)
 
+
+@router.post("/step-up", response_model=PlatformStepUpOut, summary="Re-confirm with a fresh authenticator code")
+@limiter.limit(auth_rate_limit)
+def platform_step_up(
+    request: Request,
+    body: PlatformStepUpRequest,
+    response: Response,
+    ctx: PlatformContext = Depends(require_platform_staff),
+    db: Session = Depends(get_db),
+):
+    _no_store(response)
+    expires = platform_auth_service.step_up(db, ctx.staff, ctx.session, body.code, ctx.ip_address, ctx.user_agent)
+    return PlatformStepUpOut(step_up_expires_at=expires, expires_in=max(0, int((expires - utcnow()).total_seconds())))

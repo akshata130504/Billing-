@@ -40,6 +40,11 @@ export interface PlatformSessionInfo {
   current: boolean;
 }
 
+export interface PlatformStepUp {
+  step_up_expires_at: string;
+  expires_in: number;
+}
+
 export interface PlatformChallenge {
   two_factor_required: true;
   challenge_token: string;
@@ -100,4 +105,6 @@ export const platformApi = {
   revokeSession: (id: string) => request<void>('DELETE', `/sessions/${encodeURIComponent(id)}`),
   logout: () => request<void>('POST', '/logout'),
   logoutAll: () => request<{ sessions_revoked: number }>('POST', '/logout-all'),
+  /** Re-confirm identity with a fresh authenticator code before a sensitive action. */
+  stepUp: (code: string) => request<PlatformStepUp>('POST', '/step-up', { code }),
 };

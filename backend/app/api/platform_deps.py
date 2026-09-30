@@ -22,7 +22,7 @@ from backend.app.api.deps import client_ip, get_db
 from backend.app.core.config import settings
 from backend.app.core.exceptions import ForbiddenError, UnauthorizedError
 from backend.app.models.platform import PlatformRole, PlatformSession, PlatformStaff
-from backend.app.services import platform_auth_service
+from backend.app.services import platform_audit, platform_auth_service
 
 # Cookies are host-only (never a Domain attribute) on the platform console origin, HttpOnly except
 # the double-submit CSRF cookie (readable on purpose, grants nothing on its own), SameSite=Strict.
@@ -125,6 +125,24 @@ def require_platform_roles(allowed: FrozenSet[PlatformRole]) -> Callable[..., Pl
         return ctx
 
     return dependency
+
+
+def require_recent_platform_step_up(
+    request: Request, ctx: PlatformContext = Depends(get_platform_context), db: Session = Depends(get_db)
+) -> PlatformContext:
+    """For sensitive platform actions: the CURRENT session must have completed POST
+    /platform/auth/step-up (a fresh TOTP) within PLATFORM_STEP_UP_MINUTES. Otherwise 403
+    STEP_UP_REQUIRED (the client asks for a code, then retries). Combine with a role dependency
+    for authorization; this only proves recent presence of the second factor."""
+    if not platform_auth_service.has_recent_step_up(ctx.staff, ctx.session):
+        platform_audit.record(
+            db, action=platform_audit.STEP_UP_REQUIRED, result=platform_audit.DENIED, staff=ctx.staff,
+            session_id=ctx.session.id, ip_address=ctx.ip_address, user_agent=ctx.user_agent,
+            details={"method": request.method, "path": request.url.path[:200]},
+        )
+        db.commit()
+        raise platform_auth_service.StepUpRequiredError()
+    return ctx
 
 
 ALL_PLATFORM_ROLES = frozenset(PlatformRole)

@@ -57,3 +57,14 @@ class PlatformSessionsOut(BaseModel):
 
 class PlatformLogoutAllOut(BaseModel):
     sessions_revoked: int
+
+
+class PlatformStepUpRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=10)
+
+
+class PlatformStepUpOut(BaseModel):
+    """When the step-up on this session lapses. Deliberately no token: step-up is server-side state."""
+
+    step_up_expires_at: UTCDateTime
+    expires_in: int

@@ -723,7 +723,7 @@ def test_platform_routes_expose_no_tenant_data(client, db):
     from backend.app.main import app
 
     platform_paths = {r.path for r in app.routes if "/platform" in getattr(r, "path", "")}
-    assert platform_paths == {f"{AUTH}/{p}" for p in ("login", "2fa", "refresh", "me", "sessions", "sessions/{session_id}", "logout", "logout-all")}
+    assert platform_paths == {f"{AUTH}/{p}" for p in ("login", "2fa", "refresh", "me", "sessions", "sessions/{session_id}", "logout", "logout-all", "step-up")}
 
 
 # --- audit ---------------------------------------------------------------------------------------------------------
