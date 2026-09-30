@@ -369,3 +369,23 @@ def test_websockets_are_refused_on_the_platform_host(platform_client):
         with platform_client.websocket_connect(f"{AUTH}/me"):
             pass
     assert exc_info.value.code == 1008
+
+
+def test_platform_host_serves_uploaded_website_media_read_only(platform_client, tmp_path, monkeypatch):
+    """The console preview may load /uploads/website/* (public CMS media) - GET/HEAD only; every other
+    upload path, method and traversal attempt is still refused on the platform host."""
+    import os
+
+    folder = os.path.join(settings.UPLOAD_DIR, "website")
+    os.makedirs(folder, exist_ok=True)
+    name = "0123456789abcdef0123456789abcdef.png"
+    with open(os.path.join(folder, name), "wb") as handle:
+        handle.write(b"\x89PNG\r\n\x1a\n")
+    try:
+        assert platform_client.get(f"/uploads/website/{name}").status_code == 200
+        assert platform_client.post(f"/uploads/website/{name}").status_code == 404
+        assert platform_client.get("/uploads/logos/anything.png").status_code == 404
+        assert platform_client.get("/uploads/website/../logos/anything.png").status_code == 404
+        assert platform_client.get(f"/api/v1/uploads/website/{name}").status_code == 404
+    finally:
+        os.remove(os.path.join(folder, name))

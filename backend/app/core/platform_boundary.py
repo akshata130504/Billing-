@@ -28,6 +28,10 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from backend.app.core.config import normalize_origin, settings
 
 PLATFORM_PREFIX = f"{settings.API_V1_STR.rstrip('/')}/platform"
+# Public website media (uploaded through the CMS). Readable - GET/HEAD only - on the platform host
+# too, so the console's landing-page preview can show uploaded images and videos. These files are
+# public on the tenant host anyway; nothing else under /uploads is exposed on the platform host.
+WEBSITE_MEDIA_PREFIX = "/uploads/website/"
 
 # Stricter than the tenant set: platform API responses never render, frame or load anything.
 PLATFORM_SECURITY_HEADERS: Dict[str, str] = {
@@ -86,6 +90,14 @@ class PlatformBoundaryMiddleware:
             await self.app(scope, receive, send)
             return
 
+        if (
+            on_platform_host
+            and path.startswith(WEBSITE_MEDIA_PREFIX)
+            and ".." not in path
+            and scope.get("method") in ("GET", "HEAD")
+        ):
+            await self.app(scope, receive, send)
+            return
         if platform_path != on_platform_host:
             # Platform API on the tenant host, or anything but the platform API on the platform host.
             await _reject(send, 404, "NOT_FOUND", "Not found.")

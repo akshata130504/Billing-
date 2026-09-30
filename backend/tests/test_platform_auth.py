@@ -733,6 +733,10 @@ def test_platform_routes_expose_no_tenant_data(client, db):
                      f"{console}/staff/{{staff_id}}", f"{console}/staff/{{staff_id}}/deactivate",
                      f"{console}/staff/{{staff_id}}/activate", f"{console}/staff/{{staff_id}}/revoke-sessions",
                      f"{org}/revoke-sessions", f"{console}/jobs"}
+    site = f"{console}/website/pages/{{key}}"
+    console_paths |= {site, f"{site}/draft", f"{site}/draft/discard", f"{site}/compare", f"{site}/publish",
+                      f"{site}/versions", f"{site}/versions/{{version}}", f"{site}/versions/{{version}}/rollback",
+                      f"{site}/versions/{{version}}/restore", f"{console}/website/assets"}
     assert platform_paths == auth_paths | console_paths
 
 

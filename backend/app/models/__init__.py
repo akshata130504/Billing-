@@ -41,6 +41,7 @@ from backend.app.models.platform import (
     PlatformSession,
     PlatformStaff,
 )
+from backend.app.models.website import WebsiteContentVersion, WebsitePage
 from backend.app.models.billing_cycles import (
     BillingCycle,
     BillingCycleStatus,
@@ -369,4 +370,6 @@ __all__ = [
     "PlatformRole",
     "PlatformSession",
     "PlatformStaff",
+    "WebsiteContentVersion",
+    "WebsitePage",
 ]
