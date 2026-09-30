@@ -12,6 +12,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.orm import relationship
 
@@ -39,6 +40,15 @@ class MembershipStatus(str, enum.Enum):
     INVITED = "invited"
     ACTIVE = "active"
     DEACTIVATED = "deactivated"
+
+
+class OrganizationStatus(str, enum.Enum):
+    """Platform lifecycle of a tenant. Only ACTIVE organizations run billing automation."""
+
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    PENDING_DELETION = "pending_deletion"
+    DELETED = "deleted"
 
 
 class Organization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -83,6 +93,24 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     invoice_notes = Column(Text, nullable=True)
     invoice_terms = Column(Text, nullable=True)
     logo_url = Column(String(500), nullable=True)
+    # Platform lifecycle (foundation only: nothing in the app changes these yet). Anything but
+    # ACTIVE, or jobs_paused, makes the scheduler skip this organization's billing automation
+    # (services/org_lifecycle.py). Stored as plain VARCHAR values, not a native enum type.
+    status = Column(
+        Enum(
+            OrganizationStatus,
+            name="organization_status",
+            native_enum=False,
+            create_constraint=False,
+            length=20,
+            values_callable=lambda members: [m.value for m in members],
+            validate_strings=True,
+        ),
+        nullable=False,
+        default=OrganizationStatus.ACTIVE,
+        server_default=OrganizationStatus.ACTIVE.value,
+    )
+    jobs_paused = Column(Boolean, nullable=False, default=False, server_default=false())
 
     memberships = relationship("Membership", back_populates="organization", cascade="all, delete-orphan")
 
