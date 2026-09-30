@@ -140,6 +140,9 @@ class Settings(BaseSettings):
     PLATFORM_APP_ORIGIN: str = ""
     # How long a step-up (fresh TOTP) authorises sensitive platform actions. Capped at 15.
     PLATFORM_STEP_UP_MINUTES: int = 15
+    # Waiting period between scheduling an organization's deletion and the earliest (future,
+    # separately approved) purge; cancellable by a Platform Administrator meanwhile.
+    PLATFORM_DELETION_WAITING_DAYS: int = 30
     PASSWORD_MIN_LENGTH: int = 10
     # Requests per minute allowed on credential endpoints (login, signup, reset), per client IP.
     AUTH_RATE_LIMIT: str = "10/minute"
@@ -486,6 +489,7 @@ class Settings(BaseSettings):
             ("PLATFORM_SESSION_MAX_HOURS", 1, 24),
             ("PLATFORM_LOGIN_CHALLENGE_MINUTES", 1, 15),
             ("PLATFORM_STEP_UP_MINUTES", 1, 15),
+            ("PLATFORM_DELETION_WAITING_DAYS", 7, 365),
         ):
             value = getattr(self, name)
             if not low <= value <= high:

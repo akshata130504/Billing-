@@ -124,6 +124,15 @@ class PlatformAuditLog(UUIDPrimaryKeyMixin, Base):
     ip_address = Column(String(64), nullable=True)
     user_agent = Column(String(400), nullable=True)
     details = Column(JSON, nullable=True)
+    # Phase 3 (design section 10): the acting role, the target and the justification.
+    # organization_id is a plain column with NO foreign key, so platform history outlives a tenant.
+    staff_role_snapshot = Column(String(32), nullable=True)
+    target_type = Column(String(32), nullable=True)
+    target_id = Column(String(36), nullable=True)
+    organization_id = Column(String(36), nullable=True, index=True)
+    organization_name_snapshot = Column(String(200), nullable=True)
+    reason = Column(String(500), nullable=True)
+    ticket_ref = Column(String(100), nullable=True)
 
 
 # --- append-only audit log, enforced by PostgreSQL ------------------------------------------------------

@@ -93,9 +93,9 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     invoice_notes = Column(Text, nullable=True)
     invoice_terms = Column(Text, nullable=True)
     logo_url = Column(String(500), nullable=True)
-    # Platform lifecycle (foundation only: nothing in the app changes these yet). Anything but
-    # ACTIVE, or jobs_paused, makes the scheduler skip this organization's billing automation
-    # (services/org_lifecycle.py). Stored as plain VARCHAR values, not a native enum type.
+    # Platform lifecycle. Changed only by the platform console (services/platform_org_service.py).
+    # Anything but ACTIVE, or jobs_paused, makes the scheduler skip this organization's billing
+    # automation (services/org_lifecycle.py). Stored as plain VARCHAR values, not a native enum type.
     status = Column(
         Enum(
             OrganizationStatus,
@@ -111,6 +111,14 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         server_default=OrganizationStatus.ACTIVE.value,
     )
     jobs_paused = Column(Boolean, nullable=False, default=False, server_default=false())
+    # Last lifecycle transition (the full history lives in platform_audit_logs).
+    status_changed_at = Column(DateTime(timezone=True), nullable=True)
+    status_changed_by_staff_id = Column(
+        String(36), ForeignKey("platform_staff.id", ondelete="RESTRICT"), nullable=True
+    )
+    status_reason = Column(String(500), nullable=True)
+    # PENDING_DELETION only: the earliest time the (future, separately approved) purge may run.
+    deletion_scheduled_for = Column(DateTime(timezone=True), nullable=True)
 
     memberships = relationship("Membership", back_populates="organization", cascade="all, delete-orphan")
 
