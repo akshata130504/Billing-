@@ -8,6 +8,7 @@ replayed.
 import hashlib
 import hmac
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
@@ -19,6 +20,17 @@ from backend.app.core.encryption import DecryptionError, decrypt_str, encrypt_st
 ACCESS_TOKEN_TYPE = "access"
 MFA_TOKEN_TYPE = "mfa"
 MFA_TOKEN_EXPIRE_MINUTES = 5
+
+# Tenant access tokens are bound to this audience and issuer so a future platform token
+# (different key, aud="platform") can never be replayed against tenant endpoints, nor a
+# tenant token against platform ones.
+TENANT_TOKEN_AUDIENCE = "tenant"
+TOKEN_ISSUER = "rooman-billing"
+
+# Transition for access tokens minted before tokens carried aud/iss (see
+# decode_access_token): accepted only if issued before this process started, and only during
+# the first ACCESS_TOKEN_EXPIRE_MINUTES of uptime - by then every such token has expired.
+LEGACY_TOKENS_ISSUED_BEFORE = time.time()
 
 
 # --- Passwords ---------------------------------------------------------------
@@ -68,6 +80,8 @@ def create_access_token(
         "org": organization_id,
         "role": role,
         "type": ACCESS_TOKEN_TYPE,
+        "aud": TENANT_TOKEN_AUDIENCE,
+        "iss": TOKEN_ISSUER,
         "iat": now.timestamp(),
         "exp": int((now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)).timestamp()),
         "jti": secrets.token_hex(8),
@@ -102,9 +116,58 @@ def decode_mfa_token(token: str) -> Dict[str, Any]:
     return payload
 
 
+def _decode_legacy_access_token(token: str) -> Dict[str, Any]:
+    """Accept a pre-aud/iss tenant access token, only while one could still legitimately exist.
+
+    Such a token has NEITHER `aud` NOR `iss` (never one without the other), was issued before
+    this process started, lives no longer than the configured access-token lifetime, and is
+    only accepted during that lifetime after start-up. This path exists only in the tenant
+    decoder; a platform decoder will require aud="platform" and a different key.
+    """
+    payload = jwt.decode(
+        token,
+        settings.SECRET_KEY,
+        algorithms=[settings.JWT_ALGORITHM],
+        options={"require": ["exp", "iat", "sub"]},
+    )
+    if "aud" in payload or "iss" in payload:
+        raise jwt.InvalidTokenError("Access token has an incomplete audience/issuer")
+    lifetime = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    issued_at = payload["iat"]
+    if isinstance(issued_at, bool) or not isinstance(issued_at, (int, float)):
+        raise jwt.InvalidIssuedAtError("Access token is invalid")
+    if issued_at >= LEGACY_TOKENS_ISSUED_BEFORE:
+        raise jwt.InvalidTokenError("Legacy access token issued after the transition started")
+    if time.time() >= LEGACY_TOKENS_ISSUED_BEFORE + lifetime:
+        raise jwt.InvalidTokenError("Legacy access token transition has ended")
+    if payload["exp"] - issued_at > lifetime + 60:
+        raise jwt.InvalidTokenError("Legacy access token outlives the configured lifetime")
+    return payload
+
+
 def decode_access_token(token: str) -> Dict[str, Any]:
-    """Decode and verify an access token. Raises jwt.PyJWTError on any problem."""
-    payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+    """Decode and verify a tenant access token. Raises jwt.PyJWTError on any problem.
+
+    Requires aud="tenant" (exactly, not merely listed) and iss="rooman-billing". The only
+    exception is the short, bounded legacy transition in _decode_legacy_access_token, for
+    tokens that carry neither claim.
+    """
+    try:
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+            audience=TENANT_TOKEN_AUDIENCE,
+            issuer=TOKEN_ISSUER,
+            options={"require": ["exp", "iat", "sub", "aud", "iss"]},
+        )
+    except jwt.MissingRequiredClaimError as exc:
+        if exc.claim not in ("aud", "iss"):
+            raise
+        payload = _decode_legacy_access_token(token)
+    else:
+        if payload.get("aud") != TENANT_TOKEN_AUDIENCE:
+            raise jwt.InvalidAudienceError("Access token audience must be exactly 'tenant'")
     if payload.get("type") != ACCESS_TOKEN_TYPE:
         raise jwt.InvalidTokenError("Not an access token")
     return payload
