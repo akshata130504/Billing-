@@ -34,6 +34,13 @@ from backend.app.models.identity import (
     User,
 )
 from backend.app.models.invoices import OPEN_INVOICE_STATUSES, Invoice, InvoiceItem, InvoiceStatus
+from backend.app.models.platform import (
+    PlatformAuditLog,
+    PlatformLoginChallenge,
+    PlatformRole,
+    PlatformSession,
+    PlatformStaff,
+)
 from backend.app.models.billing_cycles import (
     BillingCycle,
     BillingCycleStatus,
@@ -357,4 +364,9 @@ __all__ = [
     "RecurringExpense",
     "RecurringExpenseFrequency",
     "RecurringExpenseStatus",
+    "PlatformAuditLog",
+    "PlatformLoginChallenge",
+    "PlatformRole",
+    "PlatformSession",
+    "PlatformStaff",
 ]
