@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { Lock } from 'lucide-react';
 import { Button } from '../../components/common/Button';
 import { EmptyState } from '../../components/common/EmptyState';
@@ -19,6 +19,8 @@ import {
 } from '../consoleApi';
 import { PlatformApiError } from '../platformApi';
 import { ActionDialog } from './ActionDialog';
+import { GrantRequestDialog } from './AccessGrantsPage';
+import { ADMIN, useConsole } from './ConsoleContext';
 import { Field, Section, StatusBadge, formatDate, formatDateTime, humanizeAction } from './ui';
 
 const ACTION_COPY: Record<LifecycleAction, { description: string; notes: (org: OrganizationDetail) => string[]; danger?: boolean }> = {
@@ -71,6 +73,8 @@ const ACTION_COPY: Record<LifecycleAction, { description: string; notes: (org: O
 export function OrganizationDetailPage() {
   const { organizationId = '' } = useParams();
   const { showToast } = useToast();
+  const { hasRole } = useConsole();
+  const [requestingAccess, setRequestingAccess] = useState(false);
   const [org, setOrg] = useState<OrganizationDetail | null>(null);
   const [activity, setActivity] = useState<Page<AuditEntry> | null>(null);
   const [activityPage, setActivityPage] = useState(1);
@@ -258,13 +262,22 @@ export function OrganizationDetailPage() {
           </Section>
           <Section title="Tenant data access">
             <p className="text-sm text-slate-600">
-              Platform staff cannot open this organization's customers, invoices or payments. Scoped, time-limited
-              access grants approved by the tenant are a future capability and are not available yet.
+              Platform staff cannot open this organization's customers, invoices or payments without an access grant:
+              scoped, read-only and time-limited, approved by the organization's Owner.
             </p>
+            {hasRole(ADMIN, 'platform_support') && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={() => setRequestingAccess(true)}>Request access</Button>
+                <Link to="/access-grants" className="self-center text-sm font-medium text-brand-600 hover:underline">Access grants</Link>
+              </div>
+            )}
           </Section>
         </div>
       </div>
 
+      <GrantRequestDialog isOpen={requestingAccess} organization={{ id: org.id, name: org.name }}
+        onClose={() => setRequestingAccess(false)}
+        onDone={() => { setRequestingAccess(false); showToast('success', 'Request sent to the tenant Owner'); }} />
       {action && copy && (
         <ActionDialog
           isOpen

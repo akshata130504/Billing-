@@ -181,6 +181,7 @@ describe('Platform console shell', () => {
 describe('Separate origin', () => {
   it('the tenant app does not contain the platform console', () => {
     expect(tenantRoutesSource).not.toMatch(/platform\/Platform(Login|Home)Page/);
-    expect(tenantRoutesSource).not.toMatch(/path="\/platform/);
+    // no /platform or /platform/* console route (the tenant's /platform-access grant workspace is different)
+    expect(tenantRoutesSource).not.toMatch(/path="\/platform("|\/)/);
   });
 });

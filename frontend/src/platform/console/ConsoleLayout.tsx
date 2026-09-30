@@ -4,6 +4,7 @@ import {
   Activity,
   Building2,
   Globe,
+  KeyRound,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -35,6 +36,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/staff', label: 'Platform staff', icon: Users, roles: [ADMIN] },
   { to: '/audit', label: 'Audit log', icon: ScrollText, roles: [ADMIN] },
   { to: '/website', label: 'Website', icon: Globe, roles: [ADMIN] },
+  { to: '/access-grants', label: 'Access grants', icon: KeyRound, roles: [ADMIN, 'platform_support'] },
   { to: '/health', label: 'System health', icon: Activity },
   { to: '/account', label: 'My account', icon: UserCircle },
 ];

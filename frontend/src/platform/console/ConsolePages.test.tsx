@@ -199,7 +199,8 @@ describe('organization detail', () => {
     expect(await screen.findByRole('heading', { name: /Acme Traders/ })).toBeInTheDocument();
     expect(screen.getByText('Olive Owner · owner@acme.test')).toBeInTheDocument();
     expect(screen.getByText('2 of 4')).toBeInTheDocument();
-    expect(screen.getByText(/access grants approved by the tenant are a future capability/)).toBeInTheDocument();
+    expect(screen.getByText(/without an access grant: scoped, read-only and time-limited, approved by the organization.s Owner/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Request access' })).toBeInTheDocument(); // administrators and support only
     for (const label of ['Suspend organization', 'Schedule deletion', 'Pause billing automation', 'Sign out all tenant users']) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
     }
@@ -267,6 +268,14 @@ describe('organization detail', () => {
     renderAt('/organizations/org-1', 'platform_support');
     expect(await screen.findByText(/Your platform role cannot change this organization's lifecycle/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Suspend organization' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Request access' })).toBeInTheDocument(); // support may request a grant
+  });
+
+  it('does not offer tenant access requests to Operations', async () => {
+    api.organization.mockResolvedValue(orgDetail({ allowed_actions: ['suspend'] }));
+    renderAt('/organizations/org-1', 'platform_operations');
+    await screen.findByRole('button', { name: 'Suspend organization' });
+    expect(screen.queryByRole('button', { name: 'Request access' })).not.toBeInTheDocument();
   });
 
   it('lists platform activity for the organization', async () => {

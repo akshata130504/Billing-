@@ -46,6 +46,8 @@ const CollectionsInvoiceDetailPage = lazyNamed(() => import('../pages/collection
 const PayInvoicePage = lazyNamed(() => import('../pages/public/PayInvoicePage'), 'PayInvoicePage');
 const PublicQuotePage = lazyNamed(() => import('../pages/public/PublicQuotePage'), 'PublicQuotePage');
 const LandingPage = lazyNamed(() => import('../pages/public/LandingPage'), 'LandingPage');
+// Rooman platform staff under an approved access grant (token handed over by the platform console).
+const PlatformAccessWorkspace = lazyNamed(() => import('../pages/platformAccess/PlatformAccessWorkspace'), 'PlatformAccessWorkspace');
 const PublicCheckoutPage = lazyNamed(() => import('../pages/public/PublicCheckoutPage'), 'PublicCheckoutPage');
 const CustomerLifecycleCinematicPage = lazyNamed(() => import('../pages/public/CustomerLifecycleCinematicPage'), 'CustomerLifecycleCinematicPage');
 const ActivityPage = lazyNamed(() => import('../pages/activity/ActivityPage'), 'ActivityPage');
@@ -202,6 +204,7 @@ export function AppRoutes() {
       {/* Public: landing & hosted pages */}
       <Route path="/" element={<LandingPage />} />
       <Route path="/landing" element={<LandingPage />} />
+      <Route path="/platform-access" element={<PlatformAccessWorkspace />} />
       <Route path="/pay/:token" element={<PayInvoicePage />} />
       <Route path="/quote/:token" element={<PublicQuotePage />} />
       <Route path="/checkout/:token" element={<PublicCheckoutPage />} />

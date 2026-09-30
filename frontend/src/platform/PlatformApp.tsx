@@ -9,9 +9,11 @@ import { EmptyState } from '../components/common/EmptyState';
 import { ToastProvider } from '../components/common/Toast';
 import { PlatformLoginPage } from './PlatformLoginPage';
 import type { PlatformRole } from './platformApi';
+import { AccessGrantsPage } from './console/AccessGrantsPage';
 import { AccountPage } from './console/AccountPage';
 import { AuditPage } from './console/AuditPage';
 import { ADMIN, useConsole } from './console/ConsoleContext';
+const SUPPORT: PlatformRole = 'platform_support';
 import { ConsoleLayout } from './console/ConsoleLayout';
 import { DashboardPage } from './console/DashboardPage';
 import { HealthPage } from './console/HealthPage';
@@ -28,7 +30,7 @@ function RequireRole({ roles, children }: { roles: PlatformRole[]; children: Rea
       <EmptyState
         icon={<ShieldOff className="h-6 w-6" />}
         title="Not available for your role"
-        description="This page is limited to Platform Administrators."
+        description="Your platform role does not include this page."
       />
     );
   }
@@ -46,6 +48,7 @@ export function PlatformRoutes() {
         <Route path="staff" element={<RequireRole roles={[ADMIN]}><StaffPage /></RequireRole>} />
         <Route path="audit" element={<RequireRole roles={[ADMIN]}><AuditPage /></RequireRole>} />
         <Route path="website" element={<RequireRole roles={[ADMIN]}><WebsitePage /></RequireRole>} />
+        <Route path="access-grants" element={<RequireRole roles={[ADMIN, SUPPORT]}><AccessGrantsPage /></RequireRole>} />
         <Route path="health" element={<HealthPage />} />
         <Route path="account" element={<AccountPage />} />
       </Route>

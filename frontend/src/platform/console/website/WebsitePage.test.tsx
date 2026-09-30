@@ -134,7 +134,7 @@ describe('website CMS editor', () => {
     api.state.mockResolvedValue(pageState(edited));
     renderAt('/website');
     fireEvent.click(await screen.findByRole('tab', { name: 'preview' }));
-    const preview = await screen.findByTestId('landing-preview');
+    const preview = await screen.findByTestId('landing-preview', {}, { timeout: 5000 }); // lazy-loaded chunk
     expect(within(preview).getByText('Preview headline')).toBeInTheDocument();
     expect(within(preview).getByText('Frequently Asked Questions')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Live version 3/ }));

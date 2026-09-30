@@ -9,6 +9,7 @@ import {
   Receipt,
   Boxes,
   ShieldCheck,
+  ShieldAlert,
   HelpCircle,
 } from 'lucide-react';
 import { PageHeader } from '../../components/common/PageHeader';
@@ -28,6 +29,7 @@ import { ProfileTab } from './ProfileTab';
 import { PreferencesTab } from './PreferencesTab';
 import { NotificationsTab } from './NotificationsTab';
 import { HelpTab } from './HelpTab';
+import { PlatformAccessTab } from './PlatformAccessTab';
 
 export type SettingsTab =
   | 'profile'
@@ -39,6 +41,7 @@ export type SettingsTab =
   | 'billing'
   | 'integrations'
   | 'security'
+  | 'platform-access'
   | 'help';
 
 interface NavItem {
@@ -74,6 +77,7 @@ const NAV_GROUPS: NavGroup[] = [
     title: 'Security',
     items: [
       { key: 'security', label: 'Security', icon: ShieldCheck },
+      { key: 'platform-access', label: 'Platform access', icon: ShieldAlert },
     ],
   },
   {
@@ -94,6 +98,7 @@ const ALL_TABS: SettingsTab[] = [
   'billing',
   'integrations',
   'security',
+  'platform-access',
   'help',
 ];
 
@@ -204,6 +209,9 @@ export function SettingsPage() {
           {activeTab === 'billing' && renderOrgTab((org) => <BillingTab organization={org} canEdit={canEdit} />)}
           {activeTab === 'integrations' && <IntegrationsTab />}
           {activeTab === 'security' && <SecurityTab />}
+          {activeTab === 'platform-access' && (canEdit ? <PlatformAccessTab /> : (
+            <ErrorState message="Only Owners and Admins can see platform access." />
+          ))}
           {activeTab === 'help' && <HelpTab />}
         </div>
       </div>

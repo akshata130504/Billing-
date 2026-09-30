@@ -53,7 +53,7 @@ describe('CMS migration keeps the public landing page identical', () => {
       legacy.remove();
       current.remove();
     }
-  });
+  }, 60_000); // dozens of full-page renders compared byte for byte
 
   it('stays identical through every pricing model and quantity', () => {
     const { legacy, current } = renderBoth();
@@ -75,7 +75,7 @@ describe('CMS migration keeps the public landing page identical', () => {
         expect(html(current)).toBe(html(legacy));
       }
     }
-  });
+  }, 60_000); // dozens of full-page renders compared byte for byte
 
   it('stays identical through the FAQ and every workflow stage', () => {
     const { legacy, current } = renderBoth();
@@ -97,7 +97,7 @@ describe('CMS migration keeps the public landing page identical', () => {
       vi.advanceTimersByTime(4300); // one auto-tour step on both
     });
     expect(html(current)).toBe(html(legacy));
-  });
+  }, 60_000); // dozens of full-page renders compared byte for byte
 });
 
 // Reference implementation copied verbatim from the original page (the pre-CMS pricingModels and
