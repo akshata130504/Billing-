@@ -40,6 +40,7 @@ const DASHBOARD = {
   staff: { total: 2, active: 2 },
   health: { api: 'ok', database: 'connected', migrations: 'at_head', scheduler: 'ok' },
   scheduler: { enabled: true, status: 'ok', last_counts: {} },
+  recent_activity: [],
 };
 
 const ME = {

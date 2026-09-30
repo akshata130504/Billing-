@@ -53,6 +53,11 @@ const ACTION_COPY: Record<LifecycleAction, { description: string; notes: (org: O
     notes: () => ['Scheduled renewals, charges and reminders stop until automation is resumed.'],
     danger: true,
   },
+  revoke_sessions: {
+    description: "Signs every tenant user and customer-portal user out of this organization. They can sign in again.",
+    notes: () => ['Only this organization\'s sessions end; users keep their accounts, roles and passwords.'],
+    danger: true,
+  },
   resume_jobs: {
     description: 'Lets the billing scheduler process this organization again on its next run.',
     notes: (org) =>
@@ -69,6 +74,7 @@ export function OrganizationDetailPage() {
   const [org, setOrg] = useState<OrganizationDetail | null>(null);
   const [activity, setActivity] = useState<Page<AuditEntry> | null>(null);
   const [activityPage, setActivityPage] = useState(1);
+  const [history, setHistory] = useState<Page<AuditEntry> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [action, setAction] = useState<LifecycleAction | null>(null);
@@ -85,9 +91,15 @@ export function OrganizationDetailPage() {
 
   const loadActivity = useCallback(async () => {
     try {
-      setActivity(await consoleApi.organizationActivity(organizationId, activityPage));
+      const [all, lifecycle] = await Promise.all([
+        consoleApi.organizationActivity(organizationId, activityPage),
+        consoleApi.organizationActivity(organizationId, 1, true),
+      ]);
+      setActivity(all);
+      setHistory(lifecycle);
     } catch {
       setActivity(null);
+      setHistory(null);
     }
   }, [organizationId, activityPage]);
 
@@ -167,6 +179,27 @@ export function OrganizationDetailPage() {
             </div>
           </Section>
 
+          <Section title="Lifecycle history" description="Status changes, refused attempts, automation pauses and session revocations.">
+            {!history ? (
+              <LoadingState message="Loading history..." />
+            ) : history.items.length === 0 ? (
+              <p className="text-sm text-slate-500">No lifecycle changes yet.</p>
+            ) : (
+              <ol className="relative ml-2 space-y-4 border-l border-slate-200 pl-5">
+                {history.items.map((entry) => (
+                  <li key={entry.id}>
+                    <span className={`absolute -left-[5px] mt-1.5 h-2.5 w-2.5 rounded-full ${entry.result === 'success' ? 'bg-brand-600' : 'bg-amber-500'}`} aria-hidden="true" />
+                    <p className="text-sm font-medium text-slate-900">{humanizeAction(entry.action)}{entry.result !== 'success' ? ` (${entry.result})` : ''}</p>
+                    <p className="text-xs text-slate-500">
+                      {formatDateTime(entry.occurred_at)} · {entry.staff_email_snapshot ?? 'unknown'}{entry.ticket_ref ? ` · ticket ${entry.ticket_ref}` : ''}
+                    </p>
+                    {entry.reason && <p className="mt-0.5 text-sm text-slate-700">{entry.reason}</p>}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </Section>
+
           <Section title="Platform activity" description="Platform audit entries about this organization (read-only).">
             {!activity ? (
               <LoadingState message="Loading activity..." />
@@ -207,6 +240,13 @@ export function OrganizationDetailPage() {
             <dl className="mt-4 grid grid-cols-2 gap-3">
               {Object.entries(org.members.by_role).map(([role, count]) => (
                 <Field key={role} label={role.charAt(0).toUpperCase() + role.slice(1)}>{count}</Field>
+              ))}
+            </dl>
+          </Section>
+          <Section title="Documents" description="Counts only - records and amounts are never shown.">
+            <dl className="grid grid-cols-2 gap-3">
+              {Object.entries(org.documents).map(([key, count]) => (
+                <Field key={key} label={key.replace(/_count$/, '').replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase()) + 's'}>{count}</Field>
               ))}
             </dl>
           </Section>

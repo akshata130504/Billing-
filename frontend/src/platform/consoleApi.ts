@@ -6,7 +6,8 @@
 import { PlatformRole, consoleRequest } from './platformApi';
 
 export type OrgStatus = 'active' | 'suspended' | 'pending_deletion' | 'deleted';
-export type LifecycleAction = 'suspend' | 'reactivate' | 'schedule_deletion' | 'cancel_deletion' | 'pause_jobs' | 'resume_jobs';
+export type LifecycleAction =
+  | 'suspend' | 'reactivate' | 'schedule_deletion' | 'cancel_deletion' | 'pause_jobs' | 'resume_jobs' | 'revoke_sessions';
 
 export interface OrganizationSummary {
   id: string;
@@ -34,6 +35,7 @@ export interface OrganizationDetail extends OrganizationSummary {
   timezone: string | null;
   owners: { full_name: string; email: string }[];
   members: { active: number; invited: number; deactivated: number; by_role: Record<string, number> };
+  documents: Record<string, number>;
   security: { members_with_two_factor: number; active_members: number; live_tenant_sessions: number };
   lifecycle: {
     status: OrgStatus;
@@ -132,6 +134,16 @@ export interface Dashboard {
   staff: { total: number; active: number };
   health: { api: string; database: string; migrations: string; scheduler: string | null };
   scheduler: SchedulerStatus;
+  recent_activity: AuditEntry[];
+}
+
+export interface Jobs {
+  scheduler: SchedulerStatus;
+  durable_jobs: Record<string, number>;
+  durable_jobs_failed_24h: number;
+  outbox: Record<string, number>;
+  webhooks_received_24h: number;
+  organizations_not_running: number;
 }
 
 export interface DirectoryQuery {
@@ -148,6 +160,11 @@ export interface AuditQuery {
   result?: string;
   organization_id?: string;
   staff_id?: string;
+  target_type?: string;
+  target_id?: string;
+  q?: string;
+  since?: string;
+  until?: string;
   page?: number;
   page_size?: number;
 }
@@ -175,6 +192,7 @@ const ACTION_PATHS: Record<LifecycleAction, string> = {
   cancel_deletion: 'cancel-deletion',
   pause_jobs: 'jobs/pause',
   resume_jobs: 'jobs/resume',
+  revoke_sessions: 'revoke-sessions',
 };
 
 export const consoleApi = {
@@ -183,8 +201,11 @@ export const consoleApi = {
   organizations: (params: DirectoryQuery = {}) =>
     consoleRequest<Page<OrganizationSummary>>('GET', `/organizations${query(params)}`),
   organization: (orgId: string) => consoleRequest<OrganizationDetail>('GET', `/organizations/${id(orgId)}`),
-  organizationActivity: (orgId: string, page = 1) =>
-    consoleRequest<Page<AuditEntry>>('GET', `/organizations/${id(orgId)}/activity${query({ page, page_size: 20 })}`),
+  organizationActivity: (orgId: string, page = 1, lifecycle = false) =>
+    consoleRequest<Page<AuditEntry>>(
+      'GET', `/organizations/${id(orgId)}/activity${query({ page, page_size: 20, lifecycle: lifecycle ? 'true' : undefined })}`
+    ),
+  jobs: () => consoleRequest<Jobs>('GET', '/jobs'),
   lifecycle: (orgId: string, action: LifecycleAction, body: ReasonBody) =>
     consoleRequest<LifecycleResult>('POST', `/organizations/${id(orgId)}/${ACTION_PATHS[action]}`, body),
   staff: () => consoleRequest<{ items: StaffSummary[] }>('GET', '/staff'),
@@ -208,6 +229,7 @@ export const ACTION_LABELS: Record<LifecycleAction, string> = {
   cancel_deletion: 'Cancel deletion',
   pause_jobs: 'Pause billing automation',
   resume_jobs: 'Resume billing automation',
+  revoke_sessions: 'Sign out all tenant users',
 };
 
 /** Actions the design requires a ticket for (the server enforces this too). */

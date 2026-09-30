@@ -7,10 +7,11 @@ import { PageHeader } from '../../components/common/PageHeader';
 import { consoleApi, type Dashboard } from '../consoleApi';
 import { PlatformApiError, ROLE_LABELS } from '../platformApi';
 import { useConsole } from './ConsoleContext';
-import { Field, Section, Stat, StateDot, StatusBadge, formatDate, formatDateTime } from './ui';
+import { ADMIN } from './ConsoleContext';
+import { Field, Section, Stat, StateDot, StatusBadge, formatDate, formatDateTime, humanizeAction } from './ui';
 
 export function DashboardPage() {
-  const { me } = useConsole();
+  const { me, hasRole } = useConsole();
   const [data, setData] = useState<Dashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,6 +68,32 @@ export function DashboardPage() {
                   </ul>
                 )}
               </Section>
+              <div className="mt-6">
+                <Section
+                  title="Recent platform activity"
+                  description={hasRole(ADMIN) ? 'Latest platform audit events.' : 'Latest organization lifecycle events.'}
+                  actions={hasRole(ADMIN) ? <Link to="/audit" className="text-sm font-medium text-brand-600 hover:underline">Audit log</Link> : undefined}
+                >
+                  {data.recent_activity.length === 0 ? (
+                    <p className="text-sm text-slate-500">No platform activity yet.</p>
+                  ) : (
+                    <ul className="divide-y divide-slate-100">
+                      {data.recent_activity.map((entry) => (
+                        <li key={entry.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-slate-900">{humanizeAction(entry.action)}</p>
+                            <p className="truncate text-xs text-slate-500">
+                              {entry.staff_email_snapshot ?? 'unknown'}
+                              {entry.organization_name_snapshot ? ` · ${entry.organization_name_snapshot}` : ''}
+                            </p>
+                          </div>
+                          <span className="text-xs text-slate-500">{formatDateTime(entry.occurred_at)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </Section>
+              </div>
             </div>
             <div className="space-y-6">
               <Section

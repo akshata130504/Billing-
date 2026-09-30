@@ -22,7 +22,7 @@ vi.mock('../consoleApi', async () => {
     ...actual,
     consoleApi: {
       dashboard: vi.fn(), health: vi.fn(), organizations: vi.fn(), organization: vi.fn(),
-      organizationActivity: vi.fn(), lifecycle: vi.fn(), staff: vi.fn(), staffMember: vi.fn(),
+      organizationActivity: vi.fn(), lifecycle: vi.fn(), staff: vi.fn(), staffMember: vi.fn(), jobs: vi.fn(),
       staffAction: vi.fn(), audit: vi.fn(),
     },
   };
@@ -56,12 +56,13 @@ function orgDetail(overrides: Partial<OrganizationDetail> = {}): OrganizationDet
     timezone: 'Asia/Kolkata',
     owners: [{ full_name: 'Olive Owner', email: 'owner@acme.test' }],
     members: { active: 4, invited: 1, deactivated: 0, by_role: { owner: 1, admin: 1, finance: 1, viewer: 1 } },
+    documents: { customer_count: 12, quote_count: 5, invoice_count: 9, credit_note_count: 1, payment_count: 7, subscription_count: 3 },
     security: { members_with_two_factor: 2, active_members: 4, live_tenant_sessions: 3 },
     lifecycle: {
       status: 'active', status_changed_at: null, status_reason: null, status_changed_by: null,
       deletion_scheduled_for: null, jobs_paused: false, automation_running: true, renewals_waiting: 0,
     },
-    allowed_actions: ['suspend', 'schedule_deletion', 'pause_jobs'],
+    allowed_actions: ['suspend', 'schedule_deletion', 'pause_jobs', 'revoke_sessions'],
     ...overrides,
   };
 }
@@ -73,6 +74,10 @@ const DASHBOARD = {
   staff: { total: 3, active: 2 },
   health: { api: 'ok', database: 'connected', migrations: 'at_head', scheduler: 'ok' },
   scheduler: { enabled: true, status: 'ok', last_finished_at: '2026-09-30T09:00:00Z', last_counts: {} },
+  recent_activity: [{ id: 'ra1', occurred_at: '2026-09-30T09:30:00Z', action: 'ORGANIZATION_SUSPENDED', result: 'success',
+    platform_staff_id: 's', staff_email_snapshot: 'ops@rooman.test', staff_role_snapshot: 'platform_operations',
+    organization_id: 'org-2', organization_name_snapshot: 'Beta Corp', target_type: 'organization', target_id: 'org-2',
+    reason: 'x', ticket_ref: null, ip_address: null, user_agent: null, details: null }],
 };
 
 function renderAt(path: string, role: PlatformRole = 'platform_administrator') {
@@ -141,6 +146,8 @@ describe('dashboard', () => {
     expect(screen.getByText('API: ok')).toBeInTheDocument();
     expect(screen.getByText('Migrations: at head')).toBeInTheDocument();
     expect(screen.getByText('Priya Platform (me@rooman.test)')).toBeInTheDocument();
+    expect(screen.getByText('Recent platform activity')).toBeInTheDocument();
+    expect(screen.getByText('ops@rooman.test · Beta Corp')).toBeInTheDocument();
   });
 
   it('shows an error with retry', async () => {
@@ -193,7 +200,7 @@ describe('organization detail', () => {
     expect(screen.getByText('Olive Owner · owner@acme.test')).toBeInTheDocument();
     expect(screen.getByText('2 of 4')).toBeInTheDocument();
     expect(screen.getByText(/access grants approved by the tenant are a future capability/)).toBeInTheDocument();
-    for (const label of ['Suspend organization', 'Schedule deletion', 'Pause billing automation']) {
+    for (const label of ['Suspend organization', 'Schedule deletion', 'Pause billing automation', 'Sign out all tenant users']) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
     }
     expect(screen.queryByRole('button', { name: 'Reactivate organization' })).not.toBeInTheDocument();
@@ -272,8 +279,9 @@ describe('organization detail', () => {
       total: 1, page: 1, page_size: 20, total_pages: 1,
     });
     renderAt('/organizations/org-1');
-    expect(await screen.findByText('Organization suspended')).toBeInTheDocument();
-    expect(screen.getByText('Unpaid for 90 days')).toBeInTheDocument();
+    // the same lifecycle event appears in both the lifecycle history and the full activity list
+    expect(await screen.findAllByText('Organization suspended')).toHaveLength(2);
+    expect(screen.getAllByText('Unpaid for 90 days')).toHaveLength(2);
   });
 
   it('shows not found for an unknown organization', async () => {
@@ -390,5 +398,70 @@ describe('system health', () => {
     api.health.mockRejectedValue(new PlatformApiError('Health check failed', 500));
     renderAt('/health');
     expect(await screen.findByText('Health check failed')).toBeInTheDocument();
+  });
+});
+
+describe('phase 3 completion', () => {
+  it('shows document counts and lifecycle history on the detail page', async () => {
+    api.organization.mockResolvedValue(orgDetail());
+    api.organizationActivity.mockImplementation((_id: string, _page: number, lifecycle: boolean) => Promise.resolve(lifecycle
+      ? { items: [{ id: 'h1', occurred_at: '2026-09-30T08:00:00Z', action: 'TENANT_JOBS_PAUSED', result: 'success',
+          platform_staff_id: 's', staff_email_snapshot: 'me@rooman.test', staff_role_snapshot: null, organization_id: 'org-1',
+          organization_name_snapshot: null, target_type: null, target_id: null, reason: 'Paused for review', ticket_ref: 'T-7',
+          ip_address: null, user_agent: null, details: null }], total: 1, page: 1, page_size: 20, total_pages: 1 }
+      : { items: [], total: 0, page: 1, page_size: 20, total_pages: 0 }));
+    renderAt('/organizations/org-1');
+    expect(await screen.findByText('Tenant jobs paused')).toBeInTheDocument();
+    expect(screen.getByText('Paused for review')).toBeInTheDocument();
+    const docs = screen.getByRole('heading', { name: 'Documents' }).closest('section')!;
+    expect(within(docs).getByText('Customers')).toBeInTheDocument();
+    expect(within(docs).getByText('12')).toBeInTheDocument();
+    expect(within(docs).getByText('Credit notes')).toBeInTheDocument();
+  });
+
+  it('revokes tenant sessions through the reason dialog', async () => {
+    api.organization.mockResolvedValue(orgDetail());
+    api.lifecycle.mockResolvedValue({ organization: ORG_SUMMARY, changed: { tenant_sessions_revoked: 3 } });
+    renderAt('/organizations/org-1');
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out all tenant users' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/Only this organization.s sessions end/)).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText(/^Reason/), { target: { value: 'Suspected credential leak' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Sign out all tenant users' }));
+    await waitFor(() => expect(api.lifecycle).toHaveBeenCalledWith('org-1', 'revoke_sessions', { reason: 'Suspected credential leak' }));
+  });
+
+  it('shows background job counts to administrators and operations, not support', async () => {
+    const health = {
+      api: { status: 'ok', version: '0.1.0', environment: 'development' }, database: { status: 'connected' },
+      migrations: { status: 'at_head', current: 'x', head: 'x' }, scheduler: { enabled: true, status: 'ok', last_counts: {} },
+      platform: { auth_enabled: true, step_up_minutes: 15, session_idle_minutes: 30, session_max_hours: 8, deletion_waiting_days: 30 },
+      integrations: { email_configured: true, payments_configured: true },
+    };
+    api.health.mockResolvedValue(health);
+    api.jobs.mockResolvedValue({ scheduler: health.scheduler, durable_jobs: { pending: 2, failed: 1 }, durable_jobs_failed_24h: 1,
+      outbox: { pending: 0, failed: 4 }, webhooks_received_24h: 9, organizations_not_running: 2 });
+    const { unmount } = renderAt('/health', 'platform_operations');
+    expect(await screen.findByText('Background jobs')).toBeInTheDocument();
+    expect(screen.getByText('Organizations not running automation').closest('div')).toHaveTextContent('2');
+    unmount();
+    api.jobs.mockClear();
+    renderAt('/health', 'platform_support');
+    await screen.findByText('Database: connected');
+    expect(screen.queryByText('Background jobs')).not.toBeInTheDocument();
+    expect(api.jobs).not.toHaveBeenCalled();
+  });
+
+  it('searches the audit log by text and date', async () => {
+    api.audit.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 50, total_pages: 0 });
+    renderAt('/audit');
+    await screen.findByText('No audit entries');
+    fireEvent.change(screen.getByPlaceholderText(/Action, staff email, organization/), { target: { value: 'SUP-1234' } });
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-09-01T00:00' } });
+    fireEvent.change(screen.getByLabelText('Target type'), { target: { value: 'organization' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(api.audit).toHaveBeenLastCalledWith(expect.objectContaining({
+      q: 'SUP-1234', target_type: 'organization', since: new Date('2026-09-01T00:00').toISOString(),
+    })));
   });
 });

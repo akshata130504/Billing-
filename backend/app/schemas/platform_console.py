@@ -80,6 +80,7 @@ class OrganizationDetailOut(OrganizationSummaryOut):
     timezone: Optional[str] = None
     owners: List[OwnerContactOut]
     members: MemberCountsOut
+    documents: Dict[str, int]
     security: OrganizationSecurityOut
     lifecycle: LifecycleStateOut
     allowed_actions: List[str]
@@ -272,3 +273,15 @@ class DashboardOut(BaseModel):
     staff: StaffCountsOut
     health: HealthSummaryOut
     scheduler: SchedulerStatusOut
+    recent_activity: List[AuditEntryOut]
+
+
+class JobsOut(BaseModel):
+    """Background work, counts only. Observation: nothing in the platform API runs a job."""
+
+    scheduler: SchedulerStatusOut
+    durable_jobs: Dict[str, int]
+    durable_jobs_failed_24h: int
+    outbox: Dict[str, int]
+    webhooks_received_24h: int
+    organizations_not_running: int

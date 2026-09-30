@@ -17,7 +17,8 @@ from backend.app.core.database import check_db_health
 from backend.app.core.migrations import migration_status
 from backend.app.models import Organization, OrganizationStatus
 from backend.app.models.base import utcnow
-from backend.app.models.platform import PlatformStaff
+from backend.app.models.events import InboxEvent, Job, JobStatus, OutboxEvent, OutboxStatus
+from backend.app.models.platform import PlatformAuditLog, PlatformRole, PlatformStaff
 from backend.app.services.scheduler import get_scheduler_heartbeat
 
 RECENT_DAYS = 7
@@ -85,7 +86,43 @@ def health(db: Session) -> Dict[str, Any]:
     }
 
 
-def dashboard(db: Session) -> Dict[str, Any]:
+def recent_activity(db: Session, role: PlatformRole, limit: int = 8):
+    """Latest platform audit rows for the dashboard. The full audit is Administrator-only, so other
+    roles see organization lifecycle events only."""
+    from backend.app.services.platform_org_service import LIFECYCLE_EVENTS
+
+    stmt = select(PlatformAuditLog)
+    if role != PlatformRole.PLATFORM_ADMINISTRATOR:
+        stmt = stmt.where(PlatformAuditLog.action.in_(LIFECYCLE_EVENTS))
+    return db.scalars(stmt.order_by(PlatformAuditLog.occurred_at.desc(), PlatformAuditLog.id.desc()).limit(limit)).all()
+
+
+def _counts_by_status(db: Session, model, enum) -> Dict[str, int]:
+    rows = dict(db.execute(select(model.status, func.count(model.id)).group_by(model.status)).all())
+    return {member.value: int(rows.get(member, 0)) for member in enum}
+
+
+def jobs(db: Session) -> Dict[str, Any]:
+    """Background work across the platform - counts only (no payloads, ids or amounts).
+    Observation only: nothing here can run, retry or cancel a job."""
+    day_ago = utcnow() - timedelta(hours=24)
+    return {
+        "scheduler": scheduler_status(db),
+        "durable_jobs": _counts_by_status(db, Job, JobStatus),
+        "durable_jobs_failed_24h": int(db.scalar(
+            select(func.count(Job.id)).where(Job.status.in_((JobStatus.FAILED, JobStatus.DEAD)), Job.updated_at >= day_ago)
+        ) or 0),
+        "outbox": _counts_by_status(db, OutboxEvent, OutboxStatus),
+        "webhooks_received_24h": int(db.scalar(
+            select(func.count(InboxEvent.id)).where(InboxEvent.created_at >= day_ago)
+        ) or 0),
+        "organizations_not_running": int(db.scalar(select(func.count(Organization.id)).where(
+            (Organization.status != OrganizationStatus.ACTIVE) | Organization.jobs_paused.is_(True)
+        )) or 0),
+    }
+
+
+def dashboard(db: Session, role: PlatformRole = PlatformRole.PLATFORM_ADMINISTRATOR) -> Dict[str, Any]:
     since = utcnow() - timedelta(days=RECENT_DAYS)
     recent = db.scalars(select(Organization).order_by(Organization.created_at.desc(), Organization.id).limit(5)).all()
     snapshot = health(db)
@@ -108,4 +145,5 @@ def dashboard(db: Session) -> Dict[str, Any]:
             "scheduler": snapshot["scheduler"].get("status"),
         },
         "scheduler": snapshot["scheduler"],
+        "recent_activity": recent_activity(db, role),
     }

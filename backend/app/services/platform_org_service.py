@@ -26,23 +26,29 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
 from backend.app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from backend.app.models import (
+    CreditNote,
+    Customer,
+    Invoice,
     Membership,
     MemberRole,
     MembershipStatus,
     Organization,
     OrganizationStatus,
+    Payment,
+    Quote,
     RefreshToken,
     Subscription,
     SubscriptionStatus,
     User,
 )
+from backend.app.models.portal import CustomerPortalSession, CustomerPortalUser
 from backend.app.models.base import utcnow
 from backend.app.models.platform import PlatformAuditLog, PlatformRole, PlatformStaff
 from backend.app.services import platform_audit
@@ -81,6 +87,18 @@ TRANSITIONS: Dict[str, Transition] = {
     )
 }
 JOB_ACTIONS = {"pause_jobs": platform_audit.TENANT_JOBS_PAUSED, "resume_jobs": platform_audit.TENANT_JOBS_RESUMED}
+# Platform audit actions that make up an organization's lifecycle history.
+LIFECYCLE_EVENTS = (
+    platform_audit.ORGANIZATION_SUSPENDED, platform_audit.ORGANIZATION_REACTIVATED,
+    platform_audit.ORGANIZATION_DELETION_SCHEDULED, platform_audit.ORGANIZATION_DELETION_CANCELLED,
+    platform_audit.ORGANIZATION_LIFECYCLE_REFUSED, platform_audit.TENANT_JOBS_PAUSED,
+    platform_audit.TENANT_JOBS_RESUMED, platform_audit.TENANT_SESSIONS_REVOKED,
+)
+# Document COUNTS shown on the detail page (design section 4: counts, never records or amounts).
+DOCUMENT_COUNTS = (
+    ("customer_count", Customer), ("quote_count", Quote), ("invoice_count", Invoice),
+    ("credit_note_count", CreditNote), ("payment_count", Payment), ("subscription_count", Subscription),
+)
 
 
 @dataclass
@@ -242,6 +260,8 @@ def allowed_actions(org: Organization, role: PlatformRole) -> List[str]:
     actions = [t.action for t in TRANSITIONS.values() if status in t.sources and role in t.roles]
     if role in ADMINISTRATOR_ONLY and status not in (OrganizationStatus.DELETED,):
         actions.append("resume_jobs" if org.jobs_paused else "pause_jobs")
+    if role in LIFECYCLE_ROLES and status != OrganizationStatus.DELETED:
+        actions.append("revoke_sessions")
     return actions
 
 
@@ -295,6 +315,10 @@ def organization_detail(db: Session, organization_id: str, actor: Actor) -> Dict
         )
         or 0
     )
+    documents = {
+        name: int(db.scalar(select(func.count(model.id)).where(model.organization_id == org.id)) or 0)
+        for name, model in DOCUMENT_COUNTS
+    }
     changed_by = db.get(PlatformStaff, org.status_changed_by_staff_id) if org.status_changed_by_staff_id else None
     active_members = int(counts.get(MembershipStatus.ACTIVE, 0))
     status = org.status or OrganizationStatus.ACTIVE
@@ -309,6 +333,7 @@ def organization_detail(db: Session, organization_id: str, actor: Actor) -> Dict
             "deactivated": int(counts.get(MembershipStatus.DEACTIVATED, 0)),
             "by_role": {role.value: int(roles.get(role, 0)) for role in MemberRole},
         },
+        "documents": documents,
         "security": {
             "members_with_two_factor": two_factor,
             "active_members": active_members,
@@ -338,11 +363,13 @@ def organization_detail(db: Session, organization_id: str, actor: Actor) -> Dict
 
 
 def organization_activity(
-    db: Session, organization_id: str, *, page: int = 1, page_size: int = 25
+    db: Session, organization_id: str, *, page: int = 1, page_size: int = 25, lifecycle_only: bool = False
 ) -> Tuple[List[PlatformAuditLog], int]:
-    """Platform audit rows about this organization (read-only; the table is append-only)."""
+    """Platform audit rows about this organization (read-only; the table is append-only).
+    `lifecycle_only` narrows it to the lifecycle history (transitions, refusals, pauses, revocations)."""
     _get(db, organization_id)
-    return audit_page(db, organization_id=organization_id, page=page, page_size=page_size)
+    return audit_page(db, organization_id=organization_id, page=page, page_size=page_size,
+                      actions=LIFECYCLE_EVENTS if lifecycle_only else None)
 
 
 def audit_page(
@@ -354,12 +381,31 @@ def audit_page(
     result: Optional[str] = None,
     since: Optional[datetime] = None,
     until: Optional[datetime] = None,
+    target_type: Optional[str] = None,
+    target_id: Optional[str] = None,
+    q: Optional[str] = None,
+    actions: Optional[Tuple[str, ...]] = None,
     page: int = 1,
     page_size: int = 50,
 ) -> Tuple[List[PlatformAuditLog], int]:
     page = max(1, int(page))
     page_size = max(1, min(int(page_size), MAX_PAGE_SIZE))
     filters = []
+    if actions:
+        filters.append(PlatformAuditLog.action.in_(actions))
+    if target_type:
+        filters.append(PlatformAuditLog.target_type == target_type[:32])
+    if target_id:
+        filters.append(PlatformAuditLog.target_id == target_id[:36])
+    term = (q or "").strip()[:100]
+    if term:
+        like = f"%{_escape_like(term.lower())}%"
+        filters.append(or_(*(
+            func.lower(column).like(like, escape="\\")
+            for column in (PlatformAuditLog.action, PlatformAuditLog.staff_email_snapshot,
+                           PlatformAuditLog.organization_name_snapshot, PlatformAuditLog.reason,
+                           PlatformAuditLog.ticket_ref)
+        )))
     if organization_id:
         filters.append(PlatformAuditLog.organization_id == organization_id)
     if staff_id:
@@ -483,3 +529,45 @@ def set_jobs_paused(
     )
     db.commit()
     return LifecycleResult(organization=_summary(org, _active_members(db, org.id)), changed={"jobs_paused": pause, "renewals_waiting": waiting})
+
+
+# --- tenant session revocation ------------------------------------------------------------------------
+
+
+def revoke_tenant_sessions(
+    db: Session, organization_id: str, actor: Actor, *, reason: str, ticket_ref: Optional[str] = None
+) -> LifecycleResult:
+    """Sign every tenant user and customer-portal user out of THIS organization.
+
+    Refresh-token rows bound to the organization are revoked; access tokens bound to those rows die
+    on their next request (api/deps.get_current_user checks the session row). Portal sessions of the
+    organization's portal users are revoked. Other organizations the same users belong to are not
+    touched. Tenant data, roles and passwords are unchanged.
+    """
+    reason, ticket_ref = _clean(reason), _clean(ticket_ref) or None
+    org = _get(db, organization_id, lock=True)
+    if actor.role not in LIFECYCLE_ROLES:
+        _refuse(db, org, actor, "revoke_sessions", "Your platform role does not allow this action.",
+                reason=reason, ticket_ref=ticket_ref, status_code="forbidden")
+    now = utcnow()
+    staff_sessions = db.execute(
+        update(RefreshToken)
+        .where(RefreshToken.organization_id == org.id, RefreshToken.revoked_at.is_(None))
+        .values(revoked_at=now)
+        .execution_options(synchronize_session=False)
+    ).rowcount or 0
+    portal_ids = select(CustomerPortalUser.id).where(CustomerPortalUser.organization_id == org.id)
+    portal_sessions = db.execute(
+        update(CustomerPortalSession)
+        .where(CustomerPortalSession.portal_user_id.in_(portal_ids), CustomerPortalSession.is_revoked.is_(False))
+        .values(is_revoked=True)
+        .execution_options(synchronize_session=False)
+    ).rowcount or 0
+    changed = {"tenant_sessions_revoked": int(staff_sessions), "portal_sessions_revoked": int(portal_sessions)}
+    platform_audit.record(
+        db, action=platform_audit.TENANT_SESSIONS_REVOKED, result=platform_audit.SUCCESS, staff=actor.staff,
+        session_id=actor.session_id, ip_address=actor.ip_address, user_agent=actor.user_agent, organization=org,
+        reason=reason, ticket_ref=ticket_ref, details=changed,
+    )
+    db.commit()
+    return LifecycleResult(organization=_summary(org, _active_members(db, org.id)), changed=changed)

@@ -44,10 +44,15 @@ export function AuditPage() {
     e.preventDefault();
     setPage(1);
     setFilters({
+      q: draft.q?.trim() || undefined,
       action: draft.action?.trim().toUpperCase() || undefined,
       result: draft.result || undefined,
       organization_id: draft.organization_id?.trim() || undefined,
       staff_id: draft.staff_id?.trim() || undefined,
+      target_type: draft.target_type?.trim() || undefined,
+      target_id: draft.target_id?.trim() || undefined,
+      since: draft.since ? new Date(draft.since).toISOString() : undefined,
+      until: draft.until ? new Date(draft.until).toISOString() : undefined,
     });
   };
 
@@ -55,7 +60,22 @@ export function AuditPage() {
     <div className="space-y-6">
       <PageHeader title="Platform audit log" subtitle="Every platform sign-in, security event, staff change and lifecycle action. Append-only - entries cannot be edited or deleted." />
 
-      <form onSubmit={apply} className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-5" aria-label="Filter audit log">
+      <form onSubmit={apply} className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4" aria-label="Filter audit log">
+        <label className="text-xs font-medium text-slate-600 sm:col-span-2">
+          Search
+          <input value={draft.q ?? ''} onChange={(e) => setDraft({ ...draft, q: e.target.value })} placeholder="Action, staff email, organization, reason or ticket"
+            maxLength={100} className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-2 text-sm" />
+        </label>
+        <label className="text-xs font-medium text-slate-600">
+          From
+          <input type="datetime-local" value={draft.since ?? ''} onChange={(e) => setDraft({ ...draft, since: e.target.value })}
+            className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-2 text-sm" />
+        </label>
+        <label className="text-xs font-medium text-slate-600">
+          To
+          <input type="datetime-local" value={draft.until ?? ''} onChange={(e) => setDraft({ ...draft, until: e.target.value })}
+            className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-2 text-sm" />
+        </label>
         <label className="text-xs font-medium text-slate-600">
           Action
           <input value={draft.action ?? ''} onChange={(e) => setDraft({ ...draft, action: e.target.value })} placeholder="e.g. ORGANIZATION_SUSPENDED"
@@ -79,6 +99,22 @@ export function AuditPage() {
         <label className="text-xs font-medium text-slate-600">
           Staff id
           <input value={draft.staff_id ?? ''} onChange={(e) => setDraft({ ...draft, staff_id: e.target.value })}
+            className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-2 text-sm" />
+        </label>
+        <label className="text-xs font-medium text-slate-600">
+          Target type
+          <select value={draft.target_type ?? ''} onChange={(e) => setDraft({ ...draft, target_type: e.target.value })}
+            className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-2 text-sm">
+            <option value="">Any</option>
+            <option value="organization">Organization</option>
+            <option value="platform_staff">Platform staff</option>
+            <option value="website_page">Website page</option>
+            <option value="access_grant">Access grant</option>
+          </select>
+        </label>
+        <label className="text-xs font-medium text-slate-600">
+          Target id
+          <input value={draft.target_id ?? ''} onChange={(e) => setDraft({ ...draft, target_id: e.target.value })}
             className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-2 text-sm" />
         </label>
         <div className="flex items-end gap-2">

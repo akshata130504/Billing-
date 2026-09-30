@@ -2,6 +2,7 @@
 
     GET /dashboard   any platform role     counts by status, recent sign-ups, health, scheduler
     GET /health      any platform role     API, database, migrations, scheduler, platform settings
+    GET /jobs        Administrator, Ops    background job counts (scheduler, durable jobs, outbox)
     GET /audit       Administrator         platform audit log (filters, pages; read-only)
 
 Counts and states only: no tenant financial data, no credentials, hosts or connection strings.
@@ -16,12 +17,13 @@ from sqlalchemy.orm import Session
 from backend.app.api.deps import get_db
 from backend.app.api.platform_deps import (
     ADMINISTRATOR_ONLY,
+    LIFECYCLE_ROLES,
     PlatformContext,
     require_platform_roles,
     require_platform_staff,
 )
-from backend.app.api.v1.endpoints.platform_organizations import audit_page_out
-from backend.app.schemas.platform_console import AuditPageOut, DashboardOut, HealthOut
+from backend.app.api.v1.endpoints.platform_organizations import audit_out, audit_page_out
+from backend.app.schemas.platform_console import AuditPageOut, DashboardOut, HealthOut, JobsOut
 from backend.app.services import platform_org_service, platform_overview_service
 
 router = APIRouter()
@@ -29,12 +31,19 @@ router = APIRouter()
 
 @router.get("/dashboard", response_model=DashboardOut, summary="Platform dashboard (counts only)")
 def dashboard(ctx: PlatformContext = Depends(require_platform_staff), db: Session = Depends(get_db)):
-    return DashboardOut(**platform_overview_service.dashboard(db))
+    data = platform_overview_service.dashboard(db, ctx.role)
+    data["recent_activity"] = [audit_out(row) for row in data["recent_activity"]]
+    return DashboardOut(**data)
 
 
 @router.get("/health", response_model=HealthOut, summary="Platform and system health")
 def health(ctx: PlatformContext = Depends(require_platform_staff), db: Session = Depends(get_db)):
     return HealthOut(**platform_overview_service.health(db))
+
+
+@router.get("/jobs", response_model=JobsOut, summary="Background job status (counts only)")
+def jobs(ctx: PlatformContext = Depends(require_platform_roles(LIFECYCLE_ROLES)), db: Session = Depends(get_db)):
+    return JobsOut(**platform_overview_service.jobs(db))
 
 
 @router.get("/audit", response_model=AuditPageOut, summary="Platform audit log")
@@ -45,6 +54,9 @@ def audit(
     organization_id: Optional[str] = Query(default=None, max_length=36),
     since: Optional[datetime] = None,
     until: Optional[datetime] = None,
+    target_type: Optional[str] = Query(default=None, max_length=32),
+    target_id: Optional[str] = Query(default=None, max_length=36),
+    q: Optional[str] = Query(default=None, max_length=100),
     page: int = Query(default=1, ge=1, le=10_000),
     page_size: int = Query(default=50, ge=1, le=platform_org_service.MAX_PAGE_SIZE),
     ctx: PlatformContext = Depends(require_platform_roles(ADMINISTRATOR_ONLY)),
@@ -52,6 +64,6 @@ def audit(
 ):
     rows, total = platform_org_service.audit_page(
         db, organization_id=organization_id, staff_id=staff_id, action=action, result=result, since=since,
-        until=until, page=page, page_size=page_size,
+        until=until, target_type=target_type, target_id=target_id, q=q, page=page, page_size=page_size,
     )
     return audit_page_out(rows, total, page, page_size)

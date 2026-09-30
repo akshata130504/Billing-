@@ -5,12 +5,14 @@ Metadata only (services/platform_org_service.py). Authorization is enforced here
     GET  /                          any platform role         directory (search, status filter, sort, pages)
     GET  /{id}                      any platform role         detail (audited as ORGANIZATION_VIEWED)
     GET  /{id}/activity             any platform role         platform audit rows about this organization
+                                                              (?lifecycle=true: lifecycle history only)
     POST /{id}/suspend              Administrator, Operations reason + ticket, step-up
     POST /{id}/reactivate           Administrator, Operations reason (automation stays paused)
     POST /{id}/schedule-deletion    Administrator             reason + ticket, step-up
     POST /{id}/cancel-deletion      Administrator             reason
     POST /{id}/jobs/pause           Administrator             reason, step-up
     POST /{id}/jobs/resume          Administrator             reason, step-up
+    POST /{id}/revoke-sessions      Administrator, Operations reason, step-up (tenant + portal sessions)
 
 There is no hard delete, no tenant data endpoint, and nothing here runs billing jobs.
 """
@@ -97,10 +99,12 @@ def organization_activity(
     organization_id: str,
     page: int = Query(default=1, ge=1, le=10_000),
     page_size: int = Query(default=25, ge=1, le=svc.MAX_PAGE_SIZE),
+    lifecycle: bool = False,
     ctx: PlatformContext = Depends(require_platform_staff),
     db: Session = Depends(get_db),
 ):
-    rows, total = svc.organization_activity(db, organization_id, page=page, page_size=page_size)
+    rows, total = svc.organization_activity(db, organization_id, page=page, page_size=page_size,
+                                            lifecycle_only=lifecycle)
     return audit_page_out(rows, total, page, page_size)
 
 
@@ -157,4 +161,13 @@ def resume_jobs(organization_id: str, body: ReasonRequest,
                 db: Session = Depends(get_db)):
     result = svc.set_jobs_paused(db, organization_id, "resume_jobs", _actor(ctx), reason=body.reason,
                                  ticket_ref=body.ticket_ref)
+    return LifecycleResultOut(organization=OrganizationSummaryOut(**result.organization), changed=result.changed)
+
+
+@router.post("/{organization_id}/revoke-sessions", response_model=LifecycleResultOut,
+             summary="Sign all tenant and customer-portal users out of this organization")
+def revoke_sessions(organization_id: str, body: ReasonRequest,
+                    ctx: PlatformContext = Depends(require_platform_roles_with_step_up(LIFECYCLE_ROLES)),
+                    db: Session = Depends(get_db)):
+    result = svc.revoke_tenant_sessions(db, organization_id, _actor(ctx), reason=body.reason, ticket_ref=body.ticket_ref)
     return LifecycleResultOut(organization=OrganizationSummaryOut(**result.organization), changed=result.changed)

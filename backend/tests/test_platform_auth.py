@@ -731,7 +731,8 @@ def test_platform_routes_expose_no_tenant_data(client, db):
                      org, f"{org}/activity", f"{org}/suspend", f"{org}/reactivate", f"{org}/schedule-deletion",
                      f"{org}/cancel-deletion", f"{org}/jobs/pause", f"{org}/jobs/resume", f"{console}/staff",
                      f"{console}/staff/{{staff_id}}", f"{console}/staff/{{staff_id}}/deactivate",
-                     f"{console}/staff/{{staff_id}}/activate", f"{console}/staff/{{staff_id}}/revoke-sessions"}
+                     f"{console}/staff/{{staff_id}}/activate", f"{console}/staff/{{staff_id}}/revoke-sessions",
+                     f"{org}/revoke-sessions", f"{console}/jobs"}
     assert platform_paths == auth_paths | console_paths
 
 

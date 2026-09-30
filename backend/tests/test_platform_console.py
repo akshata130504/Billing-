@@ -250,7 +250,10 @@ def test_detail_is_metadata_only_and_audited(admin, db, tenant):
     assert body["owners"] == [{"full_name": tenant.owner.full_name, "email": tenant.owner.email}]
     assert body["members"]["active"] == 1 and body["members"]["by_role"]["owner"] == 1
     assert body["lifecycle"]["status"] == "active" and body["lifecycle"]["automation_running"] is True
-    assert set(body["allowed_actions"]) == {"suspend", "schedule_deletion", "pause_jobs"}
+    assert set(body["allowed_actions"]) == {"suspend", "schedule_deletion", "pause_jobs", "revoke_sessions"}
+    assert set(body["documents"]) == {"customer_count", "quote_count", "invoice_count", "credit_note_count",
+                                      "payment_count", "subscription_count"}
+    assert body["documents"]["customer_count"] == 2 and body["documents"]["invoice_count"] == 1  # counts only
     assert not (_keys(body) & FORBIDDEN_KEYS), _keys(body) & FORBIDDEN_KEYS
     for leaked in ("Hidden Customer Name 42", "Another Hidden Customer", "98765", "98,765"):
         assert leaked not in resp.text
@@ -263,7 +266,7 @@ def test_detail_unknown_org_404(admin):
 
 
 def test_allowed_actions_follow_the_role(ops, support, tenant):
-    assert set(ops.get(f"/organizations/{tenant.organization.id}").json()["allowed_actions"]) == {"suspend"}
+    assert set(ops.get(f"/organizations/{tenant.organization.id}").json()["allowed_actions"]) == {"suspend", "revoke_sessions"}
     assert support.get(f"/organizations/{tenant.organization.id}").json()["allowed_actions"] == []
 
 
@@ -292,10 +295,10 @@ def test_support_cannot_change_lifecycle(support, db, tenant):
     for path, body in (("suspend", {"reason": REASON, "ticket_ref": "SUP-1"}), ("reactivate", {"reason": REASON}),
                        ("schedule-deletion", {"reason": REASON, "ticket_ref": "SUP-1"}),
                        ("cancel-deletion", {"reason": REASON}), ("jobs/pause", {"reason": REASON}),
-                       ("jobs/resume", {"reason": REASON})):
+                       ("jobs/resume", {"reason": REASON}), ("revoke-sessions", {"reason": REASON})):
         assert support.post(f"/organizations/{oid}/{path}", body).status_code == 403, path
     assert _org(db, oid).status == OrganizationStatus.ACTIVE
-    assert len(_audit(db, "PLATFORM_ACCESS_DENIED", platform_staff_id=support.id)) >= 6
+    assert len(_audit(db, "PLATFORM_ACCESS_DENIED", platform_staff_id=support.id)) >= 7
 
 
 def test_operations_can_suspend_but_not_delete_or_pause(ops, db, tenant):
@@ -405,7 +408,7 @@ def test_schedule_and_cancel_deletion(admin, db, tenant):
     assert abs((scheduled - expected).total_seconds()) < 120
     assert _automation(db, oid) is False
     assert db.get(Organization, oid) is not None  # nothing is deleted
-    assert admin.get(f"/organizations/{oid}").json()["allowed_actions"] == ["cancel_deletion", "pause_jobs"]
+    assert admin.get(f"/organizations/{oid}").json()["allowed_actions"] == ["cancel_deletion", "pause_jobs", "revoke_sessions"]
 
     resp = admin.post(f"/organizations/{oid}/cancel-deletion", {"reason": "Owner changed their mind (SUP-77)"})
     assert resp.status_code == 200, resp.text
@@ -657,3 +660,85 @@ def test_lifecycle_waits_briefly_for_a_billing_transaction_then_says_busy(admin,
         billing.rollback()
     assert _org(db, oid).status == OrganizationStatus.ACTIVE
     assert _suspend(admin, oid).status_code == 200
+
+
+# --- phase 3 completion: sessions, history, jobs, activity, audit search ----------------------------
+
+
+def test_revoke_tenant_sessions_signs_the_org_out_only(client, admin, ops, db, tenant):
+    from backend.tests.conftest import Tenant
+
+    login = client.post("/api/v1/auth/login", json={"email": tenant.owner.email, "password": "Str0ngPassw0rd!"})
+    assert login.status_code == 200, login.text
+    token = login.json()["access_token"]
+    assert client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+    other = Tenant(db, uuid.uuid4().hex[:8])
+    db.commit()
+    other_login = client.post("/api/v1/auth/login", json={"email": other.owner.email, "password": "Str0ngPassw0rd!"})
+    other_token = other_login.json()["access_token"]
+
+    oid = tenant.organization.id
+    assert ops.post(f"/organizations/{oid}/revoke-sessions", {"reason": REASON}).json()["error"]["code"] == "STEP_UP_REQUIRED"
+    ops.step_up()
+    resp = ops.post(f"/organizations/{oid}/revoke-sessions", {"reason": REASON, "ticket_ref": "SEC-1"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["changed"]["tenant_sessions_revoked"] >= 1
+    assert client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+    assert client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {other_token}"}).status_code == 200
+    row = _audit(db, "TENANT_SESSIONS_REVOKED", organization_id=oid)[-1]
+    assert row.platform_staff_id == ops.id and row.ticket_ref == "SEC-1"
+    # the tenant can simply sign in again; nothing else changed
+    assert client.post("/api/v1/auth/login", json={"email": tenant.owner.email, "password": "Str0ngPassw0rd!"}).status_code == 200
+
+
+def test_lifecycle_history_filters_to_lifecycle_events(admin, db, tenant):
+    oid = tenant.organization.id
+    admin.get(f"/organizations/{oid}")  # a view, not lifecycle
+    admin.step_up()
+    assert _suspend(admin, oid).status_code == 200
+    history = admin.get(f"/organizations/{oid}/activity", params={"lifecycle": "true"}).json()
+    actions = [i["action"] for i in history["items"]]
+    assert "ORGANIZATION_SUSPENDED" in actions and "ORGANIZATION_VIEWED" not in actions
+    everything = admin.get(f"/organizations/{oid}/activity").json()
+    assert "ORGANIZATION_VIEWED" in [i["action"] for i in everything["items"]]
+
+
+def test_jobs_view_is_counts_only_and_observation_only(admin, ops, support):
+    resp = admin.get("/jobs")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body) == {"scheduler", "durable_jobs", "durable_jobs_failed_24h", "outbox", "webhooks_received_24h",
+                         "organizations_not_running"}
+    assert all(isinstance(v, int) for v in body["durable_jobs"].values())
+    assert ops.get("/jobs").status_code == 200
+    assert support.get("/jobs").status_code == 403
+    for method in ("post", "put", "delete"):
+        assert getattr(admin.client, method)(f"{API}/jobs", headers=admin.csrf()).status_code == 405
+
+
+def test_dashboard_recent_activity_respects_the_role(admin, support, db, tenant):
+    admin.step_up()
+    assert _suspend(admin, tenant.organization.id).status_code == 200
+    admin_items = admin.get("/dashboard").json()["recent_activity"]
+    assert "ORGANIZATION_SUSPENDED" in [i["action"] for i in admin_items]
+    assert any(not i["action"].startswith("ORGANIZATION_") for i in admin_items)  # admins see security events too
+    support_items = support.get("/dashboard").json()["recent_activity"]
+    from backend.app.services.platform_org_service import LIFECYCLE_EVENTS
+
+    assert support_items and all(i["action"] in LIFECYCLE_EVENTS for i in support_items)
+
+
+def test_audit_search_by_text_target_and_time(admin, ops, db, tenant):
+    admin.step_up()
+    assert _suspend(admin, tenant.organization.id, ticket="FIND-ME-77").status_code == 200
+    hit = admin.get("/audit", params={"q": "find-me-77"}).json()
+    assert hit["total"] == 1 and hit["items"][0]["ticket_ref"] == "FIND-ME-77"
+    wildcard = admin.get("/audit", params={"q": "%"}).json()
+    assert all("%" in (i["reason"] or "") + (i["action"] or "") for i in wildcard["items"])
+    assert admin.post(f"/staff/{ops.id}/revoke-sessions", {"reason": "Target filter test run"}).status_code == 200
+    by_target = admin.get("/audit", params={"target_type": "platform_staff", "target_id": ops.id}).json()
+    assert by_target["total"] >= 1 and all(i["target_id"] == ops.id for i in by_target["items"])
+    future = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    assert admin.get("/audit", params={"since": future}).json()["total"] == 0
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    assert admin.get("/audit", params={"until": past, "q": "find-me-77"}).json()["total"] == 0

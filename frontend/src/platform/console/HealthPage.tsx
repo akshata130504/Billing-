@@ -4,7 +4,8 @@ import { Button } from '../../components/common/Button';
 import { ErrorState } from '../../components/common/ErrorState';
 import { LoadingState } from '../../components/common/LoadingState';
 import { PageHeader } from '../../components/common/PageHeader';
-import { consoleApi, type Health } from '../consoleApi';
+import { consoleApi, type Health, type Jobs } from '../consoleApi';
+import { ADMIN, OPS, useConsole } from './ConsoleContext';
 import { PlatformApiError } from '../platformApi';
 import { Field, Section, StateDot, formatDateTime } from './ui';
 
@@ -21,7 +22,10 @@ const COUNT_LABELS: Record<string, string> = {
 
 /** Operational status only: no hosts, connection strings, credentials or environment variables. */
 export function HealthPage() {
+  const { hasRole } = useConsole();
+  const canSeeJobs = hasRole(ADMIN, OPS);
   const [health, setHealth] = useState<Health | null>(null);
+  const [jobs, setJobs] = useState<Jobs | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -30,12 +34,13 @@ export function HealthPage() {
     setError(null);
     try {
       setHealth(await consoleApi.health());
+      if (canSeeJobs) setJobs(await consoleApi.jobs());
     } catch (err) {
       setError(err instanceof PlatformApiError ? err.message : 'Could not load health.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canSeeJobs]);
 
   useEffect(() => {
     void load();
@@ -81,6 +86,30 @@ export function HealthPage() {
               </dl>
             )}
           </Section>
+          {jobs && (
+            <Section title="Background jobs" description="Counts only. The console can observe jobs; it can never run, retry or cancel them.">
+              <dl className="grid gap-3 sm:grid-cols-2">
+                <Field label="Durable jobs failed (24 h)">{jobs.durable_jobs_failed_24h}</Field>
+                <Field label="Organizations not running automation">{jobs.organizations_not_running}</Field>
+                <Field label="Webhooks received (24 h)">{jobs.webhooks_received_24h}</Field>
+                <Field label="Outbox failed">{jobs.outbox.failed ?? 0}</Field>
+              </dl>
+              <div className="mt-4 grid gap-4 border-t border-slate-100 pt-4 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Durable jobs</p>
+                  <dl className="mt-2 grid grid-cols-2 gap-2">
+                    {Object.entries(jobs.durable_jobs).map(([k, v]) => <Field key={k} label={k}>{v}</Field>)}
+                  </dl>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Outbox events</p>
+                  <dl className="mt-2 grid grid-cols-2 gap-2">
+                    {Object.entries(jobs.outbox).map(([k, v]) => <Field key={k} label={k}>{v}</Field>)}
+                  </dl>
+                </div>
+              </div>
+            </Section>
+          )}
           <Section title="Platform service">
             <dl className="grid gap-3 sm:grid-cols-2">
               <Field label="Platform sign-in">{health.platform.auth_enabled ? 'Enabled' : 'Disabled'}</Field>
