@@ -7,7 +7,7 @@ none reference organizations: platform data never cascades from a tenant.
 """
 import enum
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Enum, ForeignKey, Integer, String
+from sqlalchemy import DDL, JSON, Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, event
 
 from backend.app.core.database import Base
 from backend.app.models.base import TimestampMixin, UUIDPrimaryKeyMixin, utcnow
@@ -79,6 +79,11 @@ class PlatformSession(UUIDPrimaryKeyMixin, Base):
     revoke_reason = Column(String(64), nullable=True)
     ip_address = Column(String(64), nullable=True)
     user_agent = Column(String(400), nullable=True)
+    # Step-up re-authentication (fresh TOTP) for sensitive actions, bound to THIS session. It is
+    # never extended: a new step-up sets both values afresh, and it expires with the session (and on
+    # revocation / logout / logout-all / password or 2FA reset, via revoked_at and tokens_valid_after).
+    step_up_at = Column(DateTime(timezone=True), nullable=True)
+    step_up_expires_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class PlatformLoginChallenge(UUIDPrimaryKeyMixin, Base):
@@ -119,3 +124,31 @@ class PlatformAuditLog(UUIDPrimaryKeyMixin, Base):
     ip_address = Column(String(64), nullable=True)
     user_agent = Column(String(400), nullable=True)
     details = Column(JSON, nullable=True)
+
+
+# --- append-only audit log, enforced by PostgreSQL ------------------------------------------------------
+# Migration 0028 installs the same function and triggers on migrated databases; this DDL event adds
+# them to databases built with metadata.create_all (the PostgreSQL test suite). Any UPDATE, DELETE
+# or TRUNCATE of platform_audit_logs - from the ORM, raw SQL, or any role that does not own the
+# table - raises. Only the table owner / a superuser can disable the triggers (see
+# docs/platform-console-deployment.md, "Audit log immutability"). SQLite has no equivalent.
+PLATFORM_AUDIT_APPEND_ONLY_FUNCTION = """
+CREATE OR REPLACE FUNCTION platform_audit_logs_append_only() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'platform_audit_logs is append-only: % is not allowed', TG_OP
+        USING ERRCODE = '42501';
+END
+$$
+"""
+PLATFORM_AUDIT_APPEND_ONLY_TRIGGERS = (
+    "DROP TRIGGER IF EXISTS platform_audit_logs_no_update_delete ON platform_audit_logs",
+    "CREATE TRIGGER platform_audit_logs_no_update_delete BEFORE UPDATE OR DELETE ON platform_audit_logs "
+    "FOR EACH ROW EXECUTE FUNCTION platform_audit_logs_append_only()",
+    "DROP TRIGGER IF EXISTS platform_audit_logs_no_truncate ON platform_audit_logs",
+    "CREATE TRIGGER platform_audit_logs_no_truncate BEFORE TRUNCATE ON platform_audit_logs "
+    "FOR EACH STATEMENT EXECUTE FUNCTION platform_audit_logs_append_only()",
+)
+
+for _statement in (PLATFORM_AUDIT_APPEND_ONLY_FUNCTION, *PLATFORM_AUDIT_APPEND_ONLY_TRIGGERS):
+    event.listen(PlatformAuditLog.__table__, "after_create", DDL(_statement.replace("%", "%%")).execute_if(dialect="postgresql"))

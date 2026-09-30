@@ -70,6 +70,7 @@ What the runtime role still needs, all verified:
 - `ALTER DEFAULT PRIVILEGES FOR ROLE <owner>` grants tables, sequences and functions created later by migrations to the runtime role automatically. This only covers objects created **by the owner role**, so always migrate as the owner.
 - Re-run it after restoring a dump from another cluster, or to rotate the runtime password.
 - For a managed database, run it with an admin account that is a member of the owner role and has `CREATEROLE`.
+- **Append-only exception:** after the table-wide grant it revokes `UPDATE, DELETE, TRUNCATE` on `platform_audit_logs`, so the runtime role keeps only `SELECT, INSERT` there. Migration 0028 also adds a trigger that rejects those statements from any role. See `docs/platform-console-deployment.md` section 4.
 
 The password is passed through the environment and executed through `\gexec`, so it is not echoed. Keep `log_statement` at its default `none` while running the script, or the server logs `ALTER ROLE ... PASSWORD`.
 
