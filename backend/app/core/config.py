@@ -101,6 +101,18 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     INVITE_TOKEN_EXPIRE_HOURS: int = 72
     PASSWORD_RESET_EXPIRE_MINUTES: int = 60
+
+    # --- Platform administration (Rooman staff; separate from tenant auth) ------------------
+    # Signing key for platform access tokens (core/platform_security.py). MUST differ from
+    # SECRET_KEY. Empty = platform sign-in is disabled (the /platform/auth endpoints answer 503)
+    # and nothing else changes. Generate one with `openssl rand -hex 32`; never commit it.
+    PLATFORM_JWT_SECRET: str = ""
+    PLATFORM_ACCESS_TOKEN_EXPIRE_MINUTES: int = 10
+    PLATFORM_SESSION_IDLE_MINUTES: int = 30
+    PLATFORM_SESSION_MAX_HOURS: int = 8
+    PLATFORM_LOGIN_CHALLENGE_MINUTES: int = 5
+    # Secure flag on platform cookies. None = on in production-like environments only.
+    PLATFORM_COOKIE_SECURE: Optional[bool] = None
     PASSWORD_MIN_LENGTH: int = 10
     # Requests per minute allowed on credential endpoints (login, signup, reset), per client IP.
     AUTH_RATE_LIMIT: str = "10/minute"
@@ -371,6 +383,47 @@ class Settings(BaseSettings):
         env = (self.ENVIRONMENT or "").strip().lower()
         return env in {"production", "prod", "staging", "stage"}
 
+    @property
+    def platform_auth_enabled(self) -> bool:
+        return bool((self.PLATFORM_JWT_SECRET or "").strip())
+
+    @property
+    def platform_cookie_secure(self) -> bool:
+        if self.PLATFORM_COOKIE_SECURE is not None:
+            return self.PLATFORM_COOKIE_SECURE
+        return self.is_production
+
+    @model_validator(mode="after")
+    def validate_platform_settings(self) -> "Settings":
+        """A configured platform key must be strong and distinct from the tenant key (any env).
+
+        Unset is allowed everywhere: platform sign-in is simply disabled.
+        """
+        secret = (self.PLATFORM_JWT_SECRET or "").strip()
+        if secret:
+            weak = (
+                len(secret) < 32
+                or len(set(secret)) < 8
+                or secret in _INSECURE_SECRET_KEYS
+                or any(p in secret.lower() for p in ("replace", "change-this", "example", "your-", "secret-key"))
+            )
+            if weak:
+                raise ValueError(
+                    "PLATFORM_JWT_SECRET must be a random string of at least 32 characters, not a placeholder"
+                )
+            if secret == (self.SECRET_KEY or "").strip():
+                raise ValueError("PLATFORM_JWT_SECRET must differ from SECRET_KEY")
+        for name, low, high in (
+            ("PLATFORM_ACCESS_TOKEN_EXPIRE_MINUTES", 1, 60),
+            ("PLATFORM_SESSION_IDLE_MINUTES", 5, 240),
+            ("PLATFORM_SESSION_MAX_HOURS", 1, 24),
+            ("PLATFORM_LOGIN_CHALLENGE_MINUTES", 1, 15),
+        ):
+            value = getattr(self, name)
+            if not low <= value <= high:
+                raise ValueError(f"{name} must be between {low} and {high}")
+        return self
+
     @model_validator(mode="after")
     def enforce_production_safety(self) -> "Settings":
         if self.is_production:
@@ -469,6 +522,7 @@ class Settings(BaseSettings):
         """Mask sensitive secrets so logging or printing Settings never leaks credentials."""
         sensitive_fields = {
             "SECRET_KEY",
+            "PLATFORM_JWT_SECRET",
             "POSTGRES_PASSWORD",
             "RAZORPAY_KEY_SECRET",
             "RAZORPAY_WEBHOOK_SECRET",

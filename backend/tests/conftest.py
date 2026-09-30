@@ -15,6 +15,8 @@ os.environ.setdefault("ENVIRONMENT", "test")
 os.environ["DEBUG"] = "false"
 os.environ["SCHEDULER_ENABLED"] = "false"
 os.environ["SECRET_KEY"] = "unit-test-secret-key-0123456789abcdef0123456789abcdef"
+# Platform (Rooman staff) tokens are signed with a different key from tenant tokens.
+os.environ["PLATFORM_JWT_SECRET"] = "unit-test-platform-signing-9f8e7d6c5b4a39281706f5e4d3c2b1a0"
 os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL", f"sqlite:///{_TEST_DB_PATH.as_posix()}")
 os.environ["RAZORPAY_KEY_ID"] = ""
 os.environ["RAZORPAY_KEY_SECRET"] = ""
