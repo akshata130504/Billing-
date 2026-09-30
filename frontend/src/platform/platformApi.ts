@@ -53,7 +53,7 @@ export interface PlatformChallenge {
 }
 
 export class PlatformApiError extends Error {
-  constructor(message: string, public status: number, public code?: string) {
+  constructor(message: string, public status: number, public code?: string, public details?: Record<string, unknown>) {
     super(message);
   }
 }
@@ -71,7 +71,8 @@ function readCookie(name: string): string | null {
 
 async function send<T>(method: string, url: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
+  if (body !== undefined && !isForm) headers['Content-Type'] = 'application/json';
   if (method !== 'GET') {
     const csrf = CSRF_COOKIES.map(readCookie).find((value) => value);
     if (csrf) headers[CSRF_HEADER] = csrf;
@@ -79,7 +80,7 @@ async function send<T>(method: string, url: string, body?: unknown): Promise<T> 
   const res = await fetch(url, {
     method,
     headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? undefined : isForm ? (body as FormData) : JSON.stringify(body),
     credentials: 'same-origin',
   });
   if (res.status === 204) return undefined as T;
@@ -91,7 +92,7 @@ async function send<T>(method: string, url: string, body?: unknown): Promise<T> 
   }
   if (!res.ok) {
     const message = data?.error?.message || data?.detail || 'Request failed.';
-    throw new PlatformApiError(message, res.status, data?.error?.code);
+    throw new PlatformApiError(message, res.status, data?.error?.code, data?.error?.details);
   }
   return data as T;
 }

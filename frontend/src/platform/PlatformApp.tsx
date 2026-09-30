@@ -18,6 +18,7 @@ import { HealthPage } from './console/HealthPage';
 import { OrganizationDetailPage } from './console/OrganizationDetailPage';
 import { OrganizationsPage } from './console/OrganizationsPage';
 import { StaffPage } from './console/StaffPage';
+import { WebsitePage } from './console/website/WebsitePage';
 
 /** Hides a page the role cannot use. The server refuses the API calls regardless. */
 function RequireRole({ roles, children }: { roles: PlatformRole[]; children: ReactNode }) {
@@ -44,6 +45,7 @@ export function PlatformRoutes() {
         <Route path="organizations/:organizationId" element={<OrganizationDetailPage />} />
         <Route path="staff" element={<RequireRole roles={[ADMIN]}><StaffPage /></RequireRole>} />
         <Route path="audit" element={<RequireRole roles={[ADMIN]}><AuditPage /></RequireRole>} />
+        <Route path="website" element={<RequireRole roles={[ADMIN]}><WebsitePage /></RequireRole>} />
         <Route path="health" element={<HealthPage />} />
         <Route path="account" element={<AccountPage />} />
       </Route>

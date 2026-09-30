@@ -12,6 +12,7 @@
  */
 import { defineConfig, type Connect, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
+import fs from 'fs';
 import path from 'path';
 
 // Browsers resolve *.localhost to loopback; the server binds to loopback and only answers requests
@@ -25,7 +26,48 @@ const platformProxy = {
     target: process.env.PLATFORM_API_PROXY || 'http://localhost:8000',
     changeOrigin: false,
   },
+  // Uploaded website media (read-only) for the landing-page preview.
+  '/uploads/website': {
+    target: process.env.PLATFORM_API_PROXY || 'http://localhost:8000',
+    changeOrigin: false,
+  },
 };
+
+// The landing-page preview needs the brand logos and bundled hero videos. Ship exactly those
+// files (never the rest of the tenant's public/ folder) in the platform bundle.
+const SHARED_PUBLIC = path.resolve(__dirname, 'public');
+function sharedMediaFiles(): string[] {
+  const logos = ['rooman-shield-logo.png', 'rooman-full-logo.png', 'rooman-billing-logo.png'].map((f) => `logos/${f}`);
+  const videosDir = path.join(SHARED_PUBLIC, 'videos');
+  const videos = fs.existsSync(videosDir)
+    ? fs.readdirSync(videosDir).filter((f) => f.toLowerCase().endsWith('.mp4')).map((f) => `videos/${f}`)
+    : [];
+  return [...logos, ...videos].filter((f) => fs.existsSync(path.join(SHARED_PUBLIC, f)));
+}
+
+function sharedMedia(): Plugin {
+  const files = new Set(sharedMediaFiles());
+  const serve: Connect.NextHandleFunction = (req, res, next) => {
+    const rel = decodeURIComponent((req.url || '').split('?')[0]).replace(/^\//, '');
+    if (!files.has(rel)) return next();
+    res.setHeader('Content-Type', rel.endsWith('.png') ? 'image/png' : 'video/mp4');
+    fs.createReadStream(path.join(SHARED_PUBLIC, rel)).pipe(res);
+  };
+  return {
+    name: 'platform-shared-media',
+    configureServer(server) {
+      server.middlewares.use(serve);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(serve);
+    },
+    generateBundle() {
+      for (const rel of files) {
+        this.emitFile({ type: 'asset', fileName: rel, source: fs.readFileSync(path.join(SHARED_PUBLIC, rel)) });
+      }
+    },
+  };
+}
 
 // The dev/preview server must never hand out the tenant app: no SPA fallback to index.html
 // (appType 'mpa' below), every page route serves the platform entry, and any API path other than
@@ -34,7 +76,7 @@ function platformEntry(): Plugin {
   const rewrite: Connect.NextHandleFunction = (req, res, next) => {
     const url = req.url || '/';
     const pathname = url.split('?')[0];
-    if (pathname.startsWith('/api/v1/platform/')) return next();
+    if (pathname.startsWith('/api/v1/platform/') || pathname.startsWith('/uploads/website/')) return next();
     if (pathname.startsWith('/api/') || pathname.startsWith('/uploads/') || pathname === '/index.html') {
       res.statusCode = 404;
       res.end('Not found');
@@ -56,7 +98,7 @@ function platformEntry(): Plugin {
 
 export default defineConfig({
   appType: 'mpa',
-  plugins: [react(), platformEntry()],
+  plugins: [react(), sharedMedia(), platformEntry()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity,
   Building2,
+  Globe,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -33,6 +34,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/organizations', label: 'Organizations', icon: Building2 },
   { to: '/staff', label: 'Platform staff', icon: Users, roles: [ADMIN] },
   { to: '/audit', label: 'Audit log', icon: ScrollText, roles: [ADMIN] },
+  { to: '/website', label: 'Website', icon: Globe, roles: [ADMIN] },
   { to: '/health', label: 'System health', icon: Activity },
   { to: '/account', label: 'My account', icon: UserCircle },
 ];
