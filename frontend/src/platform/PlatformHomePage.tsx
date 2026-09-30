@@ -26,7 +26,7 @@ export function PlatformHomePage() {
     try {
       const current = await loadPlatformMe();
       if (!current) {
-        navigate('/platform/login', { replace: true });
+        navigate('/login', { replace: true });
         return;
       }
       setMe(current);
@@ -46,7 +46,7 @@ export function PlatformHomePage() {
     setError(null);
     try {
       await fn();
-      if (thenLeave) navigate('/platform/login', { replace: true });
+      if (thenLeave) navigate('/login', { replace: true });
       else await load();
     } catch (err) {
       setError(err instanceof PlatformApiError ? err.message : 'That did not work. Please try again.');

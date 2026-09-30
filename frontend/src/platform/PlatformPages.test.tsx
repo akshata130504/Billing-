@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { PlatformLoginPage } from './PlatformLoginPage';
-import { PlatformHomePage } from './PlatformHomePage';
+import { MemoryRouter } from 'react-router-dom';
+import { PlatformRoutes } from './PlatformApp';
+import tenantRoutesSource from '../routes/index.tsx?raw';
 import { PlatformApiError, platformApi } from './platformApi';
 
 vi.mock('./platformApi', async () => {
@@ -34,11 +34,7 @@ const ME = {
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/platform/login" element={<PlatformLoginPage />} />
-        <Route path="/platform" element={<PlatformHomePage />} />
-        <Route path="/login" element={<div>tenant login</div>} />
-      </Routes>
+      <PlatformRoutes />
     </MemoryRouter>
   );
 }
@@ -51,7 +47,7 @@ describe('Platform staff sign-in', () => {
     api.verifyTwoFactor.mockResolvedValue(ME);
     api.me.mockResolvedValue(ME);
     api.sessions.mockResolvedValue({ sessions: [] });
-    renderAt('/platform/login');
+    renderAt('/login');
 
     fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'ops@rooman.test' } });
     fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: 'Platform-Passw0rd-2026!' } });
@@ -70,7 +66,7 @@ describe('Platform staff sign-in', () => {
 
   it('shows the generic error for bad credentials and stays on the password step', async () => {
     api.login.mockRejectedValue(new PlatformApiError('Invalid email or password.', 401));
-    renderAt('/platform/login');
+    renderAt('/login');
     fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'x@rooman.test' } });
     fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: 'nope' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -81,7 +77,7 @@ describe('Platform staff sign-in', () => {
   it('shows a wrong-code error and stays on the code step', async () => {
     api.login.mockResolvedValue({ two_factor_required: true, challenge_token: 'chal-1', expires_in: 300 });
     api.verifyTwoFactor.mockRejectedValue(new PlatformApiError('The authentication code is invalid or has already been used.', 401));
-    renderAt('/platform/login');
+    renderAt('/login');
     fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'ops@rooman.test' } });
     fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: 'pw' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -94,7 +90,7 @@ describe('Platform staff sign-in', () => {
   it('goes back to the password step when the challenge expired', async () => {
     api.login.mockResolvedValue({ two_factor_required: true, challenge_token: 'chal-1', expires_in: 300 });
     api.verifyTwoFactor.mockRejectedValue(new PlatformApiError('This sign-in attempt is invalid or has expired. Please sign in again.', 401));
-    renderAt('/platform/login');
+    renderAt('/login');
     fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'ops@rooman.test' } });
     fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: 'pw' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -110,7 +106,7 @@ describe('Platform home', () => {
   it('redirects to the platform login when there is no session', async () => {
     api.me.mockRejectedValue(new PlatformApiError('Platform authentication required.', 401));
     api.refresh.mockRejectedValue(new PlatformApiError('Your platform session has ended.', 401));
-    renderAt('/platform');
+    renderAt('/');
     expect(await screen.findByText('Platform staff sign-in')).toBeInTheDocument();
   });
 
@@ -118,7 +114,7 @@ describe('Platform home', () => {
     api.me.mockRejectedValue(new PlatformApiError('Platform access token has expired.', 401));
     api.refresh.mockResolvedValue(ME);
     api.sessions.mockResolvedValue({ sessions: [] });
-    renderAt('/platform');
+    renderAt('/');
     expect(await screen.findByText('Olga Ops')).toBeInTheDocument();
     expect(api.refresh).toHaveBeenCalledTimes(1);
   });
@@ -133,7 +129,7 @@ describe('Platform home', () => {
     });
     api.revokeSession.mockResolvedValue(undefined);
     api.logout.mockResolvedValue(undefined);
-    renderAt('/platform');
+    renderAt('/');
     expect(await screen.findByText('Platform Administrator (Super Admin)')).toBeInTheDocument();
     expect(screen.getByText('This browser (this session)')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
@@ -143,11 +139,17 @@ describe('Platform home', () => {
     expect(await screen.findByText('Platform staff sign-in')).toBeInTheDocument();
   });
 
-  it('never shows tenant login and is separate from it', async () => {
+  it('has no tenant routes: unknown paths fall back to the platform console', async () => {
     api.me.mockRejectedValue(new PlatformApiError('Platform authentication required.', 401));
     api.refresh.mockRejectedValue(new PlatformApiError('ended', 401));
-    renderAt('/platform');
-    await screen.findByText('Platform staff sign-in');
-    expect(screen.queryByText('tenant login')).not.toBeInTheDocument();
+    renderAt('/dashboard');
+    expect(await screen.findByText('Platform staff sign-in')).toBeInTheDocument();
+  });
+});
+
+describe('Separate origin', () => {
+  it('the tenant app does not contain the platform console', () => {
+    expect(tenantRoutesSource).not.toMatch(/platform\/Platform(Login|Home)Page/);
+    expect(tenantRoutesSource).not.toMatch(/path="\/platform/);
   });
 });

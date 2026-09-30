@@ -40,7 +40,7 @@ export function PlatformLoginPage() {
     setBusy(true);
     try {
       await platformApi.verifyTwoFactor(challenge, code.trim());
-      navigate('/platform', { replace: true });
+      navigate('/', { replace: true });
     } catch (err) {
       const message = err instanceof PlatformApiError ? err.message : 'Verification failed. Please try again.';
       setError(message);

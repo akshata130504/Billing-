@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:platform": "vite --config vite.platform.config.ts",
     "build": "tsc && vite build",
+    "build:platform": "tsc && vite build --config vite.platform.config.ts",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
     "test": "vitest run",

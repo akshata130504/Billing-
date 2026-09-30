@@ -25,7 +25,7 @@ describe('platformApi', () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
     await platformApi.logout();
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toMatch(/\/api\/v1\/platform\/auth\/logout$/);
+    expect(url).toBe('/api/v1/platform/auth/logout'); // always same-origin, never a configured API host
     expect(init.method).toBe('POST');
     expect(init.credentials).toBe('same-origin');
     expect(init.headers['X-Platform-CSRF']).toBe('csrf-value-123');
@@ -46,5 +46,13 @@ describe('platformApi', () => {
       code: 'UNAUTHORIZED',
     });
     await expect(platformApi.login('a@rooman.test', 'x')).rejects.toBeInstanceOf(PlatformApiError);
+  });
+
+  it('reads the __Host- prefixed CSRF cookie used with secure cookies', async () => {
+    // jsdom (http) cannot store __Host- cookies, so present the browser's cookie string directly.
+    vi.spyOn(document, 'cookie', 'get').mockReturnValue('__Host-rb_platform_csrf=host-prefixed-456');
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    await platformApi.logoutAll();
+    expect(fetchMock.mock.calls[0][1].headers['X-Platform-CSRF']).toBe('host-prefixed-456');
   });
 });

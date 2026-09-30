@@ -4,11 +4,13 @@
  * The platform session lives in HttpOnly cookies set by the server (the access token is never
  * visible to this code, and nothing is written to localStorage). State-changing requests echo the
  * readable CSRF cookie in the X-Platform-CSRF header (double submit). Tenant tokens are never sent.
+ *
+ * The console is served from its own origin and always calls that same origin (no configurable API
+ * origin, no cross-origin credentials); it imports nothing from the tenant API client.
  */
-import { API_BASE_URL } from '../services/apiClient';
-
-const BASE = `${API_BASE_URL}/platform/auth`;
-const CSRF_COOKIE = 'rb_platform_csrf';
+const BASE = '/api/v1/platform/auth';
+// "__Host-" prefixed when the server uses secure cookies (production), plain in local http dev.
+const CSRF_COOKIES = ['__Host-rb_platform_csrf', 'rb_platform_csrf'];
 const CSRF_HEADER = 'X-Platform-CSRF';
 
 export type PlatformRole = 'platform_administrator' | 'platform_operations' | 'platform_support';
@@ -65,7 +67,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (method !== 'GET') {
-    const csrf = readCookie(CSRF_COOKIE);
+    const csrf = CSRF_COOKIES.map(readCookie).find((value) => value);
     if (csrf) headers[CSRF_HEADER] = csrf;
   }
   const res = await fetch(`${BASE}${path}`, {

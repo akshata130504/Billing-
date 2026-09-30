@@ -14,9 +14,6 @@ import { postLoginRedirect } from '../utils/redirect';
 // Route components are code-split: each page downloads on first visit.
 const DashboardPage = lazyNamed(() => import('../pages/dashboard/DashboardPage'), 'DashboardPage');
 const LoginPage = lazyNamed(() => import('../pages/auth/LoginPage'), 'LoginPage');
-// Rooman platform staff (separate principal, own session cookies; not linked from the tenant app).
-const PlatformLoginPage = lazyNamed(() => import('../platform/PlatformLoginPage'), 'PlatformLoginPage');
-const PlatformHomePage = lazyNamed(() => import('../platform/PlatformHomePage'), 'PlatformHomePage');
 const SignupPage = lazyNamed(() => import('../pages/auth/SignupPage'), 'SignupPage');
 const ForgotPasswordPage = lazyNamed(() => import('../pages/auth/ForgotPasswordPage'), 'ForgotPasswordPage');
 const ResetPasswordPage = lazyNamed(() => import('../pages/auth/ResetPasswordPage'), 'ResetPasswordPage');
@@ -209,10 +206,6 @@ export function AppRoutes() {
       <Route path="/quote/:token" element={<PublicQuotePage />} />
       <Route path="/checkout/:token" element={<PublicCheckoutPage />} />
       <Route path="/lifecycle-cinematic" element={<CustomerLifecycleCinematicPage />} />
-
-      {/* Rooman platform staff - separate from tenant auth */}
-      <Route path="/platform/login" element={<PlatformLoginPage />} />
-      <Route path="/platform" element={<PlatformHomePage />} />
 
       {/* Customer Self-Service Portal */}
       <Route path="/portal/login" element={<PortalLoginPage />} />
