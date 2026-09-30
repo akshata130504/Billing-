@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PlatformApiError, platformApi } from './platformApi';
+import { PlatformApiError, consoleRequest, platformApi } from './platformApi';
+import { consoleApi } from './consoleApi';
 
 function jsonResponse(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -64,5 +65,36 @@ describe('platformApi', () => {
     expect(JSON.parse(init.body)).toEqual({ code: '123456' });
     expect(init.headers['X-Platform-CSRF']).toBe('csrf-value-123');
     expect(result.expires_in).toBe(900);
+  });
+
+  it('console calls refresh an expired access token once and retry once', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { error: { code: 'UNAUTHORIZED', message: 'Platform access token has expired.' } }))
+      .mockResolvedValueOnce(jsonResponse(200, { staff: {} })) // /auth/refresh
+      .mockResolvedValueOnce(jsonResponse(200, { items: [] }));
+    await expect(consoleApi.staff()).resolves.toEqual({ items: [] });
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual([
+      '/api/v1/platform/staff', '/api/v1/platform/auth/refresh', '/api/v1/platform/staff',
+    ]);
+  });
+
+  it('console calls give up when the refresh fails (no loop)', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(401, { error: { code: 'UNAUTHORIZED', message: 'Your platform session has ended.' } }));
+    await expect(consoleRequest('GET', '/dashboard')).rejects.toMatchObject({ status: 401 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('console writes send CSRF, query strings are encoded, and 403 step-up errors pass through', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(403, { error: { code: 'STEP_UP_REQUIRED', message: 'Confirm it is you.' } }));
+    await expect(consoleApi.lifecycle('org/1', 'suspend', { reason: 'x'.repeat(12), ticket_ref: 'T-1' })).rejects.toMatchObject({
+      status: 403, code: 'STEP_UP_REQUIRED',
+    });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/v1/platform/organizations/org%2F1/suspend');
+    expect(init.headers['X-Platform-CSRF']).toBe('csrf-value-123');
+    expect(init.credentials).toBe('same-origin');
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { items: [], total: 0, page: 1, page_size: 25, total_pages: 0 }));
+    await consoleApi.organizations({ q: 'a&b', status: '', page: 2 });
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/platform/organizations?q=a%26b&page=2');
   });
 });

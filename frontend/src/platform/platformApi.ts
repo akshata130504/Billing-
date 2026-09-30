@@ -8,7 +8,8 @@
  * The console is served from its own origin and always calls that same origin (no configurable API
  * origin, no cross-origin credentials); it imports nothing from the tenant API client.
  */
-const BASE = '/api/v1/platform/auth';
+const ROOT = '/api/v1/platform';
+const BASE = `${ROOT}/auth`;
 // "__Host-" prefixed when the server uses secure cookies (production), plain in local http dev.
 const CSRF_COOKIES = ['__Host-rb_platform_csrf', 'rb_platform_csrf'];
 const CSRF_HEADER = 'X-Platform-CSRF';
@@ -68,14 +69,14 @@ function readCookie(name: string): string | null {
   return match ? decodeURIComponent(match.slice(name.length + 1)) : null;
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function send<T>(method: string, url: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (method !== 'GET') {
     const csrf = CSRF_COOKIES.map(readCookie).find((value) => value);
     if (csrf) headers[CSRF_HEADER] = csrf;
   }
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(url, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -93,6 +94,36 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     throw new PlatformApiError(message, res.status, data?.error?.code);
   }
   return data as T;
+}
+
+function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  return send<T>(method, `${BASE}${path}`, body);
+}
+
+let refreshing: Promise<unknown> | null = null;
+
+/**
+ * Console API call (`path` is relative to /api/v1/platform). The access token lives only 10
+ * minutes, so a 401 triggers ONE shared refresh of the session cookie and a single retry; if the
+ * refresh fails the original 401 is thrown and the console returns to the sign-in page.
+ */
+export async function consoleRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+  try {
+    return await send<T>(method, `${ROOT}${path}`, body);
+  } catch (err) {
+    if (!(err instanceof PlatformApiError) || err.status !== 401) throw err;
+    if (!refreshing) {
+      refreshing = platformApi.refresh().finally(() => {
+        refreshing = null;
+      });
+    }
+    try {
+      await refreshing;
+    } catch {
+      throw err;
+    }
+    return send<T>(method, `${ROOT}${path}`, body);
+  }
 }
 
 export const platformApi = {

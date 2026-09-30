@@ -4,6 +4,8 @@ import { MemoryRouter } from 'react-router-dom';
 import { PlatformRoutes } from './PlatformApp';
 import tenantRoutesSource from '../routes/index.tsx?raw';
 import { PlatformApiError, platformApi } from './platformApi';
+import { consoleApi } from './consoleApi';
+import { ToastProvider } from '../components/common/Toast';
 
 vi.mock('./platformApi', async () => {
   const actual = await vi.importActual<typeof import('./platformApi')>('./platformApi');
@@ -23,7 +25,22 @@ vi.mock('./platformApi', async () => {
   };
 });
 
+vi.mock('./consoleApi', async () => {
+  const actual = await vi.importActual<typeof import('./consoleApi')>('./consoleApi');
+  return { ...actual, consoleApi: { dashboard: vi.fn() } };
+});
+
 const api = platformApi as unknown as Record<keyof typeof platformApi, ReturnType<typeof vi.fn>>;
+const consoleMock = consoleApi as unknown as { dashboard: ReturnType<typeof vi.fn> };
+
+const DASHBOARD = {
+  organizations: { active: 3, suspended: 1, pending_deletion: 0, deleted: 0, total: 4, jobs_paused: 1 },
+  created_last_7_days: 2,
+  recent_organizations: [],
+  staff: { total: 2, active: 2 },
+  health: { api: 'ok', database: 'connected', migrations: 'at_head', scheduler: 'ok' },
+  scheduler: { enabled: true, status: 'ok', last_counts: {} },
+};
 
 const ME = {
   staff: { id: 's1', email: 'ops@rooman.test', full_name: 'Olga Ops', role: 'platform_administrator' as const },
@@ -34,9 +51,11 @@ const ME = {
 
 function renderAt(path: string) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <PlatformRoutes />
-    </MemoryRouter>
+    <ToastProvider>
+      <MemoryRouter initialEntries={[path]}>
+        <PlatformRoutes />
+      </MemoryRouter>
+    </ToastProvider>
   );
 }
 
@@ -101,8 +120,11 @@ describe('Platform staff sign-in', () => {
   });
 });
 
-describe('Platform home', () => {
-  beforeEach(() => vi.clearAllMocks());
+describe('Platform console shell', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    consoleMock.dashboard.mockResolvedValue(DASHBOARD);
+  });
 
   it('redirects to the platform login when there is no session', async () => {
     api.me.mockRejectedValue(new PlatformApiError('Platform authentication required.', 401));
@@ -120,7 +142,7 @@ describe('Platform home', () => {
     expect(api.refresh).toHaveBeenCalledTimes(1);
   });
 
-  it('shows the Super Admin label, sessions, and signs out', async () => {
+  it('shows the Super Admin label, own sessions on My account, and signs out', async () => {
     api.me.mockResolvedValue(ME);
     api.sessions.mockResolvedValue({
       sessions: [
@@ -130,9 +152,9 @@ describe('Platform home', () => {
     });
     api.revokeSession.mockResolvedValue(undefined);
     api.logout.mockResolvedValue(undefined);
-    renderAt('/');
-    expect(await screen.findByText('Platform Administrator (Super Admin)')).toBeInTheDocument();
-    expect(screen.getByText('This browser (this session)')).toBeInTheDocument();
+    renderAt('/account');
+    expect((await screen.findAllByText('Platform Administrator (Super Admin)')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('This browser (this session)')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
     await waitFor(() => expect(api.revokeSession).toHaveBeenCalledWith('sess-2'));
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
@@ -145,6 +167,13 @@ describe('Platform home', () => {
     api.refresh.mockRejectedValue(new PlatformApiError('ended', 401));
     renderAt('/dashboard');
     expect(await screen.findByText('Platform staff sign-in')).toBeInTheDocument();
+  });
+
+  it('opens on the platform dashboard after sign-in', async () => {
+    api.me.mockResolvedValue(ME);
+    renderAt('/');
+    expect(await screen.findByRole('heading', { name: 'Platform dashboard' })).toBeInTheDocument();
+    expect(consoleMock.dashboard).toHaveBeenCalledTimes(1);
   });
 });
 
