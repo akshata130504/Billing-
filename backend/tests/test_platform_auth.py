@@ -723,7 +723,16 @@ def test_platform_routes_expose_no_tenant_data(client, db):
     from backend.app.main import app
 
     platform_paths = {r.path for r in app.routes if "/platform" in getattr(r, "path", "")}
-    assert platform_paths == {f"{AUTH}/{p}" for p in ("login", "2fa", "refresh", "me", "sessions", "sessions/{session_id}", "logout", "logout-all", "step-up")}
+    auth_paths = {f"{AUTH}/{p}" for p in ("login", "2fa", "refresh", "me", "sessions", "sessions/{session_id}", "logout", "logout-all", "step-up")}
+    # Phase 3 console (metadata only; see test_platform_console.py for what each returns).
+    console = "/api/v1/platform"
+    org = f"{console}/organizations/{{organization_id}}"
+    console_paths = {f"{console}/dashboard", f"{console}/health", f"{console}/audit", f"{console}/organizations",
+                     org, f"{org}/activity", f"{org}/suspend", f"{org}/reactivate", f"{org}/schedule-deletion",
+                     f"{org}/cancel-deletion", f"{org}/jobs/pause", f"{org}/jobs/resume", f"{console}/staff",
+                     f"{console}/staff/{{staff_id}}", f"{console}/staff/{{staff_id}}/deactivate",
+                     f"{console}/staff/{{staff_id}}/activate", f"{console}/staff/{{staff_id}}/revoke-sessions"}
+    assert platform_paths == auth_paths | console_paths
 
 
 # --- audit ---------------------------------------------------------------------------------------------------------

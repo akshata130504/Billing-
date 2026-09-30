@@ -118,10 +118,54 @@ def get_platform_context(request: Request, db: Session = Depends(get_db)) -> Pla
     return PlatformContext(staff=staff, session=session, ip_address=client_ip(request), user_agent=user_agent(request))
 
 
+def _request_details(request: Request) -> dict:
+    return {"method": request.method, "path": request.url.path[:200]}
+
+
+def _enforce_role(request: Request, ctx: PlatformContext, db: Session, allowed: FrozenSet[PlatformRole]) -> None:
+    """Refuse (403) a role outside `allowed`, and record the refusal in the platform audit."""
+    if ctx.role in allowed:
+        return
+    platform_audit.record(
+        db, action=platform_audit.ACCESS_DENIED, result=platform_audit.DENIED, staff=ctx.staff,
+        session_id=ctx.session.id, ip_address=ctx.ip_address, user_agent=ctx.user_agent,
+        details={**_request_details(request), "required": sorted(r.value for r in allowed)},
+    )
+    db.commit()
+    raise ForbiddenError("Your platform role does not allow this action.")
+
+
+def _enforce_step_up(request: Request, ctx: PlatformContext, db: Session) -> None:
+    if platform_auth_service.has_recent_step_up(ctx.staff, ctx.session):
+        return
+    platform_audit.record(
+        db, action=platform_audit.STEP_UP_REQUIRED, result=platform_audit.DENIED, staff=ctx.staff,
+        session_id=ctx.session.id, ip_address=ctx.ip_address, user_agent=ctx.user_agent,
+        details=_request_details(request),
+    )
+    db.commit()
+    raise platform_auth_service.StepUpRequiredError()
+
+
 def require_platform_roles(allowed: FrozenSet[PlatformRole]) -> Callable[..., PlatformContext]:
-    def dependency(ctx: PlatformContext = Depends(get_platform_context)) -> PlatformContext:
-        if ctx.role not in allowed:
-            raise ForbiddenError("Your platform role does not allow this action.")
+    def dependency(
+        request: Request, ctx: PlatformContext = Depends(get_platform_context), db: Session = Depends(get_db)
+    ) -> PlatformContext:
+        _enforce_role(request, ctx, db, allowed)
+        return ctx
+
+    return dependency
+
+
+def require_platform_roles_with_step_up(allowed: FrozenSet[PlatformRole]) -> Callable[..., PlatformContext]:
+    """Role check first (a role that may never do this is refused without being asked for a
+    code), then a recent step-up on this session (see require_recent_platform_step_up)."""
+
+    def dependency(
+        request: Request, ctx: PlatformContext = Depends(get_platform_context), db: Session = Depends(get_db)
+    ) -> PlatformContext:
+        _enforce_role(request, ctx, db, allowed)
+        _enforce_step_up(request, ctx, db)
         return ctx
 
     return dependency
@@ -134,14 +178,7 @@ def require_recent_platform_step_up(
     /platform/auth/step-up (a fresh TOTP) within PLATFORM_STEP_UP_MINUTES. Otherwise 403
     STEP_UP_REQUIRED (the client asks for a code, then retries). Combine with a role dependency
     for authorization; this only proves recent presence of the second factor."""
-    if not platform_auth_service.has_recent_step_up(ctx.staff, ctx.session):
-        platform_audit.record(
-            db, action=platform_audit.STEP_UP_REQUIRED, result=platform_audit.DENIED, staff=ctx.staff,
-            session_id=ctx.session.id, ip_address=ctx.ip_address, user_agent=ctx.user_agent,
-            details={"method": request.method, "path": request.url.path[:200]},
-        )
-        db.commit()
-        raise platform_auth_service.StepUpRequiredError()
+    _enforce_step_up(request, ctx, db)
     return ctx
 
 
@@ -158,6 +195,10 @@ require_platform_operations = require_platform_roles(
 require_platform_support = require_platform_roles(
     frozenset({PlatformRole.PLATFORM_ADMINISTRATOR, PlatformRole.PLATFORM_SUPPORT})
 )
+
+# Role sets for the console (docs/platform-administration-design.md sections 4, 9 and 14).
+ADMINISTRATOR_ONLY = frozenset({PlatformRole.PLATFORM_ADMINISTRATOR})
+LIFECYCLE_ROLES = frozenset({PlatformRole.PLATFORM_ADMINISTRATOR, PlatformRole.PLATFORM_OPERATIONS})
 
 
 # --- cookies ------------------------------------------------------------------------------------------

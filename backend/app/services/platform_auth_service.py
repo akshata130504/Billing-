@@ -464,6 +464,11 @@ def _revoke_all(db: Session, staff: PlatformStaff, reason: str) -> int:
     return int(result.rowcount or 0)
 
 
+def revoke_all_sessions(db: Session, staff: PlatformStaff, reason: str) -> int:
+    """Revoke every session of `staff` (and every access token issued so far). Caller audits and commits."""
+    return _revoke_all(db, staff, reason)
+
+
 def logout_all(db: Session, staff: PlatformStaff, current: PlatformSession, ip: Optional[str], user_agent: Optional[str]) -> int:
     count = _revoke_all(db, staff, "logout_all")
     platform_audit.record(
