@@ -16,6 +16,7 @@ ROUTERS = [
     ("health", "", ["Health"]),
     ("meta", "/meta", ["Meta"]),
     ("auth", "/auth", ["Auth"]),
+    ("platform_auth", "/platform/auth", ["Platform Auth"]),
     ("users", "/users", ["Users"]),
     ("organization", "", ["Organization & Team"]),
     ("customers", "/customers", ["Customers"]),
