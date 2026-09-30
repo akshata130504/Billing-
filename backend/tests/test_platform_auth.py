@@ -57,6 +57,9 @@ from backend.app.models.platform import (
 from backend.app.services import platform_auth_service as svc
 
 AUTH = "/api/v1/platform/auth"
+# The platform API answers only on the platform console host (conftest: PLATFORM_APP_ORIGIN);
+# tenant endpoints answer on every other host (TestClient's default "testserver").
+PLATFORM_BASE = "http://platform.test"
 TENANT_ME = "/api/v1/auth/me"
 PASSWORD = "Platform-Passw0rd-2026!"
 
@@ -73,7 +76,7 @@ def client():
     """A fresh TestClient per test: platform cookies must never leak between tests."""
     from backend.app.main import app
 
-    with TestClient(app) as c:
+    with TestClient(app, base_url=PLATFORM_BASE) as c:
         yield c
 
 
@@ -89,6 +92,12 @@ def _code(secret, steps=0):
 
 
 def _fresh_client():
+    from backend.app.main import app
+
+    return TestClient(app, base_url=PLATFORM_BASE)
+
+
+def _tenant_client():
     from backend.app.main import app
 
     return TestClient(app)
@@ -350,7 +359,7 @@ def test_deactivated_between_steps_cannot_finish(client, db):
 
 def test_tenant_two_factor_endpoints_unaffected(client, tenant):
     """Platform 2FA is isolated: the tenant /auth/login/mfa flow still refuses a platform challenge."""
-    resp = client.post("/api/v1/auth/login/mfa", json={"mfa_token": "not-a-tenant-token", "code": "000000"})
+    resp = _tenant_client().post("/api/v1/auth/login/mfa", json={"mfa_token": "not-a-tenant-token", "code": "000000"})
     assert resp.status_code == 401
 
 
@@ -473,7 +482,7 @@ def test_password_and_two_factor_reset_revoke_sessions(db):
 
 
 def test_A_tenant_token_on_tenant_endpoint_succeeds(client, tenant):
-    assert client.get(TENANT_ME, headers=tenant.headers()).status_code == 200
+    assert _tenant_client().get(TENANT_ME, headers=tenant.headers()).status_code == 200
 
 
 def test_B_tenant_token_on_platform_endpoint_rejected(client, tenant):
@@ -493,7 +502,7 @@ def test_C_platform_token_on_platform_endpoint_succeeds(client, db):
 def test_D_platform_token_on_tenant_endpoint_rejected(client, db, tenant):
     _sign_in(client, db, _staff(db))
     token = _access(client)
-    assert _fresh_client().get(TENANT_ME, headers=_bearer(token)).status_code == 401
+    assert _tenant_client().get(TENANT_ME, headers=_bearer(token)).status_code == 401
     with pytest.raises(jwt.PyJWTError):
         decode_access_token(token)
 
@@ -554,7 +563,7 @@ def test_K_platform_key_cannot_mint_tenant_token(client, tenant):
                     "jti": uuid.uuid4().hex}, settings.PLATFORM_JWT_SECRET)
     with pytest.raises(jwt.InvalidSignatureError):
         decode_access_token(forged)
-    assert client.get(TENANT_ME, headers=_bearer(forged)).status_code == 401
+    assert _tenant_client().get(TENANT_ME, headers=_bearer(forged)).status_code == 401
 
 
 @pytest.mark.parametrize("missing", ["sub", "sid", "aud", "iss", "typ", "exp", "iat", "jti"])
@@ -596,7 +605,7 @@ def test_platform_disabled_without_key(client, db, monkeypatch):
     with pytest.raises(platform_security.PlatformAuthNotConfigured):
         create_platform_access_token(staff_id="x", session_id="y", role="z", auth_time=utcnow())
     # tenant auth keeps working
-    assert client.post("/api/v1/auth/login", json={"email": "nobody@example.test", "password": "x"}).status_code == 401
+    assert _tenant_client().post("/api/v1/auth/login", json={"email": "nobody@example.test", "password": "x"}).status_code == 401
 
 
 def test_platform_key_must_differ_from_tenant_key():
@@ -689,14 +698,22 @@ def test_platform_session_is_not_tenant_session(client, db, tenant):
     """Signing in as platform staff yields nothing that tenant endpoints accept, and a tenant sign-in
     yields nothing platform endpoints accept - with cookies or bearer tokens."""
     _sign_in(client, db, _staff(db))
-    assert client.get(TENANT_ME).status_code == 401  # platform cookies are not tenant credentials
-    assert client.get("/api/v1/customers").status_code == 401
-    tenant_client = _fresh_client()
+    # Tenant endpoints do not exist on the platform host...
+    assert client.get(TENANT_ME).status_code == 404
+    assert client.get("/api/v1/customers").status_code == 404
+    # ...and the platform cookies, even replayed by hand to the tenant host, are not tenant credentials.
+    stolen = {"Cookie": "; ".join(f"{c.name}={c.value}" for c in client.cookies.jar)}
+    assert client.cookies.jar
+    tenant_client = _tenant_client()
+    assert tenant_client.get(TENANT_ME, headers=stolen).status_code == 401
+    assert tenant_client.get("/api/v1/customers", headers=stolen).status_code == 401
     resp = tenant_client.post("/api/v1/auth/login", json={"email": tenant.owner.email, "password": "Str0ngPassw0rd!"})
     assert resp.status_code == 200, resp.text
     tenant_token = resp.json()["access_token"]
-    assert tenant_client.get(f"{AUTH}/me", headers=_bearer(tenant_token)).status_code == 401
-    assert tenant_client.get(f"{AUTH}/me").status_code == 401
+    # The platform API does not exist on the tenant host; on the platform host a tenant token fails.
+    assert tenant_client.get(f"{AUTH}/me", headers=_bearer(tenant_token)).status_code == 404
+    assert _fresh_client().get(f"{AUTH}/me", headers=_bearer(tenant_token)).status_code == 401
+    assert _fresh_client().get(f"{AUTH}/me").status_code == 401
 
 
 def test_platform_routes_expose_no_tenant_data(client, db):

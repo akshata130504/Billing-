@@ -24,15 +24,50 @@ from backend.app.core.exceptions import ForbiddenError, UnauthorizedError
 from backend.app.models.platform import PlatformRole, PlatformSession, PlatformStaff
 from backend.app.services import platform_auth_service
 
-# Cookies: the access cookie is only sent to platform API paths and the refresh cookie only to the
-# platform auth paths; neither is readable by page JavaScript. The CSRF cookie is readable on
-# purpose (double submit) and grants nothing on its own.
+# Cookies are host-only (never a Domain attribute) on the platform console origin, HttpOnly except
+# the double-submit CSRF cookie (readable on purpose, grants nothing on its own), SameSite=Strict.
+# With secure cookies (production) the names carry the browser-enforced prefixes: "__Host-" (Secure,
+# Path=/, no Domain - a sibling subdomain such as the tenant app cannot set or overwrite it) for the
+# access and CSRF cookies, "__Secure-" for the refresh cookie, which stays on the platform auth path.
+# Without secure cookies (local http development/tests) the plain names and narrow paths are used.
 ACCESS_COOKIE = "rb_platform_access"
 REFRESH_COOKIE = "rb_platform_refresh"
 CSRF_COOKIE = "rb_platform_csrf"
 CSRF_HEADER = "X-Platform-CSRF"
 ACCESS_COOKIE_PATH = f"{settings.API_V1_STR.rstrip('/')}/platform"
 REFRESH_COOKIE_PATH = f"{settings.API_V1_STR.rstrip('/')}/platform/auth"
+
+
+@dataclass(frozen=True)
+class CookieSpec:
+    name: str
+    path: str
+    httponly: bool
+
+
+def cookie_specs() -> tuple[CookieSpec, CookieSpec, CookieSpec]:
+    """(access, refresh, csrf) cookie name/path for the current cookie security mode."""
+    if settings.platform_cookie_secure:
+        return (
+            CookieSpec(f"__Host-{ACCESS_COOKIE}", "/", True),
+            CookieSpec(f"__Secure-{REFRESH_COOKIE}", REFRESH_COOKIE_PATH, True),
+            CookieSpec(f"__Host-{CSRF_COOKIE}", "/", False),
+        )
+    return (
+        CookieSpec(ACCESS_COOKIE, ACCESS_COOKIE_PATH, True),
+        CookieSpec(REFRESH_COOKIE, REFRESH_COOKIE_PATH, True),
+        CookieSpec(CSRF_COOKIE, "/", False),
+    )
+
+
+def read_refresh_cookie(request: Request) -> Optional[str]:
+    return request.cookies.get(cookie_specs()[1].name)
+
+
+def read_csrf_cookie(request: Request) -> Optional[str]:
+    return request.cookies.get(cookie_specs()[2].name)
+
+
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
@@ -54,7 +89,7 @@ def user_agent(request: Request) -> Optional[str]:
 
 def check_csrf(request: Request) -> None:
     """Double-submit check: the header must equal the CSRF cookie (constant-time)."""
-    cookie = request.cookies.get(CSRF_COOKIE) or ""
+    cookie = read_csrf_cookie(request) or ""
     header = request.headers.get(CSRF_HEADER) or ""
     if not cookie or not header or not hmac.compare_digest(cookie, header):
         raise ForbiddenError("Missing or invalid CSRF token.")
@@ -73,7 +108,7 @@ def get_platform_context(request: Request, db: Session = Depends(get_db)) -> Pla
     token = _bearer(request)
     from_cookie = False
     if token is None:
-        token = request.cookies.get(ACCESS_COOKIE)
+        token = request.cookies.get(cookie_specs()[0].name)
         from_cookie = token is not None
     if not token:
         raise UnauthorizedError("Platform authentication required.")
@@ -112,23 +147,16 @@ require_platform_support = require_platform_roles(
 
 def set_session_cookies(response: Response, access_token: str, refresh_secret: str, csrf_token: str) -> None:
     secure = settings.platform_cookie_secure
+    access, refresh, csrf = cookie_specs()
     access_age = settings.PLATFORM_ACCESS_TOKEN_EXPIRE_MINUTES * 60
     session_age = settings.PLATFORM_SESSION_MAX_HOURS * 3600
-    response.set_cookie(
-        ACCESS_COOKIE, access_token, max_age=access_age, path=ACCESS_COOKIE_PATH,
-        httponly=True, secure=secure, samesite="strict",
-    )
-    response.set_cookie(
-        REFRESH_COOKIE, refresh_secret, max_age=session_age, path=REFRESH_COOKIE_PATH,
-        httponly=True, secure=secure, samesite="strict",
-    )
-    response.set_cookie(
-        CSRF_COOKIE, csrf_token, max_age=session_age, path="/",
-        httponly=False, secure=secure, samesite="strict",
-    )
+    for spec, value, age in ((access, access_token, access_age), (refresh, refresh_secret, session_age),
+                             (csrf, csrf_token, session_age)):
+        response.set_cookie(spec.name, value, max_age=age, path=spec.path, httponly=spec.httponly,
+                            secure=secure, samesite="strict")
 
 
 def clear_session_cookies(response: Response) -> None:
     secure = settings.platform_cookie_secure
-    for name, path in ((ACCESS_COOKIE, ACCESS_COOKIE_PATH), (REFRESH_COOKIE, REFRESH_COOKIE_PATH), (CSRF_COOKIE, "/")):
-        response.delete_cookie(name, path=path, secure=secure, httponly=name != CSRF_COOKIE, samesite="strict")
+    for spec in cookie_specs():
+        response.delete_cookie(spec.name, path=spec.path, secure=secure, httponly=spec.httponly, samesite="strict")

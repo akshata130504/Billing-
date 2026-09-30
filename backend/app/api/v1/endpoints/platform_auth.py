@@ -18,11 +18,11 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import client_ip, get_db
 from backend.app.api.platform_deps import (
-    CSRF_COOKIE,
-    REFRESH_COOKIE,
     PlatformContext,
     check_csrf,
     clear_session_cookies,
+    read_csrf_cookie,
+    read_refresh_cookie,
     require_platform_staff,
     set_session_cookies,
     user_agent,
@@ -88,12 +88,12 @@ def platform_refresh(request: Request, response: Response, db: Session = Depends
     _no_store(response)
     platform_auth_service.ensure_enabled()
     check_csrf(request)
-    secret = request.cookies.get(REFRESH_COOKIE)
+    secret = read_refresh_cookie(request)
     if not secret:
         raise UnauthorizedError(platform_auth_service.SESSION_INVALID)
     est = platform_auth_service.refresh(db, secret, client_ip(request), user_agent(request))
     # The CSRF value stays the same across refreshes (it already passed check_csrf above).
-    set_session_cookies(response, est.access_token, est.refresh_secret, request.cookies.get(CSRF_COOKIE))
+    set_session_cookies(response, est.access_token, est.refresh_secret, read_csrf_cookie(request))
     return _me(est.staff, est.session)
 
 
@@ -141,3 +141,4 @@ def platform_logout_all(response: Response, ctx: PlatformContext = Depends(requi
     count = platform_auth_service.logout_all(db, ctx.staff, ctx.session, ctx.ip_address, ctx.user_agent)
     clear_session_cookies(response)
     return PlatformLogoutAllOut(sessions_revoked=count)
+

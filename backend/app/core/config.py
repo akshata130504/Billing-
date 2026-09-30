@@ -77,6 +77,26 @@ def is_private_db_host(host: Optional[str]) -> bool:
     return addr.is_private or addr.is_loopback
 
 
+def normalize_origin(url: Optional[str]) -> Optional[str]:
+    """"scheme://host[:port]" in lower case (default ports dropped), or None if `url` is not a bare
+    http(s) origin (a path other than "/", a query, a fragment or credentials make it invalid)."""
+    if not url or not url.strip():
+        return None
+    parts = urlsplit(url.strip())
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return None
+    if parts.path not in ("", "/") or parts.query or parts.fragment or parts.username or parts.password:
+        return None
+    try:
+        port = parts.port
+    except ValueError:
+        return None
+    host = parts.hostname.lower()
+    if port is None or (parts.scheme == "https" and port == 443) or (parts.scheme == "http" and port == 80):
+        return f"{parts.scheme}://{host}"
+    return f"{parts.scheme}://{host}:{port}"
+
+
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Rooman Billing"
     ENVIRONMENT: str = "development"  # development | test | staging | production
@@ -113,6 +133,13 @@ class Settings(BaseSettings):
     PLATFORM_LOGIN_CHALLENGE_MINUTES: int = 5
     # Secure flag on platform cookies. None = on in production-like environments only.
     PLATFORM_COOKIE_SECURE: Optional[bool] = None
+    # Dedicated browser origin of the platform console, e.g. https://platform.example.com
+    # (local dev: http://platform.localhost:5174). Required together with PLATFORM_JWT_SECRET.
+    # Its HOSTNAME must differ from every tenant origin (browsers do not isolate cookies by port).
+    # Platform API paths answer only on this host, and this host answers only platform paths.
+    PLATFORM_APP_ORIGIN: str = ""
+    # How long a step-up (fresh TOTP) authorises sensitive platform actions. Capped at 15.
+    PLATFORM_STEP_UP_MINUTES: int = 15
     PASSWORD_MIN_LENGTH: int = 10
     # Requests per minute allowed on credential endpoints (login, signup, reset), per client IP.
     AUTH_RATE_LIMIT: str = "10/minute"
@@ -166,8 +193,8 @@ class Settings(BaseSettings):
         if not hosts:
             if not self.is_production:
                 return ["*"]
-            for url in [self.FRONTEND_URL, *self.ALLOWED_ORIGINS]:
-                host = urlsplit(url).hostname
+            for url in [self.FRONTEND_URL, *self.ALLOWED_ORIGINS, self.PLATFORM_APP_ORIGIN]:
+                host = urlsplit(url).hostname if url else None
                 if host and host not in hosts:
                     hosts.append(host.lower())
         if "*" in hosts:
@@ -385,7 +412,27 @@ class Settings(BaseSettings):
 
     @property
     def platform_auth_enabled(self) -> bool:
-        return bool((self.PLATFORM_JWT_SECRET or "").strip())
+        return bool((self.PLATFORM_JWT_SECRET or "").strip()) and bool(self.platform_origin)
+
+    @property
+    def platform_origin(self) -> Optional[str]:
+        """Normalised platform origin ("scheme://host[:port]"), or None when not configured."""
+        return normalize_origin(self.PLATFORM_APP_ORIGIN)
+
+    @property
+    def platform_netloc(self) -> Optional[str]:
+        """The Host header value the platform origin is served under (host[:non-default port])."""
+        origin = self.platform_origin
+        return origin.split("://", 1)[1] if origin else None
+
+    @property
+    def tenant_origins(self) -> List[str]:
+        found = []
+        for url in [self.FRONTEND_URL, *self.ALLOWED_ORIGINS]:
+            origin = normalize_origin(url)
+            if origin and origin not in found:
+                found.append(origin)
+        return found
 
     @property
     def platform_cookie_secure(self) -> bool:
@@ -400,6 +447,26 @@ class Settings(BaseSettings):
         Unset is allowed everywhere: platform sign-in is simply disabled.
         """
         secret = (self.PLATFORM_JWT_SECRET or "").strip()
+        raw_origin = (self.PLATFORM_APP_ORIGIN or "").strip()
+        if bool(secret) != bool(raw_origin):
+            raise ValueError("PLATFORM_JWT_SECRET and PLATFORM_APP_ORIGIN must be configured together")
+        if raw_origin:
+            origin = normalize_origin(raw_origin)
+            if origin is None:
+                raise ValueError("PLATFORM_APP_ORIGIN must be an origin like https://platform.example.com (no path)")
+            if self.is_production and not origin.startswith("https://"):
+                raise ValueError("PLATFORM_APP_ORIGIN must be an https:// origin in production")
+            if self.is_production and self.PLATFORM_COOKIE_SECURE is False:
+                raise ValueError("PLATFORM_COOKIE_SECURE cannot be disabled in production")
+            if origin.startswith("https://") and self.PLATFORM_COOKIE_SECURE is False:
+                raise ValueError("PLATFORM_COOKIE_SECURE cannot be disabled for an https:// PLATFORM_APP_ORIGIN")
+            platform_host = urlsplit(origin).hostname
+            for tenant in self.tenant_origins:
+                if urlsplit(tenant).hostname == platform_host:
+                    raise ValueError(
+                        "PLATFORM_APP_ORIGIN must use a different hostname from the tenant app "
+                        f"({tenant}); a different port alone does not isolate cookies"
+                    )
         if secret:
             weak = (
                 len(secret) < 32
@@ -418,6 +485,7 @@ class Settings(BaseSettings):
             ("PLATFORM_SESSION_IDLE_MINUTES", 5, 240),
             ("PLATFORM_SESSION_MAX_HOURS", 1, 24),
             ("PLATFORM_LOGIN_CHALLENGE_MINUTES", 1, 15),
+            ("PLATFORM_STEP_UP_MINUTES", 1, 15),
         ):
             value = getattr(self, name)
             if not low <= value <= high:

@@ -12,6 +12,15 @@ from pydantic import ValidationError
 
 from backend.app.core.config import Settings, is_private_db_host
 
+
+@pytest.fixture(autouse=True)
+def _platform_console_not_configured(monkeypatch):
+    """conftest configures a test-only platform console (http://platform.test) for the app under
+    test. The Settings built here model deployments without it; test_platform_origin.py covers
+    production settings with the platform console configured."""
+    monkeypatch.delenv("PLATFORM_JWT_SECRET", raising=False)
+    monkeypatch.delenv("PLATFORM_APP_ORIGIN", raising=False)
+
 VALID_PROD = {
     "ENVIRONMENT": "production",
     "DEBUG": False,

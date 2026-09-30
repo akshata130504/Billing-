@@ -5,7 +5,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 
@@ -13,6 +12,12 @@ from backend.app import __version__
 from backend.app.api.v1.api_router import api_router
 from backend.app.core.config import settings
 from backend.app.core.exceptions import AppException, app_exception_handler, validation_exception_handler
+from backend.app.core.platform_boundary import (
+    PLATFORM_SECURITY_HEADERS,
+    PathSplitCORSMiddleware,
+    PlatformBoundaryMiddleware,
+    is_platform_path,
+)
 from backend.app.core.logging import correlation_id_ctx, logger
 from backend.app.core.rate_limit import RateLimitExceeded, limiter, rate_limit_exceeded_handler
 
@@ -149,16 +154,21 @@ def create_application() -> FastAPI:
 
     # CORS for the SPA. Explicit methods/headers; a wildcard origin never gets credentials
     # (production refuses "*" and non-https origins at startup, see config.py).
+    # The platform console API (/api/v1/platform) has its own, stricter policy - see platform_boundary.
     wildcard_origin = "*" in settings.ALLOWED_ORIGINS
     app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.ALLOWED_ORIGINS,
-        allow_credentials=not wildcard_origin,
-        allow_methods=CORS_ALLOWED_METHODS,
-        allow_headers=CORS_ALLOWED_HEADERS,
-        expose_headers=CORS_EXPOSED_HEADERS,
-        max_age=600,
+        PathSplitCORSMiddleware,
+        tenant_options=dict(
+            allow_origins=settings.ALLOWED_ORIGINS,
+            allow_credentials=not wildcard_origin,
+            allow_methods=CORS_ALLOWED_METHODS,
+            allow_headers=CORS_ALLOWED_HEADERS,
+            expose_headers=CORS_EXPOSED_HEADERS,
+            max_age=600,
+        ),
     )
+    # Platform console host binding and Origin / Sec-Fetch-Site checks (no-op when not configured).
+    app.add_middleware(PlatformBoundaryMiddleware)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -166,7 +176,8 @@ def create_application() -> FastAPI:
         # Swagger UI / ReDoc (development only) load their bundles from a CDN, which the CSP
         # would block; every other response (JSON API, uploads) keeps the full header set.
         skip_csp = request.url.path in _DOCS_PATHS
-        for header, value in SECURITY_HEADERS.items():
+        headers = PLATFORM_SECURITY_HEADERS if is_platform_path(request.url.path) else SECURITY_HEADERS
+        for header, value in headers.items():
             if skip_csp and header == "Content-Security-Policy":
                 continue
             response.headers.setdefault(header, value)
