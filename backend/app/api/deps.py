@@ -3,7 +3,7 @@ import ipaddress
 from dataclasses import dataclass
 from functools import lru_cache
 from datetime import datetime, timezone
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import jwt
 from fastapi import Depends, Request
@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from backend.app.core.config import settings
 from backend.app.core.database import get_db
 from backend.app.core.exceptions import ForbiddenError, UnauthorizedError
-from backend.app.core.security import decode_access_token
+from backend.app.core.security import GRANT_TOKEN_TYPE, decode_access_token, peek_token_type
 from backend.app.models import ROLE_RANK, Membership, MemberRole, MembershipStatus, Organization, RefreshToken, User
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -22,27 +22,48 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 @dataclass
 class CurrentContext:
-    """Everything a request handler needs to know about who is calling."""
+    """Everything a request handler needs to know about who is calling.
 
-    user: User
+    Normally a tenant user with an active Membership. Under a platform access grant (see
+    services/access_grant_service.py) `user` and `membership` are None and `grant` describes the
+    platform staff member: no Membership is created or faked, and only the read routes allowed by
+    the grant's scopes (core/grant_scopes.py) are reachable.
+    """
+
+    user: Optional[User]
     organization: Organization
-    membership: Membership
+    membership: Optional[Membership]
     ip_address: Optional[str]
     user_agent: Optional[str]
+    grant: Optional[Any] = None
 
     @property
-    def user_id(self) -> str:
-        return self.user.id
+    def user_id(self) -> Optional[str]:
+        return self.user.id if self.user is not None else None
 
     @property
     def role(self) -> MemberRole:
-        return self.membership.role
+        return self.membership.role if self.membership is not None else MemberRole.VIEWER
 
     @property
     def organization_id(self) -> str:
         return self.organization.id
 
+    @property
+    def is_platform_grant(self) -> bool:
+        return self.grant is not None
+
+    @property
+    def actor_label(self) -> str:
+        if self.grant is not None:
+            return self.grant.actor_label
+        return self.user.full_name if self.user is not None else "System"
+
     def has_role(self, minimum: MemberRole) -> bool:
+        # Grant contexts only ever reach routes on the explicit read allow-list, which was checked
+        # when the context was built; tenant role ranks do not apply to them.
+        if self.grant is not None:
+            return True
         return ROLE_RANK[self.role] >= ROLE_RANK[minimum]
 
 
@@ -134,11 +155,29 @@ def get_current_user(
     return user
 
 
+def _grant_context(request: Request, token: str, db: Session, *, enforce_scope: bool = True) -> CurrentContext:
+    from backend.app.services import access_grant_service
+
+    route = request.scope.get("route")
+    principal = access_grant_service.authenticate(
+        db, token, method=request.method, route_template=getattr(route, "path", None),
+        path_params=dict(request.path_params or {}), ip=client_ip(request),
+        ua=(request.headers.get("user-agent") or "")[:400] or None, enforce_scope=enforce_scope,
+    )
+    return CurrentContext(
+        user=None, organization=principal.organization, membership=None, ip_address=client_ip(request),
+        user_agent=(request.headers.get("user-agent") or "")[:400] or None, grant=principal,
+    )
+
+
 def get_current_context(
     request: Request,
-    user: User = Depends(get_current_user),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> CurrentContext:
+    if credentials is not None and credentials.scheme.lower() == "bearer" and peek_token_type(credentials.credentials) == GRANT_TOKEN_TYPE:
+        return _grant_context(request, credentials.credentials, db)
+    user = get_current_user(credentials, db)
     org_id = getattr(user, "_token_org_id", None)
     stmt = select(Membership).where(
         Membership.user_id == user.id,
@@ -159,6 +198,30 @@ def get_current_context(
         ip_address=client_ip(request),
         user_agent=(request.headers.get("user-agent") or "")[:400] or None,
     )
+
+
+def require_grant_context(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> CurrentContext:
+    """Only a valid grant token (the platform-access session/exit endpoints). Tenant users get 401."""
+    if credentials is None or credentials.scheme.lower() != "bearer" or peek_token_type(credentials.credentials) != GRANT_TOKEN_TYPE:
+        raise UnauthorizedError("Platform access token required.")
+    return _grant_context(request, credentials.credentials, db, enforce_scope=False)
+
+
+def require_tenant_user(minimum: MemberRole) -> Callable[..., CurrentContext]:
+    """Like require_role, but NEVER satisfied by a platform grant (e.g. deciding on grants)."""
+
+    def dependency(ctx: CurrentContext = Depends(get_current_context)) -> CurrentContext:
+        if ctx.grant is not None or ctx.user is None:
+            raise ForbiddenError("This action can only be performed by a member of this organization.")
+        if not ctx.has_role(minimum):
+            raise ForbiddenError(f"This action requires the {minimum.value} role or higher.")
+        return ctx
+
+    return dependency
 
 
 def require_role(minimum: MemberRole) -> Callable[..., CurrentContext]:
@@ -189,4 +252,6 @@ __all__ = [
     "require_finance",
     "require_admin",
     "require_owner",
+    "require_grant_context",
+    "require_tenant_user",
 ]

@@ -722,7 +722,7 @@ def test_platform_routes_expose_no_tenant_data(client, db):
     assert set(me["staff"]) == {"id", "email", "full_name", "role", "last_login_at"}
     from backend.app.main import app
 
-    platform_paths = {r.path for r in app.routes if "/platform" in getattr(r, "path", "")}
+    platform_paths = {r.path for r in app.routes if getattr(r, "path", "").startswith("/api/v1/platform/")}
     auth_paths = {f"{AUTH}/{p}" for p in ("login", "2fa", "refresh", "me", "sessions", "sessions/{session_id}", "logout", "logout-all", "step-up")}
     # Phase 3 console (metadata only; see test_platform_console.py for what each returns).
     console = "/api/v1/platform"
@@ -737,6 +737,10 @@ def test_platform_routes_expose_no_tenant_data(client, db):
     console_paths |= {site, f"{site}/draft", f"{site}/draft/discard", f"{site}/compare", f"{site}/publish",
                       f"{site}/versions", f"{site}/versions/{{version}}", f"{site}/versions/{{version}}/rollback",
                       f"{site}/versions/{{version}}/restore", f"{console}/website/assets"}
+    grants = f"{console}/access-grants"
+    console_paths |= {grants, f"{grants}/emergency", f"{grants}/{{grant_id}}", f"{grants}/{{grant_id}}/cancel",
+                      f"{grants}/{{grant_id}}/revoke", f"{grants}/{{grant_id}}/enter",
+                      f"{grants}/{{grant_id}}/emergency-approve", f"{grants}/{{grant_id}}/review"}
     assert platform_paths == auth_paths | console_paths
 
 

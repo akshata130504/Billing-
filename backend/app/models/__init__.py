@@ -42,6 +42,7 @@ from backend.app.models.platform import (
     PlatformStaff,
 )
 from backend.app.models.website import WebsiteContentVersion, WebsitePage
+from backend.app.models.access_grants import GrantScope, GrantStatus, TenantAccessGrant
 from backend.app.models.billing_cycles import (
     BillingCycle,
     BillingCycleStatus,
@@ -372,4 +373,7 @@ __all__ = [
     "PlatformStaff",
     "WebsiteContentVersion",
     "WebsitePage",
+    "GrantScope",
+    "GrantStatus",
+    "TenantAccessGrant",
 ]

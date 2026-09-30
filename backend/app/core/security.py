@@ -91,6 +91,54 @@ def create_access_token(
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
+GRANT_TOKEN_TYPE = "grant_access"
+GRANT_TOKEN_MAX_MINUTES = 15
+_GRANT_CLAIMS = ["exp", "iat", "sub", "aud", "iss", "type", "org", "gid", "scp", "jti", "psid"]
+
+
+def create_grant_token(
+    *, staff_id: str, organization_id: str, grant_id: str, scopes: list, platform_session_id: str,
+    grant_expires_at: datetime,
+) -> tuple:
+    """Short-lived tenant-API token for platform staff under an approved access grant.
+
+    aud=tenant / iss=rooman-billing like tenant tokens, but type=grant_access: decode_access_token
+    refuses it (so it is never a user session), and the tenant API re-validates the grant row,
+    the platform session and this token's jti on EVERY request. Expires at the earlier of 15
+    minutes or the grant's expiry. Returns (token, jti).
+    """
+    now = datetime.now(timezone.utc)
+    expires = min(now + timedelta(minutes=GRANT_TOKEN_MAX_MINUTES), grant_expires_at)
+    jti = secrets.token_hex(16)
+    payload: Dict[str, Any] = {
+        "sub": staff_id, "org": organization_id, "gid": grant_id, "scp": list(scopes), "psid": platform_session_id,
+        "type": GRANT_TOKEN_TYPE, "aud": TENANT_TOKEN_AUDIENCE, "iss": TOKEN_ISSUER,
+        "iat": now.timestamp(), "exp": int(expires.timestamp()), "jti": jti,
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM), jti
+
+
+def decode_grant_token(token: str) -> Dict[str, Any]:
+    """Verify a grant token (signature, aud, iss, type, required claims). Raises jwt.PyJWTError."""
+    payload = jwt.decode(
+        token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM], audience=TENANT_TOKEN_AUDIENCE,
+        issuer=TOKEN_ISSUER, options={"require": _GRANT_CLAIMS},
+    )
+    if payload.get("type") != GRANT_TOKEN_TYPE or payload.get("aud") != TENANT_TOKEN_AUDIENCE:
+        raise jwt.InvalidTokenError("Not a grant token")
+    if not isinstance(payload.get("scp"), list):
+        raise jwt.InvalidTokenError("Malformed grant token")
+    return payload
+
+
+def peek_token_type(token: str) -> Optional[str]:
+    """The UNVERIFIED `type` claim - only to choose which verifier runs; never trusted on its own."""
+    try:
+        return jwt.decode(token, options={"verify_signature": False}).get("type")
+    except jwt.PyJWTError:
+        return None
+
+
 def create_mfa_token(user_id: str) -> str:
     """Short-lived token proving the password step of a two-factor login succeeded.
 
