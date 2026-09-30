@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, joinedload
@@ -639,11 +639,15 @@ def evaluate_expiring_trials(
     today: Optional[date] = None,
     org_id: Optional[str] = None,
     commit: bool = False,
+    guard: Optional[Callable[[], bool]] = None,
 ) -> Dict[str, int]:
     """Evaluates trials that have ended or are approaching expiry.
 
     Each ended trial is processed in its own savepoint so one failure never rolls back
     the others; `commit=True` (scheduler) also commits after every subscription.
+    `guard` (scheduler only, see org_lifecycle.AutomationGuard) is re-checked before every
+    trial - inside the transaction that commits it - and before the reminder emails; once it
+    refuses, nothing else is converted, charged or emailed for this organization.
     Rules per ended trial:
       * cancel_at_period_end -> the subscription ends (never converts or charges)
       * default payment method + auto-charge -> convert and charge; a declined charge
@@ -674,6 +678,11 @@ def evaluate_expiring_trials(
 
     ended_subs = list(db.scalars(query).all())
     for sub in ended_subs:
+        # Organization lifecycle: re-read under the organization row lock in the transaction
+        # that will convert / charge this trial (the previous iteration has committed).
+        if guard is not None and not guard():
+            db.flush()
+            return stats
         stats["evaluated"] += 1
         sub_id = sub.id
         savepoint = db.begin_nested()
@@ -716,6 +725,11 @@ def evaluate_expiring_trials(
             except Exception:
                 logger.exception("Trial evaluation: commit failed for subscription %s", sub_id)
                 db.rollback()
+
+    # Reminder emails are flushed into the caller's transaction; re-check there first.
+    if guard is not None and not guard():
+        db.flush()
+        return stats
 
     # 2. Upcoming expiry reminders: 7 days, 3 days, 1 day
     for days_ahead, reminder_code in [(7, "about_to_expire_7d"), (3, "about_to_expire_3d"), (1, "about_to_expire_1d")]:

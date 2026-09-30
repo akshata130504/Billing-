@@ -56,6 +56,7 @@ from backend.app.schemas.customization import (
     WebTabUpdate,
 )
 from backend.app.services import notification_service
+from backend.app.services import org_lifecycle
 from backend.app.services import timezones
 
 # ---------------------------------------------------------------------------
@@ -1523,6 +1524,9 @@ def run_due_automation_schedules(db: Session, limit: int = 50) -> int:
             AutomationSchedule.is_active.is_(True),
             AutomationSchedule.status == "active",
             AutomationSchedule.next_date <= now,
+            # Schedules of suspended / pending-deletion / deleted / jobs-paused organizations
+            # are not claimed, so they never crowd out active tenants' schedules.
+            AutomationSchedule.organization_id.in_(org_lifecycle.automation_allowed_org_ids()),
         )
         .order_by(AutomationSchedule.next_date.asc())
         .limit(limit)
@@ -1545,6 +1549,11 @@ def run_due_automation_schedules(db: Session, limit: int = 50) -> int:
     for schedule_id in claimed:
         schedule = db.get(AutomationSchedule, schedule_id)
         if schedule is None:
+            continue
+        # Organization lifecycle: re-checked under the organization row lock in the transaction
+        # that runs and commits this schedule (the claim committed earlier).
+        if not org_lifecycle.automation_allowed(db, schedule.organization_id):
+            db.rollback()
             continue
         try:
             execute_schedule(db, schedule, utcnow())

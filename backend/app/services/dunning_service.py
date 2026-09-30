@@ -5,7 +5,7 @@ import calendar
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, joinedload
@@ -498,8 +498,15 @@ def trigger_dunning_for_failed_payment(
     return case
 
 
-def execute_dunning_retries(db: Session, organization_id: str) -> Dict[str, Any]:
-    """Runs scheduled dunning retries across pending cases. Called by scheduler."""
+def execute_dunning_retries(
+    db: Session, organization_id: str, guard: Optional[Callable[[], bool]] = None
+) -> Dict[str, Any]:
+    """Runs scheduled dunning retries across pending cases. Called by scheduler.
+
+    `guard` (scheduler only, see org_lifecycle.AutomationGuard) is re-checked for every due
+    case inside this transaction, after the case lock and before anything is charged or
+    changed; once it refuses, no further case of this organization is touched.
+    """
     now = utcnow()
     cases = list(
         db.scalars(
@@ -554,6 +561,11 @@ def execute_dunning_retries(db: Session, organization_id: str) -> Dict[str, Any]
                 next_at = next_at.replace(tzinfo=timezone.utc)
             if not next_at or next_at > now:
                 continue
+
+        # Organization lifecycle (suspended / pending deletion / deleted / jobs paused): re-read
+        # under the organization row lock in THIS transaction, immediately before charging.
+        if guard is not None and not guard():
+            break
 
         executed += 1
         invoice = case.invoice
