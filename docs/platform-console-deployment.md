@@ -187,4 +187,59 @@ token or cookie is issued.
 from `step_up_at` with the current setting (lowering it shortens existing windows; nothing extends
 one - not use, not refresh). It ends with logout, logout-all, revocation of the session, password
 reset, 2FA reset and deactivation. Audited as `PLATFORM_STEP_UP_SUCCEEDED`, `_FAILED`,
-`_REQUIRED`; codes are never recorded. No production route uses it yet (phase 3 will).
+`_REQUIRED`; codes are never recorded.
+
+## 6. Platform Roles and Privileges
+
+| Role | Organization Directory | Organization Lifecycle | Staff Admin | Platform Audit | Jobs & Health | Landing CMS | Tenant Access Grants |
+|---|---|---|---|---|---|---|---|
+| `platform_administrator` | Full (search, inspect) | Suspend, Reactivate, Schedule Deletion, Cancel, Revoke Sessions, Pause/Resume Jobs (Step-up required) | List, View, Activate, Deactivate, Revoke Sessions (Self-deactivation & last admin protected) | Full search & view (append-only) | View operational metrics & job status (No money-moving execution) | Edit Draft, Preview, Publish, Rollback | Request, Enter, Emergency Dual Approval, Review |
+| `platform_operations` | Full (search, inspect) | Suspend, Reactivate, Pause/Resume Jobs | Read-only | Full search & view | View operational metrics & job status | Read-only | Request, Enter (scoped) |
+| `platform_support` | Metadata view & search | View metadata | None | Own activity | View operational health | None | Request, Enter (Tenant Owner approved) |
+
+## 7. Organization Lifecycle Governance
+
+- **Lifecycle states:** `ACTIVE` → `SUSPENDED` → `PENDING_DELETION` → `DELETED`.
+- **Suspension:** Platform-side control flag. Tenant login is rejected; scheduler skips suspended organizations.
+- **Reactivation:** Restores tenant access. **Does not replay missed billing runs**; jobs remain paused until explicitly resumed via step-up authorized mutation.
+- **Deletion Schedule:** 30-day graceful window before any hard data purging. Can be cancelled by Platform Administrator.
+- **Audit Requirement:** Every lifecycle transition requires step-up MFA and explicit justification logged to `platform_audit_logs`.
+
+## 8. Tenant Access Grants & Scoped Access
+
+- **Zero Unrestricted Super Admin Access:** Platform staff have no default access to tenant data.
+- **Grant Request Flow:** Staff specifies tenant organization, specific read scopes (`READ_METADATA`, `READ_CUSTOMERS`, `READ_QUOTES`, `READ_INVOICES`, `READ_PAYMENTS`, `READ_SUBSCRIPTIONS`, `READ_AUDIT`, `READ_CONFIG`), duration (15-480m), ticket reference, and business reason.
+- **Tenant Owner Approval:** The Tenant Owner must review and approve the grant in `Settings > Platform Access`.
+- **Emergency Dual Control:** Break-glass access requires two independent Platform Administrators (requester + distinct approver) with critical justification and alert dispatch.
+- **Read-Only Invariant:** Under no grant can financial mutations, refunds, voiding, Razorpay charges, or owner changes occur.
+- **Bi-Directional Audit:** Every access request, approval, entry, viewed API endpoint, and exit is logged in both `platform_audit_logs` and tenant `audit_logs`.
+- **Banner & Ephemeral Token:** Active grant session renders a persistent banner with expiration countdown, active scopes, and immediate Exit capability. Token exists in-memory only.
+
+## 9. Landing Page CMS Governance
+
+- **Architecture:** Draft → Preview → Published with rollback capability.
+- **Public Isolation:** Public visitors only receive published content via `/api/v1/content/landing`. Draft content requires authenticated platform staff authorization.
+- **Sanitization & Safety:** Structured JSON model prevents script/HTML injection. Markdown is sanitized and verified.
+- **Pricing Content:** Marketing/illustrative pricing tiers on landing page are CMS content only and completely decoupled from tenant billing plans or SaaS subscriptions.
+
+## 10. Tenant Isolation (Defense-in-Depth)
+
+1. **ORM Layer (`backend/app/core/tenant_context.py`):**
+   - Central `ContextVar` tracks active tenant ID.
+   - `do_orm_execute` event automatically injects `with_loader_criteria` for all `TenantMixin` entities.
+   - Unscoped queries in strict context fail closed with `MissingTenantContextError` (preventing accidental cross-tenant data leakage).
+2. **Database Engine Layer (PostgreSQL Row Level Security):**
+   - Migration `0032_tenant_row_level_security.py` applies `ENABLE ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY` across 14 sensitive tenant tables.
+   - Policy: `organization_id = NULLIF(current_setting('app.current_organization_id', true), '') OR current_setting('app.current_organization_id', true) = '__SYSTEM__'`.
+   - Local setting applied per transaction via `SELECT set_config('app.current_organization_id', ..., true)`.
+
+## 11. Migration Sequence & Database Integrity
+
+1. `0026_platform_staff_and_sessions.py`: Staff tables, TOTP secrets, session revocation.
+2. `0027_platform_audit_log.py`: Platform audit logging table.
+3. `0028_platform_audit_immutability.py`: PostgreSQL triggers and privilege revocation for audit immutability.
+4. `0029_platform_lifecycle_metadata.py`: Organization lifecycle columns (`status_reason`, `jobs_paused`, `deletion_scheduled_for`).
+5. `0030_landing_page_cms.py`: CMS sections, draft/published versions, rollback history.
+6. `0031_tenant_access_grants.py`: Access grant requests, approvals, token tracking, emergency flags.
+7. `0032_tenant_row_level_security.py`: Row Level Security policies and enforcement across sensitive tenant tables.
+
