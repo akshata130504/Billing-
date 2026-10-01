@@ -172,13 +172,16 @@ def _grant_context(request: Request, token: str, db: Session, *, enforce_scope: 
     )
 
 
-def get_current_context(
+async def get_current_context(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> CurrentContext:
     if credentials is not None and credentials.scheme.lower() == "bearer" and peek_token_type(credentials.credentials) == GRANT_TOKEN_TYPE:
-        return _grant_context(request, credentials.credentials, db)
+        ctx = _grant_context(request, credentials.credentials, db)
+        from backend.app.core.tenant_context import set_tenant_context
+        set_tenant_context(ctx.organization_id)
+        return ctx
     user = get_current_user(credentials, db)
     org_id = getattr(user, "_token_org_id", None)
     stmt = select(Membership).where(
@@ -204,7 +207,7 @@ def get_current_context(
     )
 
 
-def require_grant_context(
+async def require_grant_context(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     db: Session = Depends(get_db),
@@ -212,7 +215,10 @@ def require_grant_context(
     """Only a valid grant token (the platform-access session/exit endpoints). Tenant users get 401."""
     if credentials is None or credentials.scheme.lower() != "bearer" or peek_token_type(credentials.credentials) != GRANT_TOKEN_TYPE:
         raise UnauthorizedError("Platform access token required.")
-    return _grant_context(request, credentials.credentials, db, enforce_scope=False)
+    ctx = _grant_context(request, credentials.credentials, db, enforce_scope=False)
+    from backend.app.core.tenant_context import set_tenant_context
+    set_tenant_context(ctx.organization_id)
+    return ctx
 
 
 def require_tenant_user(minimum: MemberRole) -> Callable[..., CurrentContext]:
@@ -223,6 +229,8 @@ def require_tenant_user(minimum: MemberRole) -> Callable[..., CurrentContext]:
             raise ForbiddenError("This action can only be performed by a member of this organization.")
         if not ctx.has_role(minimum):
             raise ForbiddenError(f"This action requires the {minimum.value} role or higher.")
+        from backend.app.core.tenant_context import set_tenant_context
+        set_tenant_context(ctx.organization_id)
         return ctx
 
     return dependency
@@ -234,6 +242,8 @@ def require_role(minimum: MemberRole) -> Callable[..., CurrentContext]:
     def dependency(ctx: CurrentContext = Depends(get_current_context)) -> CurrentContext:
         if not ctx.has_role(minimum):
             raise ForbiddenError(f"This action requires the {minimum.value} role or higher.")
+        from backend.app.core.tenant_context import set_tenant_context
+        set_tenant_context(ctx.organization_id)
         return ctx
 
     return dependency
