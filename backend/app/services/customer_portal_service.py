@@ -682,16 +682,18 @@ def activate_portal_account(
 def authenticate_portal_session(db: Session, token: str) -> CustomerPortalUser:
     """Validates session token and returns the authenticated customer portal user."""
     hashed_token = _hash_token(token)
-    session = (
-        db.scalars(
-            select(CustomerPortalSession)
-            .options(joinedload(CustomerPortalSession.user).joinedload(CustomerPortalUser.customer))
-            .where(
-                CustomerPortalSession.token.in_([hashed_token, token]),
-                CustomerPortalSession.is_revoked.is_(False),
+    from backend.app.core.tenant_context import set_tenant_context, system_context
+    with system_context():
+        session = (
+            db.scalars(
+                select(CustomerPortalSession)
+                .options(joinedload(CustomerPortalSession.user).joinedload(CustomerPortalUser.customer))
+                .where(
+                    CustomerPortalSession.token.in_([hashed_token, token]),
+                    CustomerPortalSession.is_revoked.is_(False),
+                )
             )
-        )
-    ).first()
+        ).first()
 
     if not session:
         raise UnauthorizedError("Invalid or expired portal session token.")
@@ -703,6 +705,7 @@ def authenticate_portal_session(db: Session, token: str) -> CustomerPortalUser:
     if expires_at and expires_at < utcnow():
         raise UnauthorizedError("Invalid or expired portal session token.")
 
+    set_tenant_context(session.user.organization_id)
     return session.user
 
 

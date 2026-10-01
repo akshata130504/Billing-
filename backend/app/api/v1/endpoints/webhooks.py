@@ -145,11 +145,14 @@ def _handle_payment_captured(db: Session, event: WebhookEvent, payload: Dict[str
     order_id = entity.get("order_id")
     if not order_id:
         raise ValueError("payment.captured without order_id")
-    payment = payment_service.find_by_order_id(db, order_id)
+    from backend.app.core.tenant_context import set_tenant_context, system_context
+    with system_context():
+        payment = payment_service.find_by_order_id(db, order_id)
     if payment is None:
         raise LookupError(f"no payment with gateway_order_id {order_id}")
     _check_org(event, payment)
     event.organization_id = payment.organization_id
+    set_tenant_context(payment.organization_id)
     payment = payment_service.lock_payment(db, payment)
     if payment.status not in (PaymentStatus.PENDING, PaymentStatus.FAILED):
         return  # already captured via razorpay-verify / checkout confirm or an earlier delivery
@@ -191,11 +194,14 @@ def _handle_payment_captured(db: Session, event: WebhookEvent, payload: Dict[str
 def _handle_payment_failed(db: Session, event: WebhookEvent, payload: Dict[str, Any]) -> None:
     entity = _entity(payload, "payment")
     order_id = entity.get("order_id")
-    payment = payment_service.find_by_order_id(db, order_id) if order_id else None
+    from backend.app.core.tenant_context import set_tenant_context, system_context
+    with system_context():
+        payment = payment_service.find_by_order_id(db, order_id) if order_id else None
     if payment is None:
         raise LookupError(f"no payment with gateway_order_id {order_id}")
     _check_org(event, payment)
     event.organization_id = payment.organization_id
+    set_tenant_context(payment.organization_id)
     payment = payment_service.lock_payment(db, payment)
     reason = entity.get("error_description") or entity.get("error_reason") or entity.get("error_code")
     payment_service.fail_gateway_payment(
@@ -230,14 +236,17 @@ def _handle_refund_processed(db: Session, event: WebhookEvent, payload: Dict[str
     if not refund_id:
         raise ValueError("refund.processed without refund id")
     gateway_payment_id = entity.get("payment_id")
-    payment = payment_service.find_by_gateway_payment_id(db, gateway_payment_id) if gateway_payment_id else None
-    if payment is None:
-        existing = payment_service.find_refund_by_gateway_id(db, refund_id)
-        if existing is None:
-            raise LookupError(f"no payment with gateway_payment_id {gateway_payment_id}")
-        payment = existing.payment
+    from backend.app.core.tenant_context import set_tenant_context, system_context
+    with system_context():
+        payment = payment_service.find_by_gateway_payment_id(db, gateway_payment_id) if gateway_payment_id else None
+        if payment is None:
+            existing = payment_service.find_refund_by_gateway_id(db, refund_id)
+            if existing is None:
+                raise LookupError(f"no payment with gateway_payment_id {gateway_payment_id}")
+            payment = existing.payment
     _check_org(event, payment)
     event.organization_id = payment.organization_id
+    set_tenant_context(payment.organization_id)
     # Lock the payment first so two deliveries of the same refund serialise here and
     # the second one sees the refund row the first one wrote.
     payment = payment_service.lock_payment(db, payment)
@@ -288,6 +297,8 @@ HANDLERS = {
 
 def _attributed_organization_id(db: Session, payload: Dict[str, Any]) -> Optional[str]:
     """Best-effort: which organization's Razorpay account sent this (unverified) event."""
+    from backend.app.core.tenant_context import system_context
+
     body = payload.get("payload") or {}
     for kind in ("payment", "refund", "order"):
         entity = (body.get(kind) or {}).get("entity") or {}
@@ -296,16 +307,17 @@ def _attributed_organization_id(db: Session, payload: Dict[str, Any]) -> Optiona
             return str(notes["organization_id"])
     payment_entity = (body.get("payment") or {}).get("entity") or {}
     order_id = payment_entity.get("order_id")
-    if order_id:
-        org = db.scalars(select(Payment.organization_id).where(Payment.gateway_order_id == order_id)).first()
-        if org:
-            return org
-    refund_entity = (body.get("refund") or {}).get("entity") or {}
-    pay_id = refund_entity.get("payment_id") or payment_entity.get("id")
-    if pay_id:
-        org = db.scalars(select(Payment.organization_id).where(Payment.gateway_payment_id == pay_id)).first()
-        if org:
-            return org
+    with system_context():
+        if order_id:
+            org = db.scalars(select(Payment.organization_id).where(Payment.gateway_order_id == order_id)).first()
+            if org:
+                return org
+        refund_entity = (body.get("refund") or {}).get("entity") or {}
+        pay_id = refund_entity.get("payment_id") or payment_entity.get("id")
+        if pay_id:
+            org = db.scalars(select(Payment.organization_id).where(Payment.gateway_payment_id == pay_id)).first()
+            if org:
+                return org
     return None
 
 

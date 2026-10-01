@@ -241,9 +241,12 @@ def get_invoice(db: Session, organization_id: str, invoice_id: str) -> Invoice:
 
 
 def get_invoice_by_token(db: Session, token: str) -> Invoice:
-    invoice = db.scalars(_base_query().where(Invoice.public_token == token)).first()
+    from backend.app.core.tenant_context import set_tenant_context, system_context
+    with system_context():
+        invoice = db.scalars(_base_query().where(Invoice.public_token == token)).first()
     if invoice is None or invoice.status == InvoiceStatus.DRAFT:
         raise EntityNotFoundError("Invoice", token)
+    set_tenant_context(invoice.organization_id)
     return invoice
 
 

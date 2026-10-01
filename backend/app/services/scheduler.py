@@ -513,32 +513,34 @@ def run_billing_jobs(db: Session, *, today: Optional[date] = None) -> Dict[str, 
     `today` forces one date for every organization (tests / backfills); by default each
     organization is processed on its own local date (Organization.timezone).
     """
-    started_at = datetime.now(timezone.utc)
-    try:
-        acquired, lock_conn = _acquire_run_lock(db)
-    except Exception as exc:
-        _run_failed(exc, "acquire_lock")
-        raise
-    if not acquired:
-        logger.info("Billing jobs skipped: another run holds the scheduler lock")
-        return {
-            "renewals": 0,
-            "trials_converted": 0,
-            "marked_overdue": 0,
-            "reminders_sent": 0,
-            "skipped_locked": 1,
-        }
-    try:
+    from backend.app.core.tenant_context import system_context
+    with system_context():
+        started_at = datetime.now(timezone.utc)
         try:
-            counts, errors = _run_billing_jobs_unlocked(db, today)
+            acquired, lock_conn = _acquire_run_lock(db)
         except Exception as exc:
-            _run_failed(exc, "run")
+            _run_failed(exc, "acquire_lock")
             raise
-        counts["errors"] = errors
-        _record_heartbeat(db, started_at=started_at, counts=counts, errors=errors)
-        return counts
-    finally:
-        _release_run_lock(lock_conn)
+        if not acquired:
+            logger.info("Billing jobs skipped: another run holds the scheduler lock")
+            return {
+                "renewals": 0,
+                "trials_converted": 0,
+                "marked_overdue": 0,
+                "reminders_sent": 0,
+                "skipped_locked": 1,
+            }
+        try:
+            try:
+                counts, errors = _run_billing_jobs_unlocked(db, today)
+            except Exception as exc:
+                _run_failed(exc, "run")
+                raise
+            counts["errors"] = errors
+            _record_heartbeat(db, started_at=started_at, counts=counts, errors=errors)
+            return counts
+        finally:
+            _release_run_lock(lock_conn)
 
 
 def _job() -> None:

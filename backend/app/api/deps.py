@@ -164,6 +164,8 @@ def _grant_context(request: Request, token: str, db: Session, *, enforce_scope: 
         path_params=dict(request.path_params or {}), ip=client_ip(request),
         ua=(request.headers.get("user-agent") or "")[:400] or None, enforce_scope=enforce_scope,
     )
+    from backend.app.core.tenant_context import set_tenant_context
+    set_tenant_context(principal.organization.id)
     return CurrentContext(
         user=None, organization=principal.organization, membership=None, ip_address=client_ip(request),
         user_agent=(request.headers.get("user-agent") or "")[:400] or None, grant=principal,
@@ -191,6 +193,8 @@ def get_current_context(
     organization = db.get(Organization, membership.organization_id)
     if organization is None:
         raise UnauthorizedError("Organization no longer exists.")
+    from backend.app.core.tenant_context import set_tenant_context
+    set_tenant_context(organization.id)
     return CurrentContext(
         user=user,
         organization=organization,

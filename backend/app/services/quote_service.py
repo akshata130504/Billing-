@@ -1254,9 +1254,12 @@ def convert_quote_to_subscription(
 def get_public_quote_or_404(db: Session, token: str) -> Quote:
     if not token:
         raise EntityNotFoundError("Quote", token)
-    quote = db.scalars(_quote_query().where(Quote.public_token == token)).first()
+    from backend.app.core.tenant_context import set_tenant_context, system_context
+    with system_context():
+        quote = db.scalars(_quote_query().where(Quote.public_token == token)).first()
     if quote is None:
         raise EntityNotFoundError("Quote", token)
+    set_tenant_context(quote.organization_id)
     expire_stale_quotes(db, quote.organization_id, quote.id)
     db.refresh(quote)
     return quote

@@ -31,6 +31,9 @@ if database_url.startswith("sqlite"):
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+from backend.app.core.tenant_context import register_tenant_listeners  # noqa: E402
+register_tenant_listeners(Session)
+
 Base = declarative_base()
 
 

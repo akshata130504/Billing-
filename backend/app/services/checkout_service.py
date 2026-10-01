@@ -128,17 +128,22 @@ def _lookup_session(db: Session, token: str) -> Optional[CheckoutSession]:
     response) cannot be replayed as a checkout link.
     """
     token_hash = _hash_token(token or "")
-    return db.scalars(
-        select(CheckoutSession)
-        .options(
-            joinedload(CheckoutSession.customer),
-            joinedload(CheckoutSession.invoice),
-            joinedload(CheckoutSession.plan),
-            joinedload(CheckoutSession.template),
-            joinedload(CheckoutSession.subscription),
-        )
-        .where(CheckoutSession.token == token_hash)
-    ).first()
+    from backend.app.core.tenant_context import set_tenant_context, system_context
+    with system_context():
+        session = db.scalars(
+            select(CheckoutSession)
+            .options(
+                joinedload(CheckoutSession.customer),
+                joinedload(CheckoutSession.invoice),
+                joinedload(CheckoutSession.plan),
+                joinedload(CheckoutSession.template),
+                joinedload(CheckoutSession.subscription),
+            )
+            .where(CheckoutSession.token == token_hash)
+        ).first()
+    if session is not None:
+        set_tenant_context(session.organization_id)
+    return session
 
 
 def _lock_session(db: Session, session: CheckoutSession) -> CheckoutSession:

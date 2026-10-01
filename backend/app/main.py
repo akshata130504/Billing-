@@ -194,6 +194,8 @@ def create_application() -> FastAPI:
         req_id = request.headers.get("X-Request-ID") or request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
         request.state.request_id = req_id
         token = correlation_id_ctx.set(req_id)
+        from backend.app.core.tenant_context import reset_tenant_context
+        reset_tenant_context()
         start_time = time.perf_counter()
         try:
             response = await call_next(request)
@@ -231,6 +233,7 @@ def create_application() -> FastAPI:
             )
             raise
         finally:
+            reset_tenant_context()
             correlation_id_ctx.reset(token)
 
 
