@@ -171,7 +171,7 @@ def test_every_console_route_requires_platform_authentication():
         return any(d.call is get_platform_context or depends_on_context(d) for d in dependant.dependencies)
 
     open_routes = {f"{API}/auth/login", f"{API}/auth/2fa", f"{API}/auth/refresh"}
-    platform_routes = [r for r in app.routes if isinstance(r, APIRoute) and r.path.startswith(API)]
+    platform_routes = [r for r in app.routes if isinstance(r, APIRoute) and r.path.startswith(f"{API}/")]
     assert len(platform_routes) >= 25
     unguarded = [r.path for r in platform_routes if r.path not in open_routes and not depends_on_context(r.dependant)]
     assert unguarded == []
@@ -182,7 +182,7 @@ def test_no_route_deletes_organizations_or_audit_or_creates_staff():
 
     from backend.app.main import app
 
-    routes = {(m, r.path) for r in app.routes if isinstance(r, APIRoute) and r.path.startswith(API) for m in r.methods}
+    routes = {(m, r.path) for r in app.routes if isinstance(r, APIRoute) and r.path.startswith(f"{API}/") for m in r.methods}
     assert not [p for m, p in routes if m in ("DELETE", "PUT", "PATCH") and "sessions" not in p]
     assert ("POST", f"{API}/staff") not in routes
     assert not [p for m, p in routes if "purge" in p or "impersonat" in p or "login-as" in p or p.endswith("/delete")]
