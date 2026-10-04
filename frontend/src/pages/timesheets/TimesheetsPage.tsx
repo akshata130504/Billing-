@@ -31,6 +31,7 @@ import { StatCard } from '../../components/common/StatCard';
 import { LoadingState } from '../../components/common/LoadingState';
 import { EmptyState } from '../../components/common/EmptyState';
 import { Modal } from '../../components/common/Modal';
+import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { formatMoney, formatDate, humanize } from '../../utils/format';
@@ -64,6 +65,8 @@ export function TimesheetsPage() {
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
   const [entryToReject, setEntryToReject] = useState<TimeEntryRead | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [entryToDelete, setEntryToDelete] = useState<TimeEntryRead | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -110,14 +113,18 @@ export function TimesheetsPage() {
     }
   };
 
-  const handleDeleteEntry = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this time entry?')) return;
+  const handleDeleteEntry = async () => {
+    if (!entryToDelete) return;
     try {
-      await timesheetService.delete(id);
+      setDeleting(true);
+      await timesheetService.delete(entryToDelete.id);
       showToast('success', 'Deleted', 'Time entry deleted');
+      setEntryToDelete(null);
       loadData();
     } catch (err: any) {
       showToast('error', 'Delete Failed', err.message || 'Failed to delete entry');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -507,7 +514,9 @@ export function TimesheetsPage() {
                                 variant="ghost"
                                 size="sm"
                                 className="text-xs text-rose-500 hover:text-rose-700 hover:bg-rose-50 px-2 py-1"
-                                onClick={() => handleDeleteEntry(entry.id)}
+                                onClick={() => setEntryToDelete(entry)}
+                                title="Delete Entry"
+                                aria-label="Delete time entry"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </Button>
@@ -547,6 +556,20 @@ export function TimesheetsPage() {
           initialCustomerId={customerIdParam}
         />
       )}
+
+      {/* Delete Confirmation */}
+      <ConfirmDialog
+        isOpen={entryToDelete !== null}
+        onClose={() => {
+          if (!deleting) setEntryToDelete(null);
+        }}
+        onConfirm={handleDeleteEntry}
+        title="Delete time entry"
+        description="Are you sure you want to delete this time entry? This cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        isLoading={deleting}
+      />
 
       {/* Reject Reason Modal */}
       {rejectModalOpen && entryToReject && (

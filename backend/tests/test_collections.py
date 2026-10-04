@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.app.core.tenant_context import tenant_context
 from backend.app.api.deps import CurrentContext
 from backend.app.core.exceptions import EntityNotFoundError, InvalidStateError, ValidationAppError
 from backend.app.models import (
@@ -73,7 +74,9 @@ def org_ctx(db: Session):
     db.refresh(customer)
 
     ctx = CurrentContext(user=user, organization=org, membership=membership, ip_address=None, user_agent=None)
-    return org, user, customer, ctx
+    # Like require_role() in a real request: everything after this runs in the org's tenant context.
+    with tenant_context(org.id):
+        yield org, user, customer, ctx
 
 
 def _make_invoice(db, ctx, customer, *, due_in_days, amount="1000.00", tax_rate="0.00"):

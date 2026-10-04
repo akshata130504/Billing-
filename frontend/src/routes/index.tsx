@@ -46,6 +46,8 @@ const CollectionsInvoiceDetailPage = lazyNamed(() => import('../pages/collection
 const PayInvoicePage = lazyNamed(() => import('../pages/public/PayInvoicePage'), 'PayInvoicePage');
 const PublicQuotePage = lazyNamed(() => import('../pages/public/PublicQuotePage'), 'PublicQuotePage');
 const LandingPage = lazyNamed(() => import('../pages/public/LandingPage'), 'LandingPage');
+// Rooman platform staff under an approved access grant (token handed over by the platform console).
+const PlatformAccessWorkspace = lazyNamed(() => import('../pages/platformAccess/PlatformAccessWorkspace'), 'PlatformAccessWorkspace');
 const PublicCheckoutPage = lazyNamed(() => import('../pages/public/PublicCheckoutPage'), 'PublicCheckoutPage');
 const CustomerLifecycleCinematicPage = lazyNamed(() => import('../pages/public/CustomerLifecycleCinematicPage'), 'CustomerLifecycleCinematicPage');
 const ActivityPage = lazyNamed(() => import('../pages/activity/ActivityPage'), 'ActivityPage');
@@ -92,9 +94,16 @@ const PortalActivationPage = lazyNamed(() => import('../pages/portal-customer/Po
 // Guards
 // ---------------------------------------------------------------------------
 
-/** Redirects unauthenticated users to /login, remembering where they wanted to go. */
+/** Redirects unauthenticated users to /login, remembering where they wanted to go.
+ *
+ * Also applies the organization lifecycle policy (docs/platform-administration-design.md §8),
+ * mirroring backend/app/api/deps.py `_check_org_active`:
+ * - pending_approval / rejected / deleted: a status screen only.
+ * - suspended: Owner and Admin keep read-only access under a banner; Finance and Viewer get a screen.
+ * - pending_deletion: the Owner keeps read-only access under a banner; everyone else gets a screen.
+ */
 export function ProtectedRoute({ children }: { children?: ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, organization, logout, refreshMe, hasRole } = useAuth();
   const location = useLocation();
 
   if (isLoading) {
@@ -113,7 +122,181 @@ export function ProtectedRoute({ children }: { children?: ReactNode }) {
       />
     );
   }
-  return children ? <>{children}</> : <Outlet />;
+
+  const content = children ? <>{children}</> : <Outlet />;
+  const onLogout = () => void logout();
+
+  switch (organization?.status) {
+    case 'pending_approval':
+      return <OrgPendingApprovalScreen organization={organization} onRefresh={() => void refreshMe()} onLogout={onLogout} />;
+    case 'rejected':
+      return <OrgRejectedScreen organization={organization} onLogout={onLogout} />;
+    case 'suspended':
+      if (hasRole('admin')) {
+        return (
+          <>
+            <OrgReadOnlyBanner
+              title="Your organization is suspended"
+              message="Your workspace is read-only until Rooman Billing reactivates it. No charges, renewals or reminder emails run while suspended."
+              reason={organization.status_reason}
+            />
+            {content}
+          </>
+        );
+      }
+      return (
+        <OrgLockedScreen
+          title="Organization Suspended"
+          message={`${organization.name} has been suspended by Rooman Billing administration. Contact your organization Owner.`}
+          onLogout={onLogout}
+        />
+      );
+    case 'pending_deletion':
+      if (hasRole('owner')) {
+        return (
+          <>
+            <OrgReadOnlyBanner
+              title="Your organization is scheduled for deletion"
+              message="Your workspace is read-only. You can still view and export your data."
+              reason={organization.status_reason}
+            />
+            {content}
+          </>
+        );
+      }
+      return (
+        <OrgLockedScreen
+          title="Organization Scheduled for Deletion"
+          message={`${organization.name} is scheduled for deletion. Contact your organization Owner.`}
+          onLogout={onLogout}
+        />
+      );
+    case 'deleted':
+      return <OrgLockedScreen title="Organization Closed" message={`${organization.name} is no longer active.`} onLogout={onLogout} />;
+    default:
+      return content;
+  }
+}
+
+/** Lets a user who belongs to other organizations leave a locked one without signing out. */
+function OtherOrganizations() {
+  const { organization, organizations, switchOrganization } = useAuth();
+  const others = organizations.filter((o) => o.id !== organization?.id);
+  if (others.length === 0) return null;
+  return (
+    <div className="mt-6 border-t border-slate-200 pt-4 text-left">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Switch to another organization</p>
+      <div className="mt-2 flex flex-col gap-2">
+        {others.map((o) => (
+          <Button key={o.id} variant="outline" className="w-full justify-start" onClick={() => void switchOrganization(o.id)}>
+            {o.name}
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function OrgReadOnlyBanner({ title, message, reason }: { title: string; message: string; reason?: string | null }) {
+  return (
+    <div role="status" className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+      <div className="mx-auto flex max-w-7xl items-start gap-2">
+        <ShieldOff className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        <p>
+          <span className="font-semibold">{title}.</span> {message}
+          {reason ? <span className="block text-amber-800">Reason: {reason}</span> : null}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function OrgPendingApprovalScreen({
+  organization,
+  onRefresh,
+  onLogout,
+}: {
+  organization: { name: string; slug: string };
+  onRefresh: () => void;
+  onLogout: () => void;
+}) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm text-center">
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-50 text-amber-600 border border-amber-200">
+          <AlertCircle className="h-7 w-7" />
+        </div>
+        <h1 className="text-xl font-bold text-slate-900">Your organization is pending approval from Rooman.</h1>
+        <p className="mt-2 text-sm text-slate-600">
+          Thank you for registering <span className="font-semibold text-slate-800">{organization.name}</span>.
+          Our platform team is reviewing your details. Normal billing and workspace operations will be unlocked as soon as your account is approved.
+        </p>
+        <div className="mt-6 flex flex-col gap-2">
+          <Button variant="primary" onClick={onRefresh}>
+            Check Approval Status
+          </Button>
+          <Button variant="outline" onClick={onLogout}>
+            Sign Out
+          </Button>
+        </div>
+        <OtherOrganizations />
+      </div>
+    </div>
+  );
+}
+
+function OrgRejectedScreen({
+  organization,
+  onLogout,
+}: {
+  organization: { name: string; status_reason?: string | null };
+  onLogout: () => void;
+}) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+      <div className="w-full max-w-md rounded-2xl border border-rose-200 bg-white p-8 shadow-sm text-center">
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-rose-50 text-rose-600 border border-rose-200">
+          <ShieldOff className="h-7 w-7" />
+        </div>
+        <h1 className="text-xl font-bold text-slate-900">Registration Not Approved</h1>
+        <p className="mt-2 text-sm text-slate-600">
+          Your organization registration for <span className="font-semibold text-slate-800">{organization.name}</span> was rejected by Rooman Billing.
+        </p>
+        {organization.status_reason && (
+          <div className="mt-4 rounded-lg bg-rose-50 border border-rose-200 p-3 text-left">
+            <p className="text-xs font-semibold text-rose-800 uppercase tracking-wide">Reason Provided</p>
+            <p className="mt-1 text-sm text-rose-900">{organization.status_reason}</p>
+          </div>
+        )}
+        <div className="mt-6">
+          <Button variant="outline" className="w-full" onClick={onLogout}>
+            Sign Out
+          </Button>
+        </div>
+        <OtherOrganizations />
+      </div>
+    </div>
+  );
+}
+
+function OrgLockedScreen({ title, message, onLogout }: { title: string; message: string; onLogout: () => void }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm text-center">
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-50 text-amber-600 border border-amber-200">
+          <ShieldOff className="h-7 w-7" />
+        </div>
+        <h1 className="text-xl font-bold text-slate-900">{title}</h1>
+        <p className="mt-2 text-sm text-slate-600">{message}</p>
+        <div className="mt-6">
+          <Button variant="outline" className="w-full" onClick={onLogout}>
+            Sign Out
+          </Button>
+        </div>
+        <OtherOrganizations />
+      </div>
+    </div>
+  );
 }
 
 /** Renders children only when the current member has at least `min` role. */
@@ -202,6 +385,7 @@ export function AppRoutes() {
       {/* Public: landing & hosted pages */}
       <Route path="/" element={<LandingPage />} />
       <Route path="/landing" element={<LandingPage />} />
+      <Route path="/platform-access" element={<PlatformAccessWorkspace />} />
       <Route path="/pay/:token" element={<PayInvoicePage />} />
       <Route path="/quote/:token" element={<PublicQuotePage />} />
       <Route path="/checkout/:token" element={<PublicCheckoutPage />} />

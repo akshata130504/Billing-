@@ -57,9 +57,9 @@ What the runtime role still needs, all verified:
 
 4. Check that `GET /api/v1/health/ready` returns 200. From `docker compose exec db psql -U rooman rooman_billing`, `SELECT usename, count(*) FROM pg_stat_activity GROUP BY 1;` should show `rooman_app` connections.
 
-**Rollback:** remove `APP_POSTGRES_*` from `.env.production` and run step 3 again. The role can stay in place.
+**Required in production.** There is no fallback to the owner role: `docker-compose.prod.yml` refuses to start `backend`/`scheduler` without `APP_POSTGRES_*`, and the API and scheduler refuse to start in production when the connected role is a superuser or has `BYPASSRLS` (those roles skip every row level security policy). To rotate the password, change `APP_POSTGRES_PASSWORD`, re-run `sh deploy/db-least-privilege.sh` and run step 3 again.
 
-`docker-compose.prod.yml` maps `POSTGRES_USER`/`PASSWORD` for `backend` and `scheduler` to `${APP_POSTGRES_USER:-${POSTGRES_USER}}`. It also passes the owner credentials to `backend` only, as `MIGRATION_POSTGRES_*`. The `scheduler` never receives them. The `db` and `backup` services keep using the owner role.
+`docker-compose.prod.yml` maps `POSTGRES_USER`/`PASSWORD` for `backend` and `scheduler` to `${APP_POSTGRES_USER:?...}` (required, no fallback). It also passes the owner credentials to `backend` only, as `MIGRATION_POSTGRES_*`. The `scheduler` never receives them. The `db` and `backup` services keep using the owner role.
 
 ### The SQL script
 
@@ -70,6 +70,7 @@ What the runtime role still needs, all verified:
 - `ALTER DEFAULT PRIVILEGES FOR ROLE <owner>` grants tables, sequences and functions created later by migrations to the runtime role automatically. This only covers objects created **by the owner role**, so always migrate as the owner.
 - Re-run it after restoring a dump from another cluster, or to rotate the runtime password.
 - For a managed database, run it with an admin account that is a member of the owner role and has `CREATEROLE`.
+- **Append-only exception:** after the table-wide grant it revokes `UPDATE, DELETE, TRUNCATE` on `platform_audit_logs`, so the runtime role keeps only `SELECT, INSERT` there. Migration 0028 also adds a trigger that rejects those statements from any role. See `docs/platform-console-deployment.md` section 4.
 
 The password is passed through the environment and executed through `\gexec`, so it is not echoed. Keep `log_statement` at its default `none` while running the script, or the server logs `ALTER ROLE ... PASSWORD`.
 

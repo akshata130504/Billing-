@@ -303,6 +303,17 @@ def _customer_or_404(db: Session, organization_id: str, customer_id: str) -> Cus
 # --- mutations ---------------------------------------------------------------------------------------
 
 
+def _ensure_expiry_after_issue(issue_dt: Optional[date], expiry_dt: Optional[date]) -> None:
+    """Validate the *effective* dates (stored values merged with the request).
+
+    The request schemas only compare the two dates when both are sent; a request that
+    changes just one of them must still be checked against the other's stored/default value.
+    """
+    if issue_dt and expiry_dt and expiry_dt <= issue_dt:
+        message = "Expiry date must be after the issue date."
+        raise ValidationAppError(message, {"fields": {"expiry_date": message}})
+
+
 def create_quote(db: Session, ctx: CurrentContext, data: QuoteCreate) -> Quote:
     today = timezones.org_today(ctx.organization)
     # The schema only rejects dates in the past everywhere on Earth; "the past" is the
@@ -316,6 +327,7 @@ def create_quote(db: Session, ctx: CurrentContext, data: QuoteCreate) -> Quote:
     supply = gst.resolve_supply(ctx.organization, customer)
     totals = compute_quote_totals(data.items, data.discount_pct, supply=supply)
     issue_dt = data.issue_date or timezones.org_today(ctx.organization)
+    _ensure_expiry_after_issue(issue_dt, data.expiry_date)
     validity_days = None
     if issue_dt and data.expiry_date:
         diff = (data.expiry_date - issue_dt).days
@@ -364,6 +376,11 @@ def update_quote(db: Session, ctx: CurrentContext, quote_id: str, data: QuoteUpd
     changes = data.model_dump(exclude_unset=True)
     if not changes:
         return quote
+    # Validate the merged dates before mutating anything (one side may come from storage).
+    _ensure_expiry_after_issue(
+        changes.get("issue_date") or quote.issue_date,
+        changes["expiry_date"] if "expiry_date" in changes else quote.expiry_date,
+    )
     before = audit.snapshot(quote, QUOTE_SNAPSHOT_FIELDS)
     before_pricing = (quote.customer_id, quote.currency, D(quote.discount_pct), D(quote.subtotal), D(quote.total))
 
@@ -1254,9 +1271,12 @@ def convert_quote_to_subscription(
 def get_public_quote_or_404(db: Session, token: str) -> Quote:
     if not token:
         raise EntityNotFoundError("Quote", token)
-    quote = db.scalars(_quote_query().where(Quote.public_token == token)).first()
+    from backend.app.core.tenant_context import set_tenant_context, system_context
+    with system_context():
+        quote = db.scalars(_quote_query().where(Quote.public_token == token)).first()
     if quote is None:
         raise EntityNotFoundError("Quote", token)
+    set_tenant_context(quote.organization_id)
     expire_stale_quotes(db, quote.organization_id, quote.id)
     db.refresh(quote)
     return quote

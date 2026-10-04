@@ -216,7 +216,7 @@ def reactivate_cancelled_subscription(
     db: Session = Depends(get_db),
 ):
     """In-term reactivation of a dunning-cancelled subscription without changing billing cycle."""
-    sub = dunning_service.reactivate_dunning_cancelled_subscription(db, subscription_id, ctx.organization_id)
+    sub = dunning_service.reactivate_dunning_cancelled_subscription(db, subscription_id, ctx.organization_id, ctx=ctx)
     db.commit()
     return {"status": "success", "message": "Subscription reactivated successfully.", "subscription_id": sub.id}
 

@@ -26,6 +26,7 @@ from backend.app.services import audit
 from backend.app.services.invoice_service import mark_overdue, send_reminder
 from backend.app.services.subscription_service import renew_subscription
 from backend.app.services import timezones
+from backend.app.services.org_lifecycle import AutomationGuard, automation_allowed
 
 _scheduler = None
 
@@ -202,6 +203,9 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
 
     counts: Dict[str, int] = {"renewals": 0, "trials_converted": 0, "marked_overdue": 0, "reminders_sent": 0}
     ended = errors = 0
+    # Work not started because the organization is not ACTIVE or has jobs_paused
+    # (services/org_lifecycle.py). The check runs inside each work item's own transaction.
+    skipped_inactive = 0
 
     # (a) scheduled subscription changes due today - BEFORE renewals, so an end-of-term
     # change moves the subscription onto the new plan before its renewal invoice is built.
@@ -210,7 +214,9 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
         try:
             from backend.app.services.subscription_change_service import execute_due_scheduled_changes
 
-            applied = execute_due_scheduled_changes(db, organization_id=oid, today=day)
+            guard = AutomationGuard(db, oid)
+            applied = execute_due_scheduled_changes(db, organization_id=oid, today=day, guard=guard)
+            skipped_inactive += guard.refused
             scheduled_changes_applied += len(applied)
             db.commit()
         except Exception as exc:
@@ -227,7 +233,9 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
         try:
             from backend.app.services.trial_service import evaluate_expiring_trials
 
-            stats = evaluate_expiring_trials(db, today=day, org_id=oid, commit=True)
+            guard = AutomationGuard(db, oid)
+            stats = evaluate_expiring_trials(db, today=day, org_id=oid, commit=True, guard=guard)
+            skipped_inactive += guard.refused
             db.commit()
             for key, value in stats.items():
                 trial_stats[key] = trial_stats.get(key, 0) + int(value or 0)
@@ -261,6 +269,10 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
             day = local_today(sub.organization_id)
             if sub.next_billing_date is None or sub.next_billing_date > day:
                 continue
+            if not automation_allowed(db, sub.organization_id):
+                skipped_inactive += 1
+                db.rollback()
+                continue
             try:
                 if _finalize_usage_before_renewal(db, sub):
                     usage_finalized += 1
@@ -272,6 +284,12 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
                 sub = _load_subscription(db, sid)
                 if sub is None:
                     continue
+            # Usage finalization commits (or rolled back above), which releases the lock:
+            # re-check in the transaction that builds and commits the renewal invoice.
+            if not automation_allowed(db, sub.organization_id):
+                skipped_inactive += 1
+                db.rollback()
+                continue
             outcome = renew_subscription(db, sub, actor_label=audit.SYSTEM_ACTOR, only_if_due=True, today=day)
             db.commit()
             if outcome == "renewed":
@@ -298,6 +316,10 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
             inv = _load_invoice(db, iid)
             day = local_today(inv.organization_id) if inv is not None else None
             if inv is not None and inv.due_date < day:
+                if not automation_allowed(db, inv.organization_id):
+                    skipped_inactive += 1
+                    db.rollback()
+                    continue
                 if mark_overdue(db, inv, actor_label=audit.SYSTEM_ACTOR, today=day):
                     counts["marked_overdue"] += 1
             db.commit()
@@ -322,6 +344,10 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
         try:
             inv = _load_invoice(db, iid)
             if inv is not None:
+                if not automation_allowed(db, inv.organization_id):
+                    skipped_inactive += 1
+                    db.rollback()
+                    continue
                 send_reminder(db, inv, actor_label=audit.SYSTEM_ACTOR, commit=False)
                 counts["reminders_sent"] += 1
             db.commit()
@@ -337,7 +363,9 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
         try:
             from backend.app.services.dunning_service import execute_dunning_retries
 
-            res = execute_dunning_retries(db, oid)
+            guard = AutomationGuard(db, oid)
+            res = execute_dunning_retries(db, oid, guard=guard)
+            skipped_inactive += guard.refused
             dunning_recovered += res.get("recovered_count", 0)
             db.commit()
         except Exception as exc:
@@ -353,7 +381,11 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
         try:
             from backend.app.services.expense_service import process_due_recurring_expenses
 
-            recurring_expenses_processed += process_due_recurring_expenses(db, today=day, organization_id=oid)
+            guard = AutomationGuard(db, oid)
+            recurring_expenses_processed += process_due_recurring_expenses(
+                db, today=day, organization_id=oid, guard=guard
+            )
+            skipped_inactive += guard.refused
             db.commit()
         except Exception as exc:
             errors += 1
@@ -361,6 +393,7 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
             db.rollback()
             _step_failed("recurring_expenses", exc, organization_id=oid)
     counts["recurring_expenses_processed"] = recurring_expenses_processed
+    counts["skipped_org_inactive"] = skipped_inactive
 
     # (h) housekeeping owned by other services - independent, failure-isolated steps
     for key, name, fn in (
@@ -480,32 +513,34 @@ def run_billing_jobs(db: Session, *, today: Optional[date] = None) -> Dict[str, 
     `today` forces one date for every organization (tests / backfills); by default each
     organization is processed on its own local date (Organization.timezone).
     """
-    started_at = datetime.now(timezone.utc)
-    try:
-        acquired, lock_conn = _acquire_run_lock(db)
-    except Exception as exc:
-        _run_failed(exc, "acquire_lock")
-        raise
-    if not acquired:
-        logger.info("Billing jobs skipped: another run holds the scheduler lock")
-        return {
-            "renewals": 0,
-            "trials_converted": 0,
-            "marked_overdue": 0,
-            "reminders_sent": 0,
-            "skipped_locked": 1,
-        }
-    try:
+    from backend.app.core.tenant_context import system_context
+    with system_context():
+        started_at = datetime.now(timezone.utc)
         try:
-            counts, errors = _run_billing_jobs_unlocked(db, today)
+            acquired, lock_conn = _acquire_run_lock(db)
         except Exception as exc:
-            _run_failed(exc, "run")
+            _run_failed(exc, "acquire_lock")
             raise
-        counts["errors"] = errors
-        _record_heartbeat(db, started_at=started_at, counts=counts, errors=errors)
-        return counts
-    finally:
-        _release_run_lock(lock_conn)
+        if not acquired:
+            logger.info("Billing jobs skipped: another run holds the scheduler lock")
+            return {
+                "renewals": 0,
+                "trials_converted": 0,
+                "marked_overdue": 0,
+                "reminders_sent": 0,
+                "skipped_locked": 1,
+            }
+        try:
+            try:
+                counts, errors = _run_billing_jobs_unlocked(db, today)
+            except Exception as exc:
+                _run_failed(exc, "run")
+                raise
+            counts["errors"] = errors
+            _record_heartbeat(db, started_at=started_at, counts=counts, errors=errors)
+            return counts
+        finally:
+            _release_run_lock(lock_conn)
 
 
 def _job() -> None:
@@ -578,6 +613,10 @@ def run_forever() -> None:
         signal.signal(signal.SIGTERM, _handle_exit)
     except (ValueError, AttributeError):
         pass
+
+    from backend.app.core.database import assert_runtime_role_unprivileged
+
+    assert_runtime_role_unprivileged()
 
     # Ensure scheduler is enabled when running as a dedicated worker
     settings.SCHEDULER_ENABLED = True

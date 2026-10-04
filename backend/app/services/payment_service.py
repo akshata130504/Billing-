@@ -261,7 +261,11 @@ def _apply_filters(
     fields: Dict[str, str] = {}
     try:
         if status:
-            stmt = stmt.where(Payment.status == PaymentStatus(status))
+            # Comma-separated list (e.g. the Refunded tab: "refunded,partially_refunded").
+            wanted = [PaymentStatus(part.strip()) for part in status.split(",") if part.strip()]
+            if not wanted:
+                raise ValueError("empty status")
+            stmt = stmt.where(Payment.status == wanted[0]) if len(wanted) == 1 else stmt.where(Payment.status.in_(wanted))
     except ValueError:
         fields["status"] = "invalid"
     try:

@@ -171,7 +171,9 @@ export function PublicQuotePage() {
   // "This quote isn't ready yet" with no Accept / Decline buttons.
   const openForCustomer = isQuoteOpenForCustomer(quote.status);
   // The backend flips sent -> expired on read, but guard client-side too.
-  const actionable = openForCustomer && !expiredByDate;
+  // A suspended merchant's quote stays viewable but cannot be accepted or declined (backend 403).
+  const merchantUnavailable = quote.actions_unavailable_reason ?? null;
+  const actionable = openForCustomer && !expiredByDate && !merchantUnavailable;
 
   const meta: MetaItem[] = [
     { label: 'Issue date', value: formatDate(quote.issue_date) },
@@ -264,6 +266,14 @@ export function PublicQuotePage() {
         );
       case 'sent':
       case 'viewed':
+        if (merchantUnavailable && !expiredByDate) {
+          return (
+            <InfoPanel tone="warning" icon={<Clock className="w-5 h-5" />} title="Responses are temporarily unavailable">
+              <p>{merchantUnavailable}</p>
+              {contactLinks}
+            </InfoPanel>
+          );
+        }
         if (expiredByDate) {
           return (
             <InfoPanel tone="warning" icon={<Hourglass className="w-5 h-5" />} title="This quote has expired">

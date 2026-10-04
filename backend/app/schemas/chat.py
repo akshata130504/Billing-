@@ -6,10 +6,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.schemas.ai import AISourceReferenceOut
 
+# Bounds on what a client may send to Roomi: keeps request bodies (and the prompt
+# forwarded to the LLM provider, when configured) small and predictable.
+CHAT_MESSAGE_MAX_LENGTH = 3000
+CHAT_HISTORY_MAX_ITEMS = 12
+
 
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant", "system"]
-    content: str = Field(..., min_length=1)
+    content: str = Field(..., min_length=1, max_length=CHAT_MESSAGE_MAX_LENGTH)
     timestamp: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -22,10 +27,16 @@ class RoomiNavigationHint(BaseModel):
 
 
 class RoomiChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=3000, description="User question or instruction")
+    message: str = Field(
+        ..., min_length=1, max_length=CHAT_MESSAGE_MAX_LENGTH, description="User question or instruction"
+    )
     conversation_id: Optional[str] = Field(None, description="Client conversation tracking ID")
     current_route: Optional[str] = Field(None, max_length=200, description="Current page path e.g. /invoices")
-    history: List[ChatMessage] = Field(default_factory=list, description="Recent conversation turns for context")
+    history: List[ChatMessage] = Field(
+        default_factory=list,
+        max_length=CHAT_HISTORY_MAX_ITEMS,
+        description="Recent conversation turns for context",
+    )
 
 
 class RoomiChatResponse(BaseModel):

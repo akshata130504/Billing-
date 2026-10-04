@@ -9,6 +9,7 @@ import {
   Download,
   ArrowRight,
   ShieldCheck,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   portalCustomerService,
@@ -76,6 +77,12 @@ export const PortalDashboardPage: React.FC = () => {
 
   return (
     <div className="space-y-8">
+      {data.read_only_reason && (
+        <div role="alert" className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <AlertTriangle className="w-5 h-5 shrink-0 text-amber-600" />
+          <p>{data.read_only_reason}</p>
+        </div>
+      )}
       {/* Welcome Banner */}
       <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-indigo-900 rounded-2xl p-6 sm:p-8 text-white shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>

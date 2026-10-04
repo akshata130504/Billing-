@@ -127,6 +127,11 @@ describe('currencySymbol', () => {
   it('returns the locale symbol for known currencies', () => {
     expect(currencySymbol('INR')).toBe('₹');
     expect(currencySymbol('USD')).toBe('$');
+    // Same convention as the backend's pricing_engine._CURRENCY_SYMBOLS.
+    expect(currencySymbol('SGD')).toBe('S$');
+    expect(currencySymbol('CAD')).toBe('C$');
+    expect(currencySymbol('AUD')).toBe('A$');
+    expect(currencySymbol('AED')).toBe('AED');
     expect(currencySymbol()).toBe('₹');
   });
 

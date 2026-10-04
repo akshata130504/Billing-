@@ -107,9 +107,10 @@ describe('calculatePricePreview — currency formatting and dynamic symbols', ()
       { code: 'EUR', symbol: '€' },
       { code: 'GBP', symbol: '£' },
       { code: 'AED', symbol: 'AED' },
-      { code: 'SGD', symbol: 'SGD' },
+      // S$ / C$: the same convention as the backend (pricing_engine._CURRENCY_SYMBOLS).
+      { code: 'SGD', symbol: 'S$' },
       { code: 'AUD', symbol: 'A$' },
-      { code: 'CAD', symbol: 'CA$' },
+      { code: 'CAD', symbol: 'C$' },
     ];
 
     for (const { code, symbol } of currencies) {

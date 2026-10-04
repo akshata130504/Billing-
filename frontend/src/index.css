@@ -73,8 +73,26 @@
    Phone input (react-phone-number-input) - blend the library's country
    select + flag into our bordered field shell instead of its own box styles.
    ========================================================================== */
+.rooman-phone-input .PhoneInput {
+  /* Brand colours instead of the library's teal/black defaults. */
+  --PhoneInput-color--focus: var(--brand-500, #3f51c9);
+  --PhoneInputCountrySelect-marginRight: 0.5rem;
+  --PhoneInputCountrySelectArrow-color: #64748b;
+  --PhoneInputCountrySelectArrow-opacity: 0.6;
+  --PhoneInputCountryFlag-borderColor: rgba(15, 23, 42, 0.15);
+  --PhoneInputCountryFlag-borderColor--focus: var(--brand-500, #3f51c9);
+  align-items: center;
+}
+
 .rooman-phone-input .PhoneInputCountry {
   margin-right: 0.5rem;
+  align-self: stretch;
+  align-items: center;
+}
+
+.rooman-phone-input .PhoneInputCountryIcon {
+  border-radius: 2px;
+  overflow: hidden;
 }
 
 .rooman-phone-input .PhoneInputCountrySelect {
@@ -84,6 +102,7 @@
 .rooman-phone-input .PhoneInputInput {
   outline: none;
   box-shadow: none;
+  line-height: 1.25rem;
 }
 
 html.dark .rooman-phone-input .PhoneInputCountrySelectArrow {
