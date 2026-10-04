@@ -14,9 +14,7 @@ import backend.app.models  # noqa
 config = context.config
 
 if config.config_file_name is not None:
-    # Keep loggers configured before an in-process migration (tests, tooling) working;
-    # the alembic CLI has none, so this changes nothing there.
-    fileConfig(config.config_file_name, disable_existing_loggers=False)
+    fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
 

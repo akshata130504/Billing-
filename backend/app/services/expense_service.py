@@ -5,7 +5,7 @@ import os
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
@@ -801,18 +801,12 @@ def execute_recurring_expense(
 
 
 def process_due_recurring_expenses(
-    db: Session,
-    *,
-    today: Optional[date] = None,
-    organization_id: Optional[str] = None,
-    guard: Optional[Callable[[], bool]] = None,
+    db: Session, *, today: Optional[date] = None, organization_id: Optional[str] = None
 ) -> int:
     """Process active recurring expenses due on or before `today`.
 
     `today` defaults to each profile's organization-local date. `organization_id` limits the
     run to one organization (the scheduler calls this per organization with its local date).
-    `guard` (scheduler only, see org_lifecycle.AutomationGuard) is re-checked before every
-    expense, inside the transaction that commits it.
     """
     if today is not None:
         horizon = today
@@ -832,9 +826,6 @@ def process_due_recurring_expenses(
 
     processed = 0
     for rec in due_recs:
-        # Organization lifecycle: each expense commits on its own, so re-check per expense.
-        if guard is not None and not guard():
-            break
         try:
             run_day = today or (horizon if organization_id else timezones.org_today_for_id(db, rec.organization_id))
             exp = execute_recurring_expense(db, rec, today=run_day)

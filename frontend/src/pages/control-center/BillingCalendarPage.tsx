@@ -5,7 +5,6 @@ import { Card, CardContent } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
-import { Pagination } from '../../components/common/Pagination';
 import { LoadingState } from '../../components/common/LoadingState';
 import { ErrorState } from '../../components/common/ErrorState';
 import { controlCenterService, toApiError } from '../../services';
@@ -66,14 +65,11 @@ type CalendarCell =
   | { dayNumber: null; isCurrentMonth: false }
   | { dayNumber: number; isCurrentMonth: true; events: CalendarEvent[]; isToday: boolean };
 
-const AGENDA_PAGE_SIZE = 10;
-
 export function BillingCalendarPage() {
   const navigate = useNavigate();
   const [viewMonth, setViewMonth] = useState<Date>(() => startOfMonth(new Date()));
   const [selectedType, setSelectedType] = useState<'all' | CalendarEventType>('all');
   const [activeEvent, setActiveEvent] = useState<CalendarEvent | null>(null);
-  const [agendaPage, setAgendaPage] = useState(1);
 
   const selectedMonthLabel = monthLabelFormatter.format(viewMonth);
   const monthString = useMemo(() => toMonthString(viewMonth), [viewMonth]);
@@ -90,18 +86,6 @@ export function BillingCalendarPage() {
       .filter((e) => selectedType === 'all' || e.type === selectedType)
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [calendarQuery.data, selectedType]);
-
-  // Agenda-only paging (the month grid keeps every event). Clamp if the list shrinks.
-  const agendaTotalPages = Math.max(1, Math.ceil(filteredEvents.length / AGENDA_PAGE_SIZE));
-  const currentAgendaPage = Math.min(agendaPage, agendaTotalPages);
-  const agendaEvents = useMemo(
-    () =>
-      filteredEvents.slice(
-        (currentAgendaPage - 1) * AGENDA_PAGE_SIZE,
-        currentAgendaPage * AGENDA_PAGE_SIZE
-      ),
-    [filteredEvents, currentAgendaPage]
-  );
 
   const calendarDays = useMemo<CalendarCell[]>(() => {
     const year = viewMonth.getFullYear();
@@ -127,15 +111,9 @@ export function BillingCalendarPage() {
   }, [filteredEvents, viewMonth]);
 
   const goToPreviousMonth = () =>
-    {
-      setViewMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
-      setAgendaPage(1);
-    };
+    setViewMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
   const goToNextMonth = () =>
-    {
-      setViewMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
-      setAgendaPage(1);
-    };
+    setViewMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
 
   const goToEntity = (event: CalendarEvent) => {
     const href = entityHref(event.entity_type, event.entity_id);
@@ -241,10 +219,7 @@ export function BillingCalendarPage() {
           <button
             key={tab.key}
             type="button"
-            onClick={() => {
-              setSelectedType(tab.key as typeof selectedType);
-              setAgendaPage(1);
-            }}
+            onClick={() => setSelectedType(tab.key as typeof selectedType)}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
               selectedType === tab.key
                 ? 'bg-slate-900 text-white shadow-xs'
@@ -358,35 +333,35 @@ export function BillingCalendarPage() {
                     </span>
                   </div>
 
-                  <div className="space-y-3 max-h-[640px] overflow-y-auto pr-1">
+                  <div className="space-y-3">
                     {filteredEvents.length === 0 && (
                       <p className="text-xs text-slate-500 text-center py-6">
                         No scheduled events in {selectedMonthLabel}.
                       </p>
                     )}
-                    {agendaEvents.map((ev) => (
+                    {filteredEvents.map((ev) => (
                       <div
                         key={ev.id}
                         onClick={() => setActiveEvent(ev)}
-                        className="min-w-0 p-3 rounded-xl bg-slate-50 hover:bg-slate-100/80 border border-slate-200/80 transition-colors cursor-pointer space-y-1.5"
+                        className="p-3 rounded-xl bg-slate-50 hover:bg-slate-100/80 border border-slate-200/80 transition-colors cursor-pointer space-y-1.5"
                       >
-                        <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center justify-between">
                           <span className="text-[11px] font-bold text-slate-500">
                             {formatDate(ev.date)}
                           </span>
                           {getEventBadge(ev.type)}
                         </div>
 
-                        <h4 className="text-xs font-bold text-slate-900 leading-tight break-words">
+                        <h4 className="text-xs font-bold text-slate-900 leading-tight">
                           {ev.title}
                         </h4>
 
-                        <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500 pt-0.5">
-                          <span className="min-w-0 flex-1 truncate">
+                        <div className="flex items-center justify-between text-[11px] text-slate-500 pt-0.5">
+                          <span className="truncate max-w-[150px]">
                             {ev.customer?.display_name ?? '—'}
                           </span>
                           {ev.amount !== null && (
-                            <span className="shrink-0 font-bold text-slate-900 tabular-nums">
+                            <span className="font-bold text-slate-900 tabular-nums">
                               {formatMoney(ev.amount)}
                             </span>
                           )}
@@ -394,15 +369,6 @@ export function BillingCalendarPage() {
                       </div>
                     ))}
                   </div>
-                  {filteredEvents.length > AGENDA_PAGE_SIZE && (
-                    <Pagination
-                      page={currentAgendaPage}
-                      pageSize={AGENDA_PAGE_SIZE}
-                      total={filteredEvents.length}
-                      onPageChange={setAgendaPage}
-                      itemLabel="events"
-                    />
-                  )}
                 </CardContent>
               </Card>
             </div>

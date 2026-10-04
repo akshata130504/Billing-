@@ -9,12 +9,12 @@ describe('<PlanModal /> Currency Display and Dynamic Formatting', () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     const onClose = vi.fn();
 
-    render(<PlanModal isOpen={true} onClose={onClose} onSave={onSave} />);
+    const { container } = render(<PlanModal isOpen={true} onClose={onClose} onSave={onSave} />);
 
     // Initial state: Currency is INR (₹)
     expect(screen.getByText('Catalog Base Rate (₹)')).toBeInTheDocument();
 
-    const numberInputs = document.body.querySelectorAll('input[type="number"]');
+    const numberInputs = container.querySelectorAll('input[type="number"]');
     const basePriceInput = numberInputs[0] as HTMLInputElement;
     const previewQtyInput = numberInputs[numberInputs.length - 1] as HTMLInputElement;
 

@@ -26,7 +26,6 @@ from sqlalchemy import func, select, text
 
 from backend.app.core.config import settings
 from backend.app.core.database import SessionLocal, engine
-from backend.app.core.tenant_context import tenant_context
 from backend.app.main import app
 from backend.app.models import Invoice, InvoiceStatus, WebhookEvent
 from backend.app.models.credits import CreditApplication, CreditNote
@@ -55,14 +54,8 @@ KEY_SECRET = "rzp_conc_key_secret"
 # --- harness ------------------------------------------------------------------------------------------------------
 
 
-def run_concurrently(fn, n=2, timeout=60, organization_id=None):
-    """Run fn(i) in n threads released together; returns (results, errors) per thread.
-
-    A new thread starts with an empty context (no tenant), so tenant-scoped work would fail
-    closed. When the workers call services directly (not over HTTP, where the request sets it),
-    pass `organization_id`: each worker then enters that tenant's context for its own work and
-    leaves it when done - exactly what the request dependency does in production.
-    """
+def run_concurrently(fn, n=2, timeout=60):
+    """Run fn(i) in n threads released together; returns (results, errors) per thread."""
     barrier = threading.Barrier(n)
     results = [None] * n
     errors = [None] * n
@@ -70,11 +63,7 @@ def run_concurrently(fn, n=2, timeout=60, organization_id=None):
     def worker(i):
         try:
             barrier.wait(timeout=10)
-            if organization_id is None:
-                results[i] = fn(i)
-            else:
-                with tenant_context(organization_id):
-                    results[i] = fn(i)
+            results[i] = fn(i)
         except BaseException as exc:  # noqa: BLE001 - reported to the test
             errors[i] = exc
 
@@ -189,7 +178,7 @@ def test_concurrent_renewal_bills_period_once(tenant, db):
             return subscription_service.renew_subscription(s, loaded, only_if_due=True, today=date.today())
         return in_session(work)
 
-    results, errors = run_concurrently(renew, n=3, organization_id=tenant.organization.id)
+    results, errors = run_concurrently(renew, n=3)
     assert errors == [None] * 3, errors
     assert sorted(results) == ["renewed", "skipped", "skipped"]
     assert _invoice_count(sub.id) == 1
@@ -213,7 +202,7 @@ def test_concurrent_generate_period_invoice_issues_one(tenant, db):
             lambda s: subscription_service.generate_period_invoice(s, s.get(Subscription, sub.id), actor_label="system").id
         )
 
-    results, errors = run_concurrently(generate, n=3, organization_id=tenant.organization.id)
+    results, errors = run_concurrently(generate, n=3)
     ok = [r for r in results if r]
     assert len(ok) == 1, (results, errors)
     assert all(e is None or "already exists" in str(e) for e in errors), errors
@@ -238,7 +227,7 @@ def test_concurrent_capture_allocates_once(tenant, db):
             ).status
         return in_session(work)
 
-    results, errors = run_concurrently(capture, n=3, organization_id=tenant.organization.id)
+    results, errors = run_concurrently(capture, n=3)
     assert errors == [None] * 3, errors
     assert results == [PaymentStatus.SUCCEEDED] * 3
     with fresh() as s:
@@ -724,7 +713,7 @@ def test_concurrent_capture_of_two_gateway_payments_keeps_excess_unallocated(ten
             ).status
         return in_session(work)
 
-    results, errors = run_concurrently(capture, n=3, organization_id=tenant.organization.id)
+    results, errors = run_concurrently(capture, n=3)
     assert errors == [None] * 3, errors
     # The money really arrived three times: every payment is captured...
     assert results == [PaymentStatus.SUCCEEDED] * 3
@@ -794,7 +783,7 @@ def test_concurrent_record_invoice_payment_service_does_not_over_allocate(tenant
             ).id
         return in_session(work)
 
-    results, errors = run_concurrently(record, n=3, organization_id=tenant.organization.id)
+    results, errors = run_concurrently(record, n=3)
     assert _assert_not_over_applied(inv.id) == Decimal("1000.00"), (results, errors)
     assert len([r for r in results if r]) == 1, (results, errors)
     # Losers are clean business rejections - never a duplicate payment number (IntegrityError).
@@ -817,60 +806,9 @@ def test_concurrent_create_payment_service_does_not_over_allocate(tenant, db):
             return payment_service.create_payment(s, _ctx(s, tenant), data).id
         return in_session(work)
 
-    results, errors = run_concurrently(create, n=3, organization_id=tenant.organization.id)
+    results, errors = run_concurrently(create, n=3)
     assert _assert_not_over_applied(inv.id) == Decimal("1000.00"), (results, errors)
     assert len([r for r in results if r]) == 1, (results, errors)
     # Losers are clean business rejections - never a duplicate payment number (IntegrityError).
     from sqlalchemy.exc import IntegrityError
     assert not any(isinstance(e, IntegrityError) for e in errors), errors
-
-
-def _live_subscription_count(customer_id, plan_id):
-    with fresh() as s:
-        return s.scalar(
-            select(func.count()).select_from(Subscription).where(
-                Subscription.customer_id == customer_id,
-                Subscription.plan_id == plan_id,
-                Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]),
-            )
-        )
-
-
-def test_concurrent_resume_of_conflicting_paused_subscriptions_allows_one(tenant, db):
-    customer = tenant.customer()
-    _, plan = tenant.product_with_plan(unit_amount="1000.00")
-    paused = [
-        _due_subscription(db, tenant, customer, plan, status=SubscriptionStatus.PAUSED, days_ago=5)
-        for _ in range(2)
-    ]
-
-    def resume(i):
-        def work(s):
-            sub = s.get(Subscription, paused[i].id)
-            return subscription_service.resume_subscription(s, _ctx(s, tenant), sub).id
-        return in_session(work)
-
-    results, errors = run_concurrently(resume, n=2, organization_id=tenant.organization.id)
-    assert len([r for r in results if r]) == 1, (results, errors)
-    assert len([e for e in errors if e is not None]) == 1, (results, errors)
-    assert _live_subscription_count(customer.id, plan.id) == 1
-
-
-def test_concurrent_activation_of_conflicting_drafts_allows_one(tenant, db):
-    customer = tenant.customer()
-    _, plan = tenant.product_with_plan(unit_amount="1000.00")
-    drafts = [
-        _due_subscription(db, tenant, customer, plan, status=SubscriptionStatus.DRAFT, days_ago=0)
-        for _ in range(2)
-    ]
-
-    def activate(i):
-        def work(s):
-            sub = s.get(Subscription, drafts[i].id)
-            return subscription_service.activate_subscription(s, _ctx(s, tenant), sub).id
-        return in_session(work)
-
-    results, errors = run_concurrently(activate, n=2, organization_id=tenant.organization.id)
-    assert len([r for r in results if r]) == 1, (results, errors)
-    assert len([e for e in errors if e is not None]) == 1, (results, errors)
-    assert _live_subscription_count(customer.id, plan.id) == 1

@@ -31,9 +31,6 @@ if database_url.startswith("sqlite"):
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-from backend.app.core.tenant_context import register_tenant_listeners  # noqa: E402
-register_tenant_listeners(Session, db_engine=engine)
-
 Base = declarative_base()
 
 
@@ -44,47 +41,6 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
-
-
-class PrivilegedDatabaseRoleError(RuntimeError):
-    """The runtime database role could bypass row level security."""
-
-
-def runtime_role_privilege_problems(conn) -> list[str]:
-    """Attributes of the connected PostgreSQL role that defeat row level security."""
-    if conn.dialect.name != "postgresql":
-        return []
-    row = conn.execute(
-        text("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user")
-    ).one()
-    problems = []
-    if row[0]:
-        problems.append("SUPERUSER")
-    if row[1]:
-        problems.append("BYPASSRLS")
-    return problems
-
-
-def assert_runtime_role_unprivileged(db_engine=None) -> None:
-    """Refuse to run in production as a role that ignores row level security.
-
-    PostgreSQL superusers and BYPASSRLS roles skip every RLS policy, even FORCE ROW LEVEL
-    SECURITY, so tenant isolation would rest on the ORM filter alone. Production must connect
-    as the least-privilege runtime role (APP_POSTGRES_USER, deploy/db-least-privilege.sh).
-    """
-    if not settings.is_production:
-        return
-    db_engine = db_engine or engine
-    if db_engine.dialect.name != "postgresql":
-        return
-    with db_engine.connect() as conn:
-        problems = runtime_role_privilege_problems(conn)
-    if problems:
-        raise PrivilegedDatabaseRoleError(
-            "Refusing to start: the runtime database role has %s, which bypasses row level "
-            "security. Set APP_POSTGRES_USER/APP_POSTGRES_PASSWORD and run "
-            "deploy/db-least-privilege.sh (docs/database-security.md)." % " and ".join(problems)
-        )
 
 
 def check_db_health() -> Dict[str, Any]:

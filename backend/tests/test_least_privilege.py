@@ -29,8 +29,6 @@ pytestmark = pytest.mark.skipif(not LP_URL, reason="LEAST_PRIVILEGE_DATABASE_URL
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PASSWORD = "Str0ngPassw0rd!"
-# Tables the runtime role may only INSERT into and SELECT from (migration 0028, least_privilege.sql).
-APPEND_ONLY_TABLES = ("platform_audit_logs",)
 
 
 @pytest.fixture(scope="module")
@@ -86,11 +84,10 @@ def test_runtime_role_has_dml_on_every_table(lp_engine):
         missing = conn.execute(
             text(
                 "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
-                "WHERE n.nspname = 'public' AND c.relkind IN ('r','p') AND c.relname <> ALL(:append_only) AND NOT ("
+                "WHERE n.nspname = 'public' AND c.relkind IN ('r','p') AND NOT ("
                 " has_table_privilege(current_user, c.oid, 'SELECT') AND has_table_privilege(current_user, c.oid, 'INSERT')"
                 " AND has_table_privilege(current_user, c.oid, 'UPDATE') AND has_table_privilege(current_user, c.oid, 'DELETE'))"
-            ),
-            {"append_only": list(APPEND_ONLY_TABLES)},
+            )
         ).scalars().all()
         seq_missing = conn.execute(
             text(
@@ -102,49 +99,6 @@ def test_runtime_role_has_dml_on_every_table(lp_engine):
     assert seq_missing == []
 
 
-def test_runtime_role_has_only_select_insert_on_platform_audit_logs(lp_engine):
-    from sqlalchemy import text
-
-    with lp_engine.connect() as conn:
-        privs = {
-            p: conn.execute(text("SELECT has_table_privilege(current_user, 'platform_audit_logs', :p)"), {"p": p}).scalar()
-            for p in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "TRIGGER", "REFERENCES")
-        }
-    assert privs == {"SELECT": True, "INSERT": True, "UPDATE": False, "DELETE": False,
-                     "TRUNCATE": False, "TRIGGER": False, "REFERENCES": False}
-
-
-def test_runtime_role_cannot_rewrite_platform_audit_logs(lp_engine):
-    """INSERT and SELECT work; UPDATE, DELETE and TRUNCATE fail (privilege and trigger); the
-    runtime role cannot disable or drop the trigger. The platform audit service still writes."""
-    from sqlalchemy import text
-    from sqlalchemy.exc import DBAPIError
-    from sqlalchemy.orm import Session
-
-    from backend.app.services import platform_audit
-
-    with Session(lp_engine) as db:
-        entry = platform_audit.record(db, action="PLATFORM_LP_CHECK", result=platform_audit.SUCCESS,
-                                      email="lp@rooman.test", details={"note": "least privilege"})
-        db.commit()
-        entry_id = entry.id
-    for statement in (
-        "UPDATE platform_audit_logs SET action = 'TAMPERED' WHERE id = :i",
-        "DELETE FROM platform_audit_logs WHERE id = :i",
-        "TRUNCATE platform_audit_logs",
-        "ALTER TABLE platform_audit_logs DISABLE TRIGGER USER",
-        "DROP TRIGGER platform_audit_logs_no_update_delete ON platform_audit_logs",
-        "DROP FUNCTION platform_audit_logs_append_only() CASCADE",
-    ):
-        with lp_engine.connect() as conn:
-            with pytest.raises(DBAPIError) as exc_info:
-                conn.execute(text(statement), {"i": entry_id} if ":i" in statement else {})
-            conn.rollback()
-        assert _sqlstate(exc_info.value) == "42501", (statement, str(exc_info.value.orig))
-    with lp_engine.connect() as conn:
-        assert conn.execute(text("SELECT action FROM platform_audit_logs WHERE id = :i"), {"i": entry_id}).scalar() == "PLATFORM_LP_CHECK"
-
-
 def test_crud_on_core_tables(lp_engine):
     from sqlalchemy import select
     from sqlalchemy.orm import Session
@@ -152,11 +106,8 @@ def test_crud_on_core_tables(lp_engine):
     from backend.app.core.security import hash_password
     from backend.app.models import Customer, Membership, MemberRole, MembershipStatus, Organization, User
 
-    from backend.app.core.tenant_context import tenant_context
-
     suffix = uuid.uuid4().hex[:8]
     with Session(lp_engine) as db:
-        # Identity rows (not tenant-scoped by RLS), as signup creates them.
         org = Organization(name=f"LP Org {suffix}", slug=f"lp-org-{suffix}")
         db.add(org)
         db.flush()
@@ -164,33 +115,25 @@ def test_crud_on_core_tables(lp_engine):
         db.add(user)
         db.flush()
         db.add(Membership(organization_id=org.id, user_id=user.id, role=MemberRole.OWNER, status=MembershipStatus.ACTIVE))
-        # Read the id before commit: after it, `org.id` is expired and reloading it would open the
-        # next transaction (and set its RLS context) before tenant_context() below is entered.
-        org_id = org.id
+        cust = Customer(
+            organization_id=org.id, customer_number="CUS-000001", display_name="LP Customer",
+            currency="INR", payment_terms_days=30,
+        )
+        db.add(cust)
         db.commit()
 
-        # Tenant-scoped CRUD runs in that organization's context, as require_role() sets it for a
-        # real request; row level security admits exactly this organization's rows.
-        with tenant_context(org_id):
-            cust = Customer(
-                organization_id=org_id, customer_number="CUS-000001", display_name="LP Customer",
-                currency="INR", payment_terms_days=30,
-            )
-            db.add(cust)
-            db.commit()
+        got = db.scalars(select(Customer).where(Customer.organization_id == org.id)).one()
+        got.display_name = "LP Customer Renamed"
+        db.commit()
+        db.expire_all()
+        assert db.get(Customer, cust.id).display_name == "LP Customer Renamed"
 
-            got = db.scalars(select(Customer).where(Customer.organization_id == org.id)).one()
-            got.display_name = "LP Customer Renamed"
-            db.commit()
-            db.expire_all()
-            assert db.get(Customer, cust.id).display_name == "LP Customer Renamed"
-
-            db.delete(db.get(Customer, cust.id))
-            db.delete(db.scalars(select(Membership).where(Membership.user_id == user.id)).one())
-            db.delete(db.get(User, user.id))
-            db.delete(db.get(Organization, org.id))
-            db.commit()
-            assert db.get(Organization, org.id) is None
+        db.delete(db.get(Customer, cust.id))
+        db.delete(db.scalars(select(Membership).where(Membership.user_id == user.id)).one())
+        db.delete(db.get(User, user.id))
+        db.delete(db.get(Organization, org.id))
+        db.commit()
+        assert db.get(Organization, org.id) is None
 
 
 def test_select_for_update_and_skip_locked(lp_engine):

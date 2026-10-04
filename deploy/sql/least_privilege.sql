@@ -10,7 +10,6 @@
 --   app_role    what the API + scheduler connect as (default: rooman_app)
 --               DML on tables, USAGE/SELECT on sequences, EXECUTE on functions,
 --               USAGE on the schema. No CREATE, no DDL, no superuser.
---               Exception: append-only tables (platform_audit_logs) get SELECT + INSERT only.
 --
 -- Run as a superuser or as a member of owner_role that has CREATEROLE, connected to the
 -- application database. Parameters come from psql variables (-v) or, psql >= 15, from the
@@ -72,7 +71,7 @@ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'owner_role') \gexec
 BEGIN;
 
 SELECT format(
-    'CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS',
+    'CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION',
     :'app_role'
 )
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'app_role') \gexec
@@ -117,14 +116,6 @@ SELECT format('REVOKE TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA %I F
 SELECT format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', :'schema_name', :'app_role') \gexec
 SELECT format('GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA %I TO %I', :'schema_name', :'app_role') \gexec
 
--- ---- append-only tables ------------------------------------------------------------------
--- platform_audit_logs (migration 0028): the runtime role may only INSERT and SELECT. The table
--- also carries a trigger that rejects UPDATE/DELETE/TRUNCATE from any role; this REVOKE is the
--- second layer. It touches this one table only (the GRANT above re-adds DML on every table, so
--- the REVOKE must come after it). Skipped when the table does not exist yet (before 0027).
-SELECT format('REVOKE UPDATE, DELETE, TRUNCATE ON %I.platform_audit_logs FROM %I', :'schema_name', :'app_role')
-WHERE to_regclass(format('%I.platform_audit_logs', :'schema_name')) IS NOT NULL \gexec
-
 -- ---- future objects created by the owner (Alembic migrations) --------------------------
 SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I', :'owner_role', :'schema_name', :'app_role') \gexec
 SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I GRANT USAGE, SELECT ON SEQUENCES TO %I', :'owner_role', :'schema_name', :'app_role') \gexec
@@ -146,13 +137,3 @@ SELECT :'app_role' AS runtime_role,
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = :'schema_name' AND c.relkind IN ('r', 'p');
-
-SELECT :'app_role' AS runtime_role,
-       has_table_privilege(:'app_role', c.oid, 'SELECT') AS audit_select,
-       has_table_privilege(:'app_role', c.oid, 'INSERT') AS audit_insert,
-       has_table_privilege(:'app_role', c.oid, 'UPDATE') AS audit_update,
-       has_table_privilege(:'app_role', c.oid, 'DELETE') AS audit_delete,
-       has_table_privilege(:'app_role', c.oid, 'TRUNCATE') AS audit_truncate
-FROM pg_class c
-JOIN pg_namespace n ON n.oid = c.relnamespace
-WHERE n.nspname = :'schema_name' AND c.relname = 'platform_audit_logs';

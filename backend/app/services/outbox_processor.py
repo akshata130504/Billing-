@@ -30,7 +30,6 @@ from sqlalchemy.orm import Session
 from backend.app.core.logging import logger
 from backend.app.models.base import utcnow
 from backend.app.models.events import DomainEventType, OutboxEvent, OutboxStatus
-from backend.app.services import org_lifecycle
 
 EMAIL_SEND_EVENT = "email.send"
 WEBHOOK_DELIVER_EVENT = "webhook.deliver"
@@ -310,14 +309,6 @@ def _claim_batch(db: Session, organization_id: Optional[str], limit: int) -> Lis
     )
     if organization_id is not None:
         stmt = stmt.where(OutboxEvent.organization_id == organization_id)
-    # Events of suspended / pending-deletion / deleted / jobs-paused organizations stay queued
-    # (unclaimed, attempts untouched) so they never crowd out active tenants' events.
-    stmt = stmt.where(
-        or_(
-            OutboxEvent.organization_id.is_(None),
-            OutboxEvent.organization_id.in_(org_lifecycle.automation_allowed_org_ids()),
-        )
-    )
     stmt = stmt.order_by(OutboxEvent.created_at.asc()).limit(limit)
     if _is_postgres(db):
         stmt = stmt.with_for_update(skip_locked=True)
@@ -333,14 +324,6 @@ def _claim_batch(db: Session, organization_id: Optional[str], limit: int) -> Lis
 
 def _process_one(db: Session, event: OutboxEvent, max_attempts: int) -> bool:
     event_id = event.id
-    # Organization lifecycle: re-checked under the organization row lock in the transaction
-    # that dispatches and commits this event (the claim committed earlier). A refused event goes
-    # back to PENDING without using an attempt.
-    if event.organization_id and not org_lifecycle.automation_allowed(db, event.organization_id):
-        event.status = OutboxStatus.PENDING
-        event.locked_at = None
-        db.commit()
-        return False
     error: Optional[str] = None
     keep_changes = False
     try:

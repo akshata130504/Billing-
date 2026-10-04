@@ -11,8 +11,6 @@ import type {
 } from '../types/portal';
 
 export interface PortalDashboardData {
-  /** Set when the merchant is suspended: the portal is read-only. */
-  read_only_reason?: string | null;
   customer_name: string;
   customer_email: string | null;
   active_subscriptions_count: number;

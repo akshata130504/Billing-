@@ -37,7 +37,6 @@ from backend.app.schemas.portal import (
 )
 from backend.app.services import (
     customer_portal_service,
-    org_lifecycle,
     subscription_service,
     trial_service,
 )
@@ -46,16 +45,12 @@ from backend.app.services.invoice_pdf import render_invoice_pdf
 router = APIRouter()
 
 
-async def get_current_portal_user(
+def get_current_portal_user(
     x_portal_token: Optional[str] = Header(None, alias="X-Portal-Token"),
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ) -> CustomerPortalUser:
-    """Dependency for authenticating customer portal requests via portal session token.
-
-    async on purpose: the tenant context it sets (authenticate_portal_session) must live in the
-    request task so the sync endpoint, run in the threadpool afterwards, inherits it.
-    """
+    """Dependency for authenticating customer portal requests via portal session token."""
     token = x_portal_token
     if not token and authorization and authorization.startswith("Bearer "):
         token = authorization[7:].strip()
@@ -67,22 +62,9 @@ async def get_current_portal_user(
         )
 
     try:
-        user = customer_portal_service.authenticate_portal_session(db, token)
+        return customer_portal_service.authenticate_portal_session(db, token)
     except UnauthorizedError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
-    # Design §8: the portal is read-only for a suspended merchant and refused otherwise.
-    if not org_lifecycle.customer_pages_visible(db, user.organization_id):
-        raise org_lifecycle.OrganizationUnavailableError("This customer portal is not available.")
-    return user
-
-
-def get_portal_user_for_write(
-    user: CustomerPortalUser = Depends(get_current_portal_user),
-    db: Session = Depends(get_db),
-) -> CustomerPortalUser:
-    """Portal user for actions that change anything (cards, trials, profile): ACTIVE merchants only."""
-    org_lifecycle.assert_customer_actions_allowed(db, user.organization_id)
-    return user
 
 
 # --- Admin Portal Settings Endpoints ---
@@ -244,10 +226,6 @@ def download_signed_invoice_pdf(
     except Exception as exc:
         raise HTTPException(status_code=401, detail=str(exc))
 
-    # The HMAC-verified token names the organization: scope every lookup to it.
-    from backend.app.core.tenant_context import set_tenant_context
-
-    set_tenant_context(org_id)
     invoice = db.scalars(
         select(Invoice)
         .options(selectinload(Invoice.items), selectinload(Invoice.customer))
@@ -437,7 +415,7 @@ def list_portal_payment_methods(
 @router.patch("/payment-methods/{method_id}/default", summary="Set default payment method from customer portal")
 def set_default_portal_payment_method(
     method_id: str,
-    user: CustomerPortalUser = Depends(get_portal_user_for_write),
+    user: CustomerPortalUser = Depends(get_current_portal_user),
     db: Session = Depends(get_db),
 ):
     from backend.app.services import payment_method_service
@@ -466,7 +444,7 @@ def set_default_portal_payment_method(
 @router.delete("/payment-methods/{method_id}", summary="Remove saved payment method from customer portal")
 def delete_portal_payment_method(
     method_id: str,
-    user: CustomerPortalUser = Depends(get_portal_user_for_write),
+    user: CustomerPortalUser = Depends(get_current_portal_user),
     db: Session = Depends(get_db),
 ):
     from backend.app.services import payment_method_service
@@ -528,7 +506,7 @@ def list_portal_payments(
 def customer_portal_extend_trial(
     subscription_id: str,
     days: Optional[int] = Query(None, ge=1, le=30),
-    user: CustomerPortalUser = Depends(get_portal_user_for_write),
+    user: CustomerPortalUser = Depends(get_current_portal_user),
     db: Session = Depends(get_db),
 ):
     sub = db.scalars(
@@ -564,7 +542,7 @@ def customer_portal_extend_trial(
 @router.post("/subscriptions/{subscription_id}/trial/convert", summary="Customer portal trial early conversion")
 def customer_portal_convert_trial(
     subscription_id: str,
-    user: CustomerPortalUser = Depends(get_portal_user_for_write),
+    user: CustomerPortalUser = Depends(get_current_portal_user),
     db: Session = Depends(get_db),
 ):
     sub = db.scalars(
@@ -655,7 +633,7 @@ def get_portal_profile(
 @router.patch("/profile", response_model=Dict[str, Any], summary="Update customer portal profile contact information")
 def update_portal_profile(
     data: PortalProfileUpdateIn,
-    user: CustomerPortalUser = Depends(get_portal_user_for_write),
+    user: CustomerPortalUser = Depends(get_current_portal_user),
     db: Session = Depends(get_db),
 ):
     cust = db.scalars(

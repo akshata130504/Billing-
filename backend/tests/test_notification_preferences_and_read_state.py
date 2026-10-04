@@ -218,9 +218,7 @@ def test_read_state_isolated_across_users_and_orgs(client, db, tenant):
 
     # The same key in the other org is an independent row (unique per org/user/key).
     assert client.post(f"{API}/read-state", json={"action": "dismiss", "keys": [key]}, headers=owner_other_h).status_code == 200
-    from backend.app.core.tenant_context import system_context
-    with system_context():
-        rows = db.query(NotificationReadState).filter_by(user_id=tenant.owner.id, notification_key=key).all()
+    rows = db.query(NotificationReadState).filter_by(user_id=tenant.owner.id, notification_key=key).all()
     assert {r.organization_id for r in rows} == {tenant.organization.id, other.organization.id}
     first_org_row = next(r for r in rows if r.organization_id == tenant.organization.id)
     assert first_org_row.dismissed_at is None

@@ -31,12 +31,10 @@ POSTGRES_USER=rooman
 POSTGRES_PASSWORD=<STRONG_RANDOM_PASSWORD>
 POSTGRES_DB=rooman_billing
 DATABASE_URL=postgresql://rooman:<STRONG_RANDOM_PASSWORD>@db:5432/rooman_billing
-APP_POSTGRES_USER=rooman_app                      # REQUIRED runtime role, != POSTGRES_USER
-APP_POSTGRES_PASSWORD=<STRONG_RANDOM_PASSWORD_16+>  # REQUIRED
 REDIS_URL=redis://redis:6379/0
 ```
 
-Required: `APP_POSTGRES_USER`/`APP_POSTGRES_PASSWORD` make the app run as a DML-only `NOSUPERUSER NOBYPASSRLS` runtime role (so row level security applies) while migrations keep running as `POSTGRES_USER`. Create it with `sh deploy/db-least-privilege.sh`; the app refuses to start in production as a superuser/BYPASSRLS role. `POSTGRES_SSLMODE=verify-full` plus `POSTGRES_SSLROOTCERT` are **required** for a non-private DB host. `ENCRYPTION_KEYS` sets the keyring for stored secrets. See [`database-security.md`](database-security.md).
+Optional hardening: `APP_POSTGRES_USER`/`APP_POSTGRES_PASSWORD` make the app run as a DML-only runtime role while migrations keep running as `POSTGRES_USER`. `POSTGRES_SSLMODE=verify-full` plus `POSTGRES_SSLROOTCERT` are **required** for a non-private DB host. `ENCRYPTION_KEYS` sets the keyring for stored secrets. See [`database-security.md`](database-security.md).
 
 ### URLs, CORS, hosts & proxies
 ```env

@@ -142,8 +142,6 @@ class PortalDashboardOut(BaseModel):
     recent_invoices: List[Dict[str, Any]] = Field(default_factory=list)
     subscriptions: List[Dict[str, Any]] = Field(default_factory=list)
     saved_payment_methods: List[Dict[str, Any]] = Field(default_factory=list)
-    # Set when the merchant is suspended: the portal is read-only (no payments, card or plan changes).
-    read_only_reason: Optional[str] = None
 
 
 class PortalProfileUpdateIn(BaseModel):

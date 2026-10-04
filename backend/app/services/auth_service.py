@@ -53,7 +53,6 @@ from backend.app.models import (
     MemberRole,
     MembershipStatus,
     Organization,
-    OrganizationStatus,
     PasswordResetToken,
     PendingSignup,
     RefreshToken,
@@ -655,11 +654,7 @@ def verify_signup_otp(
     db.delete(pending)
     db.flush()
 
-    organization = Organization(
-        name=org_name,
-        slug=unique_slug(db, org_name),
-        status=OrganizationStatus.PENDING_APPROVAL,
-    )
+    organization = Organization(name=org_name, slug=unique_slug(db, org_name))
     db.add(organization)
     db.flush()
 
@@ -711,26 +706,6 @@ def verify_signup_otp(
             "slug": organization.slug,
             "email_verified": True,
             "claimed_invited_user": existing is not None,
-            "organization_status": organization.status.value,
-        },
-    )
-    from backend.app.services import platform_audit
-    platform_audit.record(
-        db,
-        action=platform_audit.ORGANIZATION_CREATED_PENDING_APPROVAL,
-        result=platform_audit.SUCCESS,
-        staff=None,
-        session_id=None,
-        ip_address=ip,
-        user_agent=user_agent,
-        organization=organization,
-        target_type="organization",
-        target_id=organization.id,
-        details={
-            "owner_email": user.email,
-            "owner_name": user.full_name,
-            "organization_name": organization.name,
-            "status": organization.status.value,
         },
     )
     _commit(db, "An account with this email or organization already exists.")

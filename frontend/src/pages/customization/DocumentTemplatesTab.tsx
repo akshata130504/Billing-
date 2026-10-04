@@ -12,7 +12,7 @@ import { customizationService } from '../../services/customizationService';
 import { toApiError } from '../../services/apiClient';
 import { formatRelative, humanize } from '../../utils/format';
 import { cn } from '../../utils/cn';
-import { DOCUMENT_TYPES, type DocumentTemplate, type DocumentTemplateUpdate, type DocumentType } from '../../types/customization';
+import { DOCUMENT_TYPES, type DocumentTemplate, type DocumentType } from '../../types/customization';
 import { TemplateModal } from './TemplateModal';
 import { TemplatePreviewModal } from './TemplatePreviewModal';
 import { ReadOnlyNotice, TabHeader, type Resource } from './shared';
@@ -30,8 +30,6 @@ export function DocumentTemplatesTab({ resource, canManage }: DocumentTemplatesT
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<DocumentTemplate | null>(null);
   const [previewing, setPreviewing] = useState<DocumentTemplate | null>(null);
-  // Unsaved editor values to preview (null = preview the saved template).
-  const [previewDraft, setPreviewDraft] = useState<DocumentTemplateUpdate | null>(null);
   const [deleting, setDeleting] = useState<DocumentTemplate | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -204,10 +202,7 @@ export function DocumentTemplatesTab({ resource, canManage }: DocumentTemplatesT
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => {
-                        setPreviewDraft(null);
-                        setPreviewing(t);
-                      }}
+                      onClick={() => setPreviewing(t)}
                       leadingIcon={<Eye className="w-3.5 h-3.5" />}
                       aria-label={`Preview ${t.name}`}
                     >
@@ -263,20 +258,10 @@ export function DocumentTemplatesTab({ resource, canManage }: DocumentTemplatesT
           setModalOpen(false);
           void reload();
         }}
-        onPreview={(t, draft) => {
-          setPreviewDraft(draft ?? null);
-          setPreviewing(t);
-        }}
+        onPreview={(t) => setPreviewing(t)}
       />
 
-      <TemplatePreviewModal
-        template={previewing}
-        draft={previewDraft}
-        onClose={() => {
-          setPreviewing(null);
-          setPreviewDraft(null);
-        }}
-      />
+      <TemplatePreviewModal template={previewing} onClose={() => setPreviewing(null)} />
 
       <ConfirmDialog
         isOpen={!!deleting}

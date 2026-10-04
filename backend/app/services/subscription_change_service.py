@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
@@ -633,14 +633,8 @@ def execute_due_scheduled_changes(
     db: Session,
     organization_id: Optional[str] = None,
     today: Optional[date] = None,
-    guard: Optional[Callable[[], bool]] = None,
 ) -> List[SubscriptionChange]:
-    """Applies scheduled subscription changes whose effective_date is on or before today.
-
-    `guard` (scheduler only, see org_lifecycle.AutomationGuard) is re-checked before every
-    change, inside the transaction that commits it; once it refuses, the remaining changes
-    stay scheduled.
-    """
+    """Applies scheduled subscription changes whose effective_date is on or before today."""
     target_date = today or (
         timezones.org_today_for_id(db, organization_id) if organization_id else timezones.utc_today()
     )
@@ -661,9 +655,6 @@ def execute_due_scheduled_changes(
     # change (e.g. credit-note/invoice creation) must not block, roll back, or
     # duplicate-bill any other due change in this run.
     for change in due_changes:
-        # Organization lifecycle: each change commits on its own, so re-check per change.
-        if guard is not None and not guard():
-            break
         try:
             sub = db.query(Subscription).filter(Subscription.id == change.subscription_id).first()
             if not sub or sub.status in (

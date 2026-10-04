@@ -22,7 +22,7 @@ from backend.app.models import (
 )
 from backend.app.schemas.common_refs import money_str
 from backend.app.schemas.public import PublicInvoice, RazorpayOrderIn, RazorpayOrderOut, RazorpayVerifyIn, RazorpayVerifyOut
-from backend.app.services import audit, invoice_service, org_lifecycle, payment_service, razorpay_gateway
+from backend.app.services import audit, invoice_service, payment_service, razorpay_gateway
 from backend.app.services.invoice_pdf import render_invoice_pdf
 from backend.app.services.money import q2
 from backend.app.services.numbering import next_number
@@ -35,8 +35,6 @@ MIN_PARTIAL_PAYMENT = Decimal("1.00")
 
 
 def _razorpay_public_config(db: Session, organization_id: str) -> Dict[str, Any]:
-    if not org_lifecycle.customer_actions_allowed(db, organization_id):
-        return {"enabled": False, "key_id": None, "unavailable_reason": org_lifecycle.CUSTOMER_UNAVAILABLE_MESSAGE}
     creds = razorpay_gateway.credentials_for(db, organization_id)
     enabled = razorpay_gateway.is_configured(creds)
     return {"enabled": enabled, "key_id": razorpay_gateway.public_key_id(creds) if enabled else None}
@@ -109,7 +107,6 @@ def _public_invoice(db: Session, invoice) -> Dict[str, Any]:
 @limiter.limit(public_rate_limit)
 def public_invoice(request: Request, token: str, db: Session = Depends(get_db)):
     invoice = invoice_service.get_invoice_by_token(db, token)
-    org_lifecycle.assert_customer_pages_visible(db, invoice.organization_id)
     return _public_invoice(db, invoice)
 
 
@@ -117,7 +114,6 @@ def public_invoice(request: Request, token: str, db: Session = Depends(get_db)):
 @limiter.limit(public_rate_limit)
 def public_invoice_pdf(request: Request, token: str, db: Session = Depends(get_db)):
     invoice = invoice_service.get_invoice_by_token(db, token)
-    org_lifecycle.assert_customer_pages_visible(db, invoice.organization_id)
     organization = db.get(Organization, invoice.organization_id)
     pdf = render_invoice_pdf(invoice, organization)
     return RawResponse(
@@ -131,7 +127,6 @@ def public_invoice_pdf(request: Request, token: str, db: Session = Depends(get_d
 @limiter.limit(public_action_rate_limit)
 def create_razorpay_order(request: Request, token: str, body: RazorpayOrderIn, db: Session = Depends(get_db)):
     invoice = invoice_service.get_invoice_by_token(db, token)
-    org_lifecycle.assert_customer_actions_allowed(db, invoice.organization_id)
     creds = razorpay_gateway.credentials_for(db, invoice.organization_id)
     if not razorpay_gateway.is_configured(creds):
         raise GatewayNotConfiguredError("razorpay")

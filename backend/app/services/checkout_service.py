@@ -56,7 +56,7 @@ from backend.app.schemas.checkout import (
     CheckoutSessionCreate,
     PublicCheckoutView,
 )
-from backend.app.services import audit, gst, invoice_service, org_lifecycle, payment_service, razorpay_gateway, timezones
+from backend.app.services import audit, gst, invoice_service, payment_service, razorpay_gateway, timezones
 from backend.app.services.gateways.registry import get_gateway_adapter
 from backend.app.services.money import D, LineInput, compute_totals, q2
 from backend.app.services.numbering import next_number
@@ -128,22 +128,17 @@ def _lookup_session(db: Session, token: str) -> Optional[CheckoutSession]:
     response) cannot be replayed as a checkout link.
     """
     token_hash = _hash_token(token or "")
-    from backend.app.core.tenant_context import set_tenant_context, system_context
-    with system_context():
-        session = db.scalars(
-            select(CheckoutSession)
-            .options(
-                joinedload(CheckoutSession.customer),
-                joinedload(CheckoutSession.invoice),
-                joinedload(CheckoutSession.plan),
-                joinedload(CheckoutSession.template),
-                joinedload(CheckoutSession.subscription),
-            )
-            .where(CheckoutSession.token == token_hash)
-        ).first()
-    if session is not None:
-        set_tenant_context(session.organization_id)
-    return session
+    return db.scalars(
+        select(CheckoutSession)
+        .options(
+            joinedload(CheckoutSession.customer),
+            joinedload(CheckoutSession.invoice),
+            joinedload(CheckoutSession.plan),
+            joinedload(CheckoutSession.template),
+            joinedload(CheckoutSession.subscription),
+        )
+        .where(CheckoutSession.token == token_hash)
+    ).first()
 
 
 def _lock_session(db: Session, session: CheckoutSession) -> CheckoutSession:
@@ -487,7 +482,6 @@ def get_public_checkout_view(db: Session, token: str) -> PublicCheckoutView:
     session = _lookup_session(db, token)
     if not session:
         raise NotFoundAppError("Checkout page not found or link is invalid.")
-    org_lifecycle.assert_customer_pages_visible(db, session.organization_id)
 
     now = utcnow()
     expires_at = session.expires_at
@@ -532,8 +526,7 @@ def get_public_checkout_view(db: Session, token: str) -> PublicCheckoutView:
     amount = session.amount
     if session.purpose == CheckoutSessionPurpose.INVOICE_PAYMENT and session.invoice is not None and session.status != CheckoutSessionStatus.SUCCESSFUL:
         amount = session.invoice.amount_due
-    merchant_available = org_lifecycle.customer_actions_allowed(db, session.organization_id)
-    if merchant_available and not is_expired and session.status not in (
+    if not is_expired and session.status not in (
         CheckoutSessionStatus.EXPIRED,
         CheckoutSessionStatus.SUCCESSFUL,
         CheckoutSessionStatus.CANCELLED,
@@ -546,11 +539,7 @@ def get_public_checkout_view(db: Session, token: str) -> PublicCheckoutView:
     gateway_available = bool(gateway_order_id and gateway_key_id)
     gateway_message = None
     if not gateway_available and D(amount) > 0 and session.status not in (CheckoutSessionStatus.SUCCESSFUL,) and not is_expired:
-        gateway_message = (
-            org_lifecycle.CUSTOMER_UNAVAILABLE_MESSAGE
-            if not merchant_available
-            else "Online payment is currently unavailable for this link. Please contact the merchant to complete your payment."
-        )
+        gateway_message = "Online payment is currently unavailable for this link. Please contact the merchant to complete your payment."
 
     return PublicCheckoutView(
         token=token,

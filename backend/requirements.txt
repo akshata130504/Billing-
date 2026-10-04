@@ -25,7 +25,7 @@ psycopg[binary]==3.3.4
 python-dotenv==1.2.2
 
 # Security
-PyJWT==2.15.0
+PyJWT==2.13.0
 bcrypt==4.3.0
 slowapi==0.1.10
 redis==5.3.1

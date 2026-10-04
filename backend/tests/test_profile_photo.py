@@ -33,19 +33,9 @@ def signup(client, **overrides):
     if requested.status_code != 200:
         return requested
     email = requested.json()["email"]
-    resp = client.post(
+    return client.post(
         f"{API}/auth/signup/verify-otp", json={"email": email, "otp": sent[email], "password": body["password"]}
     )
-    if resp.status_code in (200, 201):
-        org_id = resp.json()["me"]["organization"]["id"]
-        from backend.app.core.database import SessionLocal
-        from backend.app.models.identity import Organization, OrganizationStatus
-        with SessionLocal() as s:
-            o = s.get(Organization, org_id)
-            if o:
-                o.status = OrganizationStatus.ACTIVE
-                s.commit()
-    return resp
 
 
 def bearer(token: str) -> dict:

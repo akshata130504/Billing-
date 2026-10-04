@@ -48,12 +48,6 @@ export const catalogCpqService = {
     await apiClient.delete(`/catalog/offerings/${id}`);
   },
 
-  /** Reverse an archive (admin); idempotent. */
-  unarchiveOffering: async (id: string): Promise<OfferingOut> => {
-    const { data } = await apiClient.post<OfferingOut>(`/catalog/offerings/${id}/unarchive`);
-    return data;
-  },
-
   // --- Price Books ---
   listPriceBooks: async (params?: {
     search?: string;

@@ -258,13 +258,8 @@ def test_roomi_tenant_isolation(client, db):
     assert data_b["conversation_id"] != conv_id_a
     assert "9999.00" not in data_b["reply"]
 
-    # Confirm in DB that Tenant B's conversation is scoped to Tenant B. Look it up across all
-    # tenants (explicit system context) so a row stored under the wrong org would be found too.
-    from backend.app.core.tenant_context import system_context
-
-    with system_context():
-        conv_b = db.query(AIConversation).filter(AIConversation.id == data_b["conversation_id"]).first()
-    assert conv_b is not None
+    # Confirm in DB that Tenant B's conversation is scoped to Tenant B
+    conv_b = db.query(AIConversation).filter(AIConversation.id == data_b["conversation_id"]).first()
     assert conv_b.organization_id == tenant_b.organization.id
 
 
@@ -540,86 +535,3 @@ def test_roomi_conversations_are_private_to_their_user(client, tenant, auth_head
     )
     assert second.status_code == 200
     assert second.json()["conversation_id"] != conv_id
-
-
-# ---------------------------------------------------------------------------
-# Request size limits
-# ---------------------------------------------------------------------------
-def test_roomi_rejects_oversized_message(client, tenant, auth_headers):
-    res = client.post("/api/v1/chat/roomi", headers=auth_headers, json={"message": "a" * 3001})
-    assert res.status_code == 422
-
-
-def test_roomi_accepts_message_at_the_limit(client, tenant, auth_headers, monkeypatch):
-    monkeypatch.setattr(settings, "GEMINI_API_KEY", None)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    res = client.post("/api/v1/chat/roomi", headers=auth_headers, json={"message": "invoice " + "a" * 2992})
-    assert res.status_code == 200
-
-
-def test_roomi_rejects_too_many_history_items(client, tenant, auth_headers):
-    history = [{"role": "user", "content": f"turn {i}"} for i in range(13)]
-    res = client.post("/api/v1/chat/roomi", headers=auth_headers, json={"message": "Hello", "history": history})
-    assert res.status_code == 422
-
-
-def test_roomi_accepts_twelve_history_items(client, tenant, auth_headers, monkeypatch):
-    monkeypatch.setattr(settings, "GEMINI_API_KEY", None)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    history = [{"role": "user", "content": f"turn {i}"} for i in range(12)]
-    res = client.post("/api/v1/chat/roomi", headers=auth_headers, json={"message": "Hello", "history": history})
-    assert res.status_code == 200
-
-
-def test_roomi_rejects_oversized_history_item(client, tenant, auth_headers):
-    history = [{"role": "assistant", "content": "x" * 3001}]
-    res = client.post("/api/v1/chat/roomi", headers=auth_headers, json={"message": "Hello", "history": history})
-    assert res.status_code == 422
-
-
-# ---------------------------------------------------------------------------
-# Off-topic guardrail: decline and steer back (LLM prompt and deterministic path)
-# ---------------------------------------------------------------------------
-def test_roomi_llm_system_prompt_declines_unrelated_questions(monkeypatch):
-    from unittest.mock import MagicMock
-    from backend.app.services.roomi_service import _call_gemini
-
-    ctx = MagicMock()
-    ctx.role.value = "admin"
-    ctx.user.full_name = "Admin User"
-    ctx.organization.name = "Acme Org"
-    ctx.organization_id = "org-1"
-    seen = {}
-
-    class Ok:
-        status_code = 200
-
-        def json(self):
-            return {"candidates": [{"content": {"parts": [{"text": "hello"}]}}]}
-
-    def fake_post(self, url, *args, **kwargs):
-        seen["payload"] = kwargs.get("json") or {}
-        return Ok()
-
-    monkeypatch.setattr(httpx.Client, "post", fake_post)
-    _call_gemini("test-key", "What is the capital of France?", ctx, {}, [])
-    system_text = seen["payload"]["system_instruction"]["parts"][0]["text"]
-    assert "5. STAY ON TOPIC" in system_text
-    assert "politely decline" in system_text
-    assert "do NOT answer" in system_text
-    assert "steer them back" in system_text
-    # the old instruction told the model to answer trivia first — it must be gone
-    assert "answer their question concisely and accurately first" not in system_text
-
-
-def test_roomi_deterministic_path_declines_trivia(client, tenant, auth_headers, monkeypatch):
-    monkeypatch.setattr(settings, "GEMINI_API_KEY", None)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    for question in ("What is the capital of France?", "Can you write a poem about cats?"):
-        res = client.post("/api/v1/chat/roomi", headers=auth_headers, json={"message": question})
-        assert res.status_code == 200
-        reply = res.json()["reply"]
-        assert "Paris" not in reply
-        assert "Roses are red" not in reply
-        assert "outside what I can help with" in reply
-        assert "Roomi" in reply

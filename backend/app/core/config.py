@@ -77,26 +77,6 @@ def is_private_db_host(host: Optional[str]) -> bool:
     return addr.is_private or addr.is_loopback
 
 
-def normalize_origin(url: Optional[str]) -> Optional[str]:
-    """"scheme://host[:port]" in lower case (default ports dropped), or None if `url` is not a bare
-    http(s) origin (a path other than "/", a query, a fragment or credentials make it invalid)."""
-    if not url or not url.strip():
-        return None
-    parts = urlsplit(url.strip())
-    if parts.scheme not in ("http", "https") or not parts.hostname:
-        return None
-    if parts.path not in ("", "/") or parts.query or parts.fragment or parts.username or parts.password:
-        return None
-    try:
-        port = parts.port
-    except ValueError:
-        return None
-    host = parts.hostname.lower()
-    if port is None or (parts.scheme == "https" and port == 443) or (parts.scheme == "http" and port == 80):
-        return f"{parts.scheme}://{host}"
-    return f"{parts.scheme}://{host}:{port}"
-
-
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Rooman Billing"
     ENVIRONMENT: str = "development"  # development | test | staging | production
@@ -121,28 +101,6 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     INVITE_TOKEN_EXPIRE_HOURS: int = 72
     PASSWORD_RESET_EXPIRE_MINUTES: int = 60
-
-    # --- Platform administration (Rooman staff; separate from tenant auth) ------------------
-    # Signing key for platform access tokens (core/platform_security.py). MUST differ from
-    # SECRET_KEY. Empty = platform sign-in is disabled (the /platform/auth endpoints answer 503)
-    # and nothing else changes. Generate one with `openssl rand -hex 32`; never commit it.
-    PLATFORM_JWT_SECRET: str = ""
-    PLATFORM_ACCESS_TOKEN_EXPIRE_MINUTES: int = 10
-    PLATFORM_SESSION_IDLE_MINUTES: int = 30
-    PLATFORM_SESSION_MAX_HOURS: int = 8
-    PLATFORM_LOGIN_CHALLENGE_MINUTES: int = 5
-    # Secure flag on platform cookies. None = on in production-like environments only.
-    PLATFORM_COOKIE_SECURE: Optional[bool] = None
-    # Dedicated browser origin of the platform console, e.g. https://platform.example.com
-    # (local dev: http://platform.localhost:5174). Required together with PLATFORM_JWT_SECRET.
-    # Its HOSTNAME must differ from every tenant origin (browsers do not isolate cookies by port).
-    # Platform API paths answer only on this host, and this host answers only platform paths.
-    PLATFORM_APP_ORIGIN: str = ""
-    # How long a step-up (fresh TOTP) authorises sensitive platform actions. Capped at 15.
-    PLATFORM_STEP_UP_MINUTES: int = 15
-    # Waiting period between scheduling an organization's deletion and the earliest (future,
-    # separately approved) purge; cancellable by a Platform Administrator meanwhile.
-    PLATFORM_DELETION_WAITING_DAYS: int = 30
     PASSWORD_MIN_LENGTH: int = 10
     # Requests per minute allowed on credential endpoints (login, signup, reset), per client IP.
     AUTH_RATE_LIMIT: str = "10/minute"
@@ -151,10 +109,6 @@ class Settings(BaseSettings):
     # keep reads generous enough for a real customer refreshing a page, and writes tight.
     PUBLIC_RATE_LIMIT: str = "60/minute"
     PUBLIC_ACTION_RATE_LIMIT: str = "10/minute"
-    # Razorpay webhook receiver, per source IP. Generous enough for Razorpay's own bursts and
-    # retries; caps how fast an unauthenticated sender can fill webhook_events/audit_logs with
-    # rejected-signature rows.
-    WEBHOOK_RATE_LIMIT: str = "300/minute"
     # Distributed rate limiting storage URI (e.g. redis://redis:6379/0).
     # When empty or omitted, SlowAPI gracefully falls back to in-memory storage.
     REDIS_URL: str | None = None
@@ -200,8 +154,8 @@ class Settings(BaseSettings):
         if not hosts:
             if not self.is_production:
                 return ["*"]
-            for url in [self.FRONTEND_URL, *self.ALLOWED_ORIGINS, self.PLATFORM_APP_ORIGIN]:
-                host = urlsplit(url).hostname if url else None
+            for url in [self.FRONTEND_URL, *self.ALLOWED_ORIGINS]:
+                host = urlsplit(url).hostname
                 if host and host not in hosts:
                     hosts.append(host.lower())
         if "*" in hosts:
@@ -417,89 +371,6 @@ class Settings(BaseSettings):
         env = (self.ENVIRONMENT or "").strip().lower()
         return env in {"production", "prod", "staging", "stage"}
 
-    @property
-    def platform_auth_enabled(self) -> bool:
-        return bool((self.PLATFORM_JWT_SECRET or "").strip()) and bool(self.platform_origin)
-
-    @property
-    def platform_origin(self) -> Optional[str]:
-        """Normalised platform origin ("scheme://host[:port]"), or None when not configured."""
-        return normalize_origin(self.PLATFORM_APP_ORIGIN)
-
-    @property
-    def platform_netloc(self) -> Optional[str]:
-        """The Host header value the platform origin is served under (host[:non-default port])."""
-        origin = self.platform_origin
-        return origin.split("://", 1)[1] if origin else None
-
-    @property
-    def tenant_origins(self) -> List[str]:
-        found = []
-        for url in [self.FRONTEND_URL, *self.ALLOWED_ORIGINS]:
-            origin = normalize_origin(url)
-            if origin and origin not in found:
-                found.append(origin)
-        return found
-
-    @property
-    def platform_cookie_secure(self) -> bool:
-        if self.PLATFORM_COOKIE_SECURE is not None:
-            return self.PLATFORM_COOKIE_SECURE
-        return self.is_production
-
-    @model_validator(mode="after")
-    def validate_platform_settings(self) -> "Settings":
-        """A configured platform key must be strong and distinct from the tenant key (any env).
-
-        Unset is allowed everywhere: platform sign-in is simply disabled.
-        """
-        secret = (self.PLATFORM_JWT_SECRET or "").strip()
-        raw_origin = (self.PLATFORM_APP_ORIGIN or "").strip()
-        if bool(secret) != bool(raw_origin):
-            raise ValueError("PLATFORM_JWT_SECRET and PLATFORM_APP_ORIGIN must be configured together")
-        if raw_origin:
-            origin = normalize_origin(raw_origin)
-            if origin is None:
-                raise ValueError("PLATFORM_APP_ORIGIN must be an origin like https://platform.example.com (no path)")
-            if self.is_production and not origin.startswith("https://"):
-                raise ValueError("PLATFORM_APP_ORIGIN must be an https:// origin in production")
-            if self.is_production and self.PLATFORM_COOKIE_SECURE is False:
-                raise ValueError("PLATFORM_COOKIE_SECURE cannot be disabled in production")
-            if origin.startswith("https://") and self.PLATFORM_COOKIE_SECURE is False:
-                raise ValueError("PLATFORM_COOKIE_SECURE cannot be disabled for an https:// PLATFORM_APP_ORIGIN")
-            platform_host = urlsplit(origin).hostname
-            for tenant in self.tenant_origins:
-                if urlsplit(tenant).hostname == platform_host:
-                    raise ValueError(
-                        "PLATFORM_APP_ORIGIN must use a different hostname from the tenant app "
-                        f"({tenant}); a different port alone does not isolate cookies"
-                    )
-        if secret:
-            weak = (
-                len(secret) < 32
-                or len(set(secret)) < 8
-                or secret in _INSECURE_SECRET_KEYS
-                or any(p in secret.lower() for p in ("replace", "change-this", "example", "your-", "secret-key"))
-            )
-            if weak:
-                raise ValueError(
-                    "PLATFORM_JWT_SECRET must be a random string of at least 32 characters, not a placeholder"
-                )
-            if secret == (self.SECRET_KEY or "").strip():
-                raise ValueError("PLATFORM_JWT_SECRET must differ from SECRET_KEY")
-        for name, low, high in (
-            ("PLATFORM_ACCESS_TOKEN_EXPIRE_MINUTES", 1, 60),
-            ("PLATFORM_SESSION_IDLE_MINUTES", 5, 240),
-            ("PLATFORM_SESSION_MAX_HOURS", 1, 24),
-            ("PLATFORM_LOGIN_CHALLENGE_MINUTES", 1, 15),
-            ("PLATFORM_STEP_UP_MINUTES", 1, 15),
-            ("PLATFORM_DELETION_WAITING_DAYS", 7, 365),
-        ):
-            value = getattr(self, name)
-            if not low <= value <= high:
-                raise ValueError(f"{name} must be between {low} and {high}")
-        return self
-
     @model_validator(mode="after")
     def enforce_production_safety(self) -> "Settings":
         if self.is_production:
@@ -553,10 +424,6 @@ class Settings(BaseSettings):
                 problems.append("ALLOWED_HOSTS must list hostnames explicitly, not '*'")
             elif self.effective_allowed_hosts == list(INTERNAL_HOSTS):
                 problems.append("ALLOWED_HOSTS must be set (or derivable from FRONTEND_URL)")
-            if self.razorpay_enabled and not (self.RAZORPAY_WEBHOOK_SECRET or "").strip():
-                # Without it every webhook is rejected, so payments whose customer closes the
-                # browser before /verify (and refunds, disputes...) are never recorded.
-                problems.append("RAZORPAY_WEBHOOK_SECRET must be set when RAZORPAY_KEY_ID/RAZORPAY_KEY_SECRET are set")
             problems.extend(self._database_tls_problems())
             if problems:
                 raise ValueError(
@@ -602,7 +469,6 @@ class Settings(BaseSettings):
         """Mask sensitive secrets so logging or printing Settings never leaks credentials."""
         sensitive_fields = {
             "SECRET_KEY",
-            "PLATFORM_JWT_SECRET",
             "POSTGRES_PASSWORD",
             "RAZORPAY_KEY_SECRET",
             "RAZORPAY_WEBHOOK_SECRET",

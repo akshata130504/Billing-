@@ -11,10 +11,6 @@
 #   scheduler  same image, one instance, SCHEDULER_ENABLED=true - runs renewals /
 #              trial conversion / overdue marking / dunning. REQUIRED: nothing else runs them.
 #   frontend   nginx serving the SPA and proxying /api/ to backend:8000 (port 80)
-#   platform-web  nginx serving the Rooman staff (platform/Super Admin) console on its OWN origin
-#              (PLATFORM_APP_ORIGIN) and proxying only /api/v1/platform/ to the backend. Not
-#              published on a host port: the Caddy overlay (docker-compose.caddy.yml) routes
-#              PLATFORM_DOMAIN to it. Part of every release (same SHA tag as backend/frontend).
 #   backup     nightly pg_dump + uploads tarball, optional rclone offsite copy and
 #              webhook alert on failure (script: deploy/backup.sh)
 #
@@ -92,19 +88,15 @@ services:
       RUN_MIGRATIONS: "true"
       POSTGRES_SERVER: db
       POSTGRES_PORT: "5432"
-      # Least privilege (REQUIRED, docs/database-security.md): the API connects as the DML-only
-      # APP_POSTGRES_USER role while the entrypoint's Alembic step runs as the owner
-      # (POSTGRES_USER). The entrypoint unsets MIGRATION_* before gunicorn starts. The app
-      # refuses to start in production as a SUPERUSER/BYPASSRLS role (RLS would be ignored).
-      POSTGRES_USER: ${APP_POSTGRES_USER:?set APP_POSTGRES_USER (least-privilege runtime role, deploy/db-least-privilege.sh) in .env.production}
-      POSTGRES_PASSWORD: ${APP_POSTGRES_PASSWORD:?set APP_POSTGRES_PASSWORD in .env.production}
+      # Least privilege (opt-in, docs/database-security.md): with APP_POSTGRES_USER/PASSWORD
+      # set, the API connects as that DML-only role while the entrypoint's Alembic step runs
+      # as the owner (POSTGRES_USER). The entrypoint unsets MIGRATION_* before gunicorn
+      # starts. Unset = both use POSTGRES_USER (previous behaviour).
+      POSTGRES_USER: ${APP_POSTGRES_USER:-${POSTGRES_USER:?set POSTGRES_USER in .env.production}}
+      POSTGRES_PASSWORD: ${APP_POSTGRES_PASSWORD:-${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}}
       MIGRATION_POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env.production}
       MIGRATION_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      # Platform (staff) console boundary: the API answers /api/v1/platform/* only for this origin.
-      # Required so a release can never ship the console image without a matching backend.
-      PLATFORM_APP_ORIGIN: ${PLATFORM_APP_ORIGIN:?set PLATFORM_APP_ORIGIN (https://<platform-host>) in .env.production}
-      PLATFORM_JWT_SECRET: ${PLATFORM_JWT_SECRET:?set PLATFORM_JWT_SECRET (openssl rand -hex 32) in .env.production}
     volumes:
       - uploads_data:/app/backend/uploads
       # Expense receipts - private (never served by nginx), see expense_service._receipt_root.
@@ -143,8 +135,8 @@ services:
       POSTGRES_SERVER: db
       POSTGRES_PORT: "5432"
       # Runtime role only (see backend); the scheduler never needs the owner credentials.
-      POSTGRES_USER: ${APP_POSTGRES_USER:?set APP_POSTGRES_USER (least-privilege runtime role, deploy/db-least-privilege.sh) in .env.production}
-      POSTGRES_PASSWORD: ${APP_POSTGRES_PASSWORD:?set APP_POSTGRES_PASSWORD in .env.production}
+      POSTGRES_USER: ${APP_POSTGRES_USER:-${POSTGRES_USER:?set POSTGRES_USER in .env.production}}
+      POSTGRES_PASSWORD: ${APP_POSTGRES_PASSWORD:-${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     volumes:
       - uploads_data:/app/backend/uploads
@@ -243,8 +235,6 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_SUPPORT_EMAIL: ${VITE_SUPPORT_EMAIL:-}
-        # Origin of the platform console: the tenant app accepts the "Enter tenant" hand-off only from it.
-        VITE_PLATFORM_APP_ORIGIN: ${PLATFORM_APP_ORIGIN:?set PLATFORM_APP_ORIGIN (https://<platform-host>) in .env.production}
     # Pulled from GHCR by deploy/deploy-poll.sh in normal operation; `build:` above is
     # kept so `docker compose up -d --build` still works for a manual/local rebuild.
     image: ghcr.io/rooman-itsd/rooman-billing-web:${IMAGE_TAG:-latest}
@@ -266,34 +256,6 @@ services:
       start_period: 5s
     mem_limit: ${FRONTEND_MEM_LIMIT:-256m}
     cpus: ${FRONTEND_CPUS:-0.5}
-    logging: *default-logging
-
-  platform-web:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.platform
-      args:
-        # Origin of the TENANT app ("Enter tenant" opens it). REQUIRED, bare origin, no default.
-        VITE_TENANT_APP_ORIGIN: ${TENANT_APP_ORIGIN:?set TENANT_APP_ORIGIN (https://<tenant-host>, normally the origin of FRONTEND_URL) in .env.production}
-    # Pulled from GHCR by deploy/deploy-poll.sh at the SAME git-SHA tag as backend/frontend;
-    # `build:` above keeps `docker compose up -d --build` working for a manual rebuild.
-    image: ghcr.io/rooman-itsd/rooman-billing-platform-web:${IMAGE_TAG:-latest}
-    restart: unless-stopped
-    # Not published on a host port: only Caddy (docker-compose.caddy.yml) reaches it, as
-    # platform-web:80, for PLATFORM_DOMAIN. Never expose it on the tenant origin.
-    depends_on:
-      backend:
-        condition: service_healthy
-    # deploy/deploy-poll.sh waits for this to report healthy and rolls the release back if it
-    # does not, so a console that cannot start fails the release.
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-      start_period: 5s
-    mem_limit: ${PLATFORM_WEB_MEM_LIMIT:-128m}
-    cpus: ${PLATFORM_WEB_CPUS:-0.25}
     logging: *default-logging
 
 volumes:

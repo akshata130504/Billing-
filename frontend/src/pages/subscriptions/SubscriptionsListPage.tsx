@@ -82,11 +82,7 @@ export function SubscriptionsListPage() {
         page,
         page_size: 20,
       };
-      if (activeTab === 'draft') {
-        // The list renders pending_activation rows as drafts and the summary's draft_count
-        // includes them, so the Draft tab lists both statuses.
-        params.status = 'draft,pending_activation';
-      } else if (activeTab !== 'all') {
+      if (activeTab !== 'all') {
         params.status = activeTab as SubscriptionStatus;
       }
       if (searchQuery.trim()) {

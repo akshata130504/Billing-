@@ -13,18 +13,16 @@ URL = "/api/v1/credit-notes"
 
 
 def _note(tenant, customer, amount, *, currency="INR", issue=None, status=CreditNoteStatus.ISSUED):
-    from backend.app.core.tenant_context import tenant_context
-    with tenant_context(tenant.organization.id):
-        cn = credit_service.create_credit_note(
-            tenant.db,
-            organization_id=tenant.organization.id,
-            customer_id=customer.id,
-            lines=[{"description": "Adj", "amount": str(amount), "tax_rate_pct": "0"}],
-            currency=currency,
-            issue_date=issue,
-            status=status,
-        )
-        return cn
+    cn = credit_service.create_credit_note(
+        tenant.db,
+        organization_id=tenant.organization.id,
+        customer_id=customer.id,
+        lines=[{"description": "Adj", "amount": str(amount), "tax_rate_pct": "0"}],
+        currency=currency,
+        issue_date=issue,
+        status=status,
+    )
+    return cn
 
 
 def test_list_total_is_real_count_not_page_size(client, tenant):

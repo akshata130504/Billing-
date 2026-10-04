@@ -234,10 +234,10 @@ export function TrialsPage() {
         <Button
           variant="primary"
           size="md"
-          onClick={() => navigate('/subscriptions/new?trial=1')}
+          onClick={() => navigate('/subscriptions/new')}
           leadingIcon={<Repeat className="w-4 h-4" />}
         >
-          New Trial
+          New Trial / Subscription
         </Button>
       </div>
 

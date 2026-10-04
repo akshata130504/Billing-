@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Plus,
@@ -70,10 +70,6 @@ export const InvoiceFormPage: React.FC = () => {
   );
   const [adjustment, setAdjustment] = useState<number>(0);
 
-  // Per-row selection counter: a pricing response is applied only if the row's
-  // selection has not changed since the request was made.
-  const selectionTokens = useRef<number[]>([]);
-
   const [items, setItems] = useState<InvoiceLineItemIn[]>([
     {
       name: '',
@@ -86,9 +82,6 @@ export const InvoiceFormPage: React.FC = () => {
       pricing_explanation: '',
     },
   ]);
-
-  const itemsRef = useRef<InvoiceLineItemIn[]>([]);
-  itemsRef.current = items;
 
   useEffect(() => {
     loadInitialData();
@@ -141,176 +134,115 @@ export const InvoiceFormPage: React.FC = () => {
     }
   };
 
-  /**
-   * Ask the pricing engine for the unit rate of one line at a given quantity.
-   *
-   * The response is merged into the *latest* state via a functional update
-   * (never a stale copy of ``items``), and only when the row still refers to
-   * the same plan/offering and still carries the quantity that was priced.
-   * A late response for an older quantity is therefore ignored instead of
-   * overwriting what the user has typed since. Only rate/pricing fields are
-   * merged; a failed or zero-rate pricing call never blanks the existing rate.
-   */
-  const calculateLineItemPrice = async (
-    index: number,
-    planId: string | undefined,
-    qty: number,
-    token: number = selectionTokens.current[index] ?? 0
-  ) => {
-    const pid = planId;
+  const calculateLineItemPrice = async (index: number, planId?: string, qty?: number) => {
+    const targetItem = items[index];
+    if (!targetItem) return;
+    const pid = planId || targetItem.plan_id || targetItem.offering_id;
+    const quantity = qty !== undefined ? qty : targetItem.quantity;
+
     if (!pid) return;
-    const pricedQuantity = Number(qty) || 1;
 
     try {
       const calc = await planPricingService.calculatePrice({
         plan_id: pid,
-        quantity: pricedQuantity,
+        quantity: Number(quantity) || 1,
       });
 
-      setItems((prev) => {
-        const row = prev[index];
-        if (!row) return prev;
-        const rowPid = row.offering_id || row.plan_id;
-        // Stale response: the row now points at another item/selection or quantity.
-        if (
-          (selectionTokens.current[index] ?? 0) !== token ||
-          rowPid !== pid ||
-          (Number(row.quantity) || 1) !== pricedQuantity
-        ) {
-          return prev;
-        }
-        const returnedRate = Number(calc.unit_rate);
-        // Preserve existing rate unless pricing engine returned a positive rate
-        const effectiveRate = Number.isFinite(returnedRate) && returnedRate > 0 ? returnedRate : (row.rate ?? 0);
-        const next = [...prev];
-        next[index] = {
-          ...row,
-          rate: effectiveRate,
-          pricing_model: calc.pricing_model || row.pricing_model,
-          pricing_explanation: calc.pricing_explanation || row.pricing_explanation,
-        };
-        return next;
-      });
+      const updated = [...items];
+      if (!updated[index]) return;
+      const returnedRate = Number(calc.unit_rate);
+      // Preserve existing rate unless pricing engine returned a positive rate
+      const effectiveRate = returnedRate > 0 ? returnedRate : (updated[index].rate ?? 0);
+      updated[index] = {
+        ...updated[index],
+        rate: effectiveRate,
+        pricing_model: calc.pricing_model || updated[index].pricing_model,
+        pricing_explanation: calc.pricing_explanation || updated[index].pricing_explanation,
+      };
+      setItems(updated);
     } catch (err) {
       showToast('warning', 'Could not calculate price', toApiError(err).message);
     }
   };
 
   const handleItemChange = (index: number, field: keyof InvoiceLineItemIn, value: any) => {
-    const current = items[index];
-    if (!current) return;
-    setItems((prev) => {
-      if (!prev[index]) return prev;
-      const next = [...prev];
-      const prevRate = next[index].rate;
-      next[index] = { ...next[index], [field]: value };
-      // Never allow editing quantity or other non-rate fields to wipe out existing rate
-      if (field === 'quantity' && (next[index].rate === undefined || Number.isNaN(next[index].rate))) {
-        next[index].rate = prevRate ?? 0;
-      }
-      return next;
-    });
+    const updated = [...items];
+    const prevRate = updated[index]?.rate;
+    updated[index] = { ...updated[index], [field]: value };
+    // Never allow editing quantity or other non-rate fields to wipe out existing rate
+    if (field === 'quantity' && (updated[index].rate === undefined || Number.isNaN(updated[index].rate))) {
+      updated[index].rate = prevRate ?? 0;
+    }
+    setItems(updated);
 
-    const pid = current.offering_id || current.plan_id;
-    if (field === 'quantity' && pid) {
-      // Only recalculate for dynamic pricing models where rate varies by volume/tier.
-      // Backend models are lowercase ('flat', 'per_unit', 'tiered', ...), older
-      // rows may carry 'FLAT' — compare case-insensitively.
-      const itemModel = String(current.pricing_model || '').toLowerCase();
-      if (itemModel && itemModel !== 'flat' && itemModel !== 'per_unit') {
-        void calculateLineItemPrice(index, pid, Number(value));
+    if (field === 'quantity' && (updated[index].plan_id || updated[index].offering_id)) {
+      const itemModel = updated[index].pricing_model;
+      // Only recalculate for dynamic pricing models where rate varies by volume/tier
+      if (itemModel && itemModel !== 'FLAT' && itemModel !== 'per_unit') {
+        calculateLineItemPrice(index, updated[index].plan_id || updated[index].offering_id, value);
       }
     }
   };
 
-  /**
-   * Single place that builds a whole line from a selection (blank/custom, a
-   * plan, or a catalog offering). Everything item-specific is replaced so no
-   * data of the previously selected item can leak into the new one; only the
-   * quantity is kept. Plans and offerings are both catalog offerings, so the
-   * id is stored in `offering_id` only (never duplicated into `plan_id`).
-   */
-  const applySelection = (index: number, value: string) => {
-    const token = (selectionTokens.current[index] ?? 0) + 1;
-    selectionTokens.current[index] = token;
-
-    const [type, itemId] = value ? value.split(':') : ['', ''];
-    const plan = type === 'plan' ? plans.find((p) => p.id === itemId) : undefined;
-    const cat = type === 'offering' ? catalogItems.find((c) => c.id === itemId) : undefined;
-
-    let build: (qty: number) => InvoiceLineItemIn;
-    let priceId: string | undefined;
-    if (plan) {
-      priceId = plan.id;
-      build = (quantity) => ({
-        offering_id: plan.id,
+  const handleUnifiedItemSelect = async (index: number, value: string) => {
+    if (!value) {
+      const updated = [...items];
+      updated[index] = {
+        ...updated[index],
         plan_id: undefined,
+        offering_id: undefined,
+        pricing_explanation: '',
+      };
+      setItems(updated);
+      return;
+    }
+
+    const [type, itemId] = value.split(':');
+    if (type === 'plan') {
+      const plan = plans.find((p) => p.id === itemId);
+      if (!plan) return;
+
+      const updated = [...items];
+      updated[index] = {
+        ...updated[index],
+        plan_id: plan.id,
+        offering_id: plan.id,
         name: plan.name,
         description: plan.description || `${plan.name} (${plan.pricing_model})`,
-        quantity,
         rate: Number(plan.base_price || 0),
-        discount_percentage: 0,
         tax_rate: Number(plan.tax_rate_pct || 18),
         pricing_model: plan.pricing_model,
-        pricing_explanation: '',
-      });
-    } else if (cat) {
-      priceId = cat.pricing_tiers && cat.pricing_tiers.length > 0 ? cat.id : undefined;
-      build = (quantity) => ({
+      };
+      setItems(updated);
+
+      await calculateLineItemPrice(index, plan.id, updated[index].quantity);
+    } else if (type === 'offering') {
+      const cat = catalogItems.find((c) => c.id === itemId);
+      if (!cat) return;
+
+      const updated = [...items];
+      updated[index] = {
+        ...updated[index],
         offering_id: cat.id,
-        plan_id: undefined,
+        plan_id: cat.type === 'plan' ? cat.id : undefined,
         name: cat.name,
         description: cat.description || cat.sku || cat.name,
-        quantity,
         rate: Number(cat.base_price || 0),
-        discount_percentage: 0,
         tax_rate: Number(cat.tax_rate_pct || 18),
         pricing_model: cat.pricing_model || 'FLAT',
         pricing_explanation: 'Base Catalog Price',
-      });
-    } else {
-      // Blank / custom (or an unknown id): a clean line.
-      build = (quantity) => ({
-        offering_id: undefined,
-        plan_id: undefined,
-        name: '',
-        description: '',
-        quantity,
-        rate: 0,
-        discount_percentage: 0,
-        tax_rate: 18,
-        pricing_model: 'FLAT',
-        pricing_explanation: '',
-      });
+      };
+      setItems(updated);
+
+      if (cat.pricing_tiers && cat.pricing_tiers.length > 0) {
+        await calculateLineItemPrice(index, cat.id, updated[index].quantity);
+      }
     }
-
-    const quantity = itemsRef.current[index]?.quantity ?? 1;
-    setItems((prev) => {
-      const row = prev[index];
-      if (!row) return prev;
-      const next = [...prev];
-      next[index] = build(row.quantity);
-      return next;
-    });
-
-    if (priceId) {
-      void calculateLineItemPrice(index, priceId, quantity, token);
-    }
-  };
-
-  const handleUnifiedItemSelect = (index: number, value: string) => applySelection(index, value);
-
-  const lineSelectValue = (item: InvoiceLineItemIn): string => {
-    const id = item.offering_id || item.plan_id;
-    if (!id) return '';
-    if (plans.some((p) => p.id === id)) return `plan:${id}`;
-    if (catalogItems.some((c) => c.id === id)) return `offering:${id}`;
-    return '';
   };
 
   const addItemRow = () => {
-    setItems((prev) => [
-      ...prev,
+    setItems([
+      ...items,
       {
         name: '',
         description: '',
@@ -326,8 +258,7 @@ export const InvoiceFormPage: React.FC = () => {
 
   const removeItemRow = (index: number) => {
     if (items.length === 1) return;
-    selectionTokens.current.splice(index, 1);
-    setItems((prev) => prev.filter((_, i) => i !== index));
+    setItems(items.filter((_, i) => i !== index));
   };
 
   // Calculation summaries
@@ -436,7 +367,7 @@ export const InvoiceFormPage: React.FC = () => {
             ? (it.description.trim().startsWith(it.name.trim()) ? it.description.trim() : `${it.name.trim()} - ${it.description.trim()}`)
             : (it.name.trim() || `Item ${idx + 1}`);
           return {
-            offering_id: it.offering_id || undefined,
+            offering_id: it.offering_id || it.plan_id || undefined,
             plan_id: it.plan_id || undefined,
             description: lineDesc,
             quantity: Number(it.quantity) || 1,
@@ -629,7 +560,13 @@ export const InvoiceFormPage: React.FC = () => {
                       Select Item / Plan / Custom
                     </label>
                     <select
-                      value={lineSelectValue(item)}
+                      value={
+                        item.plan_id
+                          ? `plan:${item.plan_id}`
+                          : item.offering_id
+                          ? `offering:${item.offering_id}`
+                          : ''
+                      }
                       onChange={(e) => handleUnifiedItemSelect(index, e.target.value)}
                       className="w-full px-3 py-1.5 bg-white border border-gray-300 rounded-md text-xs font-medium focus:ring-1 focus:ring-indigo-500"
                     >

@@ -16,17 +16,12 @@ from backend.app.schemas.validators import validate_hsn_sac, validate_sku_format
 
 # --- Pricing Tiers ---
 
-# Numeric(14,2) columns hold at most 12 integer digits.
-MAX_MONEY = Decimal("999999999999.99")
-MAX_QTY = Decimal("1000000000")  # sane upper bound for tier quantities
-
-
 class PricingTierSchema(BaseModel):
-    min_qty: Optional[Decimal] = Field(None, ge=0, le=MAX_QTY)
-    max_qty: Optional[Decimal] = Field(None, ge=0, le=MAX_QTY)
-    unit_price: Optional[Decimal] = Field(None, ge=0, le=MAX_MONEY, max_digits=14, decimal_places=2)
-    package_qty: Optional[Decimal] = Field(None, ge=0, le=MAX_QTY)
-    package_price: Optional[Decimal] = Field(None, ge=0, le=MAX_MONEY, max_digits=14, decimal_places=2)
+    min_qty: Optional[Decimal] = Field(None, ge=0)
+    max_qty: Optional[Decimal] = Field(None, ge=0)
+    unit_price: Optional[Decimal] = Field(None, ge=0)
+    package_qty: Optional[Decimal] = Field(None, ge=0)
+    package_price: Optional[Decimal] = Field(None, ge=0)
 
 
 # --- Offerings (Catalog) ---
@@ -64,7 +59,7 @@ class OfferingCreate(BaseModel):
     unit: str = Field("unit", min_length=1, max_length=32)
     currency: Optional[str] = Field(None, min_length=3, max_length=3)
     pricing_model: OfferingPricingModel = OfferingPricingModel.PER_UNIT
-    base_price: Decimal = Field(..., ge=0, le=MAX_MONEY, max_digits=14, decimal_places=2)
+    base_price: Decimal = Field(..., ge=0)
     tax_rate_pct: Optional[Decimal] = Field(None, ge=0, le=100)
     hsn_sac_code: Optional[str] = Field(None, max_length=16)
     billing_frequency: str = Field("one_time", max_length=32)
@@ -109,7 +104,7 @@ class OfferingUpdate(BaseModel):
     unit: Optional[str] = Field(None, min_length=1, max_length=32)
     currency: Optional[str] = Field(None, min_length=3, max_length=3)
     pricing_model: Optional[OfferingPricingModel] = None
-    base_price: Optional[Decimal] = Field(None, ge=0, le=MAX_MONEY, max_digits=14, decimal_places=2)
+    base_price: Optional[Decimal] = Field(None, ge=0)
     tax_rate_pct: Optional[Decimal] = Field(None, ge=0, le=100)
     hsn_sac_code: Optional[str] = Field(None, max_length=16)
     billing_frequency: Optional[str] = Field(None, max_length=32)
@@ -259,7 +254,7 @@ class CPQRuleOut(BaseModel):
 
 class PriceSimulationItemIn(BaseModel):
     offering_id: str
-    quantity: Decimal = Field(Decimal("1"), gt=0, le=1_000_000)
+    quantity: Decimal = Field(Decimal("1"), gt=0)
     custom_discount_pct: Optional[Decimal] = Field(Decimal("0"), ge=0, le=100)
 
 

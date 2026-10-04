@@ -128,10 +128,8 @@ export function PayInvoicePage() {
     void load();
   }, [load]);
 
-  const merchantUnavailable = invoice?.razorpay.unavailable_reason ?? null;
   const razorpayEnabled = useMemo(() => {
     if (gatewayDown) return false;
-    if (invoice?.razorpay.unavailable_reason) return false;
     return Boolean(invoice?.razorpay.enabled || integrations?.razorpay.enabled);
   }, [invoice, integrations, gatewayDown]);
 
@@ -491,15 +489,8 @@ export function PayInvoicePage() {
                     <AlertTriangle className="w-4 h-4 shrink-0" /> Online payment unavailable
                   </p>
                   <p className="mt-1 text-xs text-amber-800 leading-relaxed">
-                    {merchantUnavailable ? (
-                      <>{merchantUnavailable} </>
-                    ) : (
-                      <>
-                        {org.name} has not enabled card/UPI payments for this invoice. Please contact them to arrange a
-                        bank transfer or other payment,{' '}
-                      </>
-                    )}
-                    quoting invoice{' '}
+                    {org.name} has not enabled card/UPI payments for this invoice. Please contact them to arrange a
+                    bank transfer or other payment, quoting invoice{' '}
                     <span className="font-semibold tabular-nums">{invoice.invoice_number}</span>.
                   </p>
                   {(org.email || org.phone) ? (

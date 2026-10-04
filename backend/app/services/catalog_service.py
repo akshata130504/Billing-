@@ -276,10 +276,6 @@ def update_plan(db: Session, ctx: CurrentContext, plan_id: str, data: PlanUpdate
     changes = data.model_dump(exclude_unset=True)
     if not changes:
         return plan
-    if not plan.is_active and not (set(changes) == {"is_active"} and changes["is_active"] is True):
-        # An archived plan can only be re-activated (the Activate toggle sends just is_active);
-        # re-activate it first, then edit.
-        raise InvalidStateError("Archived plans cannot be edited. Reactivate it first.")
     if changes.get("code") and _code_taken(db, ctx.organization_id, changes["code"], exclude_id=plan.id):
         raise ConflictError(f"A plan with code '{changes['code']}' already exists.", details={"fields": {"code": "duplicate"}})
     structural = [

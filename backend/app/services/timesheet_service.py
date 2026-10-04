@@ -173,30 +173,6 @@ def get_time_entry(db: Session, entry_id: str, ctx: CurrentContext) -> TimeEntry
     return serialize_time_entry(entry)
 
 
-def _clock_minutes(value: Optional[str]) -> Optional[int]:
-    """Minutes since midnight for an ``HH:MM[:SS]`` string; ``None`` if blank or unparsable
-    (same leniency as the request schemas, which only reject a reversed range)."""
-    if not value:
-        return None
-    try:
-        hours, minutes = map(int, value.split(":")[:2])
-    except ValueError:
-        return None
-    return hours * 60 + minutes
-
-
-def _ensure_end_after_start(start_time: Optional[str], end_time: Optional[str]) -> None:
-    """Validate the effective time range (stored values merged with the update).
-
-    ``TimeEntryUpdate`` only compares the two times when both are sent, so an update that
-    moves just one end of the range must be checked against the stored other end.
-    """
-    start, end = _clock_minutes(start_time), _clock_minutes(end_time)
-    if start is not None and end is not None and end <= start:
-        message = "End time must be later than start time."
-        raise ValidationAppError(message, {"fields": {"end_time": message}})
-
-
 def update_time_entry(db: Session, entry_id: str, data: TimeEntryUpdate, ctx: CurrentContext) -> TimeEntryRead:
     """Updates an existing time entry respecting role-based access control."""
     org_id = ctx.organization.id
@@ -215,12 +191,6 @@ def update_time_entry(db: Session, entry_id: str, data: TimeEntryUpdate, ctx: Cu
 
     if not _can_manage_all_entries(ctx) and entry.status in (TimeEntryStatus.APPROVED, TimeEntryStatus.SUBMITTED):
         raise InvalidStateError(f"Cannot edit time entry in '{entry.status.value}' status")
-
-    # Check the merged start/end before mutating anything.
-    _ensure_end_after_start(
-        data.start_time if data.start_time is not None else entry.start_time,
-        data.end_time if data.end_time is not None else entry.end_time,
-    )
 
     if data.customer_id is not None:
         if data.customer_id != "":

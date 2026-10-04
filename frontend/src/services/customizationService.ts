@@ -50,12 +50,8 @@ export const customizationService = {
     return data;
   },
 
-  /**
-   * Render a sample preview. Pass ``overrides`` (the editor's unsaved values) to
-   * preview changes before saving; nothing is persisted by the backend.
-   */
-  previewTemplate: async (id: string, overrides?: DocumentTemplateUpdate): Promise<DocumentTemplatePreview> => {
-    const { data } = await apiClient.post<DocumentTemplatePreview>(`/templates/${id}/preview`, overrides);
+  previewTemplate: async (id: string): Promise<DocumentTemplatePreview> => {
+    const { data } = await apiClient.post<DocumentTemplatePreview>(`/templates/${id}/preview`);
     return data;
   },
 

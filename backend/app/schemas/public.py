@@ -44,8 +44,6 @@ class PublicCustomer(BaseModel):
 class PublicRazorpay(BaseModel):
     enabled: bool
     key_id: Optional[str] = None
-    # Set when online payment is switched off for the merchant (e.g. suspended organization).
-    unavailable_reason: Optional[str] = None
 
 
 class PublicInvoice(BaseModel):

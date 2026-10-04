@@ -9,15 +9,10 @@ import { customizationService } from '../../services/customizationService';
 import { toApiError } from '../../services/apiClient';
 import { humanize } from '../../utils/format';
 import { cn } from '../../utils/cn';
-import type { DocumentTemplate, DocumentTemplatePreview, DocumentTemplateUpdate } from '../../types/customization';
+import type { DocumentTemplate, DocumentTemplatePreview } from '../../types/customization';
 
 interface TemplatePreviewModalProps {
   template: DocumentTemplate | null;
-  /**
-   * Unsaved editor values to preview instead of the stored template (e.g. a logo
-   * that was just typed or uploaded). Omit to preview the saved version.
-   */
-  draft?: DocumentTemplateUpdate | null;
   onClose: () => void;
 }
 
@@ -27,7 +22,7 @@ type PreviewMode = 'html' | 'text';
  * Renders the backend's sample-data preview for a template. The HTML is placed in a
  * sandboxed iframe (no scripts, no same-origin) via srcdoc so custom CSS cannot escape.
  */
-export function TemplatePreviewModal({ template, draft, onClose }: TemplatePreviewModalProps) {
+export function TemplatePreviewModal({ template, onClose }: TemplatePreviewModalProps) {
   const [preview, setPreview] = useState<DocumentTemplatePreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,9 +34,7 @@ export function TemplatePreviewModal({ template, draft, onClose }: TemplatePrevi
     setLoading(true);
     setError(null);
     try {
-      const data = draft
-        ? await customizationService.previewTemplate(id, draft)
-        : await customizationService.previewTemplate(id);
+      const data = await customizationService.previewTemplate(id);
       setPreview(data);
     } catch (err: any) {
       setError(toApiError(err).message || 'Failed to render preview');
@@ -58,19 +51,14 @@ export function TemplatePreviewModal({ template, draft, onClose }: TemplatePrevi
     }
     setMode('html');
     void load(templateId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [templateId, draft]);
+  }, [templateId]);
 
   return (
     <Modal
       isOpen={!!template}
       onClose={onClose}
       title={template ? `Preview: ${template.name}` : 'Preview'}
-      description={
-        draft
-          ? 'Previewing your unsaved changes with sample data. Save the template to apply them to documents.'
-          : 'Rendered with sample data. Real documents use the customer and line items of each record.'
-      }
+      description="Rendered with sample data. Real documents use the customer and line items of each record."
       size="xl"
       footer={
         <>
@@ -99,9 +87,9 @@ export function TemplatePreviewModal({ template, draft, onClose }: TemplatePrevi
                 {humanize(template.document_type)}
               </Badge>
               <Badge variant="neutral" size="sm">
-                {humanize(draft?.layout_type ?? template.layout_type)} layout
+                {humanize(template.layout_type)} layout
               </Badge>
-              <span className="text-xs text-slate-500 font-mono">{draft?.font_family ?? template.font_family}</span>
+              <span className="text-xs text-slate-500 font-mono">{template.font_family}</span>
             </div>
             <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="tablist">
               {(

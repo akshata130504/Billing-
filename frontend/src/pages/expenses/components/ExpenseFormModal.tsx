@@ -6,7 +6,6 @@ import { CustomerCombobox } from '../../../components/common/CustomerCombobox';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCustomerProjects } from '../useCustomerProjects';
 import { todayIso } from '../../../utils/format';
-import { ModalShell } from '../../../components/common/Modal';
 
 const MAX_RECEIPT_BYTES = 10 * 1024 * 1024;
 const RECEIPT_EXTENSIONS = ['.pdf', '.png', '.jpg', '.jpeg', '.webp'];
@@ -218,11 +217,12 @@ export function ExpenseFormModal({
   if (!isOpen) return null;
 
   return (
-    <ModalShell onClose={onClose} labelledBy="expense-form-modal-title" className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50/50">
           <div>
-            <h3 id="expense-form-modal-title" className="text-base font-bold text-slate-900">
+            <h3 className="text-base font-bold text-slate-900">
               {editingExpense ? 'Edit Expense' : 'Record Expense'}
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -607,6 +607,7 @@ export function ExpenseFormModal({
             <span>{editingExpense ? 'Save Changes' : 'Save Expense'}</span>
           </button>
         </div>
-    </ModalShell>
+      </div>
+    </div>
   );
 }

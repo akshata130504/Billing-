@@ -123,30 +123,6 @@ def test_amount_mismatch_is_permanent_error(client, tenant, db, monkeypatch):
     assert db.get(Payment, payment.id).status == PaymentStatus.PENDING
 
 
-
-def test_currency_mismatch_is_permanent_error(client, tenant, db, monkeypatch):
-    monkeypatch.setattr(settings, "RAZORPAY_WEBHOOK_SECRET", SECRET)
-    inv = tenant.invoice(tenant.customer(), amount="500.00")
-    payment = _pending(db, tenant, inv)
-    res, event_id = _post_event(client, "payment.captured", "payment",
-                                {"id": "pay_usd", "order_id": payment.gateway_order_id, "amount": 50000, "currency": "USD"})
-    assert res.status_code == 200
-    assert "currency mismatch" in db.query(WebhookEvent).filter_by(event_id=event_id).one().error.lower()
-    db.expire_all()
-    assert db.get(Payment, payment.id).status == PaymentStatus.PENDING
-
-
-def test_capture_without_amount_is_not_applied(client, tenant, db, monkeypatch):
-    monkeypatch.setattr(settings, "RAZORPAY_WEBHOOK_SECRET", SECRET)
-    inv = tenant.invoice(tenant.customer(), amount="500.00")
-    payment = _pending(db, tenant, inv)
-    res, event_id = _post_event(client, "payment.captured", "payment",
-                                {"id": "pay_noamt", "order_id": payment.gateway_order_id, "currency": "INR"})
-    assert res.status_code == 200
-    assert "amount mismatch" in db.query(WebhookEvent).filter_by(event_id=event_id).one().error.lower()
-    db.expire_all()
-    assert db.get(Payment, payment.id).status == PaymentStatus.PENDING
-
 def test_org_webhook_secret_verifies_org_events(client, tenant, db, monkeypatch):
     monkeypatch.setattr(settings, "RAZORPAY_WEBHOOK_SECRET", SECRET)
     org_secret = "tenant_own_secret"
@@ -512,26 +488,3 @@ def test_create_payment_idempotency_key(client, tenant, auth_headers):
     r2 = client.post("/api/v1/payments", headers=headers, json=body)
     assert r1.status_code == 201 and r2.status_code == 201
     assert r1.json()["id"] == r2.json()["id"]
-
-
-def test_webhook_receiver_is_rate_limited_per_client_ip(client, monkeypatch, db):
-    """Unsigned junk from one source cannot fill webhook_events/audit_logs without limit."""
-    from fastapi.testclient import TestClient
-
-    from backend.app.main import app
-
-    monkeypatch.setattr(settings, "WEBHOOK_RATE_LIMIT", "3/minute")
-    monkeypatch.setattr(settings, "RAZORPAY_WEBHOOK_SECRET", SECRET)
-    ip = f"10.5.{uuid.uuid4().int % 250}.{uuid.uuid4().int % 250}"
-    attacker = TestClient(app, client=(ip, 50000))
-    body = json.dumps({"event": "payment.captured", "payload": {}}).encode()
-    headers = {"Content-Type": "application/json", "X-Razorpay-Signature": "bad"}
-    before = db.query(WebhookEvent).count()
-    statuses = [attacker.post(WEBHOOK, content=body, headers=headers).status_code for _ in range(5)]
-    assert statuses[:3] == [400, 400, 400]
-    assert statuses[3:] == [429, 429]
-    db.expire_all()
-    assert db.query(WebhookEvent).count() == before + 3  # limited requests store nothing
-    # A different source is unaffected.
-    other = TestClient(app, client=(f"10.4.{uuid.uuid4().int % 250}.1", 50000))
-    assert other.post(WEBHOOK, content=body, headers=headers).status_code == 400

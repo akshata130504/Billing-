@@ -238,9 +238,9 @@ export function PlansPricingPage() {
           <p className="text-[11px] text-slate-500 mt-0.5">Legacy & deactivated</p>
         </div>
 
-        <div className="min-w-0 bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs">
+        <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs">
           <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Avg Plan Rate</p>
-          <p className="text-2xl font-bold text-slate-900 mt-1 min-w-0 break-all tabular-nums">₹{Math.round(kpis.avgPrice).toLocaleString('en-IN')}</p>
+          <p className="text-2xl font-bold text-slate-900 mt-1">₹{Math.round(kpis.avgPrice).toLocaleString('en-IN')}</p>
           <p className="text-[11px] text-slate-500 mt-0.5">Across plans on this page</p>
         </div>
       </div>
@@ -390,7 +390,7 @@ export function PlansPricingPage() {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 font-semibold text-slate-900 min-w-0 max-w-[16rem] break-all tabular-nums">
+                    <td className="px-4 py-3 font-semibold text-slate-900">
                       {currencySymbol(plan.currency)}{Number(plan.base_price).toLocaleString((plan.currency || 'INR') === 'INR' ? 'en-IN' : 'en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                       <span className="text-[10px] text-slate-400 font-normal ml-1">/ {plan.unit}</span>
                     </td>
@@ -411,7 +411,6 @@ export function PlansPricingPage() {
                         {!canEdit && <span className="text-[11px] text-slate-400">View only</span>}
                         {canEdit && (
                         <>
-                        {plan.is_active && (
                         <button
                           onClick={() => {
                             setEditingPlan(plan);
@@ -422,7 +421,6 @@ export function PlansPricingPage() {
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
-                        )}
                         {plan.is_active && plan.billing_frequency !== 'one_time' && (
                           <button
                             onClick={() => navigate(`/subscriptions/new?offering_id=${plan.id}`)}

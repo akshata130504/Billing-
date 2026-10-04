@@ -58,13 +58,7 @@ export function formatMoney(
   return currencyFormatter(currency).format(n);
 }
 
-// Where en-IN Intl output differs from the backend's display convention
-// (pricing_engine._CURRENCY_SYMBOLS), use the backend's symbol so both sides agree.
-const SYMBOL_OVERRIDES: Record<string, string> = { SGD: 'S$', CAD: 'C$' };
-
 export function currencySymbol(currency = 'INR'): string {
-  const override = SYMBOL_OVERRIDES[currency.toUpperCase()];
-  if (override) return override;
   try {
     const parts = new Intl.NumberFormat('en-IN', { style: 'currency', currency }).formatToParts(1);
     return parts.find((p) => p.type === 'currency')?.value ?? currency;

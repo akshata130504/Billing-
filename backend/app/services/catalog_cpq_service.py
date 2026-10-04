@@ -157,13 +157,6 @@ def update_offering(db: Session, ctx: CurrentContext, offering_id: str, data: Of
     if not changes:
         return offering
 
-    if not offering.is_active:
-        # Archived offerings are read-only. The only way back is re-activation: the unarchive
-        # endpoint, or the legacy Plans & Pricing Activate toggle that PATCHes just is_active=true.
-        if set(changes) == {"is_active"} and changes["is_active"] is True:
-            return unarchive_offering(db, ctx, offering_id)
-        raise InvalidStateError("Archived offerings cannot be edited. Unarchive it first.")
-
     if "sku" in changes and changes["sku"]:
         sku = changes["sku"]
         existing = db.scalars(
@@ -217,19 +210,6 @@ def archive_offering(db: Session, ctx: CurrentContext, offering_id: str) -> None
     db.flush()
     sync_offering_links(db, offering)
     db.commit()
-
-
-def unarchive_offering(db: Session, ctx: CurrentContext, offering_id: str) -> Offering:
-    """Restore an archived offering (idempotent on an already-active one). Linked plan /
-    product follow, exactly like archive."""
-    offering = get_offering_or_404(db, ctx.organization_id, offering_id)
-    if offering.is_active:
-        return offering
-    offering.is_active = True
-    db.flush()
-    sync_offering_links(db, offering)
-    db.commit()
-    return get_offering_or_404(db, ctx.organization_id, offering_id)
 
 
 def serialize_offering(offering: Offering) -> Dict[str, Any]:

@@ -21,7 +21,7 @@ import pytest
 from sqlalchemy import select
 
 from backend.app.core.config import settings
-from backend.app.core.security import ACCESS_TOKEN_TYPE, create_access_token, TENANT_TOKEN_AUDIENCE, TOKEN_ISSUER
+from backend.app.core.security import ACCESS_TOKEN_TYPE, create_access_token
 from backend.app.models import Membership, MemberRole, MembershipStatus, Organization, User, utcnow
 
 API = "/api/v1"
@@ -215,8 +215,6 @@ def test_timestamp_valid_after_cutoff_precision(client, db):
         "iat": past_ts,
         "exp": int(past_ts + 1800),
         "jti": "past_token_jti_12345",
-        "aud": TENANT_TOKEN_AUDIENCE,
-        "iss": TOKEN_ISSUER,
     }
     past_token = jwt.encode(past_payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     r_past = client.get(f"{API}/auth/me", headers=_bearer(past_token))
@@ -233,8 +231,6 @@ def test_timestamp_valid_after_cutoff_precision(client, db):
         "iat": valid_ts,
         "exp": int(valid_ts + 1800),
         "jti": "valid_token_jti_12345",
-        "aud": TENANT_TOKEN_AUDIENCE,
-        "iss": TOKEN_ISSUER,
     }
     valid_token = jwt.encode(valid_payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     r_valid = client.get(f"{API}/auth/me", headers=_bearer(valid_token))

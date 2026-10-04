@@ -118,13 +118,6 @@ class DocumentTemplateOut(DocumentTemplateBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-class DocumentTemplatePreviewRequest(DocumentTemplateUpdate):
-    """Optional unsaved editor values to render instead of the stored ones.
-
-    Previewing never persists anything; omitted fields keep their saved values.
-    """
-
-
 class DocumentTemplatePreviewResponse(BaseModel):
     template_id: Optional[str]
     document_type: str

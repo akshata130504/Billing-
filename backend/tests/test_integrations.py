@@ -12,7 +12,6 @@ import uuid
 import pytest
 from unittest.mock import MagicMock, patch
 
-from backend.app.core.tenant_context import system_context, tenant_context
 from backend.app.models.identity import Membership, MemberRole, Organization, User
 from backend.app.models.integrations import OrganizationIntegration
 from backend.app.services import integrations_service
@@ -27,9 +26,7 @@ def test_org(db):
     )
     db.add(org)
     db.flush()
-    # Like a real request: the integration endpoints run in this organization's tenant context.
-    with tenant_context(org.id):
-        yield org
+    return org
 
 
 @pytest.fixture
@@ -93,10 +90,7 @@ def test_razorpay_configure_and_status(db, test_org, other_org):
     assert "my_razorpay_secret_123" not in row.encrypted_config
 
     # Organization isolation check
-    # System context switches the ORM tenant filter off: isolation must come from the
-    # service's own organization_id filter.
-    with system_context():
-        other_status = integrations_service.get_razorpay_status(db, other_org.id)
+    other_status = integrations_service.get_razorpay_status(db, other_org.id)
     assert other_status.masked_key_id != "rzp_test••••abcd"
 
 

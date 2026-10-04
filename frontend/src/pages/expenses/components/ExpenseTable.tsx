@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Expense } from '../types';
 import { formatINR } from '../format';
@@ -39,27 +38,6 @@ export function ExpenseTable({
 }: ExpenseTableProps) {
   const navigate = useNavigate();
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
-  const [menuPos, setMenuPos] = useState<{ top: number; right: number; openUp: boolean } | null>(null);
-
-  const closeMenu = () => {
-    setActiveMenuId(null);
-    setMenuPos(null);
-  };
-
-  // A fixed-position menu would drift away from its button on scroll/resize; dismiss it instead.
-  useEffect(() => {
-    if (!activeMenuId) return;
-    const handleDismiss = () => {
-      setActiveMenuId(null);
-      setMenuPos(null);
-    };
-    window.addEventListener('scroll', handleDismiss, true);
-    window.addEventListener('resize', handleDismiss);
-    return () => {
-      window.removeEventListener('scroll', handleDismiss, true);
-      window.removeEventListener('resize', handleDismiss);
-    };
-  }, [activeMenuId]);
 
   const getStatusBadge = (status: Expense['status']) => {
     switch (status) {
@@ -392,21 +370,7 @@ export function ExpenseTable({
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (isMenuOpen) {
-                              closeMenu();
-                            } else {
-                              // Positioned against the viewport (portal) so the table's
-                              // overflow-hidden/overflow-x-auto wrappers can't clip it.
-                              const rect = e.currentTarget.getBoundingClientRect();
-                              const spaceBelow = window.innerHeight - rect.bottom;
-                              const openUp = spaceBelow < 150 && rect.top > 150;
-                              setMenuPos({
-                                top: openUp ? rect.top - 4 : rect.bottom + 4,
-                                right: Math.max(8, window.innerWidth - rect.right),
-                                openUp,
-                              });
-                              setActiveMenuId(expense.id);
-                            }
+                            setActiveMenuId(isMenuOpen ? null : expense.id);
                           }}
                           className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
                           title="More Actions"
@@ -414,33 +378,23 @@ export function ExpenseTable({
                           <MoreVertical className="w-3.5 h-3.5" />
                         </button>
 
-                        {/* Dropdown Menu Rendered via Portal (React events still bubble to the
-                            row, so every handler here stops propagation) */}
-                        {isMenuOpen && menuPos && createPortal(
+                        {/* Dropdown Menu */}
+                        {isMenuOpen && (
                           <>
                             <div
-                              className="fixed inset-0 z-50 bg-transparent"
+                              className="fixed inset-0 z-20"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                closeMenu();
+                                setActiveMenuId(null);
                               }}
                             />
-                            <div
-                              role="menu"
-                              className="fixed w-44 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-1 text-xs"
-                              style={{
-                                top: menuPos.openUp ? 'auto' : `${menuPos.top}px`,
-                                bottom: menuPos.openUp ? `${window.innerHeight - menuPos.top}px` : 'auto',
-                                right: `${menuPos.right}px`,
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                            >
+                            <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1 text-xs">
                               {expense.billable && expense.status !== 'invoiced' && (
                                 <button
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    closeMenu();
+                                    setActiveMenuId(null);
                                     onAddToInvoice(expense.id);
                                   }}
                                   className="w-full px-3 py-1.5 text-left text-emerald-700 hover:bg-emerald-50 flex items-center gap-2 font-medium"
@@ -453,7 +407,7 @@ export function ExpenseTable({
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  closeMenu();
+                                  setActiveMenuId(null);
                                   onDuplicate(expense.id);
                                 }}
                                 className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
@@ -466,7 +420,7 @@ export function ExpenseTable({
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  closeMenu();
+                                  setActiveMenuId(null);
                                   onDelete(expense);
                                 }}
                                 className="w-full px-3 py-1.5 text-left text-rose-600 hover:bg-rose-50 flex items-center gap-2 font-medium"
@@ -475,8 +429,7 @@ export function ExpenseTable({
                                 Delete Expense
                               </button>
                             </div>
-                          </>,
-                          document.body
+                          </>
                         )}
                       </div>
                     </div>

@@ -2,7 +2,7 @@
 web tabs, automation rules, automation logs, schedules, and webhook deliveries."""
 from typing import List, Optional
 
-from fastapi import APIRouter, Body, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 
 from backend.app.api.deps import CurrentContext, get_db, require_admin, require_finance, require_viewer
 from backend.app.models.customization import AutomationLogStatus, DocumentType
@@ -19,7 +19,6 @@ from backend.app.schemas.customization import (
     AutomationRuleUpdate,
     DocumentTemplateCreate,
     DocumentTemplateOut,
-    DocumentTemplatePreviewRequest,
     DocumentTemplatePreviewResponse,
     DocumentTemplateUpdate,
     NumberSeriesPreviewRequest,
@@ -177,21 +176,11 @@ def delete_template(
 @router.post("/templates/{template_id}/preview", response_model=DocumentTemplatePreviewResponse)
 def preview_template(
     template_id: str,
-    overrides: Optional[DocumentTemplatePreviewRequest] = Body(None),
     ctx: CurrentContext = Depends(require_viewer),
     db: Session = Depends(get_db),
 ) -> DocumentTemplatePreviewResponse:
-    """Renders an HTML/text preview of a document template using sample data.
-
-    An optional body carries the editor's unsaved values (e.g. a new logo URL) so they
-    can be previewed before saving; nothing is persisted.
-    """
-    return customization_service.render_template_preview(
-        db,
-        template_id,
-        ctx.organization_id,
-        overrides=overrides.model_dump(exclude_unset=True) if overrides else None,
-    )
+    """Renders an HTML/text preview of a document template using sample data."""
+    return customization_service.render_template_preview(db, template_id, ctx.organization_id)
 
 
 @router.post("/templates/{template_id}/logo", summary="Upload logo for a document template")

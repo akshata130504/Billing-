@@ -77,9 +77,6 @@ rb exec -T db sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "DROP DATABASE IF E
 rb exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner' < rooman_20260901_011500.dump
 # plain SQL (.sql.gz from make backup)
 gunzip -c backups/rooman_billing_20260901_011500.sql.gz | rb exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-# re-apply the least-privilege runtime role's grants on the recreated database (REQUIRED:
-# backend + scheduler connect as APP_POSTGRES_USER, which otherwise has no access)
-sh deploy/db-least-privilege.sh
 rb start backend scheduler
 ```
 
@@ -104,7 +101,7 @@ database dump so file references match.
 ### Restore drill
 
 Quarterly, on a scratch host: `rb up -d db`, restore the latest **offsite** dump and uploads
-tarball, run `sh deploy/db-least-privilege.sh`, `rb up -d backend`, check `/api/v1/health/ready` reports `ready: true` with
+tarball, `rb up -d backend`, check `/api/v1/health/ready` reports `ready: true` with
 `migrations.status: at_head`, log in and open an invoice with a logo. See section 9.
 
 ### Volume snapshot (alternative)

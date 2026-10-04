@@ -13,7 +13,6 @@ from zoneinfo import ZoneInfo
 import pytest
 from sqlalchemy import select
 
-from backend.app.core.tenant_context import system_context, tenant_context
 from backend.app.models import Invoice, InvoiceStatus, Subscription, SubscriptionStatus
 from backend.app.services import scheduler, timezones
 
@@ -221,8 +220,7 @@ def test_scheduler_recurring_expenses_use_org_local_date(client, db, frozen):
     scheduler.run_billing_jobs(db)
 
     def expense_count(rec):
-        with tenant_context(rec.organization_id):
-            return len(db.scalars(select(Expense).where(Expense.organization_id == rec.organization_id)).all())
+        return len(db.scalars(select(Expense).where(Expense.organization_id == rec.organization_id)).all())
 
     assert expense_count(recs["Asia/Kolkata"]) == 1
     assert expense_count(recs["America/New_York"]) == 0
@@ -234,26 +232,24 @@ def test_process_due_recurring_expenses_defaults_to_each_orgs_local_date(client,
     from backend.app.models.expenses import RecurringExpense, RecurringExpenseFrequency, RecurringExpenseStatus
     from backend.app.services.expense_service import process_due_recurring_expenses
 
-    # the scheduler runs this under system_context() (run_billing_jobs)
-    with system_context():
-        t = _tenant(db, "America/New_York")
-        rec = RecurringExpense(
-            organization_id=t.organization.id,
-            name="NY rent",
-            category="Rent",
-            amount=Decimal("5.00"),
-            currency="USD",
-            frequency=RecurringExpenseFrequency.MONTHLY,
-            start_date=date(2026, 4, 1),
-            next_run=date(2026, 4, 1),
-            never_ends=True,
-            status=RecurringExpenseStatus.ACTIVE,
-        )
-        db.add(rec)
-        db.commit()
-        assert process_due_recurring_expenses(db, organization_id=t.organization.id) == 0
-        frozen(datetime(2026, 4, 1, 4, 0, tzinfo=UTC))  # 00:00 EDT on 1 April
-        assert process_due_recurring_expenses(db, organization_id=t.organization.id) == 1
+    t = _tenant(db, "America/New_York")
+    rec = RecurringExpense(
+        organization_id=t.organization.id,
+        name="NY rent",
+        category="Rent",
+        amount=Decimal("5.00"),
+        currency="USD",
+        frequency=RecurringExpenseFrequency.MONTHLY,
+        start_date=date(2026, 4, 1),
+        next_run=date(2026, 4, 1),
+        never_ends=True,
+        status=RecurringExpenseStatus.ACTIVE,
+    )
+    db.add(rec)
+    db.commit()
+    assert process_due_recurring_expenses(db, organization_id=t.organization.id) == 0
+    frozen(datetime(2026, 4, 1, 4, 0, tzinfo=UTC))  # 00:00 EDT on 1 April
+    assert process_due_recurring_expenses(db, organization_id=t.organization.id) == 1
 
 
 def test_collections_status_uses_org_local_date(client, db, frozen):
@@ -271,46 +267,45 @@ def test_collections_status_uses_org_local_date(client, db, frozen):
 def test_usage_period_boundaries_follow_org_timezone(client, db):
     from backend.app.models.meters import UsageEvent, UsageMeter
     from backend.app.services import meter_service
-    # billing runs usage aggregation from the scheduler under system_context()
-    with system_context():
-        t = _tenant(db, "Asia/Kolkata")
-        customer = t.customer()
-        _, plan = t.product_with_plan()
-        sub = Subscription(
-            organization_id=t.organization.id,
-            customer_id=customer.id,
-            plan_id=plan.id,
-            quantity=1,
-            status=SubscriptionStatus.ACTIVE,
-            start_date=date(2026, 3, 1),
-            current_period_start=date(2026, 4, 1),
-            current_period_end=date(2026, 5, 1),
-            next_billing_date=date(2026, 5, 1),
-            subscription_number=f"SUB-TZ-{uuid.uuid4().hex[:6]}",
-        )
-        meter = UsageMeter(organization_id=t.organization.id, code=f"m{uuid.uuid4().hex[:6]}", name="Calls", unit_name="call")
-        db.add_all([sub, meter])
-        db.flush()
-        # 20:00 UTC on 31 March is 01:30 IST on 1 April: it belongs to the April period.
-        db.add(
-            UsageEvent(
-                organization_id=t.organization.id,
-                meter_id=meter.id,
-                customer_id=customer.id,
-                subscription_id=sub.id,
-                quantity=Decimal("7"),
-                timestamp=FROZEN,
-                idempotency_key=uuid.uuid4().hex,
-            )
-        )
-        db.commit()
 
-        assert meter_service.subscription_has_usage(db, sub.id, date(2026, 4, 1), date(2026, 5, 1))
-        assert not meter_service.subscription_has_usage(db, sub.id, date(2026, 3, 1), date(2026, 4, 1))
-        qty = meter_service.aggregate_subscription_usage(
-            db, t.organization.id, meter.id, sub.id, date(2026, 4, 1), date(2026, 5, 1)
+    t = _tenant(db, "Asia/Kolkata")
+    customer = t.customer()
+    _, plan = t.product_with_plan()
+    sub = Subscription(
+        organization_id=t.organization.id,
+        customer_id=customer.id,
+        plan_id=plan.id,
+        quantity=1,
+        status=SubscriptionStatus.ACTIVE,
+        start_date=date(2026, 3, 1),
+        current_period_start=date(2026, 4, 1),
+        current_period_end=date(2026, 5, 1),
+        next_billing_date=date(2026, 5, 1),
+        subscription_number=f"SUB-TZ-{uuid.uuid4().hex[:6]}",
+    )
+    meter = UsageMeter(organization_id=t.organization.id, code=f"m{uuid.uuid4().hex[:6]}", name="Calls", unit_name="call")
+    db.add_all([sub, meter])
+    db.flush()
+    # 20:00 UTC on 31 March is 01:30 IST on 1 April: it belongs to the April period.
+    db.add(
+        UsageEvent(
+            organization_id=t.organization.id,
+            meter_id=meter.id,
+            customer_id=customer.id,
+            subscription_id=sub.id,
+            quantity=Decimal("7"),
+            timestamp=FROZEN,
+            idempotency_key=uuid.uuid4().hex,
         )
-        assert qty == Decimal("7")
+    )
+    db.commit()
+
+    assert meter_service.subscription_has_usage(db, sub.id, date(2026, 4, 1), date(2026, 5, 1))
+    assert not meter_service.subscription_has_usage(db, sub.id, date(2026, 3, 1), date(2026, 4, 1))
+    qty = meter_service.aggregate_subscription_usage(
+        db, t.organization.id, meter.id, sub.id, date(2026, 4, 1), date(2026, 5, 1)
+    )
+    assert qty == Decimal("7")
 
 
 def test_automation_schedule_next_run_uses_org_timezone_and_dst():

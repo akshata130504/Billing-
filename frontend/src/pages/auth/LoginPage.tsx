@@ -134,12 +134,12 @@ export function LoginPage() {
       {/* =========================================================================
           RIGHT AREA: ORGANIC LIGHT BACKDROP WITH FLOATING SIGN-IN CARD
       ========================================================================== */}
-      <div className="w-full lg:w-[46%] min-h-screen flex flex-col items-center p-6 sm:p-10 lg:p-12 relative z-20">
+      <div className="w-full lg:w-[46%] min-h-full flex flex-col justify-center items-center p-6 sm:p-10 lg:p-12 relative z-20">
         {/* Soft Organic Light Curve Backdrop on Right */}
         <div className="absolute inset-y-0 right-0 w-full lg:w-[110%] bg-gradient-to-b from-[#F2F4FD] via-[#F7F8FE] to-[#F1F3FB] -z-10 rounded-t-3xl lg:rounded-t-none lg:rounded-l-[3.5rem] shadow-2xl border-l border-white/60" />
 
         {/* Top Right Header Text (Simple Billing. Stronger Tomorrow.) */}
-        <div data-testid="login-tagline" className="hidden lg:block self-end text-right mb-6 shrink-0">
+        <div className="hidden lg:block absolute top-8 right-12 text-right">
           <div className="text-[11px] font-bold tracking-widest text-slate-400 uppercase">
             SIMPLE BILLING.
           </div>
@@ -149,9 +149,8 @@ export function LoginPage() {
           <div className="w-10 h-0.5 bg-gradient-to-r from-[#8EA5FF] to-[#E83E8C] ml-auto mt-1.5 rounded-full" />
         </div>
 
-        {/* Floating Sign-In Card (my-auto keeps it vertically centred but never underlaps the tagline) */}
-        <div className="my-auto w-full max-w-md">
-        <div data-testid="login-card" className="w-full bg-white rounded-3xl p-8 sm:p-10 shadow-2xl border border-slate-100/90 relative">
+        {/* Floating Sign-In Card */}
+        <div className="w-full max-w-md bg-white rounded-3xl p-8 sm:p-10 shadow-2xl border border-slate-100/90 relative">
           {/* Card Brand Logo */}
           <div className="flex justify-center mb-6">
             <RoomanLogo variant="brand" size="lg" showBillingBadge />
@@ -288,7 +287,6 @@ export function LoginPage() {
               Create your organization
             </Link>
           </div>
-        </div>
         </div>
       </div>
     </div>

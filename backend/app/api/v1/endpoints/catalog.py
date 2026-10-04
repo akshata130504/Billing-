@@ -78,16 +78,6 @@ def archive_offering(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/offerings/{offering_id}/unarchive", response_model=OfferingOut, summary="Unarchive offering")
-def unarchive_offering(
-    offering_id: str,
-    ctx: CurrentContext = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    offering = svc.unarchive_offering(db, ctx, offering_id)
-    return svc.serialize_offering(offering)
-
-
 # --- Price Books ---------------------------------------------------------------------
 
 @router.get("/price-books", response_model=PaginatedResponse[PriceBookOut], summary="List price books")

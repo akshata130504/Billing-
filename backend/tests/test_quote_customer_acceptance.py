@@ -54,17 +54,13 @@ def _token(quote):
 
 
 def _status(db, quote_id):
-    from backend.app.core.tenant_context import system_context
     db.expire_all()
-    with system_context():
-        return db.get(Quote, quote_id).status
+    return db.get(Quote, quote_id).status
 
 
 def _audit_count(db, quote_id, action):
-    from backend.app.core.tenant_context import system_context
     db.expire_all()
-    with system_context():
-        return db.query(AuditLog).filter_by(entity_id=quote_id, action=action).count()
+    return db.query(AuditLog).filter_by(entity_id=quote_id, action=action).count()
 
 
 # --- internal approval ----------------------------------------------------------------------------

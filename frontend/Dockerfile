@@ -14,18 +14,10 @@ WORKDIR /src
 # VITE_SUPPORT_EMAIL is baked into the bundle at build time (Help > "Contact support").
 # CI passes the GitHub repository variable SUPPORT_EMAIL; empty = "contact your administrator".
 ARG VITE_SUPPORT_EMAIL=""
-# VITE_PLATFORM_APP_ORIGIN: origin of the platform console (the same value as the backend's
-# PLATFORM_APP_ORIGIN). The tenant app accepts the console's "Enter tenant" hand-off only from this
-# origin. Required when the console is deployed; empty = hand-off refused (safe default).
-# CI passes the GitHub repository variable PLATFORM_APP_ORIGIN.
-ARG VITE_PLATFORM_APP_ORIGIN=""
-COPY docker/check-origin.sh /usr/local/bin/check-origin
-RUN sh /usr/local/bin/check-origin VITE_PLATFORM_APP_ORIGIN "$VITE_PLATFORM_APP_ORIGIN" optional
 ENV CI=true \
     VITE_API_BASE_URL="" \
     VITE_APP_TITLE="Rooman Billing" \
-    VITE_SUPPORT_EMAIL=${VITE_SUPPORT_EMAIL} \
-    VITE_PLATFORM_APP_ORIGIN=${VITE_PLATFORM_APP_ORIGIN}
+    VITE_SUPPORT_EMAIL=${VITE_SUPPORT_EMAIL}
 
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund

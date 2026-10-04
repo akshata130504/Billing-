@@ -139,9 +139,9 @@ export const PortalLoginPage: React.FC = () => {
                 variant="primary"
                 disabled={loading}
                 className="w-full justify-center py-2.5 text-sm font-semibold"
-                leadingIcon={loading ? undefined : <ArrowRight className="w-4 h-4" />}
               >
                 {loading ? 'Signing in...' : 'Sign In to Portal'}
+                {!loading && <ArrowRight className="w-4 h-4 ml-2" />}
               </Button>
             </div>
           </form>

@@ -28,11 +28,6 @@ import { formatMoney, todayIso } from '../../utils/format';
 import { validatePositiveInteger } from '../../utils/validation';
 import { NewPlanModal } from './NewPlanModal';
 
-/** Trial length used by the Trial Center when the selected plan has no default trial. */
-export const DEFAULT_TRIAL_DAYS = 14;
-
-const TRIAL_DAYS_ERROR = 'A trial needs a trial period of at least 1 day.';
-
 /** Stable select key: legacy plans and catalog offerings live in different tables. */
 const optionKey = (o: Pick<SubscribablePlanOption, 'source' | 'id'>) => `${o.source}:${o.id}`;
 
@@ -61,13 +56,6 @@ export function SubscriptionFormPage() {
   const navigate = useNavigate();
   const { showToast } = useToast();
   const [searchParams] = useSearchParams();
-  // Trial Center "New Trial" opens this form with ?trial=1: the subscription must start trialing.
-  const isTrialMode = searchParams.get('trial') === '1';
-  /** Trial days to prefill for a plan: its own default, or DEFAULT_TRIAL_DAYS in trial mode. */
-  const trialDaysFor = (planTrialDays: number | null | undefined) => {
-    const days = planTrialDays || 0;
-    return isTrialMode && days <= 0 ? DEFAULT_TRIAL_DAYS : days;
-  };
 
   const [customers, setCustomers] = useState<CustomerOut[]>([]);
   const [plans, setPlans] = useState<SubscribablePlanOption[]>([]);
@@ -76,7 +64,6 @@ export function SubscriptionFormPage() {
   const [loadingData, setLoadingData] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [trialDaysError, setTrialDaysError] = useState<string | null>(null);
 
   // Form Fields
   const [customerId, setCustomerId] = useState('');
@@ -84,7 +71,7 @@ export function SubscriptionFormPage() {
   const [quantity, setQuantity] = useState(1);
   const [status, setStatus] = useState<SubscriptionStatus>('active');
   const [startDate, setStartDate] = useState(todayIso());
-  const [trialDays, setTrialDays] = useState<number>(isTrialMode ? DEFAULT_TRIAL_DAYS : 0);
+  const [trialDays, setTrialDays] = useState<number>(0);
   const [hasTrialOverride, setHasTrialOverride] = useState(false);
   const [autoRenewal, setAutoRenewal] = useState(true);
   const [generateFirstInvoice, setGenerateFirstInvoice] = useState(true);
@@ -113,7 +100,7 @@ export function SubscriptionFormPage() {
           options[0];
         if (initial) {
           setPlanId(optionKey(initial));
-          const initialTrial = trialDaysFor(initial.trial_days);
+          const initialTrial = initial.trial_days || 0;
           setTrialDays(initialTrial);
           if (initialTrial > 0) {
             setGenerateFirstInvoice(false);
@@ -170,7 +157,7 @@ export function SubscriptionFormPage() {
     setPlanId(pId);
     const p = plans.find((plan) => optionKey(plan) === pId);
     if (p && !hasTrialOverride) {
-      const pTrial = trialDaysFor(p.trial_days);
+      const pTrial = p.trial_days || 0;
       setTrialDays(pTrial);
       if (pTrial > 0) {
         setGenerateFirstInvoice(false);
@@ -185,7 +172,7 @@ export function SubscriptionFormPage() {
     setPlans((prev) => [...prev, option]);
     setPlanId(optionKey(option));
     setHasTrialOverride(false);
-    const pTrial = trialDaysFor(plan.trial_days);
+    const pTrial = plan.trial_days || 0;
     setTrialDays(pTrial);
     setGenerateFirstInvoice(pTrial === 0);
   };
@@ -252,12 +239,6 @@ export function SubscriptionFormPage() {
       showToast('error', 'Validation Error', quantityError);
       return;
     }
-    if (isTrialMode && !(Number.isInteger(trialDays) && trialDays > 0)) {
-      setTrialDaysError(TRIAL_DAYS_ERROR);
-      setError(TRIAL_DAYS_ERROR);
-      showToast('error', 'Validation Error', TRIAL_DAYS_ERROR);
-      return;
-    }
 
     try {
       setSubmitting(true);
@@ -269,8 +250,7 @@ export function SubscriptionFormPage() {
           ? { offering_id: selectedPlan.id }
           : { plan_id: selectedPlan.id }),
         quantity: Math.max(1, quantity || 1),
-        // Trial mode always starts trialing (the backend sets trial_start / trial_end).
-        status: isTrialMode ? 'trialing' : status,
+        status: status,
         start_date: startDate || todayIso(),
         trial_days: trialDays > 0 ? trialDays : 0,
         auto_renewal: autoRenewal,
@@ -281,10 +261,8 @@ export function SubscriptionFormPage() {
       const result = await subscriptionService.create(payload);
       showToast(
         'success',
-        isTrialMode ? 'Trial Started' : 'Subscription Created',
-        isTrialMode
-          ? `Trial ${result.subscription_number} started (${trialDays} days).`
-          : `Subscription ${result.subscription_number} created successfully.`
+        'Subscription Created',
+        `Subscription ${result.subscription_number} created successfully.`
       );
       navigate(`/subscriptions/${result.id}`);
     } catch (err: any) {
@@ -309,20 +287,18 @@ export function SubscriptionFormPage() {
       {/* Top Header */}
       <div className="border-b border-slate-200 pb-4">
         <button
-          onClick={() => navigate(isTrialMode ? '/trials' : '/subscriptions')}
+          onClick={() => navigate('/subscriptions')}
           className="inline-flex items-center text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors mb-2"
         >
           <ArrowLeft className="w-3.5 h-3.5 mr-1" />
-          {isTrialMode ? 'Back to Trial Center' : 'Back to Subscriptions'}
+          Back to Subscriptions
         </button>
         <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5">
           <Repeat className="w-6 h-6 text-brand-600" />
-          {isTrialMode ? 'Start New Trial' : 'Create New Subscription'}
+          Create New Subscription
         </h1>
         <p className="text-sm text-slate-500 mt-0.5">
-          {isTrialMode
-            ? 'Start a free trial for an existing customer. Billing begins when the trial converts.'
-            : 'Set up a recurring subscription contract for an existing customer with agreed plan pricing.'}
+          Set up a recurring subscription contract for an existing customer with agreed plan pricing.
         </p>
       </div>
 
@@ -497,20 +473,14 @@ export function SubscriptionFormPage() {
               <label className="block text-xs font-medium text-slate-700 mb-1">
                 Initial Status
               </label>
-              {isTrialMode ? (
-                <div className="w-full text-xs p-2.5 bg-sky-50 border border-sky-200 rounded-lg text-sky-800 font-medium">
-                  Trialing
-                </div>
-              ) : (
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as SubscriptionStatus)}
-                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 text-slate-900"
-                >
-                  <option value="active">Active (Immediate)</option>
-                  <option value="draft">Draft (Review first)</option>
-                </select>
-              )}
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as SubscriptionStatus)}
+                className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 text-slate-900"
+              >
+                <option value="active">Active (Immediate)</option>
+                <option value="draft">Draft (Review first)</option>
+              </select>
             </div>
 
             <div>
@@ -529,38 +499,26 @@ export function SubscriptionFormPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
             <div>
-              <label htmlFor="trial-days" className="block text-xs font-medium text-slate-700 mb-1">
-                Trial Period (Days) {isTrialMode && <span className="text-rose-500">*</span>}
+              <label className="block text-xs font-medium text-slate-700 mb-1">
+                Trial Period (Days)
               </label>
               <input
-                id="trial-days"
                 type="number"
-                min={isTrialMode ? 1 : 0}
+                min={0}
                 value={trialDays}
-                required={isTrialMode}
-                aria-invalid={trialDaysError ? true : undefined}
                 onChange={(e) => {
                   setHasTrialOverride(true);
                   const days = Math.max(0, parseInt(e.target.value) || 0);
                   setTrialDays(days);
-                  setTrialDaysError(isTrialMode && days < 1 ? TRIAL_DAYS_ERROR : null);
                   if (days > 0) {
                     setGenerateFirstInvoice(false);
                   }
                 }}
                 className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 text-slate-900"
               />
-              {trialDaysError ? (
-                <span role="alert" className="text-[11px] text-rose-600 mt-0.5 block">
-                  {trialDaysError}
-                </span>
-              ) : (
-                <span className="text-[11px] text-slate-400 mt-0.5 block">
-                  {isTrialMode
-                    ? 'Trial length in days (at least 1). Billing starts when the trial converts.'
-                    : '0 = no trial (immediate billing cycle)'}
-                </span>
-              )}
+              <span className="text-[11px] text-slate-400 mt-0.5 block">
+                0 = no trial (immediate billing cycle)
+              </span>
             </div>
 
             <div className="flex flex-col justify-center space-y-2.5 pt-2">
@@ -665,7 +623,7 @@ export function SubscriptionFormPage() {
             type="button"
             variant="outline"
             size="md"
-            onClick={() => navigate(isTrialMode ? '/trials' : '/subscriptions')}
+            onClick={() => navigate('/subscriptions')}
             disabled={submitting}
           >
             Cancel
@@ -678,7 +636,7 @@ export function SubscriptionFormPage() {
             className="flex items-center gap-2"
           >
             <CheckCircle2 className="w-4 h-4" />
-            {isTrialMode ? 'Start Trial' : 'Create Subscription Contract'}
+            Create Subscription Contract
           </Button>
         </div>
       </form>

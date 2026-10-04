@@ -257,8 +257,6 @@ class PublicQuote(BaseModel):
     declined_at: Optional[datetime] = None
     organization: PublicQuoteOrganization
     customer: PublicQuoteCustomer
-    # Set when the merchant cannot take decisions right now (e.g. suspended organization).
-    actions_unavailable_reason: Optional[str] = None
 
 
 class PublicQuoteAcceptIn(BaseModel):

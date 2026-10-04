@@ -14,7 +14,6 @@ import {
   TEMPLATE_LAYOUT_TYPES,
   type DocumentTemplate,
   type DocumentTemplateCreate,
-  type DocumentTemplateUpdate,
   type DocumentType,
   type TemplateLayoutType,
 } from '../../types/customization';
@@ -26,8 +25,7 @@ interface TemplateModalProps {
   template: DocumentTemplate | null;
   onClose: () => void;
   onSaved: (saved: DocumentTemplate) => void;
-  /** ``draft`` carries the current (possibly unsaved) form values to preview. */
-  onPreview: (template: DocumentTemplate, draft?: DocumentTemplateUpdate) => void;
+  onPreview: (template: DocumentTemplate) => void;
 }
 
 const FONT_OPTIONS = ['Helvetica', 'Arial', 'Georgia', 'Times New Roman', 'Courier New', 'Verdana', 'Roboto', 'Inter'];
@@ -88,20 +86,6 @@ function fromTemplate(t: DocumentTemplate): FormState {
   };
 }
 
-/**
- * Mirrors the backend preview rules (customization_service.resolve_preview_logo_src):
- * https:// URLs or same-origin paths. http:// is refused because the app's CSP
- * (img-src 'self' data: blob: https:) would block it, so it would never display.
- */
-export function logoUrlError(raw: string): string | null {
-  const value = raw.trim();
-  if (!value) return null;
-  if (/^https:\/\/[^\s"'<>`\\]+$/i.test(value)) return null;
-  if (/^\/(?!\/)[^\s"'<>`\\]+$/.test(value) && !value.split('?')[0].split('/').includes('..')) return null;
-  if (/^http:\/\//i.test(value)) return 'Use an https:// URL — insecure http:// images are blocked by the browser.';
-  return 'Logo URL must be an https:// URL or a /uploads/... path';
-}
-
 export function TemplateModal({ isOpen, template, onClose, onSaved, onPreview }: TemplateModalProps) {
   const { showToast } = useToast();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -141,40 +125,11 @@ export function TemplateModal({ isOpen, template, onClose, onSaved, onPreview }:
     if (!form.name.trim()) next.name = 'Template name is required';
     if (!/^#[0-9a-fA-F]{6}$/.test(form.primary_color)) next.primary_color = 'Use a 6-digit hex colour, e.g. #1F2937';
     if (!/^#[0-9a-fA-F]{6}$/.test(form.accent_color)) next.accent_color = 'Use a 6-digit hex colour, e.g. #3B82F6';
-    const logoError = logoUrlError(form.logo_url);
-    if (logoError) next.logo_url = logoError;
+    if (form.logo_url.trim() && !/^https?:\/\//i.test(form.logo_url.trim()) && !form.logo_url.trim().startsWith('/uploads/')) {
+      next.logo_url = 'Logo URL must start with http:// or https:// or /uploads/';
+    }
     setErrors(next);
     return Object.keys(next).length === 0;
-  };
-
-  const buildPayload = (): DocumentTemplateCreate => ({
-    document_type: form.document_type,
-    name: form.name.trim(),
-    layout_type: form.layout_type,
-    is_default: form.is_default,
-    is_active: form.is_active,
-    primary_color: form.primary_color.trim(),
-    accent_color: form.accent_color.trim(),
-    font_family: form.font_family.trim() || 'Helvetica',
-    logo_url: nullable(form.logo_url),
-    header_text: nullable(form.header_text),
-    footer_text: nullable(form.footer_text),
-    terms_and_conditions: nullable(form.terms_and_conditions),
-    custom_css: form.custom_css.trim() === '' ? null : form.custom_css,
-    show_company_address: form.show_company_address,
-    show_tax_summary: form.show_tax_summary,
-  });
-
-  /** Preview the current form values (including an unsaved logo) without saving. */
-  const handlePreviewChanges = () => {
-    if (!template) return;
-    const logoError = logoUrlError(form.logo_url);
-    if (logoError) {
-      setErrors((prev) => ({ ...prev, logo_url: logoError }));
-      return;
-    }
-    const { document_type: _omit, name: _name, is_default: _def, is_active: _act, ...draft } = buildPayload();
-    onPreview(template, draft);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -182,7 +137,23 @@ export function TemplateModal({ isOpen, template, onClose, onSaved, onPreview }:
     if (!validate()) return;
     setSaving(true);
     try {
-      const payload = buildPayload();
+      const payload: DocumentTemplateCreate = {
+        document_type: form.document_type,
+        name: form.name.trim(),
+        layout_type: form.layout_type,
+        is_default: form.is_default,
+        is_active: form.is_active,
+        primary_color: form.primary_color.trim(),
+        accent_color: form.accent_color.trim(),
+        font_family: form.font_family.trim() || 'Helvetica',
+        logo_url: nullable(form.logo_url),
+        header_text: nullable(form.header_text),
+        footer_text: nullable(form.footer_text),
+        terms_and_conditions: nullable(form.terms_and_conditions),
+        custom_css: form.custom_css.trim() === '' ? null : form.custom_css,
+        show_company_address: form.show_company_address,
+        show_tax_summary: form.show_tax_summary,
+      };
       let saved: DocumentTemplate;
       if (template) {
         const { document_type: _omit, ...updateBody } = payload;
@@ -209,7 +180,7 @@ export function TemplateModal({ isOpen, template, onClose, onSaved, onPreview }:
       title={isEdit ? `Edit template: ${template?.name}` : 'New document template'}
       description={
         isEdit
-          ? 'Changes apply to documents generated after you save. Preview shows your current, unsaved edits.'
+          ? 'Changes apply to documents generated after you save. Preview shows the last saved version.'
           : 'Branding, layout and footer content used when rendering this document type.'
       }
       size="xl"
@@ -220,11 +191,11 @@ export function TemplateModal({ isOpen, template, onClose, onSaved, onPreview }:
               type="button"
               variant="ghost"
               size="sm"
-              onClick={handlePreviewChanges}
+              onClick={() => onPreview(template)}
               leadingIcon={<Eye className="w-3.5 h-3.5" />}
               className="mr-auto"
             >
-              Preview changes
+              Preview saved version
             </Button>
           )}
           <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={saving}>
@@ -308,7 +279,7 @@ export function TemplateModal({ isOpen, template, onClose, onSaved, onPreview }:
                   placeholder="https://…/logo.png or upload a file"
                   onChange={(e) => set('logo_url', e.target.value)}
                   error={errors.logo_url}
-                  helperText="https:// image URL, a /uploads/... path, or upload an image file. Leave blank to use the organization logo."
+                  helperText="Public image URL or upload an image file. Leave blank to use the organization logo."
                 />
               </div>
               <input

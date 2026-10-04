@@ -1,7 +1,7 @@
 name: Deploy
 
-# Builds and pushes the THREE production images (api, tenant web, platform web) to GitHub
-# Container Registry once CI has passed for a commit on main - all at the same git SHA. It never reaches the production server directly -
+# Builds and pushes production images to GitHub Container Registry once CI has
+# passed for a commit on main. It never reaches the production server directly -
 # the server pulls on its own schedule via deploy/deploy-poll.sh (private network,
 # no inbound path from GitHub's hosted runners). Pushing to GHCR only needs the
 # default GITHUB_TOKEN with `packages: write`.
@@ -14,15 +14,8 @@ name: Deploy
 #
 # Tags / labels
 #   <image>:<sha>   immutable, what the server actually deploys (IMAGE_TAG=<sha>)
-#   <image>:latest  moved to <sha>; the poller reads the api image's revision label to learn
-#                   which SHA to deploy and fetches docker-compose.prod.yml at that SHA
-#
-# Repository VARIABLES (Settings > Secrets and variables > Actions > Variables; not secrets):
-#   TENANT_APP_ORIGIN    https://<tenant-host>    baked into the platform image ("Enter tenant")
-#   PLATFORM_APP_ORIGIN  https://<platform-host>  baked into the tenant image (hand-off check);
-#                                                 must equal PLATFORM_APP_ORIGIN in .env.production
-#   SUPPORT_EMAIL        optional                 Help page mailbox
-# The run fails before building anything if an origin is missing or malformed.
+#   <image>:latest  moved to <sha>; the poller reads its revision label to learn which
+#                   SHA to deploy and fetches docker-compose.prod.yml at that SHA
 #   label org.opencontainers.image.revision=<sha>
 on:
   workflow_run:
@@ -39,10 +32,6 @@ env:
   REGISTRY: ghcr.io
   API_IMAGE: ghcr.io/${{ github.repository_owner }}/rooman-billing-api
   WEB_IMAGE: ghcr.io/${{ github.repository_owner }}/rooman-billing-web
-  PLATFORM_IMAGE: ghcr.io/${{ github.repository_owner }}/rooman-billing-platform-web
-  # Production origins of the two frontends (repository variables): no defaults, never localhost.
-  TENANT_APP_ORIGIN: ${{ vars.TENANT_APP_ORIGIN }}
-  PLATFORM_APP_ORIGIN: ${{ vars.PLATFORM_APP_ORIGIN }}
   # The commit CI tested: head_sha for workflow_run, the dispatched ref's sha otherwise.
   DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
 
@@ -81,32 +70,6 @@ jobs:
         with:
           ref: ${{ env.DEPLOY_SHA }}
 
-      - name: Require valid production origins (repository variables)
-        run: |
-          set -eu
-          fail=0
-          for name in TENANT_APP_ORIGIN PLATFORM_APP_ORIGIN; do
-            eval "value=\${$name:-}"
-            if [ -z "$value" ]; then
-              echo "::error::Repository variable $name is not set (Settings > Secrets and variables > Actions > Variables). It must be the https origin of that app, e.g. https://billing.example.com."
-              fail=1
-              continue
-            fi
-            case "$value" in
-              https://?*) ;;
-              *) echo "::error::$name must be an https:// origin."; fail=1; continue ;;
-            esac
-            case "${value#https://}" in
-              */*|*\?*|*#*) echo "::error::$name must be a bare origin (https://host[:port]) - no path, query or trailing slash."; fail=1 ;;
-            esac
-          done
-          if [ "$fail" -eq 0 ] && [ "$TENANT_APP_ORIGIN" = "$PLATFORM_APP_ORIGIN" ]; then
-            echo "::error::TENANT_APP_ORIGIN and PLATFORM_APP_ORIGIN must be different origins (separate hostnames)."
-            fail=1
-          fi
-          [ "$fail" -eq 0 ] || exit 1
-          echo "Production origins OK."
-
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -135,11 +98,8 @@ jobs:
           file: frontend/Dockerfile
           push: true
           # Public support mailbox shown on the Help page (repository variable, not a secret).
-          # PLATFORM_APP_ORIGIN (repository variable, not a secret) = the platform console origin;
-          # the tenant app accepts the console's "Enter tenant" hand-off only from it.
           build-args: |
             VITE_SUPPORT_EMAIL=${{ vars.SUPPORT_EMAIL }}
-            VITE_PLATFORM_APP_ORIGIN=${{ vars.PLATFORM_APP_ORIGIN }}
           tags: ${{ env.WEB_IMAGE }}:${{ env.DEPLOY_SHA }}
           labels: |
             org.opencontainers.image.revision=${{ env.DEPLOY_SHA }}
@@ -147,27 +107,9 @@ jobs:
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
 
-      - name: Build & push platform (Super Admin) web image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./frontend
-          file: frontend/Dockerfile.platform
-          push: true
-          # Required: the image build fails (frontend/docker/check-origin.sh) without it.
-          build-args: |
-            VITE_TENANT_APP_ORIGIN=${{ vars.TENANT_APP_ORIGIN }}
-          tags: ${{ env.PLATFORM_IMAGE }}:${{ env.DEPLOY_SHA }}
-          labels: |
-            org.opencontainers.image.revision=${{ env.DEPLOY_SHA }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          cache-from: type=gha,scope=platform
-          cache-to: type=gha,scope=platform,mode=max
-
-      # Move :latest only after ALL THREE sha-tagged images exist, platform and web first: the
-      # poller reads api:latest to pick the release, so it must never see a SHA whose web or
-      # platform image is missing.
+      # Move :latest only after BOTH sha-tagged images exist, web first: the poller reads
+      # api:latest to pick the release, so it must never see a SHA whose web image is missing.
       - name: Promote :latest to ${{ env.DEPLOY_SHA }}
         run: |
-          docker buildx imagetools create -t "$PLATFORM_IMAGE:latest" "$PLATFORM_IMAGE:$DEPLOY_SHA"
           docker buildx imagetools create -t "$WEB_IMAGE:latest" "$WEB_IMAGE:$DEPLOY_SHA"
           docker buildx imagetools create -t "$API_IMAGE:latest" "$API_IMAGE:$DEPLOY_SHA"
