@@ -2,6 +2,12 @@
 
 Sep 29, 2026 · @Kalpit Das
 
+> **Superseded (origin only):** the console is now served at `/superadmin` on the ONE application
+> origin next to the tenant app at `/admin`, not on its own origin - see
+> [`platform-console-deployment.md`](platform-console-deployment.md) section 1, including the
+> residual risk. Everything else in this design (separate identity, tokens, 2FA, grants, audit)
+> is unchanged.
+
 Rooman Billing should add a **separate, audited platform layer** — its own staff identity, its own tokens, and time-limited Tenant Access Grants — rather than a Super Admin that bypasses `organization_id` filtering. This is a design and security review only: no code, migration, commit or production change was made. Reviewed against `main` at `19a7dc4` (PR #26 and PR #27 merged). Decisions that need business sign-off are listed in section 20.
 
 ## 1. Current architecture verified

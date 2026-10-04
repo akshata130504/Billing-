@@ -39,6 +39,10 @@ function deliver(origin: string, source: unknown, token = 'grant-token-abc') {
 }
 
 describe('platform access workspace (tenant app)', () => {
+  it('accepts the hand-off only from this same application origin (the console at /superadmin)', () => {
+    expect(PLATFORM_ORIGIN).toBe(window.location.origin);
+  });
+
   it('announces readiness to the opener, pinned to the platform origin', () => {
     render(<PlatformAccessWorkspace />);
     expect(opener.postMessage).toHaveBeenCalledWith({ type: READY_MESSAGE }, PLATFORM_ORIGIN);

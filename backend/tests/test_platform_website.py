@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from backend.app.core.config import settings
 from backend.app.models.platform import PlatformAuditLog
 from backend.app.models.website import WebsiteContentVersion
 from backend.app.services import website_service
@@ -113,8 +114,13 @@ def test_public_serves_the_published_content_only(public, admin, db):
         assert resp.status_code == 404 or "Draft headline" not in resp.text
 
 
-def test_public_website_not_served_on_platform_host(admin):
-    assert admin.client.get("/api/v1/public/website/landing").status_code == 404
+def test_public_website_never_shows_drafts_to_the_console_browser(admin):
+    """One origin serves the public site and the console: a browser holding a live platform session
+    still gets only the PUBLISHED content from the public endpoint, never the draft it is editing."""
+    assert _save(admin, _edited(hero__headline="Console-only draft headline")).status_code == 200
+    resp = admin.client.get("/api/v1/public/website/landing")
+    assert resp.status_code == 200
+    assert "Console-only draft headline" not in resp.text
 
 
 # --- authorization -----------------------------------------------------------------------------------------
@@ -135,11 +141,11 @@ def test_only_administrators_can_use_the_cms(db, role):
 def test_tenant_users_and_anonymous_cannot_touch_the_cms(tenant):
     from backend.app.main import app
 
-    anon = TestClient(app, base_url="http://platform.test")
+    anon = TestClient(app, base_url=settings.platform_origin)
     assert anon.get(f"/api/v1/platform{W}").status_code == 401
     assert anon.get(f"/api/v1/platform{W}", headers=tenant.headers()).status_code == 401
     assert TestClient(app).post(f"/api/v1/platform{W}/draft", headers=tenant.headers(),
-                                json={"content": SEED, "revision": 0}).status_code == 404
+                                json={"content": SEED, "revision": 0}).status_code == 401
 
 
 # --- validation / security ---------------------------------------------------------------------------------

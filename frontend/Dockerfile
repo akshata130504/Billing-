@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1.7
-# Rooman Billing - web image (static SPA served by nginx, /api/ proxied to the backend).
+# Rooman Billing - web image: the ONE public website (nginx). Serves the tenant SPA (/admin, ...)
+# and the platform / Super Admin console (/superadmin) from a single build, and proxies /api/ to
+# the backend. There is no separate platform image or origin.
 #
 # Build context is frontend/:
 #   docker build -t rooman-billing-web ./frontend
@@ -14,24 +16,17 @@ WORKDIR /src
 # VITE_SUPPORT_EMAIL is baked into the bundle at build time (Help > "Contact support").
 # CI passes the GitHub repository variable SUPPORT_EMAIL; empty = "contact your administrator".
 ARG VITE_SUPPORT_EMAIL=""
-# VITE_PLATFORM_APP_ORIGIN: origin of the platform console (the same value as the backend's
-# PLATFORM_APP_ORIGIN). The tenant app accepts the console's "Enter tenant" hand-off only from this
-# origin. Required when the console is deployed; empty = hand-off refused (safe default).
-# CI passes the GitHub repository variable PLATFORM_APP_ORIGIN.
-ARG VITE_PLATFORM_APP_ORIGIN=""
-COPY docker/check-origin.sh /usr/local/bin/check-origin
-RUN sh /usr/local/bin/check-origin VITE_PLATFORM_APP_ORIGIN "$VITE_PLATFORM_APP_ORIGIN" optional
 ENV CI=true \
     VITE_API_BASE_URL="" \
     VITE_APP_TITLE="Rooman Billing" \
-    VITE_SUPPORT_EMAIL=${VITE_SUPPORT_EMAIL} \
-    VITE_PLATFORM_APP_ORIGIN=${VITE_PLATFORM_APP_ORIGIN}
+    VITE_SUPPORT_EMAIL=${VITE_SUPPORT_EMAIL}
 
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
 COPY . .
-# "build" = tsc && vite build (type errors fail the image build).
+# "build" = tsc && vite build (type errors fail the image build) -> dist/index.html (tenant app)
+# and dist/superadmin.html (platform console), sharing the hashed assets in dist/assets/.
 RUN npm run build
 
 # ---- Stage 2: serve ----------------------------------------------------------
@@ -41,6 +36,7 @@ FROM nginx:1.27-alpine AS runtime
 RUN rm -f /etc/nginx/conf.d/default.conf && mkdir -p /etc/nginx/snippets
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 COPY docker/security-headers.conf /etc/nginx/snippets/security-headers.conf
+COPY docker/platform-security-headers.conf /etc/nginx/snippets/platform-security-headers.conf
 
 COPY --from=build /src/dist /usr/share/nginx/html
 

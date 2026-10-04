@@ -49,6 +49,10 @@ function renderAt(role: PlatformRole = 'platform_support', path = '/access-grant
 beforeEach(() => vi.clearAllMocks());
 
 describe('tenant access grants in the console', () => {
+  it('hands grant tokens only to this same application origin (the tenant app at /admin)', () => {
+    expect(TENANT_APP_ORIGIN).toBe(window.location.origin);
+  });
+
   it('is not available to Operations', async () => {
     renderAt('platform_operations');
     expect(await screen.findByText('Not available for your role')).toBeInTheDocument();

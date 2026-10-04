@@ -2,7 +2,7 @@
 
     GET /landing   the PUBLISHED landing-page content (never a draft)
 
-Served on the tenant/public host only (the platform host serves platform routes only).
+Drafts are only reachable through the platform API (Platform Administrators, /superadmin).
 """
 from typing import Any, Dict, Optional
 

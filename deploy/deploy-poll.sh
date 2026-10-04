@@ -20,13 +20,13 @@
 #   3. sync orchestration files at the target SHA (needs GITHUB_PAT)
 #   3b. preflight: deploy/check-env.sh on .env.production (names only, never values). A missing
 #      REQUIRED setting aborts BEFORE anything is pulled or restarted (current release keeps running).
-#   4. pull backend + frontend + platform-web images at IMAGE_TAG=<sha>
+#   4. pull backend + frontend images at IMAGE_TAG=<sha> (frontend = the one website: tenant app
+#      at /admin and platform / Super Admin console at /superadmin)
 #   5. pg_dump pre-deploy backup to ./backups/predeploy/ (abort deploy if it fails)
 #   6. docker compose up -d with IMAGE_TAG=<sha>; poll READINESS_URL (backend, runs migrations)
-#      AND wait for the platform-web container to report healthy
-#   7. ready -> record .deploy/deployed_sha.  not ready (API or platform console) -> redeploy
-#      :previous with the previous compose file, record .deploy/failed_sha (so it is not retried
-#      every 2 minutes), alert ALERT_WEBHOOK_URL, exit 1.
+#   7. ready -> record .deploy/deployed_sha.  not ready -> redeploy :previous with the
+#      previous compose file, record .deploy/failed_sha (so it is not retried every
+#      2 minutes), alert ALERT_WEBHOOK_URL, exit 1.
 #
 # Migrations are forward-only: the new backend container runs `alembic upgrade head`
 # on start, and the rollback only swaps the application image back. That is safe as
@@ -46,8 +46,7 @@
 #   READINESS_TIMEOUT  seconds to wait for readiness (default 180)
 #   PREDEPLOY_BACKUP_KEEP  number of pre-deploy dumps kept (default 10)
 #   GITHUB_REPO        default rooman-itsd/Rooman-Billing
-#   API_IMAGE / WEB_IMAGE / PLATFORM_IMAGE
-#                      default ghcr.io/rooman-itsd/rooman-billing-{api,web,platform-web}
+#   API_IMAGE / WEB_IMAGE  default ghcr.io/rooman-itsd/rooman-billing-{api,web}
 #
 # Expected to run with its working directory set to the directory that holds
 # docker-compose.prod.yml and .env.production (normally /opt/rooman-billing).
@@ -75,7 +74,6 @@ GITHUB_PAT="$(env_get GITHUB_PAT)"
 GITHUB_REPO="$(env_get GITHUB_REPO)"; GITHUB_REPO="${GITHUB_REPO:-rooman-itsd/Rooman-Billing}"
 API_IMAGE="$(env_get API_IMAGE)"; API_IMAGE="${API_IMAGE:-ghcr.io/rooman-itsd/rooman-billing-api}"
 WEB_IMAGE="$(env_get WEB_IMAGE)"; WEB_IMAGE="${WEB_IMAGE:-ghcr.io/rooman-itsd/rooman-billing-web}"
-PLATFORM_IMAGE="$(env_get PLATFORM_IMAGE)"; PLATFORM_IMAGE="${PLATFORM_IMAGE:-ghcr.io/rooman-itsd/rooman-billing-platform-web}"
 ALERT_WEBHOOK_URL="$(env_get ALERT_WEBHOOK_URL)"
 READINESS_TIMEOUT="$(env_get READINESS_TIMEOUT)"; READINESS_TIMEOUT="${READINESS_TIMEOUT:-180}"
 PREDEPLOY_BACKUP_KEEP="$(env_get PREDEPLOY_BACKUP_KEEP)"; PREDEPLOY_BACKUP_KEEP="${PREDEPLOY_BACKUP_KEEP:-10}"
@@ -143,11 +141,6 @@ if [ -n "$backend_cid" ] && [ -n "$frontend_cid" ]; then
     prev_web_img="$(docker inspect --format '{{.Image}}' "$frontend_cid")"
     docker tag "$prev_api_img" "$API_IMAGE:previous"
     docker tag "$prev_web_img" "$WEB_IMAGE:previous"
-    # The platform console is part of every release from this version on; an older release has none.
-    platform_cid="$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps -q platform-web 2>/dev/null || true)"
-    if [ -n "$platform_cid" ]; then
-        docker tag "$(docker inspect --format '{{.Image}}' "$platform_cid")" "$PLATFORM_IMAGE:previous"
-    fi
     cp "$COMPOSE_FILE" "$STATE_DIR/docker-compose.prod.yml.previous"
     rm -f "$STATE_DIR/backup.sh.previous"
     if [ -f deploy/backup.sh ]; then cp deploy/backup.sh "$STATE_DIR/backup.sh.previous"; fi
@@ -228,15 +221,8 @@ else
 fi
 
 # --- 4. Pull the release images -----------------------------------------------------
-# platform-web (Super Admin console) is part of every release whose compose file defines it.
-SERVICES="backend frontend"
-if compose_tag "$TARGET_SHA" "$COMPOSE_FILE" config --services 2>/dev/null | grep -qx platform-web; then
-    SERVICES="$SERVICES platform-web"
-else
-    err "WARNING: $COMPOSE_FILE defines no platform-web service - the platform console is NOT part of this rollout (set GITHUB_PAT so the compose file follows the release)."
-fi
 failed=0
-for service in $SERVICES; do
+for service in backend frontend; do
     log "Pulling $service @ $TARGET_SHA..."
     if ! compose_tag "$TARGET_SHA" "$COMPOSE_FILE" pull "$service"; then
         err "ERROR: pull failed for $service"
@@ -295,24 +281,7 @@ wait_ready() {
     return 1
 }
 
-# The staff console must come up healthy too: a release whose platform-web cannot start is rolled back.
-wait_platform_healthy() {
-    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config --services 2>/dev/null | grep -qx platform-web || return 0
-    deadline=$(( $(date +%s) + READINESS_TIMEOUT ))
-    while [ "$(date +%s)" -lt "$deadline" ]; do
-        cid="$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps -q platform-web 2>/dev/null || true)"
-        state=""
-        [ -z "$cid" ] || state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || true)"
-        case "$state" in
-            healthy|running) return 0 ;;
-        esac
-        log "Waiting for platform-web to become healthy (state: ${state:-not created})..."
-        sleep 5
-    done
-    return 1
-}
-
-if [ "$rollout_ok" -eq 1 ] && wait_ready && wait_platform_healthy; then
+if [ "$rollout_ok" -eq 1 ] && wait_ready; then
     printf '%s\n' "$TARGET_SHA" > "$STATE_DIR/deployed_sha"
     rm -f "$STATE_DIR/failed_sha"
     docker image prune -f >/dev/null 2>&1 || true
@@ -321,7 +290,7 @@ if [ "$rollout_ok" -eq 1 ] && wait_ready && wait_platform_healthy; then
 fi
 
 # --- 7. Rollback ---------------------------------------------------------------------
-err "ERROR: release $TARGET_SHA did not become ready (API readiness and platform-web health) within ${READINESS_TIMEOUT}s."
+err "ERROR: release $TARGET_SHA did not become ready within ${READINESS_TIMEOUT}s."
 printf '%s\n' "$TARGET_SHA" > "$STATE_DIR/failed_sha"
 
 if [ "$PREV_AVAILABLE" -ne 1 ]; then

@@ -57,9 +57,9 @@ from backend.app.models.platform import (
 from backend.app.services import platform_auth_service as svc
 
 AUTH = "/api/v1/platform/auth"
-# The platform API answers only on the platform console host (conftest: PLATFORM_APP_ORIGIN);
-# tenant endpoints answer on every other host (TestClient's default "testserver").
-PLATFORM_BASE = "http://platform.test"
+# One application origin serves both the tenant app (/admin) and the platform console (/superadmin):
+# platform and tenant clients talk to the same origin and are told apart only by their credentials.
+PLATFORM_BASE = settings.platform_origin
 TENANT_ME = "/api/v1/auth/me"
 PASSWORD = "Platform-Passw0rd-2026!"
 
@@ -107,7 +107,7 @@ def _fresh_client():
 def _tenant_client():
     from backend.app.main import app
 
-    return TestClient(app)
+    return TestClient(app, base_url=PLATFORM_BASE)  # same origin as the platform console
 
 
 def _challenge(client, enrolment, password=PASSWORD):
@@ -705,10 +705,11 @@ def test_platform_session_is_not_tenant_session(client, db, tenant):
     """Signing in as platform staff yields nothing that tenant endpoints accept, and a tenant sign-in
     yields nothing platform endpoints accept - with cookies or bearer tokens."""
     _sign_in(client, db, _staff(db))
-    # Tenant endpoints do not exist on the platform host...
-    assert client.get(TENANT_ME).status_code == 404
-    assert client.get("/api/v1/customers").status_code == 404
-    # ...and the platform cookies, even replayed by hand to the tenant host, are not tenant credentials.
+    # Same origin, separate authorization: tenant endpoints on this very origin refuse the browser
+    # that holds a live platform session...
+    assert client.get(TENANT_ME).status_code == 401
+    assert client.get("/api/v1/customers").status_code == 401
+    # ...and the platform cookies, replayed by hand on tenant paths, are not tenant credentials.
     stolen = {"Cookie": "; ".join(f"{c.name}={c.value}" for c in client.cookies.jar)}
     assert client.cookies.jar
     tenant_client = _tenant_client()
@@ -717,8 +718,8 @@ def test_platform_session_is_not_tenant_session(client, db, tenant):
     resp = tenant_client.post("/api/v1/auth/login", json={"email": tenant.owner.email, "password": "Str0ngPassw0rd!"})
     assert resp.status_code == 200, resp.text
     tenant_token = resp.json()["access_token"]
-    # The platform API does not exist on the tenant host; on the platform host a tenant token fails.
-    assert tenant_client.get(f"{AUTH}/me", headers=_bearer(tenant_token)).status_code == 404
+    # A tenant token is not a platform credential on the same origin either.
+    assert tenant_client.get(f"{AUTH}/me", headers=_bearer(tenant_token)).status_code == 401
     assert _fresh_client().get(f"{AUTH}/me", headers=_bearer(tenant_token)).status_code == 401
     assert _fresh_client().get(f"{AUTH}/me").status_code == 401
 

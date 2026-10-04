@@ -1,45 +1,50 @@
-# Platform console: separate origin, audit immutability, step-up
+# Platform console: one origin (/admin + /superadmin), audit immutability, step-up
 
 Status: integrated into the production release pipeline (section 3). The first production rollout still needs the one-time server setup listed there.
-The tenant app keeps its own image and nginx config; the console is an additional service.
 
-## 1. Two origins
+## 1. One website, one origin
 
-| | Tenant app (unchanged) | Platform console (Rooman staff) |
+Rooman Billing is ONE public website on ONE origin (the origin of `FRONTEND_URL`):
+
+| | Tenant app (organizations) | Platform console (Rooman staff / Super Admin) |
 |---|---|---|
-| Origin | `FRONTEND_URL` / `ALLOWED_ORIGINS` | `PLATFORM_APP_ORIGIN` |
-| Bundle | `npm run build` → `dist/` | `npm run build:platform` → `dist-platform/` (`platform.html`, own entry `src/platform/main.tsx`) |
-| Image | `frontend/Dockerfile` | `frontend/Dockerfile.platform` |
-| nginx | `docker/nginx.conf` (+ `security-headers.conf`) | `docker/nginx.platform.conf` (+ `platform-security-headers.conf`) |
-| API reachable | all tenant paths | `/api/v1/platform/*` **only** |
-| Auth | bearer tokens (no cookies) | HttpOnly cookies + CSRF header, mandatory TOTP |
+| URL | `https://<official-domain>/admin` (sign-in; `/admin/<page>` = `/<page>`) | `https://<official-domain>/superadmin`, every console page under `/superadmin/*` |
+| Entry document | `index.html` -> `src/main.tsx` | `superadmin.html` -> `src/platform/main.tsx` (router `basename="/superadmin"`) |
+| Build / image | one `npm run build` -> `dist/` (both documents, shared hashed `assets/`), one web image `frontend/Dockerfile` | same |
+| nginx | `docker/nginx.conf`, `security-headers.conf` | same server; `/superadmin*` and `/api/v1/platform/` use `platform-security-headers.conf` |
+| Auth | bearer tokens (no cookies) | HttpOnly cookies + CSRF header, mandatory TOTP, step-up |
 
-The tenant bundle contains no platform routes or code; the platform bundle contains no tenant API
-client, no web fonts, no payment scripts, and nothing from `public/`.
+Same origin does **not** mean shared authorization. The console shares no router, auth provider,
+API client or storage with the tenant SPA; the tenant bundle contains no console route
+(`/superadmin` is answered with `superadmin.html` by nginx and by the Vite dev/preview servers).
+A tenant user who opens `/superadmin` gets the platform staff sign-in: a tenant token is not a
+platform credential (different signing key, audience, issuer and token type), and the console
+loads nothing without a platform session.
 
 ### What the backend enforces (`backend/app/core/platform_boundary.py`)
 
-Active only when `PLATFORM_APP_ORIGIN` is set:
+Active whenever platform sign-in is configured (`PLATFORM_JWT_SECRET` set):
 
-- **Host binding.** `/api/v1/platform/*` is served only when `Host` equals the platform host
-  (`host[:port]` of `PLATFORM_APP_ORIGIN`); anywhere else it is a 404. On the platform host,
-  every other path (tenant API, health, uploads, webhooks) is a 404.
-- **Origin check.** On platform paths, a present `Origin` header must equal
-  `PLATFORM_APP_ORIGIN` exactly (scheme, host and port; `null` is refused) - 403 otherwise.
+- **Origin check.** On platform paths (`/api/v1/platform/*`), a present `Origin` header must equal
+  the application origin (`FRONTEND_URL`) exactly - scheme, host and port; another origin, a
+  sibling host, another port or `null` is refused (403).
 - **Fetch metadata.** `Sec-Fetch-Site` other than `same-origin` / `none` is refused (403). This
-  blocks "simple" no-CORS form/text POSTs from the tenant origin (or any sibling subdomain), which
-  skip CORS preflight.
+  blocks "simple" no-CORS form/text POSTs from any other site or sibling subdomain, which skip
+  CORS preflight.
 - **CORS split by path.** Tenant paths keep the existing `ALLOWED_ORIGINS` policy unchanged.
-  Platform paths use a separate policy that allows only `PLATFORM_APP_ORIGIN`, with credentials,
+  Platform paths use a separate policy that allows only the application origin, with credentials,
   methods `GET POST DELETE OPTIONS` and headers `Content-Type Accept X-Platform-CSRF X-Request-ID`.
   No wildcard, no origin reflection, no regex.
 - **Headers.** Platform API responses get a stricter set than tenant ones
   (`default-src 'none'; frame-ancestors 'none'`, `X-Frame-Options: DENY`, `Referrer-Policy:
   no-referrer`, COOP/CORP `same-origin`, `Cache-Control: no-store`). The tenant CSP is unchanged.
+  The console document (`/superadmin*`) is served by nginx with its own strict CSP: no
+  third-party scripts, fonts or frames, not framable, `noindex`.
 - **CSRF.** Double submit: cookie-authenticated writes need `X-Platform-CSRF` equal to the platform
-  CSRF cookie (constant-time compare). The tenant app has no cookie auth and no CSRF token, so there
-  is nothing to cross-use; tenant bearer tokens are refused by platform routes (different key,
-  audience, issuer and type) and platform tokens by tenant routes.
+  CSRF cookie (constant-time compare), even from the same origin. The tenant app has no cookie
+  auth and no CSRF token, so there is nothing to cross-use; tenant bearer tokens are refused by
+  platform routes and platform tokens/cookies by tenant routes.
+- **Websockets** on platform paths are refused.
 
 ### Cookies
 
@@ -52,77 +57,83 @@ Host-only (never a `Domain` attribute), `SameSite=Strict`, `HttpOnly` except the
 | CSRF | `__Host-rb_platform_csrf`, `Path=/`, readable | `rb_platform_csrf`, `Path=/`, readable |
 
 `__Host-` makes the browser refuse the cookie unless it is Secure, host-only and `Path=/`, so a
-sibling subdomain (including the tenant app) cannot set, overwrite or "toss" it. The access
-cookie's `Path=/` is harmless because the platform host serves nothing but the console.
+sibling subdomain cannot set, overwrite or "toss" it. On the shared origin the secure access
+cookie also travels with tenant API requests; tenant routes read bearer tokens only and ignore it
+(covered by tests).
 
-**Why not rely on SameSite alone:** `app.example.com` and `platform.example.com` are *same-site*,
-so `SameSite=Strict` does not stop the browser attaching platform cookies to a request a
-tenant-origin page makes. Host-only cookies stop the *tenant host* from receiving them, and the
-Origin / `Sec-Fetch-Site` checks above stop a tenant-origin page from *using* them. For the
-strongest isolation, put the console on a **different registrable domain** from the tenant app
-(then it is also cross-site). Browsers do not isolate cookies by port, so `localhost:5173` vs
-`localhost:5174` is not a separate origin for cookies - configuration refuses a platform
-hostname equal to any tenant hostname.
+### Residual risk of sharing the origin (accepted with the single-origin requirement)
+
+**This is weaker isolation than the previous separate-origin design.** A separate origin kept
+script running on the tenant app away from the console. On one origin, script injected into ANY
+page of the site (an XSS bug in the tenant app, or in the console) runs on the same origin as the
+console. If a Rooman staff member is signed in to the console in the same browser, that script can
+call the platform API with their session: the browser attaches the cookies, the Origin and
+`Sec-Fetch-Site` checks pass (it IS the same origin), and the CSRF double submit does not stop it
+(the CSRF cookie is readable by same-origin script by design). Within the staff member's role it
+could:
+
+- read everything the console shows (organization directory, platform audit log, staff list,
+  health, CMS drafts);
+- perform the state changes that do not require step-up (for example requesting or cancelling
+  access grants, saving CMS drafts or uploading media, revoking sessions, some organization
+  lifecycle actions);
+- perform the step-up-protected actions too (suspension, deletion scheduling, staff
+  activation/deactivation, entering a tenant, emergency approval, CMS publish/rollback) if the
+  session completed a step-up within the last `PLATFORM_STEP_UP_MINUTES` (at most 15).
+
+What still limits it: the platform tokens are HttpOnly, so the script cannot steal the session
+for use elsewhere; sessions are short (10-minute access token, idle and absolute limits); without
+a step-up in the last 15 minutes the sensitive actions above need a fresh authenticator code,
+which a script cannot produce; both apps run under a `script-src 'self'` CSP with no third-party
+scripts on the console; tenant tokens and platform tokens remain unusable on each other's routes;
+every platform action is audited. Recommended operating practice: Rooman staff use the console in
+a separate browser profile (or browser) from any tenant account, and sign out when done.
 
 ## 2. Configuration
 
 | Variable | Meaning |
 |---|---|
-| `PLATFORM_JWT_SECRET` | Platform token signing key (≥ 32 chars, different from `SECRET_KEY`). Generate on the server; never commit. |
-| `PLATFORM_APP_ORIGIN` | Bare origin of the console, e.g. `https://<platform-host>`. Required together with the key; **https in production**; its hostname must differ from every tenant origin. Its host is added to the derived `ALLOWED_HOSTS`; if you set `ALLOWED_HOSTS` explicitly, add it there. |
+| `FRONTEND_URL` | THE application origin (bare origin, **https in production**), e.g. `https://<official-domain>`. Serves `/admin` and `/superadmin`; the only origin the platform API accepts. |
+| `PLATFORM_JWT_SECRET` | Platform token signing key (≥ 32 chars, different from `SECRET_KEY`). Generate on the server; never commit. Empty = platform sign-in disabled (503 on its API) and the boundary middleware is a no-op. |
 | `PLATFORM_COOKIE_SECURE` | Defaults to on in production. |
 | `PLATFORM_STEP_UP_MINUTES` | Step-up window, default 15, allowed 1-15. |
 
-Both empty (the default) = the platform console is disabled (503 on its API) and the boundary
-middleware is a no-op. Setting only one of the two refuses to start.
-
-No production DNS name is defined here. Choose the host, create its DNS record, and pick a TLS
-certificate for it as part of the production rollout.
+There is no separate platform origin or domain: `PLATFORM_APP_ORIGIN`, `PLATFORM_DOMAIN` and
+`TENANT_APP_ORIGIN` are retired (ignored if present; `deploy/check-env.sh` warns). No production
+DNS name is defined here.
 
 ### Local development
 
 ```sh
 # backend (from the repo root) - a throwaway key, never reuse it anywhere
 PLATFORM_JWT_SECRET=$(python -c "import secrets; print(secrets.token_hex(32))") \
-PLATFORM_APP_ORIGIN=http://platform.localhost:5174 \
+FRONTEND_URL=http://localhost:5173 \
   uvicorn backend.app.main:app --port 8000
 
 # frontend
-npm run dev            # tenant app   http://localhost:5173 (unchanged)
-npm run dev:platform   # console      http://platform.localhost:5174
+npm run dev     # http://localhost:5173/admin       tenant app
+                # http://localhost:5173/superadmin  platform console (same dev server)
 ```
-
-`*.localhost` resolves to the loopback address in current browsers. The platform dev server
-proxies only `/api/v1/platform` and keeps the `Host` header (`changeOrigin: false`).
 
 ## 3. Production rollout
 
 The console is part of the normal release (`.github/workflows/deploy.yml`, `docker-compose.prod.yml`,
-`deploy/deploy-poll.sh`); nothing is rolled out by hand except the one-time setup below.
+`deploy/deploy-poll.sh`) inside the one web image; nothing is rolled out by hand except the
+one-time setup below.
 
-1. **GitHub repository variables** (Settings > Secrets and variables > Actions > Variables):
-   `TENANT_APP_ORIGIN=https://<tenant-host>` and `PLATFORM_APP_ORIGIN=https://<platform-host>`.
-   They are baked into the images ("Enter tenant" needs both origins). The Deploy run fails
-   before building anything when either is missing, not https, not a bare origin, or when both are equal.
-2. **`.env.production`** (see `.env.production.example`): `PLATFORM_APP_ORIGIN`, `PLATFORM_DOMAIN`
-   (its host), `PLATFORM_JWT_SECRET` (>= 32 chars, different from `SECRET_KEY`), `TENANT_APP_ORIGIN`
-   (the origin of `FRONTEND_URL`) and `GITHUB_PAT`. `docker-compose.prod.yml` refuses to start
-   without them and `deploy/check-env.sh` (run by the poller before every release) validates them.
-3. **DNS + TLS**: a second hostname for the console. With the Caddy overlay the site block for
-   `{$PLATFORM_DOMAIN}` in `deploy/Caddyfile` routes it to `platform-web:80`. Optionally restrict
-   that block by client IP (office / VPN ranges) with an `@allowed remote_ip` matcher - recommended
-   for a staff-only console. After changing the Caddyfile on the server, recreate caddy
-   (`docker compose ... -f docker-compose.caddy.yml up -d --force-recreate caddy`).
-4. **Release**: merge to `main`. CI passes, Deploy publishes `rooman-billing-platform-web:<sha>`
-   next to the api and web images, the poller pulls all three, runs migrations (the backend applies
-   `alembic upgrade head` on start), and waits for the API readiness **and** `platform-web` health
-   before recording `.deploy/deployed_sha`. A console that cannot start rolls the release back.
-5. **First staff member** (no default account): see `docs/deployment.md` > Platform console
+1. **`.env.production`** (see `.env.production.example`): `FRONTEND_URL` (the https application
+   origin), `PLATFORM_JWT_SECRET` (>= 32 chars, different from `SECRET_KEY`) and `GITHUB_PAT`.
+   `docker-compose.prod.yml` refuses to start without the key and `deploy/check-env.sh` (run by
+   the poller before every release) validates them. Remove the retired `PLATFORM_APP_ORIGIN`,
+   `PLATFORM_DOMAIN` and `TENANT_APP_ORIGIN` if an older setup added them.
+2. **DNS + TLS**: one hostname (`DOMAIN` for the Caddy overlay = the host of `FRONTEND_URL`).
+   No second hostname. To restrict the console by client IP (office / VPN ranges), add a matcher
+   on `/superadmin*` and `/api/v1/platform/*` with `remote_ip` to the `{$DOMAIN}` site block.
+3. **Release**: merge to `main`. CI passes, Deploy publishes `rooman-billing-{api,web}:<sha>`, the
+   poller pulls both, runs migrations (the backend applies `alembic upgrade head` on start), and
+   waits for API readiness before recording `.deploy/deployed_sha`. A failed release rolls back.
+4. **First staff member** (no default account): see `docs/deployment.md` > Platform console
    (`python -m backend.app.cli.platform_staff create ... --password-stdin`).
-
-Local/manual image build (CI does this with the repository variables):
-`docker build -f frontend/Dockerfile.platform --build-arg VITE_TENANT_APP_ORIGIN=https://<tenant-host> ./frontend`
-fails with a clear message when the origin is missing or malformed.
 
 ## 4. Audit log immutability
 

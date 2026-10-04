@@ -6,8 +6,10 @@
     <meta name="robots" content="noindex, nofollow" />
     <meta name="referrer" content="no-referrer" />
     <title>Rooman Platform Console</title>
-    <!-- The Rooman staff console: its own origin, its own bundle, no third-party resources
-         (no web fonts, no payment scripts). See docs/platform-console-deployment.md. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- The Rooman staff console, served at /superadmin on the application origin. Its own entry
+         point and no third-party resources (no web fonts, no payment scripts), so it runs under the
+         stricter /superadmin Content-Security-Policy. See docs/platform-console-deployment.md. -->
   </head>
   <body class="h-full antialiased text-slate-900 bg-slate-50">
     <div id="root" class="h-full"></div>

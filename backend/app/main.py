@@ -170,7 +170,7 @@ def create_application() -> FastAPI:
             max_age=600,
         ),
     )
-    # Platform console host binding and Origin / Sec-Fetch-Site checks (no-op when not configured).
+    # Platform API Origin / Sec-Fetch-Site checks (no-op when platform sign-in is not configured).
     app.add_middleware(PlatformBoundaryMiddleware)
 
     @app.middleware("http")

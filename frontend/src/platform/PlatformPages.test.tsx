@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
-import { PlatformRoutes } from './PlatformApp';
+import { MemoryRouter, useLocation } from 'react-router-dom';
+import { PlatformRoutes, SUPERADMIN_BASE } from './PlatformApp';
+import superadminHtml from '../../superadmin.html?raw';
 import tenantRoutesSource from '../routes/index.tsx?raw';
 import { PlatformApiError, platformApi } from './platformApi';
 import { consoleApi } from './consoleApi';
@@ -178,7 +179,88 @@ describe('Platform console shell', () => {
   });
 });
 
-describe('Separate origin', () => {
+/** Renders the console the way production mounts it: under /superadmin on the application origin. */
+function renderSuperadmin(path: string) {
+  function Where() {
+    return <output data-testid="where">{SUPERADMIN_BASE + useLocation().pathname}</output>;
+  }
+  return render(
+    <ToastProvider>
+      <MemoryRouter basename={SUPERADMIN_BASE} initialEntries={[path]}>
+        <PlatformRoutes />
+        <Where />
+      </MemoryRouter>
+    </ToastProvider>
+  );
+}
+
+describe('Served at /superadmin', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('uses /superadmin as the console base path', () => {
+    expect(SUPERADMIN_BASE).toBe('/superadmin');
+  });
+
+  it('/superadmin without a platform session shows the staff sign-in, not the console', async () => {
+    // e.g. a signed-in tenant user: their tenant token is no platform credential, the API says 401
+    api.me.mockRejectedValue(new PlatformApiError('Platform authentication required.', 401));
+    api.refresh.mockRejectedValue(new PlatformApiError('Your platform session has ended.', 401));
+    renderSuperadmin('/superadmin');
+    expect(await screen.findByText('Platform staff sign-in')).toBeInTheDocument();
+    expect(screen.getByTestId('where')).toHaveTextContent(/^\/superadmin\/login$/);
+    expect(screen.queryByRole('heading', { name: 'Platform dashboard' })).not.toBeInTheDocument();
+    expect(consoleMock.dashboard).not.toHaveBeenCalled();
+  });
+
+  it('a deep link without a session also lands on the staff sign-in', async () => {
+    api.me.mockRejectedValue(new PlatformApiError('Platform authentication required.', 401));
+    api.refresh.mockRejectedValue(new PlatformApiError('ended', 401));
+    renderSuperadmin('/superadmin/organizations');
+    expect(await screen.findByText('Platform staff sign-in')).toBeInTheDocument();
+    expect(screen.getByTestId('where')).toHaveTextContent(/^\/superadmin\/login$/);
+  });
+
+  it('password then mandatory authenticator code, then the console at /superadmin', async () => {
+    api.login.mockResolvedValue({ two_factor_required: true, challenge_token: 'chal-9', expires_in: 300 });
+    api.verifyTwoFactor.mockResolvedValue(ME);
+    api.me.mockResolvedValue(ME);
+    renderSuperadmin('/superadmin/login');
+    fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'ops@rooman.test' } });
+    fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: 'Platform-Passw0rd-2026!' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    const codeInput = await screen.findByLabelText(/^Authenticator code/);
+    expect(api.verifyTwoFactor).not.toHaveBeenCalled(); // no session from the password alone
+    expect(screen.getByTestId('where')).toHaveTextContent(/^\/superadmin\/login$/);
+    fireEvent.change(codeInput, { target: { value: '123456' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Verify and sign in' }));
+    await waitFor(() => expect(api.verifyTwoFactor).toHaveBeenCalledWith('chal-9', '123456'));
+    expect(await screen.findByRole('heading', { name: 'Platform dashboard' })).toBeInTheDocument();
+    expect(screen.getByTestId('where')).toHaveTextContent(/^\/superadmin\/$/);
+  });
+
+  it('a direct link to a console page opens it under /superadmin', async () => {
+    api.me.mockResolvedValue(ME);
+    api.sessions.mockResolvedValue({ sessions: [] });
+    renderSuperadmin('/superadmin/account');
+    expect((await screen.findAllByText('Platform Administrator (Super Admin)')).length).toBeGreaterThan(0);
+    expect(screen.getByTestId('where')).toHaveTextContent(/^\/superadmin\/account$/);
+  });
+
+  it('console navigation stays under /superadmin', async () => {
+    api.me.mockResolvedValue(ME);
+    renderSuperadmin('/superadmin/no-such-page');
+    expect(await screen.findByRole('heading', { name: 'Platform dashboard' })).toBeInTheDocument();
+    expect(screen.getByTestId('where')).toHaveTextContent(/^\/superadmin\/$/);
+  });
+
+  it('the console document loads only its own entry and no third-party resources', () => {
+    expect(superadminHtml).toContain('src="/src/platform/main.tsx"');
+    expect(superadminHtml).not.toMatch(/https?:\/\//);
+    expect(superadminHtml).toContain('noindex');
+  });
+});
+
+describe('One application, separate console', () => {
   it('the tenant app does not contain the platform console', () => {
     expect(tenantRoutesSource).not.toMatch(/platform\/Platform(Login|Home)Page/);
     // no /platform or /platform/* console route (the tenant's /platform-access grant workspace is different)

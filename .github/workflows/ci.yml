@@ -224,18 +224,3 @@ jobs:
           tags: rooman-billing-web:ci
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
-
-      - name: Build platform (Super Admin) web image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./frontend
-          file: frontend/Dockerfile.platform
-          push: false
-          load: false
-          # Build validation only: a placeholder origin (the image is never published from CI).
-          # Releases pass the real origin from the TENANT_APP_ORIGIN repository variable.
-          build-args: |
-            VITE_TENANT_APP_ORIGIN=https://tenant.ci.invalid
-          tags: rooman-billing-platform-web:ci
-          cache-from: type=gha,scope=platform
-          cache-to: type=gha,scope=platform,mode=max

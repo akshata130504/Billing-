@@ -195,10 +195,6 @@ export function AccessGrantsPage() {
   };
 
   const enter = (grant: AccessGrant) => {
-    if (!TENANT_APP_ORIGIN) {
-      showToast('error', 'Tenant app origin is not configured (VITE_TENANT_APP_ORIGIN).');
-      return;
-    }
     // Opened synchronously on the click (popup blockers); the token follows by postMessage.
     const win = window.open(`${TENANT_APP_ORIGIN}/platform-access`, `rooman-platform-access-${grant.id}`);
     if (!win) {

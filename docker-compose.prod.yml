@@ -10,11 +10,10 @@
 #   backend    FastAPI via gunicorn/uvicorn; runs migrations on start; SCHEDULER_ENABLED=false
 #   scheduler  same image, one instance, SCHEDULER_ENABLED=true - runs renewals /
 #              trial conversion / overdue marking / dunning. REQUIRED: nothing else runs them.
-#   frontend   nginx serving the SPA and proxying /api/ to backend:8000 (port 80)
-#   platform-web  nginx serving the Rooman staff (platform/Super Admin) console on its OWN origin
-#              (PLATFORM_APP_ORIGIN) and proxying only /api/v1/platform/ to the backend. Not
-#              published on a host port: the Caddy overlay (docker-compose.caddy.yml) routes
-#              PLATFORM_DOMAIN to it. Part of every release (same SHA tag as backend/frontend).
+#   frontend   nginx serving the ONE Rooman Billing website and proxying /api/ to backend:8000
+#              (port 80): the tenant app at /admin and the Rooman staff (platform / Super Admin)
+#              console at /superadmin, both on the origin of FRONTEND_URL. There is no separate
+#              platform domain or container; the console keeps its own sign-in, 2FA and headers.
 #   backup     nightly pg_dump + uploads tarball, optional rclone offsite copy and
 #              webhook alert on failure (script: deploy/backup.sh)
 #
@@ -101,9 +100,9 @@ services:
       MIGRATION_POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env.production}
       MIGRATION_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      # Platform (staff) console boundary: the API answers /api/v1/platform/* only for this origin.
-      # Required so a release can never ship the console image without a matching backend.
-      PLATFORM_APP_ORIGIN: ${PLATFORM_APP_ORIGIN:?set PLATFORM_APP_ORIGIN (https://<platform-host>) in .env.production}
+      # Platform (staff) console sign-in at /superadmin on the FRONTEND_URL origin. Required so a
+      # release always ships a working console; the API accepts /api/v1/platform/* only from that
+      # origin (core/platform_boundary.py).
       PLATFORM_JWT_SECRET: ${PLATFORM_JWT_SECRET:?set PLATFORM_JWT_SECRET (openssl rand -hex 32) in .env.production}
     volumes:
       - uploads_data:/app/backend/uploads
@@ -243,8 +242,6 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_SUPPORT_EMAIL: ${VITE_SUPPORT_EMAIL:-}
-        # Origin of the platform console: the tenant app accepts the "Enter tenant" hand-off only from it.
-        VITE_PLATFORM_APP_ORIGIN: ${PLATFORM_APP_ORIGIN:?set PLATFORM_APP_ORIGIN (https://<platform-host>) in .env.production}
     # Pulled from GHCR by deploy/deploy-poll.sh in normal operation; `build:` above is
     # kept so `docker compose up -d --build` still works for a manual/local rebuild.
     image: ghcr.io/rooman-itsd/rooman-billing-web:${IMAGE_TAG:-latest}
@@ -266,34 +263,6 @@ services:
       start_period: 5s
     mem_limit: ${FRONTEND_MEM_LIMIT:-256m}
     cpus: ${FRONTEND_CPUS:-0.5}
-    logging: *default-logging
-
-  platform-web:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.platform
-      args:
-        # Origin of the TENANT app ("Enter tenant" opens it). REQUIRED, bare origin, no default.
-        VITE_TENANT_APP_ORIGIN: ${TENANT_APP_ORIGIN:?set TENANT_APP_ORIGIN (https://<tenant-host>, normally the origin of FRONTEND_URL) in .env.production}
-    # Pulled from GHCR by deploy/deploy-poll.sh at the SAME git-SHA tag as backend/frontend;
-    # `build:` above keeps `docker compose up -d --build` working for a manual rebuild.
-    image: ghcr.io/rooman-itsd/rooman-billing-platform-web:${IMAGE_TAG:-latest}
-    restart: unless-stopped
-    # Not published on a host port: only Caddy (docker-compose.caddy.yml) reaches it, as
-    # platform-web:80, for PLATFORM_DOMAIN. Never expose it on the tenant origin.
-    depends_on:
-      backend:
-        condition: service_healthy
-    # deploy/deploy-poll.sh waits for this to report healthy and rolls the release back if it
-    # does not, so a console that cannot start fails the release.
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-      start_period: 5s
-    mem_limit: ${PLATFORM_WEB_MEM_LIMIT:-128m}
-    cpus: ${PLATFORM_WEB_CPUS:-0.25}
     logging: *default-logging
 
 volumes:
