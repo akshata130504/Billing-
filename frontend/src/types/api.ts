@@ -279,6 +279,8 @@ export interface OrganizationOut {
   invoice_notes: string | null;
   invoice_terms: string | null;
   logo_url: string | null;
+  status?: string;
+  status_reason?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -909,7 +911,8 @@ export interface PublicInvoice {
   organization: PublicOrganization;
   customer: PublicCustomer;
   payments: InvoicePaymentRef[];
-  razorpay: { enabled: boolean; key_id: string | null };
+  /** unavailable_reason is set when the merchant cannot take payments (e.g. suspended organization). */
+  razorpay: { enabled: boolean; key_id: string | null; unavailable_reason?: string | null };
 }
 
 export interface PublicQuote {
@@ -931,6 +934,8 @@ export interface PublicQuote {
   customer: { display_name: string };
   accepted_at: string | null;
   declined_at: string | null;
+  /** Set when the merchant cannot take decisions right now (e.g. suspended organization). */
+  actions_unavailable_reason?: string | null;
 }
 
 export interface RazorpayOrderResponse {

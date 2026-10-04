@@ -5,14 +5,22 @@ import type {
   PaymentIn,
   PaymentListParams,
   PaymentOut,
+  PaymentStatus,
   PaymentsSummary,
   PaymentUpdate,
   ReconciliationSummary,
   RefundRequest,
 } from '../types/api';
 
+/**
+ * List/summary query. `status` may be a single status or a comma-separated
+ * list (e.g. 'refunded,partially_refunded') which the API matches with OR.
+ */
+export type BackendPaymentStatus = PaymentStatus | `${PaymentStatus},${string}`;
+export type PaymentQueryParams = Omit<PaymentListParams, 'status'> & { status?: BackendPaymentStatus };
+
 export const paymentService = {
-  list: async (params?: PaymentListParams): Promise<Paginated<PaymentOut>> => {
+  list: async (params?: PaymentQueryParams): Promise<Paginated<PaymentOut>> => {
     const { data } = await apiClient.get<Paginated<PaymentOut>>('/payments', {
       params: cleanParams(params),
     });
@@ -47,7 +55,7 @@ export const paymentService = {
   },
 
   /** Org-wide money totals for the same rows list() returns. */
-  summary: async (params?: PaymentListParams): Promise<PaymentsSummary> => {
+  summary: async (params?: PaymentQueryParams): Promise<PaymentsSummary> => {
     const { data } = await apiClient.get<PaymentsSummary>('/payments/summary', {
       params: cleanParams(params),
     });

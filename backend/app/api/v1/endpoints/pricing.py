@@ -13,11 +13,14 @@ from backend.app.services.pricing_engine import calculate_line_item_pricing, rou
 
 router = APIRouter()
 
+# Upper bound on a priced quantity: keeps simulator / calculator totals within sane money ranges.
+MAX_PRICING_QUANTITY = Decimal("1000000")
+
 
 class PricingCalculateItem(BaseModel):
     offering_id: Optional[str] = None
     plan_id: Optional[str] = None
-    quantity: Decimal = Field(default=Decimal("1"), ge=Decimal("0"))
+    quantity: Decimal = Field(default=Decimal("1"), ge=Decimal("0"), le=MAX_PRICING_QUANTITY)
     price_book_id: Optional[str] = None
     discount_pct: Decimal = Field(default=Decimal("0"), ge=Decimal("0"), le=Decimal("100"))
 
@@ -34,7 +37,7 @@ class PricingSimulateRequest(BaseModel):
     plan_id: Optional[str] = None
     customer_id: Optional[str] = None
     price_book_id: Optional[str] = None
-    quantity: Decimal = Field(default=Decimal("1"), ge=Decimal("0"))
+    quantity: Decimal = Field(default=Decimal("1"), ge=Decimal("0"), le=MAX_PRICING_QUANTITY)
     discount_pct: Decimal = Field(default=Decimal("0"), ge=Decimal("0"), le=Decimal("100"))
 
 

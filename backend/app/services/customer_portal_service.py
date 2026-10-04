@@ -147,32 +147,38 @@ def portal_signup(db: Session, data: PortalSignupIn) -> CustomerPortalUser:
 
 def portal_login(db: Session, data: PortalLoginIn) -> Tuple[str, CustomerPortalUser]:
     """Authenticates a customer portal user and creates an active session."""
+    from backend.app.core.tenant_context import set_tenant_context, system_context
+
     email_clean = data.email.strip().lower()
-    if data.organization_id and data.organization_id.strip():
-        user = db.scalars(
-            select(CustomerPortalUser)
-            .options(joinedload(CustomerPortalUser.customer))
-            .where(
-                CustomerPortalUser.organization_id == data.organization_id.strip(),
-                CustomerPortalUser.email == email_clean,
-            )
-        ).first()
-    else:
-        users = list(
-            db.scalars(
+    # The caller is not authenticated yet, so no tenant context exists: find the account
+    # explicitly as the system (scoped to the given organization when one is supplied).
+    with system_context():
+        if data.organization_id and data.organization_id.strip():
+            user = db.scalars(
                 select(CustomerPortalUser)
                 .options(joinedload(CustomerPortalUser.customer))
                 .where(
+                    CustomerPortalUser.organization_id == data.organization_id.strip(),
                     CustomerPortalUser.email == email_clean,
                 )
-            ).all()
-        )
-        if len(users) > 1:
-            raise ValidationAppError("Multiple accounts found for this email. Please specify Organization ID.")
-        user = users[0] if users else None
+            ).first()
+        else:
+            users = list(
+                db.scalars(
+                    select(CustomerPortalUser)
+                    .options(joinedload(CustomerPortalUser.customer))
+                    .where(
+                        CustomerPortalUser.email == email_clean,
+                    )
+                ).all()
+            )
+            if len(users) > 1:
+                raise ValidationAppError("Multiple accounts found for this email. Please specify Organization ID.")
+            user = users[0] if users else None
 
     if not user or not verify_password(data.password, user.password_hash):
         raise UnauthorizedError("Invalid email or password.")
+    set_tenant_context(user.organization_id)
 
     if not user.is_active:
         raise UnauthorizedError("This portal account is currently disabled.")
@@ -539,6 +545,22 @@ def reactivate_customer_portal_access(
     return get_customer_portal_access(db, ctx.organization_id, customer_id)
 
 
+def _invitation_by_token_hash(db: Session, token_hash: str) -> Optional[CustomerPortalInvitation]:
+    """The token hash is the only credential, so the organization is unknown until it is found:
+    look it up explicitly as the system, then continue in that organization's tenant context."""
+    from backend.app.core.tenant_context import set_tenant_context, system_context
+
+    with system_context():
+        inv = db.scalars(
+            select(CustomerPortalInvitation)
+            .options(joinedload(CustomerPortalInvitation.customer))
+            .where(CustomerPortalInvitation.token_hash == token_hash)
+        ).first()
+    if inv is not None:
+        set_tenant_context(inv.organization_id)
+    return inv
+
+
 def validate_portal_invitation_token(
     db: Session,
     raw_token: str,
@@ -547,13 +569,7 @@ def validate_portal_invitation_token(
         raise ValidationAppError("Activation token is required.")
 
     token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
-    inv = db.scalars(
-        select(CustomerPortalInvitation)
-        .options(joinedload(CustomerPortalInvitation.customer))
-        .where(
-            CustomerPortalInvitation.token_hash == token_hash,
-        )
-    ).first()
+    inv = _invitation_by_token_hash(db, token_hash)
 
     if not inv:
         raise NotFoundAppError("Invalid or unknown activation link.")
@@ -597,13 +613,7 @@ def activate_portal_account(
         raise ValidationAppError("Activation token is required.")
 
     token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
-    inv = db.scalars(
-        select(CustomerPortalInvitation)
-        .options(joinedload(CustomerPortalInvitation.customer))
-        .where(
-            CustomerPortalInvitation.token_hash == token_hash,
-        )
-    ).first()
+    inv = _invitation_by_token_hash(db, token_hash)
 
     if not inv:
         raise NotFoundAppError("Invalid or unknown activation link.")
@@ -682,16 +692,18 @@ def activate_portal_account(
 def authenticate_portal_session(db: Session, token: str) -> CustomerPortalUser:
     """Validates session token and returns the authenticated customer portal user."""
     hashed_token = _hash_token(token)
-    session = (
-        db.scalars(
-            select(CustomerPortalSession)
-            .options(joinedload(CustomerPortalSession.user).joinedload(CustomerPortalUser.customer))
-            .where(
-                CustomerPortalSession.token.in_([hashed_token, token]),
-                CustomerPortalSession.is_revoked.is_(False),
+    from backend.app.core.tenant_context import set_tenant_context, system_context
+    with system_context():
+        session = (
+            db.scalars(
+                select(CustomerPortalSession)
+                .options(joinedload(CustomerPortalSession.user).joinedload(CustomerPortalUser.customer))
+                .where(
+                    CustomerPortalSession.token.in_([hashed_token, token]),
+                    CustomerPortalSession.is_revoked.is_(False),
+                )
             )
-        )
-    ).first()
+        ).first()
 
     if not session:
         raise UnauthorizedError("Invalid or expired portal session token.")
@@ -703,6 +715,7 @@ def authenticate_portal_session(db: Session, token: str) -> CustomerPortalUser:
     if expires_at and expires_at < utcnow():
         raise UnauthorizedError("Invalid or expired portal session token.")
 
+    set_tenant_context(session.user.organization_id)
     return session.user
 
 
@@ -752,7 +765,13 @@ def get_customer_dashboard(db: Session, portal_user: CustomerPortalUser) -> Port
         ).all()
     )
 
+    from backend.app.services import org_lifecycle
+
+    read_only_reason = (
+        None if org_lifecycle.customer_actions_allowed(db, org_id) else org_lifecycle.CUSTOMER_UNAVAILABLE_MESSAGE
+    )
     return PortalDashboardOut(
+        read_only_reason=read_only_reason,
         portal_name=settings.portal_name,
         banner_message=settings.banner_message,
         customer_name=customer.display_name,

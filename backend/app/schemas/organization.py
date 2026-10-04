@@ -81,6 +81,8 @@ class OrganizationOut(BaseModel):
     invoice_notes: Optional[str] = None
     invoice_terms: Optional[str] = None
     logo_url: Optional[str] = None
+    status: str = "active"
+    status_reason: Optional[str] = None
     created_at: UTCDateTime
     updated_at: UTCDateTime
 

@@ -121,6 +121,59 @@ def line_inputs(items: Iterable) -> List[LineInput]:
     ]
 
 
+def validate_line_references(db: Session, organization_id: str, items: Iterable) -> None:
+    """Reject catalog references on posted lines that are certainly invalid: an id that does
+    not exist in THIS organization (cross-tenant and unknown ids look identical, so nothing
+    about other tenants leaks), a line carrying both product_id and plan_id, or a plan/product
+    that belongs to a different offering than the line's offering_id. Custom lines (no ids)
+    are always fine."""
+    from backend.app.models.catalog import Plan, Product
+    from backend.app.models.catalog_cpq import Offering
+
+    rows = list(items)
+    wanted = {"offering_id": set(), "product_id": set(), "plan_id": set()}
+    for item in rows:
+        for field, bucket in wanted.items():
+            value = getattr(item, field, None)
+            if value:
+                bucket.add(value)
+
+    def _existing(model, ids):
+        if not ids:
+            return {}
+        found = db.execute(
+            select(model).where(model.organization_id == organization_id, model.id.in_(list(ids)))
+        ).scalars()
+        return {row.id: row for row in found}
+
+    offerings = _existing(Offering, wanted["offering_id"])
+    products = _existing(Product, wanted["product_id"])
+    plans = _existing(Plan, wanted["plan_id"])
+
+    fields: Dict[str, str] = {}
+    for idx, item in enumerate(rows):
+        offering_id = getattr(item, "offering_id", None)
+        product_id = getattr(item, "product_id", None)
+        plan_id = getattr(item, "plan_id", None)
+        if offering_id and offering_id not in offerings:
+            fields[f"items[{idx}].offering_id"] = "unknown reference"
+        if product_id and product_id not in products:
+            fields[f"items[{idx}].product_id"] = "unknown reference"
+        if plan_id and plan_id not in plans:
+            fields[f"items[{idx}].plan_id"] = "unknown reference"
+        if product_id and plan_id:
+            fields[f"items[{idx}].plan_id"] = "a line cannot reference both a product and a plan"
+        if offering_id and offering_id in offerings:
+            plan = plans.get(plan_id) if plan_id else None
+            if plan is not None and plan.offering_id and plan.offering_id != offering_id:
+                fields[f"items[{idx}].plan_id"] = "plan does not belong to the line's offering"
+            product = products.get(product_id) if product_id else None
+            if product is not None and product.offering_id and product.offering_id != offering_id:
+                fields[f"items[{idx}].product_id"] = "product does not belong to the line's offering"
+    if fields:
+        raise ValidationAppError("One or more line items reference an invalid catalog item.", {"fields": fields})
+
+
 def _user(session: Optional[Session], user_id: Optional[str]) -> Optional[User]:
     if session is None or not user_id:
         return None
@@ -217,7 +270,13 @@ def serialize_invoice(invoice: Invoice, include_payments: bool = True) -> Dict[s
                 data["approval_request_id"] = pending_req.id
                 data["is_pending_approval"] = True
         except Exception:
-            pass
+            # Serialization must not fail over this optional flag; fall back to "no pending
+            # approval" but leave a trace so a broken query is noticed.
+            logger.warning(
+                "Pending-approval lookup failed for invoice %s; serializing without it",
+                invoice.id,
+                exc_info=True,
+            )
 
     return data
 
@@ -241,9 +300,12 @@ def get_invoice(db: Session, organization_id: str, invoice_id: str) -> Invoice:
 
 
 def get_invoice_by_token(db: Session, token: str) -> Invoice:
-    invoice = db.scalars(_base_query().where(Invoice.public_token == token)).first()
+    from backend.app.core.tenant_context import set_tenant_context, system_context
+    with system_context():
+        invoice = db.scalars(_base_query().where(Invoice.public_token == token)).first()
     if invoice is None or invoice.status == InvoiceStatus.DRAFT:
         raise EntityNotFoundError("Invoice", token)
+    set_tenant_context(invoice.organization_id)
     return invoice
 
 
@@ -447,6 +509,7 @@ def _pending_invoice_discount_request_exists(db: Session, invoice: Invoice) -> b
 
 def create_invoice(db: Session, ctx: CurrentContext, data: InvoiceCreate) -> Invoice:
     customer = get_customer(db, ctx.organization_id, data.customer_id)
+    validate_line_references(db, ctx.organization_id, data.items)
     invoice = create_invoice_record(
         db,
         organization_id=ctx.organization_id,
@@ -510,6 +573,8 @@ def _ensure_draft(invoice: Invoice, verb: str) -> None:
 
 def update_invoice(db: Session, ctx: CurrentContext, invoice: Invoice, data: InvoiceUpdate) -> Invoice:
     _ensure_draft(invoice, "edited")
+    if data.items is not None:
+        validate_line_references(db, ctx.organization_id, data.items)
     before = snapshot(invoice)
     changes = data.model_dump(exclude_unset=True)
 
@@ -820,7 +885,12 @@ def email_invoice(db: Session, invoice: Invoice, *, reminder: bool = False, atta
         from backend.app.services.integrations_service import get_active_smtp_credentials
         smtp_cfg = get_active_smtp_credentials(db, invoice.organization_id)
     except Exception:
-        pass
+        logger.warning(
+            "Tenant SMTP lookup failed for organization %s; using platform SMTP for invoice %s",
+            invoice.organization_id,
+            invoice.invoice_number,
+            exc_info=True,
+        )
 
     email_active = bool(smtp_cfg.get("host")) if smtp_cfg else settings.email_enabled
     attachments = []
@@ -853,6 +923,10 @@ def _email_and_flag_failure(db: Session, invoice: Invoice, *, reminder: bool = F
         from backend.app.services.integrations_service import get_active_smtp_credentials
         cfg = get_active_smtp_credentials(db, invoice.organization_id)
     except Exception:
+        logger.warning(
+            "Tenant SMTP lookup failed for organization %s after invoice %s email was not sent",
+            invoice.organization_id, invoice.invoice_number, exc_info=True,
+        )
         cfg = None
     return bool(cfg and cfg.get("host"))
 

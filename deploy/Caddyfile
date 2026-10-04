@@ -30,3 +30,32 @@
 		header_up X-Real-IP {remote_host}
 	}
 }
+
+# Platform (Rooman staff / Super Admin) console: its own origin, hostname different from {$DOMAIN}.
+# {$PLATFORM_DOMAIN} must be the host of PLATFORM_APP_ORIGIN in .env.production. The platform-web
+# container serves only the console bundle and proxies only /api/v1/platform/ to the backend.
+# Optionally restrict to office/VPN ranges with an `@allowed remote_ip ...` matcher.
+{$PLATFORM_DOMAIN} {
+	encode zstd gzip
+
+	log {
+		output stdout
+		format json
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	# Website CMS media uploads are the one larger platform request (nginx caps every other route
+	# at 64 KB); this is only the outer bound.
+	request_body {
+		max_size 33MB
+	}
+
+	reverse_proxy platform-web:80 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP {remote_host}
+	}
+}

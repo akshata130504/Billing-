@@ -41,6 +41,11 @@ def public_action_rate_limit() -> str:
     return settings.PUBLIC_ACTION_RATE_LIMIT
 
 
+def webhook_rate_limit() -> str:
+    """Limit for the unauthenticated payment-gateway webhook receiver."""
+    return settings.WEBHOOK_RATE_LIMIT
+
+
 def _get_storage_uri() -> str:
     """Returns Redis storage URI if configured, otherwise falls back to in-memory storage."""
     return settings.REDIS_URL or "memory://"
@@ -78,6 +83,7 @@ __all__ = [
     "auth_rate_limit",
     "public_rate_limit",
     "public_action_rate_limit",
+    "webhook_rate_limit",
     "rate_limit_key",
     "rate_limit_exceeded_handler",
     "RateLimitExceeded",

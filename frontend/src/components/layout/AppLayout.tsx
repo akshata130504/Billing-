@@ -7,6 +7,7 @@ import { GlobalSearchModal } from '../common/GlobalSearchModal';
 import { RoomiChatbot } from '../chat/RoomiChatbot';
 import { ErrorBoundary } from '../common/ErrorBoundary';
 import { PageLoader } from '../common/PageLoader';
+import { PlatformAccessBanner } from './PlatformAccessBanner';
 
 export function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -51,6 +52,7 @@ export function AppLayout() {
           onQuickCreateClick={() => setQuickCreateOpen(true)}
           onOpenSearch={() => setSearchOpen(true)}
         />
+        <PlatformAccessBanner />
 
         {/* Scrollable Page Body */}
         <main

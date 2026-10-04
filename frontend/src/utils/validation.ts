@@ -181,10 +181,13 @@ export function validatePositiveMoney(value: string | number | null | undefined,
 }
 
 /** Money that must be zero or more (e.g. unit price, budget). */
-export function validateNonNegativeMoney(value: string | number | null | undefined, fieldLabel = 'Amount', options: { required?: boolean } = {}): ValidationResult {
+export function validateNonNegativeMoney(value: string | number | null | undefined, fieldLabel = 'Amount', options: { required?: boolean; max?: number } = {}): ValidationResult {
   const n = parseStrictNumber(value);
   if (n === null) return options.required ? `${fieldLabel} is required.` : (value ? `${fieldLabel} must be a number.` : null);
   if (n < 0) return `${fieldLabel} cannot be negative.`;
+  if (options.max !== undefined && n > options.max) {
+    return `${fieldLabel} cannot exceed ${options.max.toLocaleString('en-US', { maximumFractionDigits: 2 })}.`;
+  }
   return null;
 }
 

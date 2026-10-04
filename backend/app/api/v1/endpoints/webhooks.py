@@ -36,6 +36,7 @@ from backend.app.api.deps import get_db
 from backend.app.core.alerts import send_alert
 from backend.app.core.exceptions import AppException
 from backend.app.core.logging import logger
+from backend.app.core.rate_limit import limiter, webhook_rate_limit
 from backend.app.models import AuditStatus, Invoice, InvoiceStatus, Payment, PaymentStatus, RefundStatus, WebhookEvent, utcnow
 from backend.app.schemas.public import WebhookAck
 from backend.app.services import audit, dunning_service, payment_service, razorpay_gateway
@@ -145,21 +146,26 @@ def _handle_payment_captured(db: Session, event: WebhookEvent, payload: Dict[str
     order_id = entity.get("order_id")
     if not order_id:
         raise ValueError("payment.captured without order_id")
-    payment = payment_service.find_by_order_id(db, order_id)
+    from backend.app.core.tenant_context import set_tenant_context, system_context
+    with system_context():
+        payment = payment_service.find_by_order_id(db, order_id)
     if payment is None:
         raise LookupError(f"no payment with gateway_order_id {order_id}")
     _check_org(event, payment)
     event.organization_id = payment.organization_id
+    set_tenant_context(payment.organization_id)
     payment = payment_service.lock_payment(db, payment)
     if payment.status not in (PaymentStatus.PENDING, PaymentStatus.FAILED):
         return  # already captured via razorpay-verify / checkout confirm or an earlier delivery
 
     # Verify amount and currency from webhook entity against expected payment record
+    # A capture without an amount is never applied (fail closed): Razorpay always sends it.
     entity_amount_paise = entity.get("amount")
-    if entity_amount_paise is not None:
-        entity_amount = payment_service.from_paise(entity_amount_paise)
-        if entity_amount != payment.amount:
-            raise ValueError(f"Captured payment amount mismatch: expected {payment.amount}, got {entity_amount}")
+    if entity_amount_paise is None:
+        raise ValueError("Captured payment amount mismatch: the event carries no amount")
+    entity_amount = payment_service.from_paise(entity_amount_paise)
+    if entity_amount != payment.amount:
+        raise ValueError(f"Captured payment amount mismatch: expected {payment.amount}, got {entity_amount}")
 
     entity_currency = entity.get("currency")
     if entity_currency and entity_currency.upper() != payment.currency.upper():
@@ -191,11 +197,14 @@ def _handle_payment_captured(db: Session, event: WebhookEvent, payload: Dict[str
 def _handle_payment_failed(db: Session, event: WebhookEvent, payload: Dict[str, Any]) -> None:
     entity = _entity(payload, "payment")
     order_id = entity.get("order_id")
-    payment = payment_service.find_by_order_id(db, order_id) if order_id else None
+    from backend.app.core.tenant_context import set_tenant_context, system_context
+    with system_context():
+        payment = payment_service.find_by_order_id(db, order_id) if order_id else None
     if payment is None:
         raise LookupError(f"no payment with gateway_order_id {order_id}")
     _check_org(event, payment)
     event.organization_id = payment.organization_id
+    set_tenant_context(payment.organization_id)
     payment = payment_service.lock_payment(db, payment)
     reason = entity.get("error_description") or entity.get("error_reason") or entity.get("error_code")
     payment_service.fail_gateway_payment(
@@ -230,14 +239,17 @@ def _handle_refund_processed(db: Session, event: WebhookEvent, payload: Dict[str
     if not refund_id:
         raise ValueError("refund.processed without refund id")
     gateway_payment_id = entity.get("payment_id")
-    payment = payment_service.find_by_gateway_payment_id(db, gateway_payment_id) if gateway_payment_id else None
-    if payment is None:
-        existing = payment_service.find_refund_by_gateway_id(db, refund_id)
-        if existing is None:
-            raise LookupError(f"no payment with gateway_payment_id {gateway_payment_id}")
-        payment = existing.payment
+    from backend.app.core.tenant_context import set_tenant_context, system_context
+    with system_context():
+        payment = payment_service.find_by_gateway_payment_id(db, gateway_payment_id) if gateway_payment_id else None
+        if payment is None:
+            existing = payment_service.find_refund_by_gateway_id(db, refund_id)
+            if existing is None:
+                raise LookupError(f"no payment with gateway_payment_id {gateway_payment_id}")
+            payment = existing.payment
     _check_org(event, payment)
     event.organization_id = payment.organization_id
+    set_tenant_context(payment.organization_id)
     # Lock the payment first so two deliveries of the same refund serialise here and
     # the second one sees the refund row the first one wrote.
     payment = payment_service.lock_payment(db, payment)
@@ -266,14 +278,20 @@ def _handle_refund_failed(db: Session, event: WebhookEvent, payload: Dict[str, A
     refund_id = entity.get("id")
     if not refund_id:
         raise ValueError("refund.failed without refund id")
-    existing = payment_service.find_refund_by_gateway_id(db, refund_id)
+    from backend.app.core.tenant_context import set_tenant_context, system_context
+    # The refund's organization is not known yet: look it up explicitly as the system, then
+    # continue in that organization's tenant context (as the other handlers do).
+    with system_context():
+        existing = payment_service.find_refund_by_gateway_id(db, refund_id)
+        payment = existing.payment if existing is not None else None
     if existing is None:
         # A refund we never booked (e.g. started and failed in the Razorpay
         # dashboard) leaves nothing to undo.
         event.error = "ignored: refund not recorded here"
         return
-    _check_org(event, existing.payment)
+    _check_org(event, payment)
     event.organization_id = existing.organization_id
+    set_tenant_context(existing.organization_id)
     reason = entity.get("error_description") or entity.get("status_details") or "Refund failed at Razorpay"
     payment_service.fail_refund(db, existing, reason=str(reason)[:500], actor_label=audit.WEBHOOK_ACTOR)
 
@@ -288,6 +306,8 @@ HANDLERS = {
 
 def _attributed_organization_id(db: Session, payload: Dict[str, Any]) -> Optional[str]:
     """Best-effort: which organization's Razorpay account sent this (unverified) event."""
+    from backend.app.core.tenant_context import system_context
+
     body = payload.get("payload") or {}
     for kind in ("payment", "refund", "order"):
         entity = (body.get(kind) or {}).get("entity") or {}
@@ -296,16 +316,17 @@ def _attributed_organization_id(db: Session, payload: Dict[str, Any]) -> Optiona
             return str(notes["organization_id"])
     payment_entity = (body.get("payment") or {}).get("entity") or {}
     order_id = payment_entity.get("order_id")
-    if order_id:
-        org = db.scalars(select(Payment.organization_id).where(Payment.gateway_order_id == order_id)).first()
-        if org:
-            return org
-    refund_entity = (body.get("refund") or {}).get("entity") or {}
-    pay_id = refund_entity.get("payment_id") or payment_entity.get("id")
-    if pay_id:
-        org = db.scalars(select(Payment.organization_id).where(Payment.gateway_payment_id == pay_id)).first()
-        if org:
-            return org
+    with system_context():
+        if order_id:
+            org = db.scalars(select(Payment.organization_id).where(Payment.gateway_order_id == order_id)).first()
+            if org:
+                return org
+        refund_entity = (body.get("refund") or {}).get("entity") or {}
+        pay_id = refund_entity.get("payment_id") or payment_entity.get("id")
+        if pay_id:
+            org = db.scalars(select(Payment.organization_id).where(Payment.gateway_payment_id == pay_id)).first()
+            if org:
+                return org
     return None
 
 
@@ -337,6 +358,7 @@ def _is_retryable(exc: Exception, payload: Dict[str, Any]) -> bool:
 
 
 @router.post("/razorpay", response_model=WebhookAck, summary="Razorpay webhook receiver")
+@limiter.limit(webhook_rate_limit)
 async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
     raw = await request.body()
     signature = request.headers.get(SIGNATURE_HEADER)

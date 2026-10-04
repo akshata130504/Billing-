@@ -135,3 +135,12 @@ class SubscriptionSummaryOut(BaseModel):
     cancelled_count: int
     draft_count: int = 0
     total_mrr: str
+    # Normalised annual run-rate: total_mrr x 12.
+    total_arr: str = "0.00"
+    past_due_count: int = 0
+    # Live subscriptions ending within 7 days that will not renew.
+    expiring_soon_count: int = 0
+    # Trials ending within 7 days.
+    trial_expiring_soon_count: int = 0
+    # Active subscriptions with auto-renewal on (and not cancelling at period end).
+    auto_renew_enabled_count: int = 0

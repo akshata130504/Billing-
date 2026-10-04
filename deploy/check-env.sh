@@ -46,6 +46,12 @@ check() {  # check <REQUIRED|optional> KEY...
 
 echo "== core (REQUIRED)"
 check REQUIRED SECRET_KEY FRONTEND_URL ALLOWED_ORIGINS POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
+echo "== least-privilege runtime DB role - the app refuses to start as a superuser (REQUIRED)"
+check REQUIRED APP_POSTGRES_USER APP_POSTGRES_PASSWORD
+echo "== platform (Super Admin) console + frontend origins (REQUIRED)"
+check REQUIRED PLATFORM_APP_ORIGIN PLATFORM_DOMAIN PLATFORM_JWT_SECRET TENANT_APP_ORIGIN
+echo "== release sync - the server must receive docker-compose.prod.yml / deploy files with each release (REQUIRED)"
+check REQUIRED GITHUB_PAT
 echo "== email - signup codes, invitations, password resets (REQUIRED)"
 check REQUIRED SMTP_HOST SMTP_PORT SMTP_USERNAME SMTP_PASSWORD EMAIL_FROM_ADDRESS
 echo "== format checks (values are inspected, never printed)"
@@ -54,11 +60,36 @@ rule REQUIRED "ALLOWED_ORIGINS https-only, no localhost, no *" sh -c \
     'o="$1"; [ -n "$o" ] || exit 1; case "$o" in *localhost*|*127.0.0.1*|*"*"*|*http://*) exit 1;; esac' _ "$(raw ALLOWED_ORIGINS)"
 rule REQUIRED "POSTGRES_PASSWORD is not the default" sh -c '[ -n "$1" ] && [ "$1" != "postgres" ]' _ "$(raw POSTGRES_PASSWORD)"
 rule REQUIRED "SECRET_KEY is at least 32 characters" sh -c '[ "${#1}" -ge 32 ]' _ "$(raw SECRET_KEY)"
+rule REQUIRED "APP_POSTGRES_USER differs from POSTGRES_USER" sh -c '[ -n "$1" ] && [ "$1" != "$2" ]' _ "$(raw APP_POSTGRES_USER)" "$(raw POSTGRES_USER)"
+rule REQUIRED "APP_POSTGRES_PASSWORD is at least 16 characters" sh -c '[ "${#1}" -ge 16 ]' _ "$(raw APP_POSTGRES_PASSWORD)"
 rule REQUIRED "DEBUG is not true" sh -c 'case "$1" in [Tt]rue|1|[Yy]es) exit 1;; *) exit 0;; esac' _ "$(raw DEBUG)"
+# A bare https origin: scheme://host[:port], no path / query / fragment / trailing slash, no localhost.
+is_prod_origin() {
+    case "$1" in
+        https://?*) ;;
+        *) return 1 ;;
+    esac
+    case "${1#https://}" in
+        */*|*\?*|*#*|localhost*|127.*|*.localhost*) return 1 ;;
+    esac
+    return 0
+}
+origin_host() { h="${1#*://}"; printf '%s' "${h%%/*}"; }
+rule REQUIRED "PLATFORM_APP_ORIGIN is a bare https origin (not localhost)" is_prod_origin "$(raw PLATFORM_APP_ORIGIN)"
+rule REQUIRED "TENANT_APP_ORIGIN is a bare https origin (not localhost)" is_prod_origin "$(raw TENANT_APP_ORIGIN)"
+rule REQUIRED "PLATFORM_APP_ORIGIN host differs from the tenant host" sh -c \
+    '[ -n "$1" ] && [ -n "$2" ] && [ "$1" != "$2" ]' _ "$(origin_host "$(raw PLATFORM_APP_ORIGIN)")" "$(origin_host "$(raw FRONTEND_URL)")"
+rule REQUIRED "PLATFORM_DOMAIN equals the host of PLATFORM_APP_ORIGIN" sh -c \
+    '[ -n "$1" ] && [ "$1" = "$2" ]' _ "$(raw PLATFORM_DOMAIN)" "$(origin_host "$(raw PLATFORM_APP_ORIGIN)")"
+rule REQUIRED "TENANT_APP_ORIGIN is the origin of FRONTEND_URL" sh -c \
+    '[ -n "$1" ] && [ "${1%/}" = "${2%/}" ]' _ "$(raw TENANT_APP_ORIGIN)" "$(raw FRONTEND_URL)"
+rule REQUIRED "PLATFORM_JWT_SECRET is at least 32 characters" sh -c '[ "${#1}" -ge 32 ]' _ "$(raw PLATFORM_JWT_SECRET)"
+rule REQUIRED "PLATFORM_JWT_SECRET differs from SECRET_KEY" sh -c '[ -n "$1" ] && [ "$1" != "$2" ]' _ "$(raw PLATFORM_JWT_SECRET)" "$(raw SECRET_KEY)"
 echo "== payments (required before taking online payments)"
 check optional RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET RAZORPAY_WEBHOOK_SECRET
 if value_set RAZORPAY_KEY_ID; then
-    rule optional "Razorpay webhook secret set with the API keys" value_set RAZORPAY_WEBHOOK_SECRET
+    # The API refuses to start with Razorpay keys but no webhook secret (payments would be lost).
+    rule REQUIRED "Razorpay webhook secret set with the API keys" value_set RAZORPAY_WEBHOOK_SECRET
     rule optional "Razorpay key is LIVE mode (rzp_live_)" sh -c 'case "$1" in rzp_live_*) exit 0;; *) exit 1;; esac' _ "$(raw RAZORPAY_KEY_ID)"
 fi
 echo "== operations (strongly recommended)"
@@ -71,8 +102,9 @@ if value_set OFFSITE_BACKUP_REMOTE; then
     check optional OFFSITE_S3_PROVIDER OFFSITE_S3_REGION OFFSITE_S3_ENDPOINT OFFSITE_RETENTION_DAYS
 fi
 echo "== optional"
-check optional SENTRY_DSN GEMINI_API_KEY APP_POSTGRES_USER APP_POSTGRES_PASSWORD ENCRYPTION_KEYS POSTGRES_SSLMODE ALLOWED_HOSTS
+check optional SENTRY_DSN GEMINI_API_KEY ENCRYPTION_KEYS POSTGRES_SSLMODE ALLOWED_HOSTS
 echo "== not checkable here"
+echo "  Repository variables TENANT_APP_ORIGIN / PLATFORM_APP_ORIGIN (GitHub Actions) are baked into the images at build time and must equal the values above."
 echo "  Support email on the Help page = GitHub repository variable SUPPORT_EMAIL (baked into the web image)."
 
 if [ "$missing_required" -ne 0 ]; then

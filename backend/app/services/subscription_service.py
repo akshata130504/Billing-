@@ -304,6 +304,55 @@ def lock_subscription_row(db: Session, subscription_id: str) -> None:
     db.execute(select(Subscription.id).where(Subscription.id == subscription_id).with_for_update())
 
 
+def lock_customer_row(db: Session, organization_id: str, customer_id: str) -> None:
+    """SELECT ... FOR UPDATE on the customer (skipped on SQLite) so concurrent create /
+    activate / resume requests for the same customer serialise before the conflict check."""
+    if db.bind is None or db.bind.dialect.name == "sqlite":
+        return
+    db.execute(
+        select(Customer.id)
+        .where(Customer.id == customer_id, Customer.organization_id == organization_id)
+        .with_for_update()
+    )
+
+
+_SLOT_STATUSES = (SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING, SubscriptionStatus.PAUSED)
+
+
+def assert_no_conflicting_subscription(
+    db: Session,
+    organization_id: str,
+    customer_id: str,
+    plan_id: str,
+    *,
+    statuses=_SLOT_STATUSES,
+    exclude_id: Optional[str] = None,
+) -> None:
+    """One live subscription per (organization, customer, plan): a paused subscription
+    still occupies the slot. Raises ValidationAppError (422) when another one exists."""
+    stmt = select(Subscription).where(
+        Subscription.organization_id == organization_id,
+        Subscription.customer_id == customer_id,
+        Subscription.plan_id == plan_id,
+        Subscription.status.in_(list(statuses)),
+    )
+    if exclude_id:
+        stmt = stmt.where(Subscription.id != exclude_id)
+    existing = db.scalars(stmt.order_by(Subscription.created_at)).first()
+    if existing is None:
+        return
+    if existing.status == SubscriptionStatus.PAUSED:
+        raise ValidationAppError(
+            f"This customer already has a paused subscription ({existing.subscription_number}) to this plan. "
+            "Resume or cancel it instead.",
+            {"fields": {"plan_id": "A paused subscription for this customer and plan already exists."}},
+        )
+    raise ValidationAppError(
+        f"Customer already has an active subscription ({existing.subscription_number}) for this plan.",
+        {"fields": {"plan_id": "An active subscription for this customer and plan already exists."}},
+    )
+
+
 def lock_and_reload(db: Session, subscription: Subscription) -> Subscription:
     """Flush pending changes, then re-read the subscription row under SELECT ... FOR UPDATE
     so the in-memory object reflects what a concurrent (now committed) request did."""
@@ -480,10 +529,15 @@ def list_subscriptions(
             .where(or_(Subscription.subscription_number.ilike(like), Customer.display_name.ilike(like), Plan.name.ilike(like)))
         )
     if status:
+        # A comma-separated list filters on any of the statuses (e.g. the Draft tab lists
+        # "draft,pending_activation", matching the summary's draft_count).
         try:
-            stmt = stmt.where(Subscription.status == SubscriptionStatus(status))
+            wanted = [SubscriptionStatus(part.strip()) for part in status.split(",") if part.strip()]
         except ValueError:
             raise ValidationAppError("Unknown subscription status.", {"fields": {"status": "invalid"}})
+        if not wanted:
+            raise ValidationAppError("Unknown subscription status.", {"fields": {"status": "invalid"}})
+        stmt = stmt.where(Subscription.status == wanted[0]) if len(wanted) == 1 else stmt.where(Subscription.status.in_(wanted))
     if customer_id:
         stmt = stmt.where(Subscription.customer_id == customer_id)
     if plan_id:
@@ -495,7 +549,21 @@ def list_subscriptions(
 
 
 def get_subscriptions_summary(db: Session, organization_id: str) -> Dict[str, Any]:
-    """Computes real database aggregation for subscription KPIs."""
+    """Computes real database aggregation for subscription KPIs.
+
+    Field meanings (the Subscriptions list / Trial Center / Revenue pages rely on them):
+
+    - ``draft_count``: subscriptions not yet live - ``draft`` and ``pending_activation``
+      (the list renders both as drafts and the Draft tab lists both).
+    - ``past_due_count``: subscriptions whose renewal invoice is overdue.
+    - ``total_arr``: the headline MRR annualised (MRR x 12).
+    - ``renewing_soon_count``: active subscriptions billing again within 7 days.
+    - ``expiring_soon_count``: live (active / past due) subscriptions whose current period
+      ends within 7 days and that will NOT renew (auto-renewal off or cancel at period end).
+    - ``trial_expiring_soon_count``: trialing subscriptions whose trial ends within 7 days.
+    - ``auto_renew_enabled_count``: active subscriptions that will auto-renew
+      (auto-renewal on and not set to cancel at period end).
+    """
     today = timezones.org_today_for_id(db, organization_id)
     seven_days = today + timedelta(days=7)
 
@@ -507,14 +575,24 @@ def get_subscriptions_summary(db: Session, organization_id: str) -> Dict[str, An
     active_count = 0
     trialing_count = 0
     paused_count = 0
+    past_due_count = 0
     renewing_soon_count = 0
+    expiring_soon_count = 0
+    trial_expiring_soon_count = 0
+    auto_renew_enabled_count = 0
     cancelled_count = 0
     draft_count = 0
     total_mrr = Decimal("0.00")
 
     for s in subs:
+        will_renew = bool(s.auto_renewal) and not bool(s.cancel_at_period_end)
+        if s.status in (SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE):
+            if not will_renew and s.current_period_end and today <= s.current_period_end <= seven_days:
+                expiring_soon_count += 1
         if s.status == SubscriptionStatus.ACTIVE:
             active_count += 1
+            if will_renew:
+                auto_renew_enabled_count += 1
             if s.plan:
                 unit_price = effective_unit_price(s, s.plan)
                 total_mrr += compute_mrr(s.plan, s.quantity or 1, unit_price)
@@ -522,11 +600,15 @@ def get_subscriptions_summary(db: Session, organization_id: str) -> Dict[str, An
                 renewing_soon_count += 1
         elif s.status == SubscriptionStatus.TRIALING:
             trialing_count += 1
+            if s.trial_end and today <= s.trial_end <= seven_days:
+                trial_expiring_soon_count += 1
+        elif s.status == SubscriptionStatus.PAST_DUE:
+            past_due_count += 1
         elif s.status == SubscriptionStatus.PAUSED:
             paused_count += 1
         elif s.status == SubscriptionStatus.CANCELLED:
             cancelled_count += 1
-        elif s.status == SubscriptionStatus.DRAFT:
+        elif s.status in (SubscriptionStatus.DRAFT, SubscriptionStatus.PENDING_ACTIVATION):
             draft_count += 1
 
     # Headline MRR comes from the single shared definition (dashboard/reports/AI agree).
@@ -536,16 +618,22 @@ def get_subscriptions_summary(db: Session, organization_id: str) -> Dict[str, An
         total_mrr = D(shared_compute_mrr(db, organization_id)["mrr"])
     except Exception:  # pragma: no cover - fall back to the local sum above
         pass
+    total_mrr = q2(total_mrr)
 
     return {
         "total_subscriptions": total_count,
         "active_count": active_count,
         "trialing_count": trialing_count,
         "paused_count": paused_count,
+        "past_due_count": past_due_count,
         "renewing_soon_count": renewing_soon_count,
+        "expiring_soon_count": expiring_soon_count,
+        "trial_expiring_soon_count": trial_expiring_soon_count,
+        "auto_renew_enabled_count": auto_renew_enabled_count,
         "cancelled_count": cancelled_count,
         "draft_count": draft_count,
-        "total_mrr": money_str(q2(total_mrr)),
+        "total_mrr": money_str(total_mrr),
+        "total_arr": money_str(q2(total_mrr * Decimal("12"))),
     }
 
 
@@ -938,19 +1026,8 @@ def build_subscription(
         next_billing = period_end
 
     if status in (SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING):
-        existing_active = db.scalar(
-            select(Subscription).where(
-                Subscription.organization_id == ctx.organization_id,
-                Subscription.customer_id == customer.id,
-                Subscription.plan_id == plan.id,
-                Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]),
-            )
-        )
-        if existing_active:
-            raise ValidationAppError(
-                f"Customer already has an active subscription ({existing_active.subscription_number}) for this plan.",
-                {"fields": {"plan_id": "An active subscription for this customer and plan already exists."}},
-            )
+        lock_customer_row(db, ctx.organization_id, customer.id)
+        assert_no_conflicting_subscription(db, ctx.organization_id, customer.id, plan.id)
 
     subscription = Subscription(
         organization_id=ctx.organization_id,
@@ -1078,20 +1155,10 @@ def activate_subscription(db: Session, ctx: CurrentContext, subscription: Subscr
             {"fields": {"plan_id": "inactive plan"}},
         )
 
-    existing_active = db.scalar(
-        select(Subscription).where(
-            Subscription.organization_id == ctx.organization_id,
-            Subscription.customer_id == subscription.customer_id,
-            Subscription.plan_id == subscription.plan_id,
-            Subscription.id != subscription.id,
-            Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]),
-        )
+    lock_customer_row(db, ctx.organization_id, subscription.customer_id)
+    assert_no_conflicting_subscription(
+        db, ctx.organization_id, subscription.customer_id, subscription.plan_id, exclude_id=subscription.id
     )
-    if existing_active:
-        raise ValidationAppError(
-            f"Customer already has an active subscription ({existing_active.subscription_number}) for this plan.",
-            {"fields": {"plan_id": "An active subscription for this customer and plan already exists."}},
-        )
 
     before = snapshot(subscription)
     today = timezones.org_today(ctx.organization)
@@ -1202,9 +1269,24 @@ def pause_subscription(db: Session, ctx: CurrentContext, subscription: Subscript
 def resume_subscription(db: Session, ctx: CurrentContext, subscription: Subscription) -> Subscription:
     if subscription.status != SubscriptionStatus.PAUSED:
         raise InvalidStateError(f"Only paused subscriptions can be resumed; this one is {subscription.status.value}.")
+    # Serialise with concurrent resumes / activations / creates for this customer, then
+    # re-check state and conflicts under the lock; a loser changes and records nothing.
+    lock_customer_row(db, ctx.organization_id, subscription.customer_id)
+    lock_and_reload(db, subscription)
+    if subscription.status != SubscriptionStatus.PAUSED:
+        raise InvalidStateError("This subscription has already been resumed.")
+    assert_no_conflicting_subscription(
+        db,
+        ctx.organization_id,
+        subscription.customer_id,
+        subscription.plan_id,
+        statuses=(SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING),
+        exclude_id=subscription.id,
+    )
     before = snapshot(subscription)
     today = timezones.org_today(ctx.organization)
-    subscription.status = SubscriptionStatus.ACTIVE
+    if not claim_status_transition(db, subscription, (SubscriptionStatus.PAUSED,), SubscriptionStatus.ACTIVE):
+        raise InvalidStateError("This subscription has already been resumed.")
     subscription.paused_at = None
     subscription.current_period_start = today
     subscription.current_period_end = period_end_for(today, subscription.plan, today.day)
@@ -1378,6 +1460,21 @@ def convert_trial(db: Session, subscription: Subscription, *, actor_label: str =
     # conversion) that already converted it wins, and this call records nothing.
     lock_and_reload(db, subscription)
     if subscription.status != SubscriptionStatus.TRIALING:
+        return None
+    try:
+        assert_no_conflicting_subscription(
+            db,
+            subscription.organization_id,
+            subscription.customer_id,
+            subscription.plan_id,
+            statuses=(SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING),
+            exclude_id=subscription.id,
+        )
+    except ValidationAppError as exc:
+        # Pre-existing duplicate: never create a second live subscription automatically.
+        from backend.app.core.logging import logger
+
+        logger.warning("Trial conversion skipped for %s: %s", subscription.id, exc)
         return None
     before = snapshot(subscription)
     period_start = subscription.trial_end or timezones.org_today_for_id(db, subscription.organization_id)

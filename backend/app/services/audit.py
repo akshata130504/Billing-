@@ -60,8 +60,8 @@ def record(
     """
     entry = AuditLog(
         organization_id=organization_id or (ctx.organization_id if ctx else None),
-        actor_user_id=ctx.user.id if ctx else None,
-        actor_label=actor_label or (ctx.user.full_name if ctx else SYSTEM_ACTOR),
+        actor_user_id=ctx.user.id if ctx and ctx.user is not None else None,
+        actor_label=actor_label or (ctx.actor_label if ctx else SYSTEM_ACTOR),
         action=action,
         entity_type=entity_type,
         entity_id=entity_id,

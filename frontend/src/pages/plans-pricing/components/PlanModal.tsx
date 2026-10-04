@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2, Calculator, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Button } from '../../../components/common/Button';
+import { ModalShell } from '../../../components/common/Modal';
 import { validateSensibleName, validateSku, validatePercentage, validateNonNegativeMoney } from '../../../utils/validation';
 import { calculatePricePreview } from './planPricePreview';
 import { currencySymbol } from '../../../utils/format';
 import { errorSummary } from '../../../services/apiClient';
+import { clampSimulatorQuantity, MAX_SIMULATOR_QUANTITY } from '../PricingSimulatorPage';
 import type {
   PlanPricingItem,
   CreatePlanPricingInput,
@@ -12,6 +14,9 @@ import type {
   PlanBillingFrequency,
   PlanPricingTier,
 } from '../../../types/plans_pricing';
+
+/** Largest price the API accepts for a base/tier price. */
+export const MAX_PLAN_PRICE = 999999999999.99;
 
 const SUPPORTED_CURRENCIES = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD', 'AUD', 'CAD'];
 
@@ -127,7 +132,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
       setError(codeError);
       return;
     }
-    const basePriceError = validateNonNegativeMoney(basePrice, 'Base price', { required: true });
+    const basePriceError = validateNonNegativeMoney(basePrice, 'Base price', { required: true, max: MAX_PLAN_PRICE });
     if (basePriceError) {
       setError(basePriceError);
       return;
@@ -165,12 +170,11 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+    <ModalShell onClose={onClose} labelledBy="plan-modal-title" className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in duration-150">
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
           <div>
-            <h2 className="text-lg font-bold text-slate-900">
+            <h2 id="plan-modal-title" className="text-lg font-bold text-slate-900">
               {initialData ? 'Edit Plan & Pricing' : 'Create New Pricing Plan'}
             </h2>
             <p className="text-xs text-slate-500">
@@ -353,6 +357,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
                 <input
                   type="number"
                   min="0"
+                  max={MAX_PLAN_PRICE}
                   step="0.01"
                   required
                   value={basePrice}
@@ -409,36 +414,37 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
                 </div>
 
                 {tiers.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic py-2 text-center">
-                    No custom tiers added yet. Default base price of {sym}{basePrice} will apply.
+                  <p className="text-xs text-slate-400 italic py-2 text-center min-w-0 break-words">
+                    No custom tiers added yet. Default base price of <span className="break-all tabular-nums">{sym}{basePrice}</span> will apply.
                   </p>
                 ) : (
                   <div className="space-y-2">
                     {tiers.map((t, idx) => (
-                      <div key={idx} className="flex items-center gap-2 bg-white p-2.5 rounded-lg border border-slate-200 shadow-2xs text-xs">
+                      <div key={idx} className="flex flex-wrap items-center gap-2 bg-white p-2.5 rounded-lg border border-slate-200 shadow-2xs text-xs min-w-0">
                         {pricingModel === 'package' ? (
                           <>
                             <span className="font-semibold text-slate-500 text-[11px] w-6">#{idx + 1}</span>
-                            <div className="flex-1 flex items-center gap-2">
+                            <div className="flex-1 min-w-0 flex flex-wrap items-center gap-2">
                               <span className="text-slate-500 text-[11px]">Package Qty:</span>
                               <input
                                 type="number"
                                 min="1"
                                 value={t.package_qty ?? ''}
                                 onChange={(e) => handleUpdateTier(idx, 'package_qty', e.target.value)}
-                                className="w-24 px-2 py-1 rounded border border-slate-200 font-semibold"
+                                className="w-24 max-w-full px-2 py-1 rounded border border-slate-200 font-semibold"
                                 placeholder="e.g. 10"
                               />
                             </div>
-                            <div className="flex-1 flex items-center gap-2">
+                            <div className="flex-1 min-w-0 flex flex-wrap items-center gap-2">
                               <span className="text-slate-500 text-[11px]">Package Price ({sym}):</span>
                               <input
                                 type="number"
                                 min="0"
+                                max={MAX_PLAN_PRICE}
                                 step="0.01"
                                 value={t.package_price ?? ''}
                                 onChange={(e) => handleUpdateTier(idx, 'package_price', e.target.value)}
-                                className="w-28 px-2 py-1 rounded border border-slate-200 font-semibold text-slate-900"
+                                className="w-28 max-w-full px-2 py-1 rounded border border-slate-200 font-semibold text-slate-900"
                                 placeholder="5000"
                               />
                             </div>
@@ -453,7 +459,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
                                 min="0"
                                 value={t.min_qty ?? ''}
                                 onChange={(e) => handleUpdateTier(idx, 'min_qty', e.target.value)}
-                                className="w-20 px-2 py-1 rounded border border-slate-200 font-semibold"
+                                className="w-20 max-w-full px-2 py-1 rounded border border-slate-200 font-semibold"
                                 placeholder="1"
                               />
                             </div>
@@ -464,19 +470,20 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
                                 min="0"
                                 value={t.max_qty ?? ''}
                                 onChange={(e) => handleUpdateTier(idx, 'max_qty', e.target.value)}
-                                className="w-20 px-2 py-1 rounded border border-slate-200 font-semibold"
+                                className="w-20 max-w-full px-2 py-1 rounded border border-slate-200 font-semibold"
                                 placeholder="∞"
                               />
                             </div>
-                            <div className="flex-1 flex items-center gap-1 justify-end">
+                            <div className="flex-1 min-w-0 flex flex-wrap items-center gap-1 justify-end">
                               <span className="text-slate-500 text-[11px]">Rate ({sym}/unit):</span>
                               <input
                                 type="number"
                                 min="0"
+                                max={MAX_PLAN_PRICE}
                                 step="0.01"
                                 value={t.unit_price ?? ''}
                                 onChange={(e) => handleUpdateTier(idx, 'unit_price', e.target.value)}
-                                className="w-24 px-2 py-1 rounded border border-slate-200 font-semibold text-slate-900 text-right"
+                                className="w-24 max-w-full px-2 py-1 rounded border border-slate-200 font-semibold text-slate-900 text-right"
                                 placeholder="1000"
                               />
                             </div>
@@ -501,7 +508,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
 
           {/* Section 4: Live Pricing Preview */}
           <div className="p-4 rounded-xl bg-emerald-50/50 border border-emerald-200/80 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Calculator className="w-4 h-4 text-emerald-600" />
                 <h4 className="text-xs font-bold text-emerald-900 uppercase tracking-wider">
@@ -514,24 +521,25 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
                   type="number"
                   min="1"
                   value={previewQty}
-                  onChange={(e) => setPreviewQty(Math.max(1, Number(e.target.value)))}
+                  max={MAX_SIMULATOR_QUANTITY}
+                  onChange={(e) => setPreviewQty(clampSimulatorQuantity(e.target.value).value)}
                   className="w-20 px-2 py-1 rounded-md border border-emerald-300 bg-white font-bold text-emerald-900 text-center"
                 />
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs bg-white p-3 rounded-lg border border-emerald-100">
-              <div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs bg-white p-3 rounded-lg border border-emerald-100 min-w-0">
+              <div className="min-w-0">
                 <p className="text-slate-400 text-[11px]">Calculated Subtotal</p>
-                <p className="font-bold text-slate-900 text-sm">{formatPreview(preview.subtotal)}</p>
+                <p className="font-bold text-slate-900 text-sm break-all tabular-nums">{formatPreview(preview.subtotal)}</p>
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="text-slate-400 text-[11px]">Taxes ({taxRatePct}% GST)</p>
-                <p className="font-bold text-slate-900 text-sm">{formatPreview(preview.tax)}</p>
+                <p className="font-bold text-slate-900 text-sm break-all tabular-nums">{formatPreview(preview.tax)}</p>
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="text-slate-400 text-[11px]">Final Total Amount</p>
-                <p className="font-bold text-emerald-600 text-base">{formatPreview(preview.total)}</p>
+                <p className="font-bold text-emerald-600 text-base break-all tabular-nums">{formatPreview(preview.total)}</p>
               </div>
             </div>
             <p className="text-[11px] text-emerald-700 font-medium italic">
@@ -555,7 +563,6 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
             </Button>
           </div>
         </form>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

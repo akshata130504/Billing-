@@ -16,13 +16,13 @@ import {
   PaymentType,
   PaymentMethod,
 } from './types';
-import { paymentService } from '../../services/paymentService';
+import { paymentService, type BackendPaymentStatus, type PaymentQueryParams } from '../../services/paymentService';
 import { customerService } from '../../services/customerService';
 import { invoiceService } from '../../services/invoiceService';
 import { toApiError } from '../../services/apiClient';
 import { useToast } from '../../components/common/Toast';
 import { paymentOutToUi, uiToPaymentIn, customerToUi, toBackendPaymentMethod } from './paymentMapper';
-import type { ApiError, InvoiceOut, PaymentListParams, PaymentStatus as BackendPaymentStatus } from '../../types/api';
+import type { ApiError, InvoiceOut } from '../../types/api';
 
 export const PAYMENTS_PAGE_SIZE = 25;
 
@@ -102,7 +102,7 @@ export const INITIAL_PAYMENT_FILTERS: PaymentFilterState = {
 };
 
 /** Translate the UI filter state into the query parameters the API understands. */
-function toListParams(filters: PaymentFilterState, page: number): PaymentListParams {
+export function toListParams(filters: PaymentFilterState, page: number): PaymentQueryParams {
   const sortMap: Record<PaymentFilterState['sortBy'], string> = {
     newest: '-created_at',
     oldest: 'created_at',
@@ -121,6 +121,9 @@ function toListParams(filters: PaymentFilterState, page: number): PaymentListPar
     status = 'pending';
   } else if (filters.statusTab === 'failed') {
     status = 'failed';
+  } else if (filters.statusTab === 'refunded') {
+    // Fully and partially refunded payments both belong on the Refunded tab.
+    status = 'refunded,partially_refunded';
   }
 
   return {
