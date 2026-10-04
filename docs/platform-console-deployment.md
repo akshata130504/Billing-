@@ -63,15 +63,31 @@ cookie also travels with tenant API requests; tenant routes read bearer tokens o
 
 ### Residual risk of sharing the origin (accepted with the single-origin requirement)
 
-A separate origin used to isolate the console from script running on the tenant origin. On one
-origin, script injected into ANY page of the site (an XSS bug in the tenant app) runs on the same
-origin as the console and could call the platform API with a signed-in staff member's cookies.
-What still limits it: the platform access token is HttpOnly (not readable); sessions are short
-(10-minute access token, idle and absolute session limits); every sensitive console action
-(suspend, delete, staff changes, access grants, CMS publish) requires a fresh TOTP step-up that a
-script cannot produce; both apps run under a `script-src 'self'` CSP; every action is audited.
-Recommended operating practice: Rooman staff use the console in a separate browser profile from
-any tenant account.
+**This is weaker isolation than the previous separate-origin design.** A separate origin kept
+script running on the tenant app away from the console. On one origin, script injected into ANY
+page of the site (an XSS bug in the tenant app, or in the console) runs on the same origin as the
+console. If a Rooman staff member is signed in to the console in the same browser, that script can
+call the platform API with their session: the browser attaches the cookies, the Origin and
+`Sec-Fetch-Site` checks pass (it IS the same origin), and the CSRF double submit does not stop it
+(the CSRF cookie is readable by same-origin script by design). Within the staff member's role it
+could:
+
+- read everything the console shows (organization directory, platform audit log, staff list,
+  health, CMS drafts);
+- perform the state changes that do not require step-up (for example requesting or cancelling
+  access grants, saving CMS drafts or uploading media, revoking sessions, some organization
+  lifecycle actions);
+- perform the step-up-protected actions too (suspension, deletion scheduling, staff
+  activation/deactivation, entering a tenant, emergency approval, CMS publish/rollback) if the
+  session completed a step-up within the last `PLATFORM_STEP_UP_MINUTES` (at most 15).
+
+What still limits it: the platform tokens are HttpOnly, so the script cannot steal the session
+for use elsewhere; sessions are short (10-minute access token, idle and absolute limits); without
+a step-up in the last 15 minutes the sensitive actions above need a fresh authenticator code,
+which a script cannot produce; both apps run under a `script-src 'self'` CSP with no third-party
+scripts on the console; tenant tokens and platform tokens remain unusable on each other's routes;
+every platform action is audited. Recommended operating practice: Rooman staff use the console in
+a separate browser profile (or browser) from any tenant account, and sign out when done.
 
 ## 2. Configuration
 
