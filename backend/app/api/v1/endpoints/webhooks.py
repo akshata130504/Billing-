@@ -36,6 +36,7 @@ from backend.app.api.deps import get_db
 from backend.app.core.alerts import send_alert
 from backend.app.core.exceptions import AppException
 from backend.app.core.logging import logger
+from backend.app.core.rate_limit import limiter, webhook_rate_limit
 from backend.app.models import AuditStatus, Invoice, InvoiceStatus, Payment, PaymentStatus, RefundStatus, WebhookEvent, utcnow
 from backend.app.schemas.public import WebhookAck
 from backend.app.services import audit, dunning_service, payment_service, razorpay_gateway
@@ -158,11 +159,13 @@ def _handle_payment_captured(db: Session, event: WebhookEvent, payload: Dict[str
         return  # already captured via razorpay-verify / checkout confirm or an earlier delivery
 
     # Verify amount and currency from webhook entity against expected payment record
+    # A capture without an amount is never applied (fail closed): Razorpay always sends it.
     entity_amount_paise = entity.get("amount")
-    if entity_amount_paise is not None:
-        entity_amount = payment_service.from_paise(entity_amount_paise)
-        if entity_amount != payment.amount:
-            raise ValueError(f"Captured payment amount mismatch: expected {payment.amount}, got {entity_amount}")
+    if entity_amount_paise is None:
+        raise ValueError("Captured payment amount mismatch: the event carries no amount")
+    entity_amount = payment_service.from_paise(entity_amount_paise)
+    if entity_amount != payment.amount:
+        raise ValueError(f"Captured payment amount mismatch: expected {payment.amount}, got {entity_amount}")
 
     entity_currency = entity.get("currency")
     if entity_currency and entity_currency.upper() != payment.currency.upper():
@@ -275,14 +278,20 @@ def _handle_refund_failed(db: Session, event: WebhookEvent, payload: Dict[str, A
     refund_id = entity.get("id")
     if not refund_id:
         raise ValueError("refund.failed without refund id")
-    existing = payment_service.find_refund_by_gateway_id(db, refund_id)
+    from backend.app.core.tenant_context import set_tenant_context, system_context
+    # The refund's organization is not known yet: look it up explicitly as the system, then
+    # continue in that organization's tenant context (as the other handlers do).
+    with system_context():
+        existing = payment_service.find_refund_by_gateway_id(db, refund_id)
+        payment = existing.payment if existing is not None else None
     if existing is None:
         # A refund we never booked (e.g. started and failed in the Razorpay
         # dashboard) leaves nothing to undo.
         event.error = "ignored: refund not recorded here"
         return
-    _check_org(event, existing.payment)
+    _check_org(event, payment)
     event.organization_id = existing.organization_id
+    set_tenant_context(existing.organization_id)
     reason = entity.get("error_description") or entity.get("status_details") or "Refund failed at Razorpay"
     payment_service.fail_refund(db, existing, reason=str(reason)[:500], actor_label=audit.WEBHOOK_ACTOR)
 
@@ -349,6 +358,7 @@ def _is_retryable(exc: Exception, payload: Dict[str, Any]) -> bool:
 
 
 @router.post("/razorpay", response_model=WebhookAck, summary="Razorpay webhook receiver")
+@limiter.limit(webhook_rate_limit)
 async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
     raw = await request.body()
     signature = request.headers.get(SIGNATURE_HEADER)

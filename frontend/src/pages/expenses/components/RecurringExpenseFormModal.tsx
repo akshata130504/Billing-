@@ -10,6 +10,7 @@ import { X, CheckCircle, Repeat } from 'lucide-react';
 import { CustomerCombobox } from '../../../components/common/CustomerCombobox';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCustomerProjects } from '../useCustomerProjects';
+import { ModalShell } from '../../../components/common/Modal';
 import { validateSensibleName, validatePositiveMoney, validateNonNegativeMoney, validateDateNotBefore, parseStrictNumber } from '../../../utils/validation';
 import { todayIso, toIsoDate } from '../../../utils/format';
 
@@ -202,8 +203,7 @@ export function RecurringExpenseFormModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col">
+    <ModalShell onClose={onClose} labelledBy="recurring-expense-modal-title" className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50/50">
           <div className="flex items-center gap-2.5">
@@ -211,7 +211,7 @@ export function RecurringExpenseFormModal({
               <Repeat className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900">
+              <h3 id="recurring-expense-modal-title" className="text-base font-bold text-slate-900">
                 {editingExpense ? 'Edit Recurring Profile' : 'New Recurring Expense'}
               </h3>
               <p className="text-xs text-slate-500">
@@ -451,7 +451,6 @@ export function RecurringExpenseFormModal({
             <span>{editingExpense ? 'Save Changes' : 'Save Recurring Profile'}</span>
           </button>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

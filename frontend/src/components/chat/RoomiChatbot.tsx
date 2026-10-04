@@ -100,7 +100,9 @@ export function RoomiChatbot() {
       const historyContext: ChatMessage[] = messages
         .filter((m) => !m.isError && m.id !== 'msg-welcome')
         .slice(-6)
-        .map((m) => ({ role: m.role, content: m.content }));
+        // The API caps each history item at 3000 chars (and the list at 12 items); long
+        // assistant replies are trimmed so they never turn a follow-up question into a 422.
+        .map((m) => ({ role: m.role, content: m.content.slice(0, 3000) }));
 
       const response = await roomiService.sendMessage({
         message: prompt,
@@ -421,6 +423,7 @@ export function RoomiChatbot() {
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
                       onKeyDown={handleKeyDown}
+                      maxLength={3000}
                       placeholder="Ask Roomi about billing, invoices, subscriptions..."
                       disabled={isLoading}
                       rows={1}

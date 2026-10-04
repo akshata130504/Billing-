@@ -360,6 +360,29 @@ def trigger_dunning_for_failed_payment(
     payment_method_type: str = "card",
 ) -> DunningCase:
     """Initiates a dunning case upon payment failure or past-due overdue event."""
+    from backend.app.core.tenant_context import tenant_context
+
+    with tenant_context(organization_id):
+        return _trigger_dunning_for_failed_payment_impl(
+            db=db,
+            organization_id=organization_id,
+            invoice_id=invoice_id,
+            customer_id=customer_id,
+            subscription_id=subscription_id,
+            reason=reason,
+            payment_method_type=payment_method_type,
+        )
+
+
+def _trigger_dunning_for_failed_payment_impl(
+    db: Session,
+    organization_id: str,
+    invoice_id: str,
+    customer_id: str,
+    subscription_id: Optional[str] = None,
+    reason: str = "card_declined",
+    payment_method_type: str = "card",
+) -> DunningCase:
     # 1. Prevent duplicate active dunning cases for the same invoice
     existing_case = db.scalars(
         select(DunningCase).where(
@@ -507,6 +530,15 @@ def execute_dunning_retries(
     case inside this transaction, after the case lock and before anything is charged or
     changed; once it refuses, no further case of this organization is touched.
     """
+    from backend.app.core.tenant_context import tenant_context
+
+    with tenant_context(organization_id):
+        return _execute_dunning_retries_impl(db, organization_id, guard=guard)
+
+
+def _execute_dunning_retries_impl(
+    db: Session, organization_id: str, guard: Optional[Callable[[], bool]] = None
+) -> Dict[str, Any]:
     now = utcnow()
     cases = list(
         db.scalars(
@@ -970,6 +1002,7 @@ def reactivate_dunning_cancelled_subscription(
     db: Session,
     subscription_id: str,
     organization_id: str,
+    ctx: Any = None,
 ) -> Subscription:
     """In-term reactivation of a dunning-cancelled subscription without altering billing cycle."""
     sub = db.scalars(
@@ -984,8 +1017,32 @@ def reactivate_dunning_cancelled_subscription(
     if sub.status != SubscriptionStatus.CANCELLED:
         raise ValidationAppError(f"Subscription is in '{sub.status.value}' state; only cancelled subscriptions can be reactivated.")
 
+    from backend.app.services import subscription_service
+
+    subscription_service.lock_customer_row(db, organization_id, sub.customer_id)
+    subscription_service.assert_no_conflicting_subscription(
+        db,
+        organization_id,
+        sub.customer_id,
+        sub.plan_id,
+        exclude_id=sub.id,
+    )
+    before = subscription_service.snapshot(sub)
     sub.status = SubscriptionStatus.ACTIVE
+    sub.updated_at = utcnow()
     db.flush()
+    audit.record(
+        db,
+        action="SUBSCRIPTION_REACTIVATED",
+        entity_type="subscription",
+        entity_id=sub.id,
+        entity_label=sub.subscription_number,
+        organization_id=organization_id,
+        ctx=ctx,
+        actor_label=None if ctx is not None else audit.SYSTEM_ACTOR,
+        before=before,
+        after=subscription_service.snapshot(sub),
+    )
     return sub
 
 

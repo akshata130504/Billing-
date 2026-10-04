@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from backend.app.core.tenant_context import system_context, tenant_context
 from backend.app.models import (
     Invoice,
     InvoiceStatus,
@@ -141,19 +142,21 @@ def test_recompute_invoice_status_uses_org_local_date(client, db, frozen):
 def test_renewal_due_check_defaults_to_org_local_date(client, db, frozen):
     from backend.app.services.subscription_service import renew_subscription
 
-    sub_in = _subscription(db, _tenant(db, KOLKATA))
-    sub_ny = _subscription(db, _tenant(db, NEW_YORK))
+    # the scheduler runs this under system_context() (run_billing_jobs)
+    with system_context():
+        sub_in = _subscription(db, _tenant(db, KOLKATA))
+        sub_ny = _subscription(db, _tenant(db, NEW_YORK))
 
-    assert renew_subscription(db, sub_ny, only_if_due=True) == "skipped"
-    db.commit()
-    db.refresh(sub_ny)
-    assert sub_ny.next_billing_date == date(2026, 4, 1)
+        assert renew_subscription(db, sub_ny, only_if_due=True) == "skipped"
+        db.commit()
+        db.refresh(sub_ny)
+        assert sub_ny.next_billing_date == date(2026, 4, 1)
 
-    assert renew_subscription(db, sub_in, only_if_due=True) != "skipped"
-    db.commit()
-    db.refresh(sub_in)
-    assert sub_in.next_billing_date > date(2026, 4, 1)
-    assert sub_in.current_period_start == date(2026, 4, 1)
+        assert renew_subscription(db, sub_in, only_if_due=True) != "skipped"
+        db.commit()
+        db.refresh(sub_in)
+        assert sub_in.next_billing_date > date(2026, 4, 1)
+        assert sub_in.current_period_start == date(2026, 4, 1)
 
 
 # --- trial end -----------------------------------------------------------------------------------
@@ -162,26 +165,28 @@ def test_renewal_due_check_defaults_to_org_local_date(client, db, frozen):
 def test_trial_end_evaluation_uses_org_local_date(client, db, frozen):
     from backend.app.services.trial_service import evaluate_expiring_trials
 
-    trial = dict(
-        status=SubscriptionStatus.TRIALING,
-        trial_start=date(2026, 3, 18),
-        trial_end=date(2026, 4, 1),
-        start_date=date(2026, 3, 18),
-        current_period_start=date(2026, 3, 18),
-        current_period_end=date(2026, 4, 1),
-        next_billing_date=date(2026, 4, 1),
-    )
-    kolkata = _tenant(db, KOLKATA)
-    new_york = _tenant(db, NEW_YORK)
-    _subscription(db, kolkata, **trial)
-    sub_ny = _subscription(db, new_york, **trial)
+    # the scheduler runs this under system_context() (run_billing_jobs)
+    with system_context():
+        trial = dict(
+            status=SubscriptionStatus.TRIALING,
+            trial_start=date(2026, 3, 18),
+            trial_end=date(2026, 4, 1),
+            start_date=date(2026, 3, 18),
+            current_period_start=date(2026, 3, 18),
+            current_period_end=date(2026, 4, 1),
+            next_billing_date=date(2026, 4, 1),
+        )
+        kolkata = _tenant(db, KOLKATA)
+        new_york = _tenant(db, NEW_YORK)
+        _subscription(db, kolkata, **trial)
+        sub_ny = _subscription(db, new_york, **trial)
 
-    # 1 April has begun in Kolkata: its trial has ended and is evaluated.
-    assert evaluate_expiring_trials(db, org_id=kolkata.organization.id, commit=True)["evaluated"] == 1
-    # Still 31 March in New York: the trial runs until its own local midnight.
-    assert evaluate_expiring_trials(db, org_id=new_york.organization.id, commit=True)["evaluated"] == 0
-    db.refresh(sub_ny)
-    assert sub_ny.status == SubscriptionStatus.TRIALING
+        # 1 April has begun in Kolkata: its trial has ended and is evaluated.
+        assert evaluate_expiring_trials(db, org_id=kolkata.organization.id, commit=True)["evaluated"] == 1
+        # Still 31 March in New York: the trial runs until its own local midnight.
+        assert evaluate_expiring_trials(db, org_id=new_york.organization.id, commit=True)["evaluated"] == 0
+        db.refresh(sub_ny)
+        assert sub_ny.status == SubscriptionStatus.TRIALING
 
 
 # --- quote expiry --------------------------------------------------------------------------------
@@ -260,12 +265,13 @@ def test_credit_note_issue_date_defaults_to_org_local_date(client, db, frozen):
     notes = {}
     for tz_name in (KOLKATA, NEW_YORK):
         t = _tenant(db, tz_name)
-        notes[tz_name] = credit_service.create_credit_note(
-            db,
-            organization_id=t.organization.id,
-            customer_id=t.customer().id,
-            lines=[{"description": "Goodwill", "amount": "50.00", "tax_rate_pct": "0"}],
-        )
+        with tenant_context(t.organization.id):  # as the credit-note endpoint runs
+            notes[tz_name] = credit_service.create_credit_note(
+                db,
+                organization_id=t.organization.id,
+                customer_id=t.customer().id,
+                lines=[{"description": "Goodwill", "amount": "50.00", "tax_rate_pct": "0"}],
+            )
     db.commit()
     assert notes[KOLKATA].issue_date == date(2026, 4, 1)
     assert notes[NEW_YORK].issue_date == date(2026, 3, 31)
@@ -324,7 +330,8 @@ def test_report_this_month_range_kolkata_vs_new_york_at_month_boundary(client, d
         _payment(db, t, customer, "100.00", datetime(2026, 3, 31, 17, 0, tzinfo=UTC))
         _payment(db, t, customer, "10.00", datetime(2026, 3, 31, 19, 0, tzinfo=UTC))
         r = report_range(range="this_month", start=None, end=None, ctx=SimpleNamespace(organization=t.organization))
-        results[tz_name] = (r, reports_service.kpis(db, t.organization.id, r), t.organization.id)
+        with tenant_context(t.organization.id):  # as the reports endpoint runs
+            results[tz_name] = (r, reports_service.kpis(db, t.organization.id, r), t.organization.id)
 
     r_in, kpis_in, _ = results[KOLKATA]
     assert (r_in.start, r_in.end) == (date(2026, 4, 1), date(2026, 4, 1))
@@ -339,7 +346,8 @@ def test_report_this_month_range_kolkata_vs_new_york_at_month_boundary(client, d
     assert kpis_ny["total_revenue"] == "110.00"  # both are 31 March in New York
 
     # The revenue-over-time buckets use the local date of each payment too.
-    trend = reports_service.revenue_analytics(db, ny_org_id, r_ny)
+    with tenant_context(ny_org_id):
+        trend = reports_service.revenue_analytics(db, ny_org_id, r_ny)
     assert {row["period"]: row["amount"] for row in trend["revenue_over_time"]}["2026-03-31"] == "110.00"
 
 

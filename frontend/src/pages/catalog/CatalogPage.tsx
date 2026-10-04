@@ -8,6 +8,7 @@ import {
   XCircle,
   Edit2,
   Archive,
+  ArchiveRestore,
 } from 'lucide-react';
 import { Button } from '../../components/common/Button';
 import { LoadingState } from '../../components/common/LoadingState';
@@ -73,6 +74,7 @@ export function CatalogPage() {
 
   // Archive confirmation state
   const [offeringToArchive, setOfferingToArchive] = useState<OfferingOut | null>(null);
+  const [offeringToUnarchive, setOfferingToUnarchive] = useState<OfferingOut | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -140,6 +142,8 @@ export function CatalogPage() {
   }, [showToast]);
 
   const openOfferingModal = (offering: OfferingOut | null) => {
+    // Archived offerings are read-only; they must be unarchived before editing.
+    if (offering && !offering.is_active) return;
     setEditingOffering(offering);
     setIsOfferingModalOpen(true);
     void loadPickerOfferings();
@@ -171,6 +175,22 @@ export function CatalogPage() {
       await loadData();
     } catch (err) {
       showToast('error', 'Could not archive offering', toApiError(err).message);
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
+  const handleConfirmUnarchive = async () => {
+    if (!offeringToUnarchive) return;
+    try {
+      setIsArchiving(true);
+      await catalogCpqService.unarchiveOffering(offeringToUnarchive.id);
+      setOfferingToUnarchive(null);
+      showToast('success', 'Offering unarchived');
+      await loadData();
+    } catch (err) {
+      setOfferingToUnarchive(null);
+      showToast('error', 'Could not unarchive offering', toApiError(err).message);
     } finally {
       setIsArchiving(false);
     }
@@ -296,7 +316,8 @@ export function CatalogPage() {
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search offerings by SKU, name..."
+            placeholder={activeTab === 'price_books' ? 'Search price books by name, segment...' : 'Search offerings by SKU, name...'}
+            aria-label={activeTab === 'price_books' ? 'Search price books' : 'Search offerings'}
             value={searchQuery}
             onChange={(e) => changeSearch(e.target.value)}
             className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
@@ -446,7 +467,7 @@ export function CatalogPage() {
                         {!canEdit && !canArchive && (
                           <span className="text-[11px] text-slate-400">View only</span>
                         )}
-                        {canEdit && (
+                        {canEdit && item.is_active && (
                         <button
                           onClick={() => openOfferingModal(item)}
                           className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100"
@@ -454,6 +475,15 @@ export function CatalogPage() {
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
+                        )}
+                        {canArchive && !item.is_active && (
+                          <button
+                            onClick={() => setOfferingToUnarchive(item)}
+                            className="p-1 rounded text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+                            title="Unarchive Offering"
+                          >
+                            <ArchiveRestore className="w-3.5 h-3.5" />
+                          </button>
                         )}
                         {canArchive && item.is_active && (
                           <button
@@ -514,6 +544,21 @@ export function CatalogPage() {
         confirmLabel="Archive"
         cancelLabel="Cancel"
         variant="danger"
+        isLoading={isArchiving}
+      />
+      {/* Unarchive Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={Boolean(offeringToUnarchive)}
+        onClose={() => setOfferingToUnarchive(null)}
+        onConfirm={handleConfirmUnarchive}
+        title="Unarchive Commercial Offering"
+        description={
+          offeringToUnarchive
+            ? `Unarchive "${offeringToUnarchive.name}" (${offeringToUnarchive.sku})? It will become active again and can be edited and added to new quotes or subscriptions.`
+            : ''
+        }
+        confirmLabel="Unarchive"
+        cancelLabel="Cancel"
         isLoading={isArchiving}
       />
     </div>

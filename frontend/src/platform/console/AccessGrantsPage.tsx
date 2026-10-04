@@ -231,7 +231,16 @@ export function AccessGrantsPage() {
         actions={
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => setRequesting('normal')}>Request access</Button>
-            {isAdmin && <Button size="sm" variant="danger" onClick={() => setRequesting('emergency')}><ShieldAlert className="mr-1 h-4 w-4" />Emergency access</Button>}
+            {isAdmin && (
+              <Button
+                size="sm"
+                variant="danger"
+                leadingIcon={<ShieldAlert className="h-4 w-4" />}
+                onClick={() => setRequesting('emergency')}
+              >
+                Emergency access
+              </Button>
+            )}
           </div>
         }
       />
@@ -270,7 +279,11 @@ export function AccessGrantsPage() {
                   {g.reviewed_at ? `Reviewed ${formatDateTime(g.reviewed_at)}.` : ''}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {mine && open && <Button size="sm" onClick={() => enter(g)}><LogIn className="mr-1 h-4 w-4" />Enter tenant</Button>}
+                  {mine && open && (
+                    <Button size="sm" leadingIcon={<LogIn className="h-4 w-4" />} onClick={() => enter(g)}>
+                      Enter tenant
+                    </Button>
+                  )}
                   {mine && g.status === 'pending' && <Button size="sm" variant="outline" onClick={() => void act(() => grantsApi.cancel(g.id), 'Request cancelled')}>Cancel request</Button>}
                   {(mine || isAdmin) && open && (
                     <Button size="sm" variant="danger" onClick={() => { setRevoking(g); setText(''); }}>Revoke</Button>

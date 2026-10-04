@@ -151,6 +151,10 @@ class Settings(BaseSettings):
     # keep reads generous enough for a real customer refreshing a page, and writes tight.
     PUBLIC_RATE_LIMIT: str = "60/minute"
     PUBLIC_ACTION_RATE_LIMIT: str = "10/minute"
+    # Razorpay webhook receiver, per source IP. Generous enough for Razorpay's own bursts and
+    # retries; caps how fast an unauthenticated sender can fill webhook_events/audit_logs with
+    # rejected-signature rows.
+    WEBHOOK_RATE_LIMIT: str = "300/minute"
     # Distributed rate limiting storage URI (e.g. redis://redis:6379/0).
     # When empty or omitted, SlowAPI gracefully falls back to in-memory storage.
     REDIS_URL: str | None = None
@@ -549,6 +553,10 @@ class Settings(BaseSettings):
                 problems.append("ALLOWED_HOSTS must list hostnames explicitly, not '*'")
             elif self.effective_allowed_hosts == list(INTERNAL_HOSTS):
                 problems.append("ALLOWED_HOSTS must be set (or derivable from FRONTEND_URL)")
+            if self.razorpay_enabled and not (self.RAZORPAY_WEBHOOK_SECRET or "").strip():
+                # Without it every webhook is rejected, so payments whose customer closes the
+                # browser before /verify (and refunds, disputes...) are never recorded.
+                problems.append("RAZORPAY_WEBHOOK_SECRET must be set when RAZORPAY_KEY_ID/RAZORPAY_KEY_SECRET are set")
             problems.extend(self._database_tls_problems())
             if problems:
                 raise ValueError(

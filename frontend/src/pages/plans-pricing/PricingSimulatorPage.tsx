@@ -15,6 +15,19 @@ import type { CustomerOut } from '../../types/api';
 import type { PriceBookOut } from '../../types/catalog_cpq';
 
 import { LoadingState } from '../../components/common/LoadingState';
+import { currencySymbol } from '../../utils/format';
+
+/** Largest quantity the simulator prices (the API rejects anything above it with a 422). */
+export const MAX_SIMULATOR_QUANTITY = 1_000_000;
+export const QUANTITY_LIMIT_MESSAGE = `Quantity cannot exceed ${MAX_SIMULATOR_QUANTITY.toLocaleString('en-IN')}.`;
+
+/** Clamp a typed quantity into 1..MAX_SIMULATOR_QUANTITY (whole units). */
+export function clampSimulatorQuantity(raw: string | number): { value: number; error: string | null } {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return { value: 1, error: null };
+  if (n > MAX_SIMULATOR_QUANTITY) return { value: MAX_SIMULATOR_QUANTITY, error: QUANTITY_LIMIT_MESSAGE };
+  return { value: Math.floor(n), error: null };
+}
 
 export function PricingSimulatorPage() {
   const navigate = useNavigate();
@@ -28,10 +41,13 @@ export function PricingSimulatorPage() {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
   const [selectedPriceBookId, setSelectedPriceBookId] = useState<string>('');
   const [quantity, setQuantity] = useState<number>(10);
+  const [quantityError, setQuantityError] = useState<string | null>(null);
   const [discountPct, setDiscountPct] = useState<number>(0);
 
   const [isCalculating, setIsCalculating] = useState(false);
   const [result, setResult] = useState<PricingSimulationResponse | null>(null);
+  // Currency of the plan the current result was calculated for (the response carries no currency).
+  const [resultCurrency, setResultCurrency] = useState<string>('INR');
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -70,12 +86,19 @@ export function PricingSimulatorPage() {
         offering_id: selectedPlanId,
         customer_id: selectedCustomerId || undefined,
         price_book_id: selectedPriceBookId || undefined,
-        quantity: Math.max(1, Number(quantity)),
+        quantity: clampSimulatorQuantity(quantity).value,
         discount_pct: Number(discountPct) || 0,
       });
+      setResultCurrency(plans.find((p) => p.id === selectedPlanId)?.currency || 'INR');
       setResult(res);
     } catch (err: any) {
-      setError(err?.response?.data?.detail || err?.message || 'Calculation failed');
+      const detail = err?.response?.data?.detail;
+      setError(
+        err?.response?.data?.error?.message ||
+          (typeof detail === 'string' ? detail : null) ||
+          err?.message ||
+          'Calculation failed'
+      );
     } finally {
       setIsCalculating(false);
     }
@@ -92,6 +115,7 @@ export function PricingSimulatorPage() {
     setSelectedCustomerId('');
     setSelectedPriceBookId('');
     setQuantity(10);
+    setQuantityError(null);
     setDiscountPct(0);
     setError(null);
   };
@@ -119,6 +143,8 @@ export function PricingSimulatorPage() {
   };
 
   const selectedPlanObj = plans.find((p) => p.id === selectedPlanId);
+  const planSym = currencySymbol(selectedPlanObj?.currency || 'INR');
+  const sym = currencySymbol(resultCurrency);
 
   if (isLoading) {
     return (
@@ -131,8 +157,8 @@ export function PricingSimulatorPage() {
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-150">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <Link to="/plans-pricing">
             <Button variant="outline" size="sm" leadingIcon={<ArrowLeft className="w-3.5 h-3.5" />}>
               Back
@@ -149,7 +175,7 @@ export function PricingSimulatorPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <Button variant="outline" size="sm" onClick={handleReset}>
             Reset
           </Button>
@@ -198,7 +224,7 @@ export function PricingSimulatorPage() {
               >
                 {plans.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name} ({p.pricing_model.toUpperCase()}) - ₹{Number(p.base_price).toLocaleString('en-IN')}/{p.unit}
+                    {p.name} ({p.pricing_model.toUpperCase()}) - {currencySymbol(p.currency || 'INR')}{Number(p.base_price).toLocaleString('en-IN')}/{p.unit}
                   </option>
                 ))}
               </select>
@@ -242,14 +268,31 @@ export function PricingSimulatorPage() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Quantity</label>
+                <label htmlFor="simulator-quantity" className="block text-xs font-semibold text-slate-700 mb-1">
+                  Quantity
+                </label>
                 <input
+                  id="simulator-quantity"
                   type="number"
                   min="1"
+                  max={MAX_SIMULATOR_QUANTITY}
+                  step="1"
                   value={quantity}
-                  onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))}
-                  className="w-full px-3 py-2 text-xs font-bold rounded-lg border border-slate-200 text-slate-900"
+                  aria-invalid={quantityError ? true : undefined}
+                  onChange={(e) => {
+                    const { value, error: limitError } = clampSimulatorQuantity(e.target.value);
+                    setQuantity(value);
+                    setQuantityError(limitError);
+                  }}
+                  className={`w-full px-3 py-2 text-xs font-bold rounded-lg border text-slate-900 ${
+                    quantityError ? 'border-red-300' : 'border-slate-200'
+                  }`}
                 />
+                {quantityError && (
+                  <p role="alert" className="mt-1 text-[11px] text-red-600">
+                    {quantityError}
+                  </p>
+                )}
               </div>
 
               <div>
@@ -271,16 +314,16 @@ export function PricingSimulatorPage() {
                 <p className="font-semibold text-slate-700">Configured Tiers / Packages:</p>
                 <div className="space-y-1 text-[11px] text-slate-600">
                   {selectedPlanObj.pricing_tiers.map((t, i) => (
-                    <div key={i} className="flex justify-between font-mono">
+                    <div key={i} className="flex justify-between gap-2 font-mono tabular-nums">
                       {selectedPlanObj.pricing_model === 'package' ? (
                         <>
-                          <span>Block of {t.package_qty} units:</span>
-                          <span className="font-semibold text-slate-900">₹{Number(t.package_price).toLocaleString('en-IN')}</span>
+                          <span className="min-w-0 break-all">Block of {t.package_qty} units:</span>
+                          <span className="min-w-0 break-all text-right font-semibold text-slate-900">{planSym}{Number(t.package_price).toLocaleString('en-IN')}</span>
                         </>
                       ) : (
                         <>
-                          <span>Tier [{t.min_qty} - {t.max_qty || '∞'}]:</span>
-                          <span className="font-semibold text-slate-900">₹{Number(t.unit_price).toLocaleString('en-IN')}/unit</span>
+                          <span className="min-w-0 break-all">Tier [{t.min_qty} - {t.max_qty || '∞'}]:</span>
+                          <span className="min-w-0 break-all text-right font-semibold text-slate-900">{planSym}{Number(t.unit_price).toLocaleString('en-IN')}/unit</span>
                         </>
                       )}
                     </div>
@@ -314,32 +357,32 @@ export function PricingSimulatorPage() {
             <div className="space-y-5">
               {/* Summary Card */}
               <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-2xs space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900">{result.offering_name}</h3>
-                    <p className="text-xs text-slate-500 font-mono">{result.offering_sku}</p>
+                <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-bold text-slate-900 break-words">{result.offering_name}</h3>
+                    <p className="text-xs text-slate-500 font-mono break-all">{result.offering_sku}</p>
                   </div>
-                  <span className="px-2.5 py-1 rounded-full text-xs font-semibold capitalize bg-purple-50 text-purple-700 border border-purple-200">
+                  <span className="shrink-0 px-2.5 py-1 rounded-full text-xs font-semibold capitalize bg-purple-50 text-purple-700 border border-purple-200">
                     {result.pricing_model.replace('_', ' ')} Model
                   </span>
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-slate-400 text-[11px]">Effective Rate</p>
-                    <p className="text-base font-bold text-slate-900">₹{Number(result.effective_unit_price).toLocaleString('en-IN')}</p>
+                    <p className="text-base font-bold text-slate-900 break-all">{sym}{Number(result.effective_unit_price).toLocaleString('en-IN')}</p>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-slate-400 text-[11px]">Subtotal</p>
-                    <p className="text-base font-bold text-slate-900">₹{Number(result.subtotal).toLocaleString('en-IN')}</p>
+                    <p className="text-base font-bold text-slate-900 break-all">{sym}{Number(result.subtotal).toLocaleString('en-IN')}</p>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-slate-400 text-[11px]">Discount ({result.discount_pct}%)</p>
-                    <p className="text-base font-bold text-amber-600">-₹{Number(result.discount_amount).toLocaleString('en-IN')}</p>
+                    <p className="text-base font-bold text-amber-600 break-all">-{sym}{Number(result.discount_amount).toLocaleString('en-IN')}</p>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-slate-400 text-[11px]">Final Total (incl. Tax)</p>
-                    <p className="text-lg font-bold text-emerald-600">₹{Number(result.total_amount).toLocaleString('en-IN')}</p>
+                    <p data-testid="simulator-final-total" className="text-lg font-bold text-emerald-600 break-all">{sym}{Number(result.total_amount).toLocaleString('en-IN')}</p>
                   </div>
                 </div>
               </div>
@@ -354,45 +397,45 @@ export function PricingSimulatorPage() {
                 </div>
 
                 <div className="space-y-3 font-mono text-xs">
-                  <div className="flex items-center justify-between py-1 border-b border-slate-800/80">
+                  <div className="flex items-start justify-between gap-3 py-1 border-b border-slate-800/80">
                     <span className="text-slate-400">1. Catalog Base Rate</span>
-                    <span className="text-slate-200">₹{result.explanation.catalog_base_price}</span>
+                    <span className="min-w-0 break-all text-right text-slate-200">{sym}{result.explanation.catalog_base_price}</span>
                   </div>
 
                   {result.explanation.price_book_adjustment && (
-                    <div className="flex items-center justify-between py-1 border-b border-slate-800/80 text-indigo-300">
+                    <div className="flex items-start justify-between gap-3 py-1 border-b border-slate-800/80 text-indigo-300">
                       <span>2. Price Book Adjustment</span>
-                      <span>{result.explanation.price_book_adjustment}</span>
+                      <span className="min-w-0 break-all text-right">{result.explanation.price_book_adjustment}</span>
                     </div>
                   )}
 
                   {result.explanation.tier_explanation && (
-                    <div className="flex items-center justify-between py-1 border-b border-slate-800/80 text-purple-300">
+                    <div className="flex items-start justify-between gap-3 py-1 border-b border-slate-800/80 text-purple-300">
                       <span>3. Applied Tier / Bracket</span>
-                      <span>{result.explanation.tier_explanation}</span>
+                      <span className="min-w-0 break-all text-right">{result.explanation.tier_explanation}</span>
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between py-1 border-b border-slate-800/80">
+                  <div className="flex items-start justify-between gap-3 py-1 border-b border-slate-800/80">
                     <span className="text-slate-400">4. Pre-discount Subtotal ({result.quantity} units)</span>
-                    <span className="text-slate-200">₹{result.explanation.subtotal_pre_discount}</span>
+                    <span className="min-w-0 break-all text-right text-slate-200">{sym}{result.explanation.subtotal_pre_discount}</span>
                   </div>
 
                   {Number(result.discount_amount) > 0 && (
-                    <div className="flex items-center justify-between py-1 border-b border-slate-800/80 text-amber-400">
+                    <div className="flex items-start justify-between gap-3 py-1 border-b border-slate-800/80 text-amber-400">
                       <span>5. Applied Discount ({result.discount_pct}%)</span>
-                      <span>-₹{result.discount_amount}</span>
+                      <span className="min-w-0 break-all text-right">-{sym}{result.discount_amount}</span>
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between py-1 border-b border-slate-800/80">
+                  <div className="flex items-start justify-between gap-3 py-1 border-b border-slate-800/80">
                     <span className="text-slate-400">6. Applicable GST ({result.tax_rate_pct}%)</span>
-                    <span className="text-slate-200">+₹{result.tax_amount}</span>
+                    <span className="min-w-0 break-all text-right text-slate-200">+{sym}{result.tax_amount}</span>
                   </div>
 
-                  <div className="flex items-center justify-between pt-2 text-sm font-bold text-emerald-400">
+                  <div className="flex items-start justify-between gap-3 pt-2 text-sm font-bold text-emerald-400">
                     <span>FINAL TOTAL AMOUNT</span>
-                    <span>₹{result.total_amount}</span>
+                    <span className="min-w-0 break-all text-right">{sym}{result.total_amount}</span>
                   </div>
                 </div>
               </div>

@@ -52,7 +52,14 @@ def _staff(db, role=PlatformRole.PLATFORM_ADMINISTRATOR):
 
 
 def _code(secret, steps=0):
-    return totp(secret, at=time.time() + steps * 30)
+    now = time.time()
+    if steps < 0 and 30 - (now % 30) < 2.5:
+        # The server accepts its own 30 s step +/- 1. A code for the PREVIOUS step made in the last
+        # moments of a window falls outside that range if the boundary passes before the request is
+        # verified (slow CI / loaded machine), so wait for the next window instead of racing it.
+        time.sleep(30 - (now % 30) + 0.2)
+        now = time.time()
+    return totp(secret, at=now + steps * 30)
 
 
 def _sign_in(client, db, enrolment, steps=-1):

@@ -15,7 +15,7 @@ from backend.app.core.config import settings
 from backend.app.core.database import get_db
 from backend.app.core.exceptions import ForbiddenError, UnauthorizedError
 from backend.app.core.security import GRANT_TOKEN_TYPE, decode_access_token, peek_token_type
-from backend.app.models import ROLE_RANK, Membership, MemberRole, MembershipStatus, Organization, RefreshToken, User
+from backend.app.models import ROLE_RANK, Membership, MemberRole, MembershipStatus, Organization, OrganizationStatus, RefreshToken, User
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -221,12 +221,60 @@ async def require_grant_context(
     return ctx
 
 
+_READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+class OrganizationNotActiveError(ForbiddenError):
+    """403 with a machine-readable code so the SPA can show the right lifecycle screen."""
+
+    def __init__(self, message: str, code: str):
+        super().__init__(message)
+        self.code = code
+
+
+def _check_org_active(ctx: CurrentContext, method: str) -> None:
+    """Organization lifecycle gate for tenant users (docs/platform-administration-design.md §8).
+
+    - pending_approval / rejected: no business endpoints (self-service /auth/* still works).
+    - suspended: Owner and Admin read-only; Finance and Viewer refused; every write refused.
+    - pending_deletion: Owner read-only (data export); everyone else refused.
+    - deleted: refused.
+    """
+    org = ctx.organization
+    if org is None:
+        return
+    st = org.status.value if hasattr(org.status, "value") else str(org.status)
+    is_read = method.upper() in _READ_METHODS
+    if st == OrganizationStatus.PENDING_APPROVAL.value:
+        raise OrganizationNotActiveError("Your organization is pending approval from Rooman.", "ORGANIZATION_PENDING_APPROVAL")
+    if st == OrganizationStatus.REJECTED.value:
+        msg = f"Your organization registration was rejected: {org.status_reason}" if org.status_reason else "Your organization registration was rejected."
+        raise OrganizationNotActiveError(msg, "ORGANIZATION_REJECTED")
+    if st == OrganizationStatus.SUSPENDED.value:
+        if ROLE_RANK[ctx.role] < ROLE_RANK[MemberRole.ADMIN]:
+            raise OrganizationNotActiveError(
+                "Your organization is suspended. Contact your organization Owner.", "ORGANIZATION_SUSPENDED"
+            )
+        if not is_read:
+            raise OrganizationNotActiveError(
+                "Your organization is suspended and is read-only until it is reactivated.", "ORGANIZATION_SUSPENDED"
+            )
+        return
+    if st == OrganizationStatus.PENDING_DELETION.value:
+        if ctx.role == MemberRole.OWNER and is_read:
+            return
+        raise OrganizationNotActiveError("This organization is scheduled for deletion.", "ORGANIZATION_PENDING_DELETION")
+    if st == OrganizationStatus.DELETED.value:
+        raise OrganizationNotActiveError("This organization is not active.", "ORGANIZATION_DELETED")
+
+
 def require_tenant_user(minimum: MemberRole) -> Callable[..., CurrentContext]:
     """Like require_role, but NEVER satisfied by a platform grant (e.g. deciding on grants)."""
 
-    def dependency(ctx: CurrentContext = Depends(get_current_context)) -> CurrentContext:
+    def dependency(request: Request, ctx: CurrentContext = Depends(get_current_context)) -> CurrentContext:
         if ctx.grant is not None or ctx.user is None:
             raise ForbiddenError("This action can only be performed by a member of this organization.")
+        _check_org_active(ctx, request.method)
         if not ctx.has_role(minimum):
             raise ForbiddenError(f"This action requires the {minimum.value} role or higher.")
         from backend.app.core.tenant_context import set_tenant_context
@@ -239,7 +287,9 @@ def require_tenant_user(minimum: MemberRole) -> Callable[..., CurrentContext]:
 def require_role(minimum: MemberRole) -> Callable[..., CurrentContext]:
     """Dependency factory: `ctx: CurrentContext = Depends(require_role(MemberRole.FINANCE))`."""
 
-    def dependency(ctx: CurrentContext = Depends(get_current_context)) -> CurrentContext:
+    def dependency(request: Request, ctx: CurrentContext = Depends(get_current_context)) -> CurrentContext:
+        if ctx.grant is None:
+            _check_org_active(ctx, request.method)
         if not ctx.has_role(minimum):
             raise ForbiddenError(f"This action requires the {minimum.value} role or higher.")
         from backend.app.core.tenant_context import set_tenant_context

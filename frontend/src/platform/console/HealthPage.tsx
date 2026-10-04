@@ -51,7 +51,17 @@ export function HealthPage() {
       <PageHeader
         title="System health"
         subtitle="API, database, migrations, scheduler and platform service status."
-        actions={<Button size="sm" variant="outline" onClick={() => void load()} isLoading={loading}><RefreshCw className="mr-1 h-4 w-4" />Refresh</Button>}
+        actions={
+          <Button
+            size="sm"
+            variant="outline"
+            leadingIcon={<RefreshCw className="h-4 w-4" />}
+            onClick={() => void load()}
+            isLoading={loading}
+          >
+            Refresh
+          </Button>
+        }
       />
       {error && <ErrorState message={error} onRetry={() => void load()} />}
       {!health && !error && <LoadingState message="Checking health..." />}

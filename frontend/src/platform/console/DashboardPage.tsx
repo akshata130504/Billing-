@@ -35,8 +35,24 @@ export function DashboardPage() {
       {!data && !error && <LoadingState message="Loading dashboard..." />}
       {data && (
         <>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
+          {(data.organizations.pending_approval ?? 0) > 0 && (
+            <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <span>
+                {data.organizations.pending_approval} organization{data.organizations.pending_approval === 1 ? ' is' : 's are'} waiting for approval.
+              </span>
+              <Link to="/organizations?status=pending_approval" className="font-medium text-amber-900 underline hover:no-underline">
+                Review pending organizations
+              </Link>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-7">
             <Stat label="Organizations" value={data.organizations.total ?? 0} />
+            <Stat
+              label="Pending approval"
+              value={data.organizations.pending_approval ?? 0}
+              tone={data.organizations.pending_approval ? 'warning' : 'default'}
+              hint="New sign-ups awaiting a Platform Administrator"
+            />
             <Stat label="Active" value={data.organizations.active ?? 0} tone="success" />
             <Stat label="Suspended" value={data.organizations.suspended ?? 0} tone={data.organizations.suspended ? 'warning' : 'default'} />
             <Stat label="Pending deletion" value={data.organizations.pending_deletion ?? 0} tone={data.organizations.pending_deletion ? 'danger' : 'default'} />

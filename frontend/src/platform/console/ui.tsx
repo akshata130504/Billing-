@@ -4,7 +4,9 @@ import { STATUS_LABELS, type OrgStatus } from '../consoleApi';
 import { ROLE_LABELS, type PlatformRole } from '../platformApi';
 
 const STATUS_VARIANTS: Record<OrgStatus, 'success' | 'warning' | 'danger' | 'neutral'> = {
+  pending_approval: 'warning',
   active: 'success',
+  rejected: 'danger',
   suspended: 'warning',
   pending_deletion: 'danger',
   deleted: 'neutral',

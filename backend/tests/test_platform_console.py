@@ -64,8 +64,12 @@ class Staff:
         self.db.commit()
         first = self.client.post(f"{API}/auth/login", json={"email": self.enrolment.staff.email, "password": PASSWORD})
         assert first.status_code == 200, first.text
+        # Current step, not the previous one: the server accepts its own step +/- 1, so a current-step
+        # code stays valid even if a 30 s boundary passes before the request is verified (a previous-
+        # step code would then fall outside the window and be refused). Replay protection is
+        # unaffected: totp_last_used_step was cleared above and step_up() pins it again.
         resp = self.client.post(f"{API}/auth/2fa", json={"challenge_token": first.json()["challenge_token"],
-                                                         "code": totp(self.enrolment.totp_secret, at=time.time() - 30)})
+                                                         "code": totp(self.enrolment.totp_secret, at=time.time())})
         assert resp.status_code == 200, resp.text
         self.session_id = resp.json()["session_id"]
         return resp
@@ -82,7 +86,7 @@ class Staff:
     def step_up(self):
         self.db.expire_all()
         staff = self.db.get(PlatformStaff, self.id)
-        staff.totp_last_used_step = int(time.time() // 30) - 1  # the sign-in used an older step
+        staff.totp_last_used_step = int(time.time() // 30) - 1  # below the current step, whatever sign-in used
         self.db.commit()
         resp = self.post("/auth/step-up", {"code": totp(self.enrolment.totp_secret, at=time.time())})
         assert resp.status_code == 200, resp.text

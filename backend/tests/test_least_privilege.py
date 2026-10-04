@@ -152,8 +152,11 @@ def test_crud_on_core_tables(lp_engine):
     from backend.app.core.security import hash_password
     from backend.app.models import Customer, Membership, MemberRole, MembershipStatus, Organization, User
 
+    from backend.app.core.tenant_context import tenant_context
+
     suffix = uuid.uuid4().hex[:8]
     with Session(lp_engine) as db:
+        # Identity rows (not tenant-scoped by RLS), as signup creates them.
         org = Organization(name=f"LP Org {suffix}", slug=f"lp-org-{suffix}")
         db.add(org)
         db.flush()
@@ -161,25 +164,33 @@ def test_crud_on_core_tables(lp_engine):
         db.add(user)
         db.flush()
         db.add(Membership(organization_id=org.id, user_id=user.id, role=MemberRole.OWNER, status=MembershipStatus.ACTIVE))
-        cust = Customer(
-            organization_id=org.id, customer_number="CUS-000001", display_name="LP Customer",
-            currency="INR", payment_terms_days=30,
-        )
-        db.add(cust)
+        # Read the id before commit: after it, `org.id` is expired and reloading it would open the
+        # next transaction (and set its RLS context) before tenant_context() below is entered.
+        org_id = org.id
         db.commit()
 
-        got = db.scalars(select(Customer).where(Customer.organization_id == org.id)).one()
-        got.display_name = "LP Customer Renamed"
-        db.commit()
-        db.expire_all()
-        assert db.get(Customer, cust.id).display_name == "LP Customer Renamed"
+        # Tenant-scoped CRUD runs in that organization's context, as require_role() sets it for a
+        # real request; row level security admits exactly this organization's rows.
+        with tenant_context(org_id):
+            cust = Customer(
+                organization_id=org_id, customer_number="CUS-000001", display_name="LP Customer",
+                currency="INR", payment_terms_days=30,
+            )
+            db.add(cust)
+            db.commit()
 
-        db.delete(db.get(Customer, cust.id))
-        db.delete(db.scalars(select(Membership).where(Membership.user_id == user.id)).one())
-        db.delete(db.get(User, user.id))
-        db.delete(db.get(Organization, org.id))
-        db.commit()
-        assert db.get(Organization, org.id) is None
+            got = db.scalars(select(Customer).where(Customer.organization_id == org.id)).one()
+            got.display_name = "LP Customer Renamed"
+            db.commit()
+            db.expire_all()
+            assert db.get(Customer, cust.id).display_name == "LP Customer Renamed"
+
+            db.delete(db.get(Customer, cust.id))
+            db.delete(db.scalars(select(Membership).where(Membership.user_id == user.id)).one())
+            db.delete(db.get(User, user.id))
+            db.delete(db.get(Organization, org.id))
+            db.commit()
+            assert db.get(Organization, org.id) is None
 
 
 def test_select_for_update_and_skip_locked(lp_engine):

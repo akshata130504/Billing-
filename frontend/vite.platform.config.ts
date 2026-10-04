@@ -97,6 +97,7 @@ function platformEntry(): Plugin {
 }
 
 export default defineConfig({
+  cacheDir: 'node_modules/.vite-platform',
   appType: 'mpa',
   plugins: [react(), sharedMedia(), platformEntry()],
   resolve: {

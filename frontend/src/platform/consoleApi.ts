@@ -5,9 +5,9 @@
  */
 import { PlatformRole, consoleRequest } from './platformApi';
 
-export type OrgStatus = 'active' | 'suspended' | 'pending_deletion' | 'deleted';
+export type OrgStatus = 'pending_approval' | 'active' | 'rejected' | 'suspended' | 'pending_deletion' | 'deleted';
 export type LifecycleAction =
-  | 'suspend' | 'reactivate' | 'schedule_deletion' | 'cancel_deletion' | 'pause_jobs' | 'resume_jobs' | 'revoke_sessions';
+  | 'approve' | 'reject' | 'suspend' | 'reactivate' | 'schedule_deletion' | 'cancel_deletion' | 'pause_jobs' | 'resume_jobs' | 'revoke_sessions';
 
 export interface OrganizationSummary {
   id: string;
@@ -53,6 +53,26 @@ export interface OrganizationDetail extends OrganizationSummary {
 export interface LifecycleResult {
   organization: OrganizationSummary;
   changed: Record<string, unknown>;
+}
+
+export interface TenantAdmin {
+  membership_id: string;
+  user_id: string;
+  email: string;
+  full_name: string;
+  role: string;
+  status: string;
+  has_2fa: boolean;
+  live_sessions: number;
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export interface TenantAdminActionResult {
+  user_id: string;
+  action: string;
+  success: boolean;
+  message: string;
 }
 
 export interface AuditEntry {
@@ -186,6 +206,8 @@ function query(params: object): string {
 const id = (value: string) => encodeURIComponent(value);
 
 const ACTION_PATHS: Record<LifecycleAction, string> = {
+  approve: 'approve',
+  reject: 'reject',
   suspend: 'suspend',
   reactivate: 'reactivate',
   schedule_deletion: 'schedule-deletion',
@@ -208,6 +230,14 @@ export const consoleApi = {
   jobs: () => consoleRequest<Jobs>('GET', '/jobs'),
   lifecycle: (orgId: string, action: LifecycleAction, body: ReasonBody) =>
     consoleRequest<LifecycleResult>('POST', `/organizations/${id(orgId)}/${ACTION_PATHS[action]}`, body),
+  tenantAdmins: (orgId: string) =>
+    consoleRequest<TenantAdmin[]>('GET', `/organizations/${id(orgId)}/admins`),
+  deactivateTenantAdmin: (orgId: string, userId: string, body: ReasonBody) =>
+    consoleRequest<TenantAdminActionResult>('POST', `/organizations/${id(orgId)}/admins/${id(userId)}/deactivate`, body),
+  reactivateTenantAdmin: (orgId: string, userId: string, body: ReasonBody) =>
+    consoleRequest<TenantAdminActionResult>('POST', `/organizations/${id(orgId)}/admins/${id(userId)}/reactivate`, body),
+  revokeTenantAdminSessions: (orgId: string, userId: string, body: ReasonBody) =>
+    consoleRequest<TenantAdminActionResult>('POST', `/organizations/${id(orgId)}/admins/${id(userId)}/revoke-sessions`, body),
   staff: () => consoleRequest<{ items: StaffSummary[] }>('GET', '/staff'),
   staffMember: (staffId: string) => consoleRequest<StaffDetail>('GET', `/staff/${id(staffId)}`),
   staffAction: (staffId: string, action: 'deactivate' | 'activate' | 'revoke-sessions', body: ReasonBody) =>
@@ -216,13 +246,17 @@ export const consoleApi = {
 };
 
 export const STATUS_LABELS: Record<OrgStatus, string> = {
+  pending_approval: 'Pending Approval',
   active: 'Active',
+  rejected: 'Rejected',
   suspended: 'Suspended',
   pending_deletion: 'Pending deletion',
   deleted: 'Deleted',
 };
 
 export const ACTION_LABELS: Record<LifecycleAction, string> = {
+  approve: 'Approve organization',
+  reject: 'Reject organization',
   suspend: 'Suspend organization',
   reactivate: 'Reactivate organization',
   schedule_deletion: 'Schedule deletion',

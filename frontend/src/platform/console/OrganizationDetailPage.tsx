@@ -16,6 +16,7 @@ import {
   type LifecycleAction,
   type OrganizationDetail,
   type Page,
+  type TenantAdmin,
 } from '../consoleApi';
 import { PlatformApiError } from '../platformApi';
 import { ActionDialog } from './ActionDialog';
@@ -24,6 +25,15 @@ import { ADMIN, useConsole } from './ConsoleContext';
 import { Field, Section, StatusBadge, formatDate, formatDateTime, humanizeAction } from './ui';
 
 const ACTION_COPY: Record<LifecycleAction, { description: string; notes: (org: OrganizationDetail) => string[]; danger?: boolean }> = {
+  approve: {
+    description: 'Approves this organization for Rooman Billing. Tenant users will gain full access to their workspace.',
+    notes: () => ['The organization status transitions from Pending Approval to Active.', 'Billing automation is enabled.'],
+  },
+  reject: {
+    description: 'Rejects this organization registration. A mandatory explanation must be provided and will be shown to the tenant Owner.',
+    notes: () => ['The organization status transitions to Rejected.', 'Tenant users will see this rejection explanation when attempting to access the workspace.'],
+    danger: true,
+  },
   suspend: {
     description: 'Stops all billing automation for this organization. Tenant sign-in and data are not changed.',
     notes: () => [
@@ -82,6 +92,11 @@ export function OrganizationDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [action, setAction] = useState<LifecycleAction | null>(null);
+  const [admins, setAdmins] = useState<TenantAdmin[] | null>(null);
+  const [adminAction, setAdminAction] = useState<{
+    action: 'deactivate' | 'reactivate' | 'revoke_sessions';
+    admin: TenantAdmin;
+  } | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -92,6 +107,15 @@ export function OrganizationDetailPage() {
       else setError(err instanceof PlatformApiError ? err.message : 'Could not load this organization.');
     }
   }, [organizationId]);
+
+  const loadAdmins = useCallback(async () => {
+    if (!hasRole(ADMIN)) return;
+    try {
+      setAdmins(await consoleApi.tenantAdmins(organizationId));
+    } catch {
+      setAdmins(null);
+    }
+  }, [organizationId, hasRole]);
 
   const loadActivity = useCallback(async () => {
     try {
@@ -110,6 +134,9 @@ export function OrganizationDetailPage() {
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    void loadAdmins();
+  }, [loadAdmins]);
   useEffect(() => {
     void loadActivity();
   }, [loadActivity]);
@@ -135,6 +162,32 @@ export function OrganizationDetailPage() {
         title={<span className="flex flex-wrap items-center gap-3">{org.name} <StatusBadge status={org.status} /></span>}
         subtitle={`${org.slug} · ${org.id}`}
       />
+
+      {org.status === 'pending_approval' && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-semibold text-amber-900">Organization Pending Super Admin Approval</h3>
+              <p className="mt-1 text-sm text-amber-700">
+                This newly registered organization requires Super Admin review and approval before tenant users can access Rooman Billing.
+              </p>
+              <div className="mt-2 text-xs text-amber-800">
+                Requested by: <span className="font-medium">{org.owners.length > 0 ? `${org.owners[0].full_name} (${org.owners[0].email})` : 'Tenant Owner'}</span> · Registered: {formatDateTime(org.created_at)}
+              </div>
+            </div>
+            {hasRole(ADMIN) && (
+              <div className="flex gap-2">
+                <Button size="sm" variant="danger" onClick={() => setAction('reject')}>
+                  Reject Organization
+                </Button>
+                <Button size="sm" variant="primary" onClick={() => setAction('approve')}>
+                  Approve Organization
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
@@ -182,6 +235,97 @@ export function OrganizationDetailPage() {
               ))}
             </div>
           </Section>
+
+          {hasRole(ADMIN) && (
+            <Section
+              title="Tenant Administrators"
+              description="Admin accounts for this tenant. Owner accounts are protected and cannot be deactivated or downgraded."
+            >
+              {!admins ? (
+                <LoadingState message="Loading tenant administrators..." />
+              ) : admins.length === 0 ? (
+                <p className="text-sm text-slate-500">No administrators found.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-xs font-semibold text-slate-500">
+                        <th className="pb-2">Name & Email</th>
+                        <th className="pb-2">Role</th>
+                        <th className="pb-2">Status</th>
+                        <th className="pb-2">2FA</th>
+                        <th className="pb-2">Live Sessions</th>
+                        <th className="pb-2 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {admins.map((admin) => (
+                        <tr key={admin.membership_id} className="text-slate-800">
+                          <td className="py-2.5">
+                            <div className="font-medium text-slate-900">{admin.full_name}</div>
+                            <div className="text-xs text-slate-500">{admin.email}</div>
+                          </td>
+                          <td className="py-2.5">
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${admin.role === 'owner' ? 'bg-purple-50 text-purple-700 border border-purple-200' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
+                              {admin.role === 'owner' ? 'Owner (Protected)' : 'Admin'}
+                            </span>
+                          </td>
+                          <td className="py-2.5">
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${admin.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                              {admin.status}
+                            </span>
+                          </td>
+                          <td className="py-2.5 text-xs text-slate-600">
+                            {admin.has_2fa ? 'Enabled' : 'Disabled'}
+                          </td>
+                          <td className="py-2.5 text-xs text-slate-600">
+                            {admin.live_sessions}
+                          </td>
+                          <td className="py-2.5 text-right">
+                            {admin.role === 'owner' ? (
+                              <span className="text-xs italic text-slate-400">Protected</span>
+                            ) : (
+                              <div className="flex justify-end gap-1.5">
+                                {admin.status === 'active' ? (
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-xs px-2 py-1 h-auto"
+                                      onClick={() => setAdminAction({ action: 'revoke_sessions', admin })}
+                                    >
+                                      Revoke Sessions
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="danger"
+                                      className="text-xs px-2 py-1 h-auto"
+                                      onClick={() => setAdminAction({ action: 'deactivate', admin })}
+                                    >
+                                      Deactivate
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-xs px-2 py-1 h-auto text-emerald-700 hover:bg-emerald-50"
+                                    onClick={() => setAdminAction({ action: 'reactivate', admin })}
+                                  >
+                                    Reactivate
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Section>
+          )}
 
           <Section title="Lifecycle history" description="Status changes, refused attempts, automation pauses and session revocations.">
             {!history ? (
@@ -294,6 +438,38 @@ export function OrganizationDetailPage() {
             setAction(null);
             void load();
             setActivityPage(1);
+            void loadActivity();
+          }}
+        />
+      )}
+      {adminAction && (
+        <ActionDialog
+          isOpen
+          title={`${adminAction.action === 'deactivate' ? 'Deactivate' : adminAction.action === 'reactivate' ? 'Reactivate' : 'Revoke Sessions'}: ${adminAction.admin.email}`}
+          description={`Organization: ${org.name}. Target admin: ${adminAction.admin.full_name} (${adminAction.admin.email}).`}
+          notes={[
+            adminAction.action === 'deactivate'
+              ? 'The tenant Admin account will be deactivated and all active sessions will be terminated immediately.'
+              : adminAction.action === 'reactivate'
+              ? 'The tenant Admin account will be restored to active.'
+              : 'All active sessions for this tenant Admin in this organization will be terminated.',
+          ]}
+          danger={adminAction.action !== 'reactivate'}
+          confirmLabel={adminAction.action === 'deactivate' ? 'Deactivate Admin' : adminAction.action === 'reactivate' ? 'Reactivate Admin' : 'Revoke Sessions'}
+          onClose={() => setAdminAction(null)}
+          onSubmit={(body) => {
+            if (adminAction.action === 'deactivate') {
+              return consoleApi.deactivateTenantAdmin(org.id, adminAction.admin.user_id, body);
+            } else if (adminAction.action === 'reactivate') {
+              return consoleApi.reactivateTenantAdmin(org.id, adminAction.admin.user_id, body);
+            } else {
+              return consoleApi.revokeTenantAdminSessions(org.id, adminAction.admin.user_id, body);
+            }
+          }}
+          onDone={(res) => {
+            showToast('success', res.message);
+            setAdminAction(null);
+            void loadAdmins();
             void loadActivity();
           }}
         />

@@ -43,7 +43,14 @@ from backend.app.services.gateways.registry import get_gateway_adapter, register
 from backend.app.services.outbox_processor import clear_outbox_handlers, register_outbox_handler
 from backend.app.services.scheduler import run_billing_jobs
 
-INACTIVE = [OrganizationStatus.SUSPENDED, OrganizationStatus.PENDING_DELETION, OrganizationStatus.DELETED]
+INACTIVE = [
+    OrganizationStatus.SUSPENDED,
+    OrganizationStatus.PENDING_DELETION,
+    OrganizationStatus.DELETED,
+    # Never approved: must not be billed or emailed either.
+    OrganizationStatus.PENDING_APPROVAL,
+    OrganizationStatus.REJECTED,
+]
 TEST_EVENT = "lifecycle.test_event"
 
 
@@ -136,6 +143,13 @@ def _card(db, tenant, customer):
 
 def _seed_due_work(db, tenant):
     """One of every kind of scheduler work, all due today, for this tenant."""
+    from backend.app.core.tenant_context import system_context
+
+    with system_context():
+        return _seed_due_work_impl(db, tenant)
+
+
+def _seed_due_work_impl(db, tenant):
     org_id = tenant.organization.id
     today = date.today()
     ids = {}
@@ -249,28 +263,31 @@ def _charged_customers(gateway):
 
 
 def _state(db, ids):
-    db.expire_all()
-    from backend.app.models.customization import AutomationSchedule
+    from backend.app.core.tenant_context import system_context
 
-    trial = db.get(Subscription, ids["trial_sub"])
-    renewal = db.get(Subscription, ids["renewal_sub"])
-    case = db.get(DunningCase, ids["dunning_case"])
-    schedule = db.get(AutomationSchedule, ids["schedule"])
-    event = db.get(OutboxEvent, ids["outbox_event"])
-    return {
-        "trial_status": trial.status,
-        "renewal_next_billing": renewal.next_billing_date,
-        "renewal_invoices": db.scalar(select(func.count()).select_from(Invoice).where(Invoice.subscription_id == renewal.id)),
-        "overdue_status": db.get(Invoice, ids["overdue_invoice"]).status,
-        "reminders": db.get(Invoice, ids["reminder_invoice"]).reminder_count,
-        "dunning_status": case.status,
-        "dunning_attempts": db.scalar(select(func.count()).select_from(DunningAttempt).where(DunningAttempt.case_id == case.id)),
-        "dunning_charged": (case.attempt_count or 0) > 0,
-        "expenses": db.scalar(select(func.count()).select_from(Expense).where(Expense.organization_id == renewal.organization_id)),
-        "outbox_status": event.status,
-        "outbox_retries": event.retry_count or 0,
-        "schedule_next": _aware(schedule.next_date),
-    }
+    with system_context():
+        db.expire_all()
+        from backend.app.models.customization import AutomationSchedule
+
+        trial = db.get(Subscription, ids["trial_sub"])
+        renewal = db.get(Subscription, ids["renewal_sub"])
+        case = db.get(DunningCase, ids["dunning_case"])
+        schedule = db.get(AutomationSchedule, ids["schedule"])
+        event = db.get(OutboxEvent, ids["outbox_event"])
+        return {
+            "trial_status": trial.status,
+            "renewal_next_billing": renewal.next_billing_date,
+            "renewal_invoices": db.scalar(select(func.count()).select_from(Invoice).where(Invoice.subscription_id == renewal.id)),
+            "overdue_status": db.get(Invoice, ids["overdue_invoice"]).status,
+            "reminders": db.get(Invoice, ids["reminder_invoice"]).reminder_count,
+            "dunning_status": case.status,
+            "dunning_attempts": db.scalar(select(func.count()).select_from(DunningAttempt).where(DunningAttempt.case_id == case.id)),
+            "dunning_charged": (case.attempt_count or 0) > 0,
+            "expenses": db.scalar(select(func.count()).select_from(Expense).where(Expense.organization_id == renewal.organization_id)),
+            "outbox_status": event.status,
+            "outbox_retries": event.retry_count or 0,
+            "schedule_next": _aware(schedule.next_date),
+        }
 
 
 def _aware(value):
@@ -413,9 +430,12 @@ def test_scheduled_plan_change_not_applied_for_suspended_org(client, db, tenant)
 
     run_billing_jobs(db, today=effective)
 
-    db.expire_all()
-    assert db.get(SubscriptionChange, active_change).status == SubscriptionChangeStatus.APPLIED
-    assert db.get(SubscriptionChange, frozen_change).status == SubscriptionChangeStatus.SCHEDULED
+    from backend.app.core.tenant_context import system_context
+
+    with system_context():
+        db.expire_all()
+        assert db.get(SubscriptionChange, active_change).status == SubscriptionChangeStatus.APPLIED
+        assert db.get(SubscriptionChange, frozen_change).status == SubscriptionChangeStatus.SCHEDULED
 
 
 # --- D: the check is made inside the work item's own transaction -------------------------------------------
@@ -471,9 +491,12 @@ def test_suspension_after_usage_finalization_still_stops_the_renewal(db, tenant,
 
 def test_dunning_guard_checked_per_case_before_charging(db, tenant, gateway):
     ids = _seed_due_work(db, tenant)
-    attempts_before = db.scalar(
-        select(func.count()).select_from(DunningAttempt).where(DunningAttempt.case_id == ids["dunning_case"])
-    )
+    from backend.app.core.tenant_context import system_context
+
+    with system_context():
+        attempts_before = db.scalar(
+            select(func.count()).select_from(DunningAttempt).where(DunningAttempt.case_id == ids["dunning_case"])
+        )
     calls = []
 
     def guard():
@@ -485,12 +508,13 @@ def test_dunning_guard_checked_per_case_before_charging(db, tenant, gateway):
     assert calls, "the guard must be consulted before a due case is processed"
     assert gateway.charges == []
     assert res["recovered_count"] == 0
-    db.expire_all()
-    attempts_after = db.scalar(
-        select(func.count()).select_from(DunningAttempt).where(DunningAttempt.case_id == ids["dunning_case"])
-    )
-    assert attempts_after == attempts_before
-    assert db.get(DunningCase, ids["dunning_case"]).attempt_count == 0
+    with system_context():
+        db.expire_all()
+        attempts_after = db.scalar(
+            select(func.count()).select_from(DunningAttempt).where(DunningAttempt.case_id == ids["dunning_case"])
+        )
+        assert attempts_after == attempts_before
+        assert db.get(DunningCase, ids["dunning_case"]).attempt_count == 0
 
 
 def test_services_without_a_guard_are_unchanged(db, tenant, gateway):

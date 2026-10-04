@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from backend.app.schemas.organization import UTCDateTime
 
-OrgStatus = Literal["active", "suspended", "pending_deletion", "deleted"]
+OrgStatus = Literal["pending_approval", "active", "rejected", "suspended", "pending_deletion", "deleted"]
 PlatformRoleName = Literal["platform_administrator", "platform_operations", "platform_support"]
 
 
@@ -122,6 +122,31 @@ class TicketedReasonRequest(ReasonRequest):
 class LifecycleResultOut(BaseModel):
     organization: OrganizationSummaryOut
     changed: Dict[str, Any]
+
+
+class OptionalReasonRequest(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=500)
+    ticket_ref: Optional[str] = Field(default=None, max_length=100)
+
+
+class TenantAdminOut(BaseModel):
+    membership_id: str
+    user_id: str
+    email: str
+    full_name: str
+    role: str
+    status: str
+    has_2fa: bool
+    live_sessions: int
+    created_at: UTCDateTime
+    last_login_at: Optional[UTCDateTime] = None
+
+
+class TenantAdminActionResult(BaseModel):
+    user_id: str
+    action: str
+    success: bool
+    message: str
 
 
 # --- audit ------------------------------------------------------------------------------------------------

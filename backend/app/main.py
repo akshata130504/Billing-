@@ -98,6 +98,9 @@ def _load_scheduler():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Application %s started in %s mode (v%s)", settings.PROJECT_NAME, settings.ENVIRONMENT, __version__)
+    from backend.app.core.database import assert_runtime_role_unprivileged
+
+    assert_runtime_role_unprivileged()
     _warn_if_scheduler_disabled()
     stop_scheduler = None
     if settings.SCHEDULER_ENABLED:
@@ -194,8 +197,8 @@ def create_application() -> FastAPI:
         req_id = request.headers.get("X-Request-ID") or request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
         request.state.request_id = req_id
         token = correlation_id_ctx.set(req_id)
-        from backend.app.core.tenant_context import reset_tenant_context
-        reset_tenant_context()
+        from backend.app.core.tenant_context import _current_tenant_id
+        tenant_token = _current_tenant_id.set(None)
         start_time = time.perf_counter()
         try:
             response = await call_next(request)
@@ -233,7 +236,7 @@ def create_application() -> FastAPI:
             )
             raise
         finally:
-            reset_tenant_context()
+            _current_tenant_id.reset(tenant_token)
             correlation_id_ctx.reset(token)
 
 

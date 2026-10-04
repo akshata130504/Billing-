@@ -63,6 +63,7 @@ def _make_customer(db: Session, org_id: str, name: str) -> Customer:
 
 def test_tenant_context_manager():
     """Verify tenant_context sets and restores context variable."""
+    reset_tenant_context()
     assert get_current_tenant_id() is None
     with tenant_context("org-alpha"):
         assert get_current_tenant_id() == "org-alpha"
@@ -106,24 +107,112 @@ def test_orm_isolation_filters_to_context_org(db: Session):
 
 def test_orm_isolation_fails_closed_without_context(db: Session):
     """Without tenant context or system context, querying tenant-scoped models fails closed (0 rows)."""
+    org = _make_org(db, "Org FailClosed NoCtx")
+    with system_context():
+        cust = _make_customer(db, org.id, "Cust FC NoCtx")
+
+    # Outside any context (not strict): no error, but never unfiltered tenant data.
+    reset_tenant_context()
+    customers = db.scalars(select(Customer)).all()
+    assert cust.id not in {c.id for c in customers}
+    assert customers == []
+    # Also through a relationship-style joined child table.
+    assert db.scalars(select(InvoiceItem)).all() == []
+
+
+class _FakeCursor:
+    def __init__(self, fail: bool):
+        self.fail = fail
+        self.executed: list = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params):
+        if self.fail:
+            raise RuntimeError("connection is broken")
+        self.executed.append(params)
+
+
+class _FakeConn:
+    def __init__(self, fail: bool, cached: str | None):
+        self.dialect = type("D", (), {"name": "postgresql"})()
+        self.info = {} if cached is None else {"rls_org_id": cached}
+        self._cursor = _FakeCursor(fail)
+        self.connection = self
+
+    def cursor(self):
+        return self._cursor
+
+
+def test_rls_sync_failure_raises_and_does_not_keep_stale_context():
+    """A failed RLS context sync must abort the statement, not run it under the previous org."""
+    from backend.app.core.tenant_context import sync_pg_rls_context
+
+    # Connection still carries __SYSTEM__ from an earlier system_context() lookup.
+    conn = _FakeConn(fail=True, cached="__SYSTEM__")
+    with tenant_context("org-b"):
+        with pytest.raises(RuntimeError):
+            sync_pg_rls_context(conn, "SELECT * FROM customers")
+    # The stale marker is gone, so the next statement re-syncs instead of trusting it.
+    assert "rls_org_id" not in conn.info
+
+
+def test_rls_sync_sets_explicit_context_values():
+    from backend.app.core.tenant_context import sync_pg_rls_context
+
+    conn = _FakeConn(fail=False, cached=None)
+    reset_tenant_context()
+    sync_pg_rls_context(conn, "SELECT 1")
+    assert conn.info["rls_org_id"] == "__NONE__"
+    with tenant_context("org-a"):
+        sync_pg_rls_context(conn, "SELECT 1")
+        assert conn.info["rls_org_id"] == "org-a"
+        with system_context():
+            sync_pg_rls_context(conn, "SELECT 1")
+            assert conn.info["rls_org_id"] == "__SYSTEM__"
+    assert [p[0] for p in conn._cursor.executed] == ["__NONE__", "org-a", "__SYSTEM__"]
+
+
+def test_tenant_api_lists_only_own_customers(client, db: Session):
+    """Normal tenant requests still work and never return another tenant's rows."""
+    from backend.tests.conftest import Tenant
+
+    with system_context():
+        a = Tenant(db, uuid.uuid4().hex[:8])
+        b = Tenant(db, uuid.uuid4().hex[:8])
+        ca = a.customer(display_name="Alpha Customer")
+        cb = b.customer(display_name="Beta Customer")
+        ca_id, cb_id = ca.id, cb.id
+    reset_tenant_context()
+
+    resp = client.get("/api/v1/customers", headers=a.headers())
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    items = body.get("items", body) if isinstance(body, dict) else body
+    ids = {c["id"] for c in items}
+    assert ca_id in ids
+    assert cb_id not in ids
+
+    # Direct access to B's customer from A is not found.
+    assert client.get(f"/api/v1/customers/{cb_id}", headers=a.headers()).status_code == 404
+
+
+def test_orm_isolation_fails_closed_with_security_error(db: Session):
+    """Without tenant context in strict mode, querying tenant-scoped models fails closed with MissingTenantContextError."""
     org = _make_org(db, "Org FailClosed")
     with system_context():
         cust = _make_customer(db, org.id, "Cust FC")
 
-    # Outside any context
-    reset_tenant_context()
-    customers = db.scalars(select(Customer)).all()
-    # Fails closed: 0 rows returned
-    assert cust.id not in {c.id for c in customers}
-    assert customers == []
-
-
-def test_orm_isolation_strict_mode_raises(db: Session):
-    """In strict mode, querying tenant-scoped models without context raises MissingTenantContextError."""
+    # Outside any context in strict mode: fails closed with security error
     reset_tenant_context()
     with strict_context(True):
         with pytest.raises(MissingTenantContextError):
             db.scalars(select(Customer)).all()
+
 
 
 def test_system_context_allows_cross_tenant_reads(db: Session):

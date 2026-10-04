@@ -614,6 +614,10 @@ def run_forever() -> None:
     except (ValueError, AttributeError):
         pass
 
+    from backend.app.core.database import assert_runtime_role_unprivileged
+
+    assert_runtime_role_unprivileged()
+
     # Ensure scheduler is enabled when running as a dedicated worker
     settings.SCHEDULER_ENABLED = True
     start_scheduler()

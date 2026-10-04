@@ -205,3 +205,129 @@ def test_production_rejects_local_origins(origin):
 def test_default_db_pool_fits_postgres_connection_budget():
     s = Settings(_env_file=None)
     assert s.DB_POOL_SIZE + s.DB_MAX_OVERFLOW <= 10
+
+
+_LIVE_KEY_ID = "rzp_live_ExampleKeyId0001"
+_LIVE_KEY_SECRET = "live-key-secret-value-do-not-print-0001"
+_WEBHOOK_SECRET = "webhook-secret-value-do-not-print-0001"
+
+
+def test_production_refuses_razorpay_keys_without_webhook_secret():
+    """Live Razorpay keys without RAZORPAY_WEBHOOK_SECRET must stop startup."""
+    with pytest.raises(ValidationError) as exc:
+        Settings(
+            _env_file=None,
+            ENVIRONMENT="production",
+            RAZORPAY_KEY_ID=_LIVE_KEY_ID,
+            RAZORPAY_KEY_SECRET=_LIVE_KEY_SECRET,
+            RAZORPAY_WEBHOOK_SECRET="",
+            **_VALID_PROD_OVERRIDES,
+        )
+    message = str(exc.value)
+    assert "RAZORPAY_WEBHOOK_SECRET" in message
+    # Secret values are never echoed.
+    assert _LIVE_KEY_SECRET not in message
+    assert _LIVE_KEY_ID not in message
+
+
+def test_production_refuses_blank_razorpay_webhook_secret():
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            ENVIRONMENT="production",
+            RAZORPAY_KEY_ID=_LIVE_KEY_ID,
+            RAZORPAY_KEY_SECRET=_LIVE_KEY_SECRET,
+            RAZORPAY_WEBHOOK_SECRET="   ",
+            **_VALID_PROD_OVERRIDES,
+        )
+
+
+def test_production_accepts_razorpay_keys_with_webhook_secret():
+    settings = Settings(
+        _env_file=None,
+        ENVIRONMENT="production",
+        RAZORPAY_KEY_ID=_LIVE_KEY_ID,
+        RAZORPAY_KEY_SECRET=_LIVE_KEY_SECRET,
+        RAZORPAY_WEBHOOK_SECRET=_WEBHOOK_SECRET,
+        **_VALID_PROD_OVERRIDES,
+    )
+    assert settings.razorpay_enabled is True
+    assert _WEBHOOK_SECRET not in repr(settings)
+
+
+def test_production_without_razorpay_keys_does_not_need_webhook_secret():
+    settings = Settings(_env_file=None, ENVIRONMENT="production", **_VALID_PROD_OVERRIDES)
+    assert settings.razorpay_enabled is False
+
+
+def test_development_allows_razorpay_keys_without_webhook_secret():
+    settings = Settings(
+        _env_file=None,
+        ENVIRONMENT="development",
+        RAZORPAY_KEY_ID="rzp_test_ExampleKeyId0001",
+        RAZORPAY_KEY_SECRET="test-secret",
+    )
+    assert settings.razorpay_enabled is True
+
+
+class _FakeRoleConn:
+    def __init__(self, rolsuper: bool, rolbypassrls: bool):
+        self.dialect = type("D", (), {"name": "postgresql"})()
+        self._row = (rolsuper, rolbypassrls)
+
+    def execute(self, *_a, **_k):
+        row = self._row
+
+        class _R:
+            def one(self_inner):
+                return row
+
+        return _R()
+
+
+@pytest.mark.parametrize(
+    "rolsuper,rolbypassrls,expected",
+    [
+        (True, False, ["SUPERUSER"]),
+        (False, True, ["BYPASSRLS"]),
+        (True, True, ["SUPERUSER", "BYPASSRLS"]),
+        (False, False, []),
+    ],
+)
+def test_runtime_role_privilege_problems(rolsuper, rolbypassrls, expected):
+    from backend.app.core.database import runtime_role_privilege_problems
+
+    assert runtime_role_privilege_problems(_FakeRoleConn(rolsuper, rolbypassrls)) == expected
+
+
+def test_production_refuses_to_start_as_superuser(monkeypatch):
+    """The app must not run under a role that bypasses row level security in production."""
+    from contextlib import contextmanager
+
+    from backend.app.core import database
+
+    class _FakeEngine:
+        dialect = type("D", (), {"name": "postgresql"})()
+
+        @contextmanager
+        def connect(self):
+            yield _FakeRoleConn(True, False)
+
+    monkeypatch.setattr(database.settings, "ENVIRONMENT", "production")
+    with pytest.raises(database.PrivilegedDatabaseRoleError) as exc:
+        database.assert_runtime_role_unprivileged(_FakeEngine())
+    assert "SUPERUSER" in str(exc.value)
+    assert "APP_POSTGRES_USER" in str(exc.value)
+
+
+def test_runtime_role_check_skipped_outside_production(monkeypatch):
+    from backend.app.core import database
+
+    class _ExplodingEngine:
+        dialect = type("D", (), {"name": "postgresql"})()
+
+        def connect(self):  # pragma: no cover - must not be called
+            raise AssertionError("must not connect outside production")
+
+    monkeypatch.setattr(database.settings, "ENVIRONMENT", "development")
+    database.assert_runtime_role_unprivileged(_ExplodingEngine())

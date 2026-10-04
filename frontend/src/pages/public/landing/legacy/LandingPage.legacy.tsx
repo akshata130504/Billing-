@@ -578,7 +578,7 @@ export function LegacyLandingPage() {
       badge: 'Foundation',
       route: '/catalog',
       details: ['Multi-currency support', 'Subscription plans & one-time items', 'Add-ons & usage tiers'],
-      kpi: '81 Active Offerings',
+      kpi: 'Centralized Offerings',
     },
     {
       id: 'pricing',
@@ -655,7 +655,7 @@ export function LegacyLandingPage() {
       badge: 'Accounting',
       route: '/control-center/reconciliation',
       details: ['Disbursement matching', 'Settlement variance detection', 'Zero-discrepancy ledger'],
-      kpi: '100% Audit Reconciled',
+      kpi: 'Audit-Ready Reconciliation',
     },
     {
       id: 'reporting',
@@ -971,28 +971,28 @@ export function LegacyLandingPage() {
       desc: 'Handle hybrid seat + usage pricing, automated subscription renewals, trial conversions, and self-serve upgrades with zero billing leakage.',
       icon: Layers,
       benefit: 'Automate recurring SaaS tiers & mid-cycle seat expansions',
-      example: 'Vertex Global: Scaled from 20 to 180 seats with automated monthly proration',
+      example: 'Example scenario: a SaaS team adds seats mid-cycle and the next invoice is prorated automatically',
     },
     {
       title: 'IT & Managed Services',
       desc: 'Combine fixed monthly retainer agreements, billable consulting timesheets, hardware one-time sales, and milestone invoicing in one ledger.',
       icon: Briefcase,
       benefit: 'Unify time & material logs with recurring retainer invoices',
-      example: 'CloudTech Systems: Consolidated 50+ client retainer contracts & project milestones',
+      example: 'Example scenario: a services firm bills retainers, timesheets and project milestones from one ledger',
     },
     {
       title: 'Usage & API Platforms',
       desc: 'Ingest high-frequency meter events, aggregate billable units, calculate tier discounts, and bill overages accurately at period end.',
       icon: Cpu,
       benefit: 'Deterministic meter event ingestion with idempotency keys',
-      example: 'Nova Stream: Ingests 100k+ API billing events daily with paisa-level precision',
+      example: 'Example scenario: an API platform meters usage events and bills overages at period end',
     },
     {
       title: 'Sales-Assisted Enterprise',
       desc: 'Empower sales reps with guided CPQ configuration, custom discount approval limits, professional quote previews, and one-click invoice creation.',
       icon: Building2,
       benefit: 'Guard margins with multi-tier managerial approval thresholds',
-      example: 'Apex Global: Reduced sales quote-to-cash turnaround from 5 days to 20 minutes',
+      example: 'Example scenario: a sales rep configures a quote, routes the discount for approval and converts it to an invoice',
     },
   ];
 

@@ -20,9 +20,11 @@ from __future__ import annotations
 
 from typing import Optional
 
+from fastapi import status
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
+from backend.app.core.exceptions import AppException, NotFoundError
 from backend.app.models import Organization, OrganizationStatus
 
 
@@ -75,3 +77,51 @@ class AutomationGuard:
         if not allowed:
             self.refused += 1
         return allowed
+
+
+# --- customer-facing pages (public invoice/quote/checkout links, customer portal) -----------------
+
+CUSTOMER_UNAVAILABLE_MESSAGE = (
+    "This merchant's account is temporarily unavailable. No new payments or changes can be made "
+    "right now; please contact the merchant."
+)
+
+
+class OrganizationUnavailableError(AppException):
+    """A customer-initiated action on a non-ACTIVE organization (design §8: suspended orgs take no
+    new payments or Razorpay orders, quotes cannot be accepted or declined, the portal is read-only)."""
+
+    def __init__(self, message: str = CUSTOMER_UNAVAILABLE_MESSAGE):
+        super().__init__(message=message, code="ORGANIZATION_UNAVAILABLE", status_code=status.HTTP_403_FORBIDDEN)
+
+
+def _status_of(db: Session, organization_id: Optional[str]) -> Optional[OrganizationStatus]:
+    if not organization_id:
+        return None
+    return db.scalars(select(Organization.status).where(Organization.id == organization_id)).first()
+
+
+def customer_actions_allowed(db: Session, organization_id: Optional[str]) -> bool:
+    """True when customers may start new payments or change anything for this organization.
+
+    Payments the customer already completed (signature verification, webhooks) are always
+    recorded; this only gates starting new ones.
+    """
+    return _status_of(db, organization_id) == OrganizationStatus.ACTIVE
+
+
+def assert_customer_actions_allowed(db: Session, organization_id: Optional[str]) -> None:
+    if not customer_actions_allowed(db, organization_id):
+        raise OrganizationUnavailableError()
+
+
+def customer_pages_visible(db: Session, organization_id: Optional[str]) -> bool:
+    """Read-only customer access (portal, public links): ACTIVE and SUSPENDED only."""
+    return _status_of(db, organization_id) in (OrganizationStatus.ACTIVE, OrganizationStatus.SUSPENDED)
+
+
+def assert_customer_pages_visible(db: Session, organization_id: Optional[str]) -> None:
+    """Public invoice/quote/checkout links of an organization that is pending deletion, deleted,
+    or was never approved are refused as invalid links (design §8)."""
+    if not customer_pages_visible(db, organization_id):
+        raise NotFoundError("This link is no longer available.")

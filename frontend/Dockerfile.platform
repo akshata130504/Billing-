@@ -8,7 +8,15 @@
 
 FROM node:22-alpine AS build
 WORKDIR /src
-ENV CI=true
+# REQUIRED: origin of the TENANT app (e.g. https://billing.example.com). "Enter tenant" opens it
+# and hands the grant token over by postMessage; the bundle has no production default.
+#   docker build -f frontend/Dockerfile.platform \
+#     --build-arg VITE_TENANT_APP_ORIGIN=https://<tenant-host> ./frontend
+ARG VITE_TENANT_APP_ORIGIN
+COPY docker/check-origin.sh /usr/local/bin/check-origin
+RUN sh /usr/local/bin/check-origin VITE_TENANT_APP_ORIGIN "$VITE_TENANT_APP_ORIGIN" required
+ENV CI=true \
+    VITE_TENANT_APP_ORIGIN=${VITE_TENANT_APP_ORIGIN}
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY . .

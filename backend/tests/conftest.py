@@ -27,6 +27,7 @@ os.environ["AUTH_RATE_LIMIT"] = "1000/minute"
 # production defaults would throttle unrelated tests. Rate-limit tests monkeypatch their own limit.
 os.environ["PUBLIC_RATE_LIMIT"] = "1000/minute"
 os.environ["PUBLIC_ACTION_RATE_LIMIT"] = "1000/minute"
+os.environ["WEBHOOK_RATE_LIMIT"] = "1000/minute"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -62,6 +63,15 @@ TEST_ORG_TIMEZONE = _local_iana_timezone()
 @pytest.fixture(scope="session", autouse=True)
 def _create_schema():
     if engine.dialect.name == "postgresql":
+        # PostgreSQL runs on the real migrated schema (RLS policies, triggers, constraints come
+        # from Alembic, not create_all): bring the test database to head first - a no-op when
+        # it already is - then empty every table.
+        from alembic import command
+        from alembic.config import Config
+
+        alembic_cfg = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+        alembic_cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[1] / "alembic"))
+        command.upgrade(alembic_cfg, "head")
         with engine.connect() as conn:
             conn.execute(
                 __import__("sqlalchemy").text("""
@@ -88,7 +98,9 @@ def _create_schema():
     if engine.dialect.name != "postgresql":
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
-    if _TEST_DB_PATH.exists():
+    # Only remove the default file when THIS session used it: a run pointed elsewhere via
+    # TEST_DATABASE_URL must never delete the database of another run in progress.
+    if "TEST_DATABASE_URL" not in os.environ and _TEST_DB_PATH.exists():
         try:
             _TEST_DB_PATH.unlink()
         except OSError:
@@ -231,9 +243,25 @@ class Tenant:
             return inv
 
 
+@pytest.fixture(autouse=True)
+def _clean_context_per_test():
+    from backend.app.core.tenant_context import _is_strict_context, _is_system_context, reset_tenant_context
+    reset_tenant_context()
+    _is_system_context.set(False)
+    _is_strict_context.set(False)
+    yield
+    reset_tenant_context()
+    _is_system_context.set(False)
+    _is_strict_context.set(False)
+
+
 @pytest.fixture()
-def tenant(db: Session) -> Tenant:
-    return Tenant(db, uuid.uuid4().hex[:8])
+def tenant(db: Session):
+    from backend.app.core.tenant_context import tenant_context
+    t = Tenant(db, uuid.uuid4().hex[:8])
+    with tenant_context(t.organization.id):
+        yield t
+
 
 
 @pytest.fixture()

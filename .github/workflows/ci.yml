@@ -90,6 +90,23 @@ jobs:
           alembic -c backend/alembic.ini upgrade head
           alembic -c backend/alembic.ini check
 
+      - name: Row level security as the production runtime role (NOSUPERUSER, NOBYPASSRLS)
+        # The `postgres` service user is a superuser and ignores every RLS policy, so RLS is
+        # only verified here: the migrated rooman_migrate database gets the least-privilege
+        # role from deploy/sql/least_privilege.sql and the RLS suite connects as that role.
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/rooman_test
+          LEAST_PRIVILEGE_DATABASE_URL: postgresql+psycopg://rooman_app_ci:ci-runtime-role-password@localhost:5432/rooman_migrate
+          LEAST_PRIVILEGE_OWNER_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/rooman_migrate
+        run: |
+          set -euo pipefail
+          psql -h localhost -U postgres -d rooman_migrate -X -v ON_ERROR_STOP=1 \
+            -v app_role=rooman_app_ci -v app_password=ci-runtime-role-password \
+            -f deploy/sql/least_privilege.sql
+          pytest -q -rs backend/tests/test_rls_runtime_role.py 2>&1 | tee /tmp/rls.txt
+          # A skipped RLS test must fail the gate, not pass it silently.
+          ! grep -qi "skipped" /tmp/rls.txt
+
       - name: Security test suite on PostgreSQL (explicit gate)
         # Run the security-critical tests on their own so a failure is unmistakable in the
         # log (they also run again as part of the full suite below).
@@ -207,3 +224,18 @@ jobs:
           tags: rooman-billing-web:ci
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
+
+      - name: Build platform (Super Admin) web image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: frontend/Dockerfile.platform
+          push: false
+          load: false
+          # Build validation only: a placeholder origin (the image is never published from CI).
+          # Releases pass the real origin from the TENANT_APP_ORIGIN repository variable.
+          build-args: |
+            VITE_TENANT_APP_ORIGIN=https://tenant.ci.invalid
+          tags: rooman-billing-platform-web:ci
+          cache-from: type=gha,scope=platform
+          cache-to: type=gha,scope=platform,mode=max

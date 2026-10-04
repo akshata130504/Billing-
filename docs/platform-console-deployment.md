@@ -1,8 +1,7 @@
 # Platform console: separate origin, audit immutability, step-up
 
-Status: **phase 2.5 hardening, not production-ready.** Nothing in this document has been deployed.
-The existing tenant deployment (`deploy/Caddyfile`, `docker-compose.prod.yml`, `frontend/Dockerfile`,
-`frontend/docker/nginx.conf`) is unchanged. The platform console is off unless it is configured.
+Status: integrated into the production release pipeline (section 3). The first production rollout still needs the one-time server setup listed there.
+The tenant app keeps its own image and nginx config; the console is an additional service.
 
 ## 1. Two origins
 
@@ -96,47 +95,34 @@ npm run dev:platform   # console      http://platform.localhost:5174
 `*.localhost` resolves to the loopback address in current browsers. The platform dev server
 proxies only `/api/v1/platform` and keeps the `Host` header (`changeOrigin: false`).
 
-## 3. Production rollout sketch (not applied)
+## 3. Production rollout
 
-1. Build and publish the platform image: `docker build -f frontend/Dockerfile.platform ./frontend`.
-2. Add a compose service (example - adapt to the real stack):
+The console is part of the normal release (`.github/workflows/deploy.yml`, `docker-compose.prod.yml`,
+`deploy/deploy-poll.sh`); nothing is rolled out by hand except the one-time setup below.
 
-   ```yaml
-   platform-web:
-     image: <registry>/rooman-billing-platform-web:<tag>
-     restart: unless-stopped
-     depends_on:
-       backend:
-         condition: service_healthy
-     # not published on a host port: only Caddy reaches it
-   ```
+1. **GitHub repository variables** (Settings > Secrets and variables > Actions > Variables):
+   `TENANT_APP_ORIGIN=https://<tenant-host>` and `PLATFORM_APP_ORIGIN=https://<platform-host>`.
+   They are baked into the images ("Enter tenant" needs both origins). The Deploy run fails
+   before building anything when either is missing, not https, not a bare origin, or when both are equal.
+2. **`.env.production`** (see `.env.production.example`): `PLATFORM_APP_ORIGIN`, `PLATFORM_DOMAIN`
+   (its host), `PLATFORM_JWT_SECRET` (>= 32 chars, different from `SECRET_KEY`), `TENANT_APP_ORIGIN`
+   (the origin of `FRONTEND_URL`) and `GITHUB_PAT`. `docker-compose.prod.yml` refuses to start
+   without them and `deploy/check-env.sh` (run by the poller before every release) validates them.
+3. **DNS + TLS**: a second hostname for the console. With the Caddy overlay the site block for
+   `{$PLATFORM_DOMAIN}` in `deploy/Caddyfile` routes it to `platform-web:80`. Optionally restrict
+   that block by client IP (office / VPN ranges) with an `@allowed remote_ip` matcher - recommended
+   for a staff-only console. After changing the Caddyfile on the server, recreate caddy
+   (`docker compose ... -f docker-compose.caddy.yml up -d --force-recreate caddy`).
+4. **Release**: merge to `main`. CI passes, Deploy publishes `rooman-billing-platform-web:<sha>`
+   next to the api and web images, the poller pulls all three, runs migrations (the backend applies
+   `alembic upgrade head` on start), and waits for the API readiness **and** `platform-web` health
+   before recording `.deploy/deployed_sha`. A console that cannot start rolls the release back.
+5. **First staff member** (no default account): see `docs/deployment.md` > Platform console
+   (`python -m backend.app.cli.platform_staff create ... --password-stdin`).
 
-3. Add a Caddy site block next to the existing one (the existing `{$DOMAIN}` block is unchanged):
-
-   ```caddy
-   {$PLATFORM_DOMAIN} {
-       encode zstd gzip
-       header {
-           Strict-Transport-Security "max-age=31536000; includeSubDomains"
-           -Server
-       }
-       request_body {
-           max_size 64KB
-       }
-       reverse_proxy platform-web:80 {
-           header_up X-Forwarded-Proto {scheme}
-           header_up X-Real-IP {remote_host}
-       }
-   }
-   ```
-
-   Optionally restrict the block by client IP (office / VPN ranges) with a `@allowed remote_ip`
-   matcher - recommended for a staff-only console.
-4. Set `PLATFORM_JWT_SECRET` and `PLATFORM_APP_ORIGIN=https://<platform-host>` in the backend and
-   scheduler environment; run `alembic upgrade head` (0028) as the owner role; re-run
-   `deploy/db-least-privilege.sh` (idempotent).
-5. Create the first staff member with the server-side CLI (`python -m backend.app.cli.platform_staff
-   create ... --password-stdin`). There is no default account.
+Local/manual image build (CI does this with the repository variables):
+`docker build -f frontend/Dockerfile.platform --build-arg VITE_TENANT_APP_ORIGIN=https://<tenant-host> ./frontend`
+fails with a clear message when the origin is missing or malformed.
 
 ## 4. Audit log immutability
 

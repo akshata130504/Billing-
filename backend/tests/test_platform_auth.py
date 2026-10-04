@@ -88,7 +88,14 @@ def _staff(db, role=ADMIN, email=None):
 
 
 def _code(secret, steps=0):
-    return totp(secret, at=time.time() + steps * 30)
+    now = time.time()
+    if steps < 0 and 30 - (now % 30) < 2.5:
+        # The server accepts its own 30 s step +/- 1. A code for the PREVIOUS step made in the last
+        # moments of a window falls outside that range if the boundary passes before the request is
+        # verified (slow CI / loaded machine), so wait for the next window instead of racing it.
+        time.sleep(30 - (now % 30) + 0.2)
+        now = time.time()
+    return totp(secret, at=now + steps * 30)
 
 
 def _fresh_client():
@@ -732,7 +739,11 @@ def test_platform_routes_expose_no_tenant_data(client, db):
                      f"{org}/cancel-deletion", f"{org}/jobs/pause", f"{org}/jobs/resume", f"{console}/staff",
                      f"{console}/staff/{{staff_id}}", f"{console}/staff/{{staff_id}}/deactivate",
                      f"{console}/staff/{{staff_id}}/activate", f"{console}/staff/{{staff_id}}/revoke-sessions",
-                     f"{org}/revoke-sessions", f"{console}/jobs"}
+                     f"{org}/revoke-sessions", f"{console}/jobs",
+                     f"{org}/approve", f"{org}/reject", f"{org}/admins",
+                     f"{org}/admins/{{user_id}}/deactivate",
+                     f"{org}/admins/{{user_id}}/reactivate",
+                     f"{org}/admins/{{user_id}}/revoke-sessions"}
     site = f"{console}/website/pages/{{key}}"
     console_paths |= {site, f"{site}/draft", f"{site}/draft/discard", f"{site}/compare", f"{site}/publish",
                       f"{site}/versions", f"{site}/versions/{{version}}", f"{site}/versions/{{version}}/rollback",

@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
 from backend.app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
+from backend.app.core.tenant_context import tenant_context
 from backend.app.models import (
     CreditNote,
     Customer,
@@ -75,6 +76,10 @@ class Transition:
 TRANSITIONS: Dict[str, Transition] = {
     t.action: t
     for t in (
+        Transition("approve", frozenset({OrganizationStatus.PENDING_APPROVAL}), OrganizationStatus.ACTIVE,
+                   ADMINISTRATOR_ONLY, False, platform_audit.ORGANIZATION_APPROVED),
+        Transition("reject", frozenset({OrganizationStatus.PENDING_APPROVAL}), OrganizationStatus.REJECTED,
+                   ADMINISTRATOR_ONLY, False, platform_audit.ORGANIZATION_REJECTED),
         Transition("suspend", frozenset({OrganizationStatus.ACTIVE}), OrganizationStatus.SUSPENDED,
                    LIFECYCLE_ROLES, True, platform_audit.ORGANIZATION_SUSPENDED),
         Transition("reactivate", frozenset({OrganizationStatus.SUSPENDED}), OrganizationStatus.ACTIVE,
@@ -89,10 +94,14 @@ TRANSITIONS: Dict[str, Transition] = {
 JOB_ACTIONS = {"pause_jobs": platform_audit.TENANT_JOBS_PAUSED, "resume_jobs": platform_audit.TENANT_JOBS_RESUMED}
 # Platform audit actions that make up an organization's lifecycle history.
 LIFECYCLE_EVENTS = (
+    platform_audit.ORGANIZATION_CREATED_PENDING_APPROVAL,
+    platform_audit.ORGANIZATION_APPROVED, platform_audit.ORGANIZATION_REJECTED,
     platform_audit.ORGANIZATION_SUSPENDED, platform_audit.ORGANIZATION_REACTIVATED,
     platform_audit.ORGANIZATION_DELETION_SCHEDULED, platform_audit.ORGANIZATION_DELETION_CANCELLED,
     platform_audit.ORGANIZATION_LIFECYCLE_REFUSED, platform_audit.TENANT_JOBS_PAUSED,
     platform_audit.TENANT_JOBS_RESUMED, platform_audit.TENANT_SESSIONS_REVOKED,
+    platform_audit.TENANT_ADMIN_DEACTIVATED, platform_audit.TENANT_ADMIN_REACTIVATED,
+    platform_audit.TENANT_ADMIN_SESSIONS_REVOKED,
 )
 # Document COUNTS shown on the detail page (design section 4: counts, never records or amounts).
 DOCUMENT_COUNTS = (
@@ -228,7 +237,9 @@ def _get(db: Session, organization_id: str, *, lock: bool = False) -> Organizati
     try:
         org = db.scalars(stmt).first()
     except OperationalError as exc:
-        if getattr(getattr(exc, "orig", None), "sqlstate", None) == "55P03":  # lock_not_available
+        orig = getattr(exc, "orig", None)
+        code = getattr(orig, "pgcode", None) or getattr(orig, "sqlstate", None)
+        if code == "55P03" or "lock timeout" in str(exc).lower():  # lock_not_available
             db.rollback()
             raise ConflictError(BUSY_MESSAGE)
         raise
@@ -241,26 +252,33 @@ def renewals_waiting(db: Session, organization_id: str) -> int:
     """How many ACTIVE subscriptions already have a renewal due (a count, never the records).
     These are what resuming automation would bill on the next scheduler run."""
     today = datetime.now(timezone.utc).date()
-    return int(
-        db.scalar(
-            select(func.count(Subscription.id)).where(
-                Subscription.organization_id == organization_id,
-                Subscription.status == SubscriptionStatus.ACTIVE,
-                Subscription.next_billing_date.is_not(None),
-                Subscription.next_billing_date <= today,
+    # Scoped to this one organization so both the ORM filter and PostgreSQL RLS admit its rows
+    # (platform requests carry no tenant context, which would otherwise fail closed to 0).
+    with tenant_context(organization_id):
+        return int(
+            db.scalar(
+                select(func.count(Subscription.id)).where(
+                    Subscription.organization_id == organization_id,
+                    Subscription.status == SubscriptionStatus.ACTIVE,
+                    Subscription.next_billing_date.is_not(None),
+                    Subscription.next_billing_date <= today,
+                )
             )
+            or 0
         )
-        or 0
-    )
 
 
 def allowed_actions(org: Organization, role: PlatformRole) -> List[str]:
     """What this role may do to this organization right now (the server re-checks every call)."""
     status = org.status or OrganizationStatus.ACTIVE
     actions = [t.action for t in TRANSITIONS.values() if status in t.sources and role in t.roles]
-    if role in ADMINISTRATOR_ONLY and status not in (OrganizationStatus.DELETED,):
+    if role in ADMINISTRATOR_ONLY and status not in (
+        OrganizationStatus.DELETED,
+        OrganizationStatus.REJECTED,
+        OrganizationStatus.PENDING_APPROVAL,
+    ):
         actions.append("resume_jobs" if org.jobs_paused else "pause_jobs")
-    if role in LIFECYCLE_ROLES and status != OrganizationStatus.DELETED:
+    if role in LIFECYCLE_ROLES and status not in (OrganizationStatus.DELETED, OrganizationStatus.REJECTED):
         actions.append("revoke_sessions")
     return actions
 
@@ -315,10 +333,12 @@ def organization_detail(db: Session, organization_id: str, actor: Actor) -> Dict
         )
         or 0
     )
-    documents = {
-        name: int(db.scalar(select(func.count(model.id)).where(model.organization_id == org.id)) or 0)
-        for name, model in DOCUMENT_COUNTS
-    }
+    # Counts only, scoped to this organization (ORM filter + RLS), never the records.
+    with tenant_context(org.id):
+        documents = {
+            name: int(db.scalar(select(func.count(model.id)).where(model.organization_id == org.id)) or 0)
+            for name, model in DOCUMENT_COUNTS
+        }
     changed_by = db.get(PlatformStaff, org.status_changed_by_staff_id) if org.status_changed_by_staff_id else None
     active_members = int(counts.get(MembershipStatus.ACTIVE, 0))
     status = org.status or OrganizationStatus.ACTIVE
@@ -459,6 +479,10 @@ def change_lifecycle(
     if transition is None:
         raise NotFoundError("Unknown lifecycle action.")
     reason, ticket_ref = _clean(reason), _clean(ticket_ref) or None
+    if action == "reject" and (not reason or len(reason) < 10):
+        raise ConflictError("A mandatory reason (at least 10 characters) is required to reject an organization.")
+    if action == "approve" and not reason:
+        reason = "Approved by Platform Administrator"
     org = _get(db, organization_id, lock=True)
     if actor.role not in transition.roles:  # routes check this first; defence in depth
         _refuse(db, org, actor, action, "Your platform role does not allow this action.",
@@ -571,3 +595,247 @@ def revoke_tenant_sessions(
     )
     db.commit()
     return LifecycleResult(organization=_summary(org, _active_members(db, org.id)), changed=changed)
+
+
+# --- tenant admin management -------------------------------------------------------------------------
+
+
+def list_tenant_admins(db: Session, organization_id: str, actor: Actor) -> List[Dict[str, Any]]:
+    """List Owner and Admin members of an organization with security/session metadata."""
+    org = _get(db, organization_id)
+    if actor.role not in ADMINISTRATOR_ONLY:
+        raise ForbiddenError("Only Platform Administrator can administer tenant Admins.")
+
+    now = utcnow()
+    memberships = (
+        db.execute(
+            select(Membership, User)
+            .join(User, User.id == Membership.user_id)
+            .where(
+                Membership.organization_id == org.id,
+                Membership.role.in_([MemberRole.OWNER, MemberRole.ADMIN]),
+            )
+            .order_by(Membership.role.asc(), Membership.created_at.asc())
+        )
+        .all()
+    )
+
+    results = []
+    for m, u in memberships:
+        live_sessions = int(
+            db.scalar(
+                select(func.count(RefreshToken.id)).where(
+                    RefreshToken.user_id == u.id,
+                    RefreshToken.organization_id == org.id,
+                    RefreshToken.revoked_at.is_(None),
+                    RefreshToken.expires_at > now,
+                )
+            )
+            or 0
+        )
+        results.append(
+            {
+                "membership_id": m.id,
+                "user_id": u.id,
+                "email": u.email,
+                "full_name": u.full_name,
+                "role": m.role.value,
+                "status": m.status.value,
+                "has_2fa": bool(u.totp_enabled_at),
+                "live_sessions": live_sessions,
+                "created_at": m.created_at,
+                "last_login_at": u.last_login_at,
+            }
+        )
+    return results
+
+
+def deactivate_tenant_admin(
+    db: Session,
+    organization_id: str,
+    user_id: str,
+    actor: Actor,
+    *,
+    reason: str,
+    ticket_ref: Optional[str] = None,
+) -> Dict[str, Any]:
+    if actor.role not in ADMINISTRATOR_ONLY:
+        raise ForbiddenError("Only Platform Administrator can administer tenant Admins.")
+    reason, ticket_ref = _clean(reason), _clean(ticket_ref) or None
+    if not reason or len(reason) < 10:
+        raise ConflictError("A reason of at least 10 characters is required.")
+
+    org = _get(db, organization_id, lock=True)
+    m = db.scalars(
+        select(Membership).where(
+            Membership.organization_id == org.id,
+            Membership.user_id == user_id,
+        )
+    ).first()
+    if m is None:
+        raise NotFoundError("Member not found in this organization.")
+
+    # OWNER PROTECTION: Owner cannot be deleted, deactivated, or downgraded
+    if m.role == MemberRole.OWNER:
+        raise ForbiddenError("The organization Owner cannot be deactivated or downgraded by Admin management.")
+    if m.role != MemberRole.ADMIN:
+        raise ConflictError("Target member is not a tenant Admin.")
+    if m.status == MembershipStatus.DEACTIVATED:
+        raise ConflictError("Tenant Admin is already deactivated.")
+
+    m.status = MembershipStatus.DEACTIVATED
+    u = db.get(User, user_id)
+    now = utcnow()
+    db.execute(
+        update(RefreshToken)
+        .where(
+            RefreshToken.user_id == user_id,
+            RefreshToken.organization_id == org.id,
+            RefreshToken.revoked_at.is_(None),
+        )
+        .values(revoked_at=now)
+    )
+
+    platform_audit.record(
+        db,
+        action=platform_audit.TENANT_ADMIN_DEACTIVATED,
+        result=platform_audit.SUCCESS,
+        staff=actor.staff,
+        session_id=actor.session_id,
+        ip_address=actor.ip_address,
+        user_agent=actor.user_agent,
+        organization=org,
+        target_type="user",
+        target_id=user_id,
+        reason=reason,
+        ticket_ref=ticket_ref,
+        details={
+            "user_email": u.email if u else None,
+            "user_name": u.full_name if u else None,
+            "role": m.role.value,
+        },
+    )
+    db.commit()
+    return {"user_id": user_id, "action": "deactivate", "success": True, "message": f"Tenant Admin {u.email if u else user_id} deactivated."}
+
+
+def reactivate_tenant_admin(
+    db: Session,
+    organization_id: str,
+    user_id: str,
+    actor: Actor,
+    *,
+    reason: str,
+    ticket_ref: Optional[str] = None,
+) -> Dict[str, Any]:
+    if actor.role not in ADMINISTRATOR_ONLY:
+        raise ForbiddenError("Only Platform Administrator can administer tenant Admins.")
+    reason, ticket_ref = _clean(reason), _clean(ticket_ref) or None
+    if not reason or len(reason) < 10:
+        raise ConflictError("A reason of at least 10 characters is required.")
+
+    org = _get(db, organization_id, lock=True)
+    m = db.scalars(
+        select(Membership).where(
+            Membership.organization_id == org.id,
+            Membership.user_id == user_id,
+        )
+    ).first()
+    if m is None:
+        raise NotFoundError("Member not found in this organization.")
+
+    if m.role == MemberRole.OWNER:
+        raise ForbiddenError("Cannot modify Owner via Admin management.")
+    if m.role != MemberRole.ADMIN:
+        raise ConflictError("Target member is not a tenant Admin.")
+    if m.status == MembershipStatus.ACTIVE:
+        raise ConflictError("Tenant Admin is already active.")
+
+    m.status = MembershipStatus.ACTIVE
+    u = db.get(User, user_id)
+
+    platform_audit.record(
+        db,
+        action=platform_audit.TENANT_ADMIN_REACTIVATED,
+        result=platform_audit.SUCCESS,
+        staff=actor.staff,
+        session_id=actor.session_id,
+        ip_address=actor.ip_address,
+        user_agent=actor.user_agent,
+        organization=org,
+        target_type="user",
+        target_id=user_id,
+        reason=reason,
+        ticket_ref=ticket_ref,
+        details={
+            "user_email": u.email if u else None,
+            "user_name": u.full_name if u else None,
+            "role": m.role.value,
+        },
+    )
+    db.commit()
+    return {"user_id": user_id, "action": "reactivate", "success": True, "message": f"Tenant Admin {u.email if u else user_id} reactivated."}
+
+
+def revoke_tenant_admin_sessions(
+    db: Session,
+    organization_id: str,
+    user_id: str,
+    actor: Actor,
+    *,
+    reason: str,
+    ticket_ref: Optional[str] = None,
+) -> Dict[str, Any]:
+    if actor.role not in ADMINISTRATOR_ONLY:
+        raise ForbiddenError("Only Platform Administrator can administer tenant Admins.")
+    reason, ticket_ref = _clean(reason), _clean(ticket_ref) or None
+    if not reason or len(reason) < 10:
+        raise ConflictError("A reason of at least 10 characters is required.")
+
+    org = _get(db, organization_id, lock=True)
+    m = db.scalars(
+        select(Membership).where(
+            Membership.organization_id == org.id,
+            Membership.user_id == user_id,
+        )
+    ).first()
+    if m is None:
+        raise NotFoundError("Member not found in this organization.")
+
+    if m.role == MemberRole.OWNER:
+        raise ForbiddenError("Cannot revoke Owner sessions via Admin management.")
+    if m.role != MemberRole.ADMIN:
+        raise ConflictError("Target member is not a tenant Admin.")
+
+    now = utcnow()
+    revoked = db.execute(
+        update(RefreshToken)
+        .where(
+            RefreshToken.user_id == user_id,
+            RefreshToken.organization_id == org.id,
+            RefreshToken.revoked_at.is_(None),
+        )
+        .values(revoked_at=now)
+    ).rowcount or 0
+
+    u = db.get(User, user_id)
+    platform_audit.record(
+        db,
+        action=platform_audit.TENANT_ADMIN_SESSIONS_REVOKED,
+        result=platform_audit.SUCCESS,
+        staff=actor.staff,
+        session_id=actor.session_id,
+        ip_address=actor.ip_address,
+        user_agent=actor.user_agent,
+        organization=org,
+        target_type="user",
+        target_id=user_id,
+        reason=reason,
+        ticket_ref=ticket_ref,
+        details={
+            "user_email": u.email if u else None,
+            "sessions_revoked": int(revoked),
+        },
+    )
+    db.commit()
+    return {"user_id": user_id, "action": "revoke_sessions", "success": True, "message": f"{revoked} sessions revoked for tenant Admin."}

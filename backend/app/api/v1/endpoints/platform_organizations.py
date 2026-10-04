@@ -36,10 +36,13 @@ from backend.app.schemas.platform_console import (
     AuditEntryOut,
     AuditPageOut,
     LifecycleResultOut,
+    OptionalReasonRequest,
     OrganizationDetailOut,
     OrganizationPageOut,
     OrganizationSummaryOut,
     ReasonRequest,
+    TenantAdminActionResult,
+    TenantAdminOut,
     TicketedReasonRequest,
 )
 from backend.app.services import platform_audit, platform_org_service as svc
@@ -171,3 +174,72 @@ def revoke_sessions(organization_id: str, body: ReasonRequest,
                     db: Session = Depends(get_db)):
     result = svc.revoke_tenant_sessions(db, organization_id, _actor(ctx), reason=body.reason, ticket_ref=body.ticket_ref)
     return LifecycleResultOut(organization=OrganizationSummaryOut(**result.organization), changed=result.changed)
+
+
+@router.post("/{organization_id}/approve", response_model=LifecycleResultOut, summary="Approve a pending organization")
+def approve(
+    organization_id: str,
+    body: OptionalReasonRequest = OptionalReasonRequest(),
+    ctx: PlatformContext = Depends(require_platform_roles_with_step_up(ADMINISTRATOR_ONLY)),
+    db: Session = Depends(get_db),
+):
+    reason = body.reason or "Approved by Platform Administrator"
+    result = svc.change_lifecycle(db, organization_id, "approve", _actor(ctx), reason=reason, ticket_ref=body.ticket_ref)
+    return LifecycleResultOut(organization=OrganizationSummaryOut(**result.organization), changed=result.changed)
+
+
+@router.post("/{organization_id}/reject", response_model=LifecycleResultOut, summary="Reject a pending organization with a reason")
+def reject(
+    organization_id: str,
+    body: ReasonRequest,
+    ctx: PlatformContext = Depends(require_platform_roles_with_step_up(ADMINISTRATOR_ONLY)),
+    db: Session = Depends(get_db),
+):
+    result = svc.change_lifecycle(db, organization_id, "reject", _actor(ctx), reason=body.reason, ticket_ref=body.ticket_ref)
+    return LifecycleResultOut(organization=OrganizationSummaryOut(**result.organization), changed=result.changed)
+
+
+@router.get("/{organization_id}/admins", response_model=list[TenantAdminOut], summary="List tenant Owner and Admin accounts")
+def list_admins(
+    organization_id: str,
+    ctx: PlatformContext = Depends(require_platform_roles(ADMINISTRATOR_ONLY)),
+    db: Session = Depends(get_db),
+):
+    items = svc.list_tenant_admins(db, organization_id, _actor(ctx))
+    return [TenantAdminOut(**item) for item in items]
+
+
+@router.post("/{organization_id}/admins/{user_id}/deactivate", response_model=TenantAdminActionResult, summary="Deactivate a tenant Admin")
+def deactivate_admin(
+    organization_id: str,
+    user_id: str,
+    body: ReasonRequest,
+    ctx: PlatformContext = Depends(require_platform_roles_with_step_up(ADMINISTRATOR_ONLY)),
+    db: Session = Depends(get_db),
+):
+    res = svc.deactivate_tenant_admin(db, organization_id, user_id, _actor(ctx), reason=body.reason, ticket_ref=body.ticket_ref)
+    return TenantAdminActionResult(**res)
+
+
+@router.post("/{organization_id}/admins/{user_id}/reactivate", response_model=TenantAdminActionResult, summary="Reactivate a tenant Admin")
+def reactivate_admin(
+    organization_id: str,
+    user_id: str,
+    body: ReasonRequest,
+    ctx: PlatformContext = Depends(require_platform_roles_with_step_up(ADMINISTRATOR_ONLY)),
+    db: Session = Depends(get_db),
+):
+    res = svc.reactivate_tenant_admin(db, organization_id, user_id, _actor(ctx), reason=body.reason, ticket_ref=body.ticket_ref)
+    return TenantAdminActionResult(**res)
+
+
+@router.post("/{organization_id}/admins/{user_id}/revoke-sessions", response_model=TenantAdminActionResult, summary="Revoke sessions of a tenant Admin")
+def revoke_admin_sessions(
+    organization_id: str,
+    user_id: str,
+    body: ReasonRequest,
+    ctx: PlatformContext = Depends(require_platform_roles_with_step_up(ADMINISTRATOR_ONLY)),
+    db: Session = Depends(get_db),
+):
+    res = svc.revoke_tenant_admin_sessions(db, organization_id, user_id, _actor(ctx), reason=body.reason, ticket_ref=body.ticket_ref)
+    return TenantAdminActionResult(**res)

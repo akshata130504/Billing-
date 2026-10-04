@@ -15,6 +15,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.orm import Session
 
+from backend.app.core.tenant_context import system_context, tenant_context
 from backend.app.api.deps import CurrentContext
 from backend.app.models import (
     Customer,
@@ -75,7 +76,9 @@ def org_ctx(db: Session):
     db.refresh(customer)
 
     ctx = CurrentContext(user=user, organization=org, membership=membership, ip_address=None, user_agent=None)
-    return org, user, customer, ctx
+    # Like require_role() in a real request: everything after this runs in the org's tenant context.
+    with tenant_context(org.id):
+        yield org, user, customer, ctx
 
 
 def _mk_org_and_customer(db: Session, *, label: str) -> tuple[Organization, Customer]:
@@ -778,6 +781,13 @@ def test_export_empty_org_yields_single_no_data_row_when_the_section_has_no_rows
 
 
 def test_tenant_isolation_across_report_functions(db: Session):
+    # System context switches the ORM tenant filter off, so isolation here comes only from the
+    # report functions' own organization_id filtering (the strictest form of this check).
+    with system_context():
+        _tenant_isolation_across_report_functions(db)
+
+
+def _tenant_isolation_across_report_functions(db: Session):
     org_a, customer_a = _mk_org_and_customer(db, label="OrgA")
     org_b, customer_b = _mk_org_and_customer(db, label="OrgB")
 

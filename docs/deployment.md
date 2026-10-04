@@ -12,10 +12,13 @@ already operate. The same images work on any orchestrator; the compose files are
 | `backend` | `rooman-billing-api` (`backend/Dockerfile`) | gunicorn with `WEB_CONCURRENCY` uvicorn workers on :8000. Waits for the DB, runs `alembic upgrade head`, then serves. `SCHEDULER_ENABLED=false`. |
 | `scheduler` | same image | One container, `SCHEDULER_ENABLED=true`, command `python -c "from backend.app.services.scheduler import run_forever; run_forever()"`. Renewals, trial conversion, overdue marking, dunning. |
 | `frontend` | `rooman-billing-web` (`frontend/Dockerfile`) | nginx: SPA + `/api/` proxy to `backend:8000`. Publishes `${FRONTEND_BIND:-80}:80`. |
-| `caddy` (optional overlay) | `caddy:2-alpine` | Automatic HTTPS for `DOMAIN`, proxies to `frontend:80`. |
+| `platform-web` | `rooman-billing-platform-web` (`frontend/Dockerfile.platform`) | nginx serving the Rooman staff / Super Admin console on its **own hostname** (`PLATFORM_DOMAIN`) and proxying only `/api/v1/platform/` to `backend:8000`. Not published on a host port. Part of every release; the rollout waits for it to be healthy. |
+| `caddy` (optional overlay) | `caddy:2-alpine` | Automatic HTTPS for `DOMAIN` (-> `frontend:80`) and `PLATFORM_DOMAIN` (-> `platform-web:80`). |
 
 Razorpay webhooks therefore arrive at `https://<DOMAIN>/api/v1/webhooks/razorpay` -> caddy ->
-nginx -> backend.
+nginx -> backend. The platform console is a separate origin (`https://<PLATFORM_DOMAIN>`); the tenant
+app and the console open each other through the "Enter tenant" hand-off, which only works when the
+two origins are baked into the images (see section 7).
 
 ## 1. Provision the host
 
@@ -29,7 +32,9 @@ nginx -> backend.
 
 ## 2. DNS and TLS
 
-1. Create an `A`/`AAAA` record `billing.example.com` -> host IP. Wait until it resolves.
+1. Create `A`/`AAAA` records for **two different hostnames** -> host IP: the tenant app
+   (`billing.example.com`) and the platform console (`platform.example.com`). Wait until both
+   resolve. Separate hostnames are mandatory (browsers do not isolate cookies by port).
 2. Choose one:
    - **Bundled Caddy** (recommended for a single host): nothing else to install; certificates are
      obtained from Let's Encrypt automatically. Caddyfile: `deploy/Caddyfile`.
@@ -55,11 +60,14 @@ Edit and set at minimum:
 | `ALLOWED_ORIGINS` | `https://billing.example.com` |
 | `SECURE_COOKIES` | `true` |
 | `SMTP_*`, `EMAIL_FROM_*` | your relay (optional but strongly recommended) |
-| `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` | live keys (optional; can be added later) |
-| `DOMAIN`, `ACME_EMAIL`, `FRONTEND_BIND=127.0.0.1:8080` | only when using the Caddy overlay |
+| `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` | live keys (optional until you take payments). Whenever the keys are set the **webhook secret is required** (the API refuses to start without it, so a captured payment can never be lost); webhook URL `https://<DOMAIN>/api/v1/webhooks/razorpay` |
+| `DOMAIN`, `PLATFORM_DOMAIN`, `ACME_EMAIL`, `FRONTEND_BIND=127.0.0.1:8080` | only when using the Caddy overlay (`PLATFORM_DOMAIN` is required by the overlay) |
 | `ALLOWED_HOSTS` | optional; defaults to the host of `FRONTEND_URL` (`*` is refused) |
-| `ALERT_WEBHOOK_URL` | recommended; app, deploy and backup alerts (`{"text": ...}`) |
-| `APP_POSTGRES_USER`, `APP_POSTGRES_PASSWORD` | optional least-privilege runtime role; run `sh deploy/db-least-privilege.sh` once, see [`database-security.md`](database-security.md) |
+| `ALERT_WEBHOOK_URL` | strongly recommended; app, deploy and backup alerts (`{"text": ...}`) |
+| `OFFSITE_BACKUP_REMOTE`, `OFFSITE_S3_*` | strongly recommended; nightly offsite copy (see section 9 / `operations.md`); with a remote set, the S3 credentials are required |
+| `PLATFORM_APP_ORIGIN`, `PLATFORM_DOMAIN`, `PLATFORM_JWT_SECRET`, `TENANT_APP_ORIGIN` | **required** (staff console). `PLATFORM_APP_ORIGIN=https://platform.example.com`, `PLATFORM_DOMAIN=platform.example.com`, `PLATFORM_JWT_SECRET=$(openssl rand -hex 32)` (different from `SECRET_KEY`), `TENANT_APP_ORIGIN=https://billing.example.com` (the origin of `FRONTEND_URL`). Compose refuses to start without them. See [`platform-console-deployment.md`](platform-console-deployment.md) |
+| `GITHUB_PAT` | **required**: fine-grained token, this repo only, `Contents: Read-only`. The poller uses it to fetch `docker-compose.prod.yml` and the deploy scripts at each release SHA (without it the compose file that defines `platform-web` never reaches the server) |
+| `APP_POSTGRES_USER`, `APP_POSTGRES_PASSWORD` | **required** least-privilege runtime role (NOSUPERUSER, NOBYPASSRLS); run `sh deploy/db-least-privilege.sh` once, see [`database-security.md`](database-security.md) |
 | `POSTGRES_SSLMODE=verify-full`, `POSTGRES_SSLROOTCERT` | required when the DB is **not** on the compose network (managed or remote PostgreSQL) |
 
 `ENVIRONMENT=production` and `DEBUG=false` are already set in the template. The API validates
@@ -108,6 +116,23 @@ Also check `features` in that response: `scheduler_enabled` must be `false` on t
 service (the separate `scheduler` service runs the jobs), and `razorpay_configured` /
 `smtp_configured` / `sentry_enabled` should match what you put in `.env.production`.
 
+### Platform (Super Admin) console
+
+After the stack is up (`platform-web` shows `healthy` in `docker compose ps`):
+
+```bash
+curl -s https://<PLATFORM_DOMAIN>/healthz                 # ok
+# Create the first Super Admin on the server (no default account; the TOTP secret is shown once):
+docker compose --env-file .env.production -f docker-compose.prod.yml exec backend   python -m backend.app.cli.platform_staff create --email you@example.com --name "Your Name"   --role platform_administrator --password-stdin
+```
+
+Sign in at `https://<PLATFORM_DOMAIN>/login`. See
+[`platform-console-deployment.md`](platform-console-deployment.md).
+
+If you front the stack with your own reverse proxy instead of the Caddy overlay, route
+`PLATFORM_DOMAIN` to the `platform-web` container (port 80, not published on the host) and keep it
+on a different hostname from the tenant app.
+
 ## 5. First login
 
 There is no seed user. Open `https://billing.example.com/signup` and register: this calls
@@ -137,16 +162,33 @@ threshold.
 
 ## 7. Upgrading
 
-Normal path (automatic): merge to `main` -> CI passes -> `.github/workflows/deploy.yml` pushes
-`rooman-billing-{api,web}:<sha>` and moves `:latest` -> the host's `rooman-billing-poll.timer`
-(every 2 min) runs `deploy/deploy-poll.sh`, which
+Normal path (automatic): merge to `main` -> CI passes -> `.github/workflows/deploy.yml` builds and
+pushes **three images at the same SHA** - `rooman-billing-{api,web,platform-web}:<sha>` - and only
+then moves `:latest` (platform, web, then api) -> the host's `rooman-billing-poll.timer` (every
+2 min) runs `deploy/deploy-poll.sh`, which
 
 1. reads the release SHA from the `org.opencontainers.image.revision` label of `api:latest`,
-2. fetches `docker-compose.prod.yml`, `deploy/backup.sh`, `deploy/alert.sh` and itself **at that
-   SHA** (needs `GITHUB_PAT`),
-3. pulls the images, takes a pre-deploy `pg_dump` into `backups/predeploy/`,
-4. `up -d` with `IMAGE_TAG=<sha>` and waits for `READINESS_URL` to return 200,
-5. records `.deploy/deployed_sha`, or rolls back and alerts (section 8).
+2. fetches `docker-compose.prod.yml`, `deploy/backup.sh`, `deploy/alert.sh`, `deploy/check-env.sh`
+   and itself **at that SHA** (needs `GITHUB_PAT`),
+3. runs `deploy/check-env.sh` on `.env.production` (names only): a missing REQUIRED setting
+   (`APP_POSTGRES_*`, `PLATFORM_*`, `TENANT_APP_ORIGIN`, `GITHUB_PAT`, ...) aborts the release
+   **before anything is restarted** and alerts,
+4. pulls backend, frontend and platform-web images, takes a pre-deploy `pg_dump` into
+   `backups/predeploy/` (aborts if the dump fails),
+5. `up -d` with `IMAGE_TAG=<sha>` (the backend runs `alembic upgrade head` on start, as the owner
+   role, then serves as the least-privilege role), waits for `READINESS_URL` to return 200 **and**
+   for `platform-web` to be healthy,
+6. records `.deploy/deployed_sha`, or rolls back and alerts (section 8).
+
+**GitHub prerequisites (repository variables, not secrets):** `TENANT_APP_ORIGIN` and
+`PLATFORM_APP_ORIGIN` (https, bare origins, different hostnames, equal to the values in
+`.env.production`) are baked into the images; the Deploy run fails before building if either is
+missing. `SUPPORT_EMAIL` is optional.
+
+**Verify what is deployed:** `cat /opt/rooman-billing/.deploy/deployed_sha` must equal the SHA of
+the merge commit on `main` (`git rev-parse origin/main`); `docker compose ps` shows backend,
+scheduler, frontend and platform-web healthy; `curl -fsS https://<DOMAIN>/api/v1/health/ready`
+returns 200. The images carry the SHA as the `org.opencontainers.image.revision` label.
 
 `workflow_dispatch` of Deploy only works on `main` and only for a commit whose CI already
 succeeded - it re-publishes, it cannot bypass CI.

@@ -2,6 +2,7 @@ import { errorSummary } from '../../../services/apiClient';
 import { useState } from 'react';
 import { X, Plus, Trash2, Layers, AlertCircle } from 'lucide-react';
 import { Button } from '../../../components/common/Button';
+import { ModalShell } from '../../../components/common/Modal';
 import { validateSensibleName, validateSku, validatePercentage, validateNonNegativeMoney, parseStrictNumber } from '../../../utils/validation';
 import type { OfferingIn, OfferingOut, OfferingType, OfferingPricingModel, PricingTier, BundleComponent } from '../../../types/catalog_cpq';
 
@@ -34,10 +35,12 @@ export const OfferingModal: React.FC<OfferingModalProps> = ({
   const [description, setDescription] = useState(initialData?.description || '');
 
   // Volume / Tiered brackets
-  const [pricingTiers, setPricingTiers] = useState<PricingTier[]>(
-    initialData?.pricing_tiers || [
-      { min_qty: 0, max_qty: 100, unit_price: Number(initialData?.base_price || 0) },
-    ]
+  // Deep-copied so editing a bracket never mutates the offering object owned by the
+  // caller (otherwise Cancel would leave the edits visible in the catalog list).
+  const [pricingTiers, setPricingTiers] = useState<PricingTier[]>(() =>
+    initialData?.pricing_tiers
+      ? initialData.pricing_tiers.map((t) => ({ ...t }))
+      : [{ min_qty: 0, max_qty: 100, unit_price: Number(initialData?.base_price || 0) }]
   );
 
   // Bundle components
@@ -118,6 +121,14 @@ export const OfferingModal: React.FC<OfferingModalProps> = ({
     setPricingTiers([...pricingTiers, { min_qty: nextMin, max_qty: null, unit_price: Number(basePrice) }]);
   };
 
+  const updateTier = (idx: number, patch: Partial<PricingTier>) => {
+    setPricingTiers((tiers) => tiers.map((t, i) => (i === idx ? { ...t, ...patch } : t)));
+  };
+
+  const updateBundleComp = (idx: number, patch: Partial<(typeof bundleComponents)[number]>) => {
+    setBundleComponents((comps) => comps.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
+  };
+
   const removeTier = (idx: number) => {
     setPricingTiers(pricingTiers.filter((_, i) => i !== idx));
   };
@@ -138,8 +149,8 @@ export const OfferingModal: React.FC<OfferingModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden my-8">
+    <ModalShell onClose={onClose} labelledBy="offering-modal-title" className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden my-8">
+      <>
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -147,7 +158,7 @@ export const OfferingModal: React.FC<OfferingModalProps> = ({
               <Layers className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900">
+              <h3 id="offering-modal-title" className="text-base font-bold text-slate-900">
                 {initialData ? 'Edit Commercial Offering' : 'Create Commercial Offering'}
               </h3>
               <p className="text-xs text-slate-500">Configure catalog offering, pricing model, and billing properties</p>
@@ -306,11 +317,7 @@ export const OfferingModal: React.FC<OfferingModalProps> = ({
                       type="number"
                       placeholder="Min Qty"
                       value={t.min_qty}
-                      onChange={(e) => {
-                        const updated = [...pricingTiers];
-                        updated[idx].min_qty = Number(e.target.value);
-                        setPricingTiers(updated);
-                      }}
+                      onChange={(e) => updateTier(idx, { min_qty: Number(e.target.value) })}
                       className="w-24 px-2 py-1 text-xs border rounded"
                     />
                     <span className="text-xs text-slate-400">to</span>
@@ -318,11 +325,7 @@ export const OfferingModal: React.FC<OfferingModalProps> = ({
                       type="number"
                       placeholder="Max (blank=∞)"
                       value={t.max_qty ?? ''}
-                      onChange={(e) => {
-                        const updated = [...pricingTiers];
-                        updated[idx].max_qty = e.target.value ? Number(e.target.value) : null;
-                        setPricingTiers(updated);
-                      }}
+                      onChange={(e) => updateTier(idx, { max_qty: e.target.value ? Number(e.target.value) : null })}
                       className="w-28 px-2 py-1 text-xs border rounded"
                     />
                     <span className="text-xs text-slate-400">Rate: ₹</span>
@@ -331,11 +334,7 @@ export const OfferingModal: React.FC<OfferingModalProps> = ({
                       step="0.01"
                       placeholder="Rate"
                       value={t.unit_price}
-                      onChange={(e) => {
-                        const updated = [...pricingTiers];
-                        updated[idx].unit_price = Number(e.target.value);
-                        setPricingTiers(updated);
-                      }}
+                      onChange={(e) => updateTier(idx, { unit_price: Number(e.target.value) })}
                       className="w-28 px-2 py-1 text-xs border rounded font-semibold text-slate-800"
                     />
                     <button
@@ -369,11 +368,7 @@ export const OfferingModal: React.FC<OfferingModalProps> = ({
                   <div key={idx} className="flex items-center gap-2 bg-white p-2 rounded-lg border border-slate-200">
                     <select
                       value={b.component_offering_id}
-                      onChange={(e) => {
-                        const updated = [...bundleComponents];
-                        updated[idx].component_offering_id = e.target.value;
-                        setBundleComponents(updated);
-                      }}
+                      onChange={(e) => updateBundleComp(idx, { component_offering_id: e.target.value })}
                       className="flex-1 px-2 py-1 text-xs border rounded"
                     >
                       {availableOfferings.map((o) => (
@@ -386,22 +381,14 @@ export const OfferingModal: React.FC<OfferingModalProps> = ({
                       type="number"
                       placeholder="Qty"
                       value={b.default_quantity}
-                      onChange={(e) => {
-                        const updated = [...bundleComponents];
-                        updated[idx].default_quantity = Number(e.target.value);
-                        setBundleComponents(updated);
-                      }}
+                      onChange={(e) => updateBundleComp(idx, { default_quantity: Number(e.target.value) })}
                       className="w-16 px-2 py-1 text-xs border rounded"
                     />
                     <label className="flex items-center gap-1 text-[11px] text-slate-600">
                       <input
                         type="checkbox"
                         checked={b.is_required}
-                        onChange={(e) => {
-                          const updated = [...bundleComponents];
-                          updated[idx].is_required = e.target.checked;
-                          setBundleComponents(updated);
-                        }}
+                        onChange={(e) => updateBundleComp(idx, { is_required: e.target.checked })}
                       />
                       Req
                     </label>
@@ -428,7 +415,7 @@ export const OfferingModal: React.FC<OfferingModalProps> = ({
             </Button>
           </div>
         </form>
-      </div>
-    </div>
+      </>
+    </ModalShell>
   );
 };

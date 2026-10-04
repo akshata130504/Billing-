@@ -57,9 +57,9 @@ What the runtime role still needs, all verified:
 
 4. Check that `GET /api/v1/health/ready` returns 200. From `docker compose exec db psql -U rooman rooman_billing`, `SELECT usename, count(*) FROM pg_stat_activity GROUP BY 1;` should show `rooman_app` connections.
 
-**Rollback:** remove `APP_POSTGRES_*` from `.env.production` and run step 3 again. The role can stay in place.
+**Required in production.** There is no fallback to the owner role: `docker-compose.prod.yml` refuses to start `backend`/`scheduler` without `APP_POSTGRES_*`, and the API and scheduler refuse to start in production when the connected role is a superuser or has `BYPASSRLS` (those roles skip every row level security policy). To rotate the password, change `APP_POSTGRES_PASSWORD`, re-run `sh deploy/db-least-privilege.sh` and run step 3 again.
 
-`docker-compose.prod.yml` maps `POSTGRES_USER`/`PASSWORD` for `backend` and `scheduler` to `${APP_POSTGRES_USER:-${POSTGRES_USER}}`. It also passes the owner credentials to `backend` only, as `MIGRATION_POSTGRES_*`. The `scheduler` never receives them. The `db` and `backup` services keep using the owner role.
+`docker-compose.prod.yml` maps `POSTGRES_USER`/`PASSWORD` for `backend` and `scheduler` to `${APP_POSTGRES_USER:?...}` (required, no fallback). It also passes the owner credentials to `backend` only, as `MIGRATION_POSTGRES_*`. The `scheduler` never receives them. The `db` and `backup` services keep using the owner role.
 
 ### The SQL script
 

@@ -45,7 +45,9 @@ class MembershipStatus(str, enum.Enum):
 class OrganizationStatus(str, enum.Enum):
     """Platform lifecycle of a tenant. Only ACTIVE organizations run billing automation."""
 
+    PENDING_APPROVAL = "pending_approval"
     ACTIVE = "active"
+    REJECTED = "rejected"
     SUSPENDED = "suspended"
     PENDING_DELETION = "pending_deletion"
     DELETED = "deleted"

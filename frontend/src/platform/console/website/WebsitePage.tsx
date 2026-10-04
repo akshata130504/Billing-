@@ -141,11 +141,23 @@ export function WebsitePage() {
         subtitle="Public marketing content. Pricing figures on this page are illustrative examples, not Rooman Billing subscription prices."
         actions={
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => void save()} isLoading={saving} disabled={!dirty}>
-              <Save className="mr-1 h-4 w-4" /> Save draft
+            <Button
+              size="sm"
+              variant="outline"
+              leadingIcon={<Save className="h-4 w-4" />}
+              onClick={() => void save()}
+              isLoading={saving}
+              disabled={!dirty}
+            >
+              Save draft
             </Button>
-            <Button size="sm" onClick={() => setPending({ kind: 'publish' })} disabled={!hasDraft || dirty}>
-              <Send className="mr-1 h-4 w-4" /> Publish
+            <Button
+              size="sm"
+              leadingIcon={<Send className="h-4 w-4" />}
+              onClick={() => setPending({ kind: 'publish' })}
+              disabled={!hasDraft || dirty}
+            >
+              Publish
             </Button>
           </div>
         }

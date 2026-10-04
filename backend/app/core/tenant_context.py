@@ -80,8 +80,38 @@ def strict_context(enabled: bool = True) -> Generator[None, None, None]:
         _is_strict_context.reset(token)
 
 
-def register_tenant_listeners(session_factory_or_engine: type[Session] | Session = Session) -> None:
-    """Register ORM query filter and PostgreSQL RLS event listeners on the Session class."""
+def _desired_rls_org_id() -> str:
+    if is_system_context():
+        return "__SYSTEM__"
+    return get_current_tenant_id() or "__NONE__"
+
+
+def sync_pg_rls_context(conn, statement: str) -> None:
+    """Make `app.current_organization_id` on `conn` match the current context before a statement.
+
+    Never swallows errors: if the setting cannot be synchronised, the statement must not run
+    under a previous organization's (or `__SYSTEM__`) context, so the exception propagates and
+    aborts the operation.
+    """
+    if conn.dialect.name != "postgresql":
+        return
+    if "set_config" in statement:
+        return
+    desired_org = _desired_rls_org_id()
+    if conn.info.get("rls_org_id") == desired_org:
+        return
+    # Forget the cached value first so a failure can never leave a stale "in sync" marker.
+    conn.info.pop("rls_org_id", None)
+    with conn.connection.cursor() as cur:
+        cur.execute("SELECT set_config('app.current_organization_id', %s, true)", (desired_org,))
+    conn.info["rls_org_id"] = desired_org
+
+
+def register_tenant_listeners(
+    session_factory_or_engine: type[Session] | Session = Session,
+    db_engine = None,
+) -> None:
+    """Register ORM query filter and PostgreSQL RLS event listeners."""
 
     @event.listens_for(session_factory_or_engine, "do_orm_execute")
     def _enforce_orm_tenant_filter(execute_state):
@@ -117,7 +147,7 @@ def register_tenant_listeners(session_factory_or_engine: type[Session] | Session
                             f"Query on tenant entity '{entity.__name__}' executed without tenant or system context."
                         )
 
-            # Fail closed: filter to an impossible organization ID so 0 rows are returned
+            # Fail closed: no tenant and no system context must never return tenant rows.
             execute_state.statement = execute_state.statement.options(
                 with_loader_criteria(
                     TenantMixin,
@@ -130,7 +160,7 @@ def register_tenant_listeners(session_factory_or_engine: type[Session] | Session
     def _enforce_pg_rls_context(session, transaction, connection):
         if connection.dialect.name != "postgresql":
             return
-
+        connection.info.pop("rls_org_id", None)
         if is_system_context():
             org_id = "__SYSTEM__"
         else:
@@ -140,3 +170,17 @@ def register_tenant_listeners(session_factory_or_engine: type[Session] | Session
             text("SELECT set_config('app.current_organization_id', :org_id, true)"),
             {"org_id": org_id},
         )
+        connection.info["rls_org_id"] = org_id
+
+    if db_engine is not None:
+        @event.listens_for(db_engine, "before_cursor_execute")
+        def _sync_pg_rls_before_cursor(conn, cursor, statement, parameters, context, executemany):
+            sync_pg_rls_context(conn, statement)
+
+        @event.listens_for(db_engine, "rollback")
+        def _clear_rls_on_rollback(conn):
+            conn.info.pop("rls_org_id", None)
+
+        @event.listens_for(db_engine, "commit")
+        def _clear_rls_on_commit(conn):
+            conn.info.pop("rls_org_id", None)

@@ -193,6 +193,18 @@ describe('<PublicQuotePage /> customer quote experience', () => {
     expect(screen.queryByRole('button', { name: /decline/i })).not.toBeInTheDocument();
   });
 
+  it('shows a suspended merchant quote without Accept or Decline', async () => {
+    getQuote().mockResolvedValue(
+      makeQuote({ actions_unavailable_reason: "This merchant's account is temporarily unavailable." }),
+    );
+    renderPage();
+    expect(await screen.findByText('Responses are temporarily unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/account is temporarily unavailable/)).toBeInTheDocument();
+    expect(screen.getByText('Implementation services')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /accept quote/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /decline/i })).not.toBeInTheDocument();
+  });
+
   it('shows an already-declined quote without actions', async () => {
     getQuote().mockResolvedValue(makeQuote({ status: 'declined', declined_at: '2026-09-02T09:00:00Z' }));
     renderPage();

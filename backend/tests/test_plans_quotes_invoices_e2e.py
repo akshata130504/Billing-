@@ -73,7 +73,9 @@ def org_and_user(db: Session):
         user_agent=None,
     )
 
-    return org, user, customer, ctx
+    from backend.app.core.tenant_context import tenant_context
+    with tenant_context(org.id):
+        yield org, user, customer, ctx
 
 
 def test_1_to_5_plans_and_pricing_models(db: Session, org_and_user):

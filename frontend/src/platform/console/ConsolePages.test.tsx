@@ -23,7 +23,7 @@ vi.mock('../consoleApi', async () => {
     consoleApi: {
       dashboard: vi.fn(), health: vi.fn(), organizations: vi.fn(), organization: vi.fn(),
       organizationActivity: vi.fn(), lifecycle: vi.fn(), staff: vi.fn(), staffMember: vi.fn(), jobs: vi.fn(),
-      staffAction: vi.fn(), audit: vi.fn(),
+      staffAction: vi.fn(), audit: vi.fn(), tenantAdmins: vi.fn(),
     },
   };
 });
@@ -95,6 +95,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   api.dashboard.mockResolvedValue(DASHBOARD);
   api.organizationActivity.mockResolvedValue({ ...EMPTY_PAGE, page_size: 20 });
+  api.tenantAdmins.mockResolvedValue([]);
 });
 
 describe('navigation and roles', () => {
@@ -148,6 +149,22 @@ describe('dashboard', () => {
     expect(screen.getByText('Priya Platform (me@rooman.test)')).toBeInTheDocument();
     expect(screen.getByText('Recent platform activity')).toBeInTheDocument();
     expect(screen.getByText('ops@rooman.test · Beta Corp')).toBeInTheDocument();
+  });
+
+  it('highlights organizations waiting for approval and links to the filtered directory', async () => {
+    api.dashboard.mockResolvedValue({ ...DASHBOARD, organizations: { ...DASHBOARD.organizations, pending_approval: 2 } });
+    renderAt('/');
+    expect(await screen.findByText('2 organizations are waiting for approval.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Review pending organizations' })).toHaveAttribute(
+      'href', '/organizations?status=pending_approval',
+    );
+    expect(within(screen.getByRole('main')).getByText('Pending approval').closest('div')).toHaveTextContent('2');
+  });
+
+  it('shows no approval callout when nothing is pending', async () => {
+    renderAt('/');
+    await screen.findByText('Acme Traders');
+    expect(screen.queryByRole('link', { name: 'Review pending organizations' })).not.toBeInTheDocument();
   });
 
   it('shows an error with retry', async () => {
@@ -205,6 +222,45 @@ describe('organization detail', () => {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
     }
     expect(screen.queryByRole('button', { name: 'Reactivate organization' })).not.toBeInTheDocument();
+  });
+
+  const PENDING = { status: 'pending_approval' as const, allowed_actions: ['approve', 'reject'] as OrganizationDetail['allowed_actions'] };
+
+  it('approves a pending organization', async () => {
+    api.organization.mockResolvedValueOnce(orgDetail(PENDING)).mockResolvedValue(orgDetail());
+    api.lifecycle.mockResolvedValue({ organization: { ...ORG_SUMMARY, status: 'active' }, changed: {} });
+    renderAt('/organizations/org-1');
+
+    expect(await screen.findByText('Organization Pending Super Admin Approval')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve Organization' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(/^Reason/), { target: { value: 'Verified business documents' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Approve/ }));
+    await waitFor(() => expect(api.lifecycle).toHaveBeenCalledWith('org-1', 'approve', expect.objectContaining({ reason: 'Verified business documents' })));
+  });
+
+  it('rejects a pending organization only with a reason', async () => {
+    api.organization.mockResolvedValueOnce(orgDetail(PENDING)).mockResolvedValue(orgDetail({ status: 'rejected', allowed_actions: [] }));
+    api.lifecycle.mockResolvedValue({ organization: { ...ORG_SUMMARY, status: 'rejected' }, changed: {} });
+    renderAt('/organizations/org-1');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Reject Organization' }));
+    const dialog = await screen.findByRole('dialog');
+    const submit = within(dialog).getByRole('button', { name: /^Reject/ });
+    expect(submit).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText(/^Reason/), { target: { value: 'Could not verify the business registration' } });
+    fireEvent.click(submit);
+    await waitFor(() => expect(api.lifecycle).toHaveBeenCalledWith(
+      'org-1', 'reject', expect.objectContaining({ reason: 'Could not verify the business registration' }),
+    ));
+  });
+
+  it('hides approve and reject from non-administrators', async () => {
+    api.organization.mockResolvedValue(orgDetail(PENDING));
+    renderAt('/organizations/org-1', 'platform_operations');
+    expect(await screen.findByText('Organization Pending Super Admin Approval')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve Organization' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject Organization' })).not.toBeInTheDocument();
   });
 
   it('suspends with reason and ticket, asking for a fresh code when the server requires step-up', async () => {

@@ -8,6 +8,7 @@ import hmac
 import html
 import json
 import os
+import re
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
@@ -33,6 +34,7 @@ from backend.app.models.customization import (
     OutboundWebhookDelivery,
     ReportingTag,
     ScheduleFrequency,
+    TemplateLayoutType,
     TransactionNumberSeries,
     WebTab,
 )
@@ -313,9 +315,97 @@ def _resolve_local_logo_data_uri(logo_url: Optional[str]) -> Optional[str]:
     return f"data:{mime};base64,{base64.b64encode(img_bytes).decode('ascii')}"
 
 
-def render_template_preview(db: Session, template_id: str, organization_id: str) -> Dict[str, str]:
-    """Renders a sample HTML/text preview of a document template using placeholder data."""
-    template = get_template(db, template_id, organization_id)
+# Same-origin path the viewer's browser may load directly (e.g. ``/logos/acme.png``,
+# ``/uploads/logos/x.png``). Single leading slash only (``//host`` is protocol-relative,
+# i.e. remote), no backslashes, quotes, whitespace or ``..`` segments.
+_SAFE_RELATIVE_LOGO_RE = re.compile(r"^/(?!/)[A-Za-z0-9._~\-/%+]+(\?[A-Za-z0-9._~\-=&%+]*)?$")
+# Inline raster images only; ``data:image/svg+xml`` can carry script and is refused.
+_SAFE_DATA_LOGO_RE = re.compile(r"^data:image/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=]+$", re.IGNORECASE)
+
+
+def resolve_preview_logo_src(logo_url: Optional[str]) -> Optional[str]:
+    """Returns the ``<img src>`` to use for a template preview, or ``None``.
+
+    The server never fetches a remote URL here (no SSRF): uploaded files under
+    ``UPLOAD_DIR`` are inlined from disk, and everything else is only handed to the
+    viewer's browser, which renders the preview in a sandboxed iframe.
+
+    Accepted: ``https://`` URLs, same-origin relative paths (``/logos/...``,
+    ``/uploads/...``) and inline raster ``data:image/...;base64`` URIs. Rejected:
+    ``http://`` (blocked by the app's CSP ``img-src 'self' data: blob: https:`` anyway),
+    protocol-relative ``//host`` URLs, ``javascript:``, ``file:``, SVG/non-image ``data:``
+    and any path containing ``..`` segments.
+    """
+    if not logo_url:
+        return None
+    candidate = logo_url.strip()
+    if not candidate or any(ch.isspace() or ord(ch) < 32 for ch in candidate):
+        return None
+
+    inlined = _resolve_local_logo_data_uri(candidate)
+    if inlined:
+        return inlined
+
+    lowered = candidate.lower()
+    if lowered.startswith("https://"):
+        from urllib.parse import urlsplit
+
+        try:
+            parts = urlsplit(candidate)
+        except ValueError:
+            return None
+        if parts.scheme.lower() != "https" or not parts.hostname or any(c in candidate for c in "\\\"'<>`"):
+            return None
+        return candidate
+    if lowered.startswith("data:"):
+        return candidate if _SAFE_DATA_LOGO_RE.match(candidate) else None
+    if candidate.startswith("/") and _SAFE_RELATIVE_LOGO_RE.match(candidate):
+        path_part = candidate.split("?", 1)[0]
+        if any(seg in ("..", ".") for seg in path_part.split("/")):
+            return None
+        return candidate
+    return None
+
+
+_PREVIEW_OVERRIDE_FIELDS = (
+    "layout_type",
+    "primary_color",
+    "accent_color",
+    "font_family",
+    "logo_url",
+    "header_text",
+    "footer_text",
+    "terms_and_conditions",
+    "custom_css",
+    "show_company_address",
+    "show_tax_summary",
+)
+
+
+def render_template_preview(
+    db: Session,
+    template_id: str,
+    organization_id: str,
+    overrides: Optional[Dict[str, Any]] = None,
+) -> Dict[str, str]:
+    """Renders a sample HTML/text preview of a document template using placeholder data.
+
+    ``overrides`` lets the editor preview its *unsaved* form values (e.g. a freshly
+    typed or uploaded logo) without persisting them; nothing is written to the DB.
+    """
+    saved = get_template(db, template_id, organization_id)
+    if overrides:
+        from types import SimpleNamespace
+
+        view = {field: getattr(saved, field) for field in _PREVIEW_OVERRIDE_FIELDS}
+        for field in _PREVIEW_OVERRIDE_FIELDS:
+            if field in overrides and (overrides[field] is not None or field == "logo_url"):
+                view[field] = overrides[field]
+        if view["layout_type"] is not None and not hasattr(view["layout_type"], "value"):
+            view["layout_type"] = TemplateLayoutType(view["layout_type"])
+        template = SimpleNamespace(id=saved.id, document_type=saved.document_type, **view)
+    else:
+        template = saved
     ctx = _SAMPLE_DOCUMENT_CONTEXT
 
     # Fetch configured logo from template, falling back to organization logo
@@ -325,10 +415,7 @@ def render_template_preview(db: Session, template_id: str, organization_id: str)
         if org and org.logo_url:
             logo_url = org.logo_url
 
-    resolved_logo_src = _resolve_local_logo_data_uri(logo_url)
-    if not resolved_logo_src and logo_url and logo_url.lower().startswith("https://"):
-        # Rendered by the viewer's browser only; the server never fetches remote logos.
-        resolved_logo_src = logo_url
+    resolved_logo_src = resolve_preview_logo_src(logo_url)
 
     logo_html = (
         f'<div class="logo-container" style="margin-bottom: 16px;"><img src="{html.escape(resolved_logo_src, quote=True)}" alt="Organization Logo" style="max-height: 50px; max-width: 200px; object-fit: contain;" /></div>'
