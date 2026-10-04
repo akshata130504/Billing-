@@ -77,14 +77,16 @@ export const grantsApi = {
   review: (grantId: string, notes: string) => consoleRequest<AccessGrant>('POST', `/access-grants/${id(grantId)}/review`, { notes }),
 };
 
-/** Where the tenant app runs (the grant token is handed ONLY to this exact origin). */
-export const TENANT_APP_ORIGIN: string =
-  import.meta.env.VITE_TENANT_APP_ORIGIN || (import.meta.env.DEV ? 'http://localhost:5173' : '');
+/**
+ * Where the tenant app runs: the same origin as this console (single-origin deployment, the tenant
+ * app at /admin and the console at /superadmin). The grant token is handed ONLY to this exact origin.
+ */
+export const TENANT_APP_ORIGIN: string = window.location.origin;
 export const GRANT_MESSAGE = 'rooman-platform-grant';
 export const READY_MESSAGE = 'rooman-platform-ready';
 
 /**
- * Deliver a grant token to the tenant workspace tab by postMessage, pinned to the tenant origin
+ * Deliver a grant token to the tenant workspace tab by postMessage, pinned to the app origin
  * (never a URL, never storage). Delivered when the tab reports it is ready; stops listening after
  * a minute.
  */

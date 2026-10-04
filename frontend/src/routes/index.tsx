@@ -365,6 +365,22 @@ function PublicOnly({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * /admin/<page> is the same tenant page as /<page>: one app and one route table, so a bookmarked
+ * or shared /admin/... link lands on the right screen (signed-out users go through sign-in first).
+ */
+function AdminAlias() {
+  const location = useLocation();
+  const rest = location.pathname.replace(/^\/admin\/?/, '');
+  return (
+    <Navigate
+      to={{ pathname: rest ? `/${rest}` : '/admin', search: location.search, hash: location.hash }}
+      state={location.state}
+      replace
+    />
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
@@ -376,6 +392,12 @@ export function AppRoutes() {
     <Suspense fallback={<PageLoader fullScreen />}>
     <Routes>
       {/* Public: auth */}
+      {/* Single-origin entry points. /admin is the tenant (organization) app's sign-in, and goes
+          straight to the workspace when already signed in. /superadmin is NOT a route of this
+          app: it is the separate platform console document (superadmin.html) on the same origin,
+          with its own staff sign-in and mandatory 2FA. */}
+      <Route path="/admin" element={<PublicOnly><LoginPage /></PublicOnly>} />
+      <Route path="/admin/*" element={<AdminAlias />} />
       <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
       <Route path="/signup" element={<PublicOnly><SignupPage /></PublicOnly>} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />

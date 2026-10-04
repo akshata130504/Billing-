@@ -6,15 +6,15 @@ import { SCOPE_LABELS } from '../../services/platformAccessService';
 /**
  * Read-only workspace for Rooman platform staff under an approved access grant (design section 17).
  *
- * The platform console opens this page and hands over a short-lived grant token with
- * window.postMessage - accepted ONLY from the configured platform origin and only from the window
- * that opened this one. The token lives in memory only (never localStorage, never a URL), is never
+ * The platform console (/superadmin, on this same origin) opens this page and hands over a
+ * short-lived grant token with window.postMessage - accepted ONLY from this origin and only from the
+ * window that opened this one. The token lives in memory only (never localStorage, never a URL), is never
  * mixed with a tenant user's own session, and every request is re-validated by the server against
  * the grant (scope, expiry, revocation). A fixed banner shows the organization, scopes, time left
  * and an Exit button that ends the grant token immediately.
  */
-export const PLATFORM_ORIGIN: string =
-  import.meta.env.VITE_PLATFORM_APP_ORIGIN || (import.meta.env.DEV ? 'http://platform.localhost:5174' : '');
+// Single-origin deployment: the console is served from the same origin as the tenant app.
+export const PLATFORM_ORIGIN: string = window.location.origin;
 
 export const GRANT_MESSAGE = 'rooman-platform-grant';
 export const READY_MESSAGE = 'rooman-platform-ready';

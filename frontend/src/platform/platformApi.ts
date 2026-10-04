@@ -5,8 +5,10 @@
  * visible to this code, and nothing is written to localStorage). State-changing requests echo the
  * readable CSRF cookie in the X-Platform-CSRF header (double submit). Tenant tokens are never sent.
  *
- * The console is served from its own origin and always calls that same origin (no configurable API
- * origin, no cross-origin credentials); it imports nothing from the tenant API client.
+ * The console is served at /superadmin on the one application origin and always calls that same
+ * origin (no configurable API origin, no cross-origin credentials); it imports nothing from the
+ * tenant API client. Same origin is not shared authorization: the server accepts only the platform
+ * session on platform routes and never on tenant routes.
  */
 const ROOT = '/api/v1/platform';
 const BASE = `${ROOT}/auth`;

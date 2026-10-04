@@ -1,6 +1,7 @@
 /**
- * The Rooman platform (staff) console. A separate app and bundle from the tenant SPA, served only
- * from the platform origin: it shares no router, auth provider, API client or storage with it.
+ * The Rooman platform (staff) console, served at /superadmin on the same origin as the tenant app
+ * (/admin). It is a separate entry point (superadmin.html -> platform/main.tsx) of the same build:
+ * it shares no router, auth provider, API client or storage with the tenant SPA.
  */
 import type { ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
@@ -57,10 +58,13 @@ export function PlatformRoutes() {
   );
 }
 
+/** Every console route lives under this path (e.g. /superadmin/organizations). */
+export const SUPERADMIN_BASE = '/superadmin';
+
 export function PlatformApp() {
   return (
     <ToastProvider>
-      <BrowserRouter>
+      <BrowserRouter basename={SUPERADMIN_BASE}>
         <PlatformRoutes />
       </BrowserRouter>
     </ToastProvider>
