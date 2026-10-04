@@ -15,6 +15,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from backend.app.core.config import settings
 from backend.app.core.database import engine
 from backend.app.core.totp import totp
 from backend.app.models.platform import PlatformAuditLog, PlatformRole
@@ -149,7 +150,7 @@ def test_audit_service_and_auth_events_still_write(db):
 
     enrolment = svc.create_staff(db, email=f"imm-{uuid.uuid4().hex[:8]}@rooman.test", full_name="Imm",
                                  role=PlatformRole.PLATFORM_SUPPORT, password=PASSWORD, actor="test")
-    client = TestClient(app, base_url="http://platform.test")
+    client = TestClient(app, base_url=settings.platform_origin)
     assert client.post("/api/v1/platform/auth/login", json={"email": enrolment.staff.email, "password": "wrong-Passw0rd-x1"}).status_code == 401
     first = client.post("/api/v1/platform/auth/login", json={"email": enrolment.staff.email, "password": PASSWORD})
     assert first.status_code == 200

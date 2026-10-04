@@ -27,7 +27,8 @@ from backend.app.models.platform import PlatformAuditLog, PlatformRole, Platform
 from backend.app.services import platform_auth_service as svc
 from backend.app.services.auth_service import MAX_FAILED_LOGINS
 
-PLATFORM = "http://platform.test"
+# The one application origin: the tenant app (/admin) and the platform console (/superadmin).
+PLATFORM = settings.platform_origin
 AUTH = "/api/v1/platform/auth"
 PASSWORD = "Platform-Passw0rd-2026!"
 

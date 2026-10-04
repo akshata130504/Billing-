@@ -32,7 +32,8 @@ from backend.tests.test_scheduler_org_lifecycle import (  # noqa: F401  (fixture
     outbox_seen,
 )
 
-PLATFORM = "http://platform.test"
+# The one application origin: the tenant app (/admin) and the platform console (/superadmin).
+PLATFORM = settings.platform_origin
 API = "/api/v1/platform"
 PASSWORD = "Platform-Passw0rd-2026!"
 ADMIN = PlatformRole.PLATFORM_ADMINISTRATOR
@@ -162,7 +163,8 @@ def test_console_routes_need_a_platform_session(path, tenant):
     anon = TestClient(app, base_url=PLATFORM)
     assert anon.get(f"{API}{path}").status_code == 401
     assert anon.get(f"{API}{path}", headers=tenant.headers()).status_code == 401  # tenant Owner token
-    assert TestClient(app).get(f"{API}{path}", headers=tenant.headers()).status_code == 404  # tenant host
+    # a tenant token is refused on any host, including the default test host
+    assert TestClient(app).get(f"{API}{path}", headers=tenant.headers()).status_code == 401
 
 
 def test_every_console_route_requires_platform_authentication():
@@ -465,7 +467,8 @@ def test_platform_staff_get_no_tenant_data_through_tenant_routes(admin, client, 
     token = admin.client.cookies.get("rb_platform_access", path="/api/v1/platform")
     for path in ("/api/v1/customers", "/api/v1/invoices", "/api/v1/payments", "/api/v1/auth/me"):
         assert client.get(path, headers={"Authorization": f"Bearer {token}"}).status_code == 401
-        assert admin.client.get(path).status_code == 404  # tenant routes do not exist on the platform host
+        # same origin, but the platform session is no tenant credential
+        assert admin.client.get(path).status_code == 401
 
 
 # --- scheduler behaviour through the console --------------------------------------------------------------------

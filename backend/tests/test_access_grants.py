@@ -40,7 +40,7 @@ def admin(db):
 def tenant_api():
     from backend.app.main import app
 
-    return TestClient(app)  # tenant host
+    return TestClient(app)  # same application, tenant credentials
 
 
 @pytest.fixture(autouse=True)
@@ -134,7 +134,7 @@ def test_invalid_requests_are_refused(support, tenant, body, status):
 def test_operations_and_tenants_cannot_request(db, tenant, tenant_api):
     ops = Staff(db, OPS)
     assert _request(ops, tenant.organization.id).status_code == 403
-    assert tenant_api.post(f"/api/v1/platform{G}", headers=tenant.headers(), json={}).status_code == 404
+    assert tenant_api.post(f"/api/v1/platform{G}", headers=tenant.headers(), json={}).status_code == 401
 
 
 def test_one_open_request_per_staff_and_org(support, tenant):
@@ -309,7 +309,7 @@ def test_grant_token_is_not_a_user_session(support, db, tenant, tenant_api):
     assert tenant_api.get("/api/v1/platform-access/session", headers=tenant.headers()).status_code == 401
 
 
-def test_grant_token_is_useless_on_the_platform_host(support, tenant, tenant_api):
+def test_grant_token_is_useless_on_platform_routes(support, tenant, tenant_api):
     gid, token = _granted(support, tenant, tenant_api)
     assert support.client.get("/api/v1/platform/dashboard", headers=_bearer(token)).status_code == 401
 
