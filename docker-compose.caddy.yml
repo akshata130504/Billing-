@@ -1,14 +1,14 @@
 # Optional overlay: Caddy terminates TLS (automatic Let's Encrypt certificates) and
 # proxies to the frontend container, which in turn proxies /api/ to the backend.
 #
-#   Set in .env.production:   DOMAIN=billing.example.com
-#                             PLATFORM_DOMAIN=platform.example.com   # staff console; host of PLATFORM_APP_ORIGIN
+#   Set in .env.production:   DOMAIN=billing.example.com     # host of FRONTEND_URL: /admin and /superadmin
 #                             FRONTEND_BIND=127.0.0.1:8080   # keep :80/:443 free for caddy
 #   Run:
 #   docker compose --env-file .env.production -f docker-compose.prod.yml -f docker-compose.caddy.yml up -d --build
 #
 # Ports 80 and 443 must be reachable from the internet for the ACME challenge, and
-# DOMAIN and PLATFORM_DOMAIN must already resolve to this host.
+# DOMAIN must already resolve to this host. There is one public domain: the platform (Super Admin)
+# console is served at https://DOMAIN/superadmin by the same frontend container.
 
 services:
   caddy:
@@ -20,8 +20,6 @@ services:
       - "443:443/udp"   # HTTP/3
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN in .env.production}
-      # Host of PLATFORM_APP_ORIGIN (the staff console), a different hostname from DOMAIN.
-      PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:?set PLATFORM_DOMAIN (host of PLATFORM_APP_ORIGIN) in .env.production}
       ACME_EMAIL: ${ACME_EMAIL:-}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
@@ -29,8 +27,6 @@ services:
       - caddy_config:/config
     depends_on:
       frontend:
-        condition: service_started
-      platform-web:
         condition: service_started
     logging:
       driver: json-file

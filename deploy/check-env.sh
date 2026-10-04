@@ -48,8 +48,8 @@ echo "== core (REQUIRED)"
 check REQUIRED SECRET_KEY FRONTEND_URL ALLOWED_ORIGINS POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
 echo "== least-privilege runtime DB role - the app refuses to start as a superuser (REQUIRED)"
 check REQUIRED APP_POSTGRES_USER APP_POSTGRES_PASSWORD
-echo "== platform (Super Admin) console + frontend origins (REQUIRED)"
-check REQUIRED PLATFORM_APP_ORIGIN PLATFORM_DOMAIN PLATFORM_JWT_SECRET TENANT_APP_ORIGIN
+echo "== platform (Super Admin) console at FRONTEND_URL/superadmin - one public origin (REQUIRED)"
+check REQUIRED PLATFORM_JWT_SECRET
 echo "== release sync - the server must receive docker-compose.prod.yml / deploy files with each release (REQUIRED)"
 check REQUIRED GITHUB_PAT
 echo "== email - signup codes, invitations, password resets (REQUIRED)"
@@ -75,14 +75,16 @@ is_prod_origin() {
     return 0
 }
 origin_host() { h="${1#*://}"; printf '%s' "${h%%/*}"; }
-rule REQUIRED "PLATFORM_APP_ORIGIN is a bare https origin (not localhost)" is_prod_origin "$(raw PLATFORM_APP_ORIGIN)"
-rule REQUIRED "TENANT_APP_ORIGIN is a bare https origin (not localhost)" is_prod_origin "$(raw TENANT_APP_ORIGIN)"
-rule REQUIRED "PLATFORM_APP_ORIGIN host differs from the tenant host" sh -c \
-    '[ -n "$1" ] && [ -n "$2" ] && [ "$1" != "$2" ]' _ "$(origin_host "$(raw PLATFORM_APP_ORIGIN)")" "$(origin_host "$(raw FRONTEND_URL)")"
-rule REQUIRED "PLATFORM_DOMAIN equals the host of PLATFORM_APP_ORIGIN" sh -c \
-    '[ -n "$1" ] && [ "$1" = "$2" ]' _ "$(raw PLATFORM_DOMAIN)" "$(origin_host "$(raw PLATFORM_APP_ORIGIN)")"
-rule REQUIRED "TENANT_APP_ORIGIN is the origin of FRONTEND_URL" sh -c \
-    '[ -n "$1" ] && [ "${1%/}" = "${2%/}" ]' _ "$(raw TENANT_APP_ORIGIN)" "$(raw FRONTEND_URL)"
+# FRONTEND_URL is THE application origin: the tenant app (/admin) and the platform console
+# (/superadmin) are both served there, and the API accepts platform requests only from it.
+rule REQUIRED "FRONTEND_URL is a bare https origin (not localhost)" is_prod_origin "$(raw FRONTEND_URL)"
+if value_set DOMAIN; then
+    rule REQUIRED "DOMAIN (Caddy) is the host of FRONTEND_URL" sh -c \
+        '[ "$1" = "$2" ]' _ "$(raw DOMAIN)" "$(origin_host "$(raw FRONTEND_URL)")"
+fi
+# Left over from the retired separate-platform-domain layout: ignored, but should be removed.
+rule optional "no PLATFORM_APP_ORIGIN/PLATFORM_DOMAIN/TENANT_APP_ORIGIN" sh -c \
+    '[ -z "$1$2$3" ]' _ "$(raw PLATFORM_APP_ORIGIN)" "$(raw PLATFORM_DOMAIN)" "$(raw TENANT_APP_ORIGIN)"
 rule REQUIRED "PLATFORM_JWT_SECRET is at least 32 characters" sh -c '[ "${#1}" -ge 32 ]' _ "$(raw PLATFORM_JWT_SECRET)"
 rule REQUIRED "PLATFORM_JWT_SECRET differs from SECRET_KEY" sh -c '[ -n "$1" ] && [ "$1" != "$2" ]' _ "$(raw PLATFORM_JWT_SECRET)" "$(raw SECRET_KEY)"
 echo "== payments (required before taking online payments)"
@@ -104,7 +106,6 @@ fi
 echo "== optional"
 check optional SENTRY_DSN GEMINI_API_KEY ENCRYPTION_KEYS POSTGRES_SSLMODE ALLOWED_HOSTS
 echo "== not checkable here"
-echo "  Repository variables TENANT_APP_ORIGIN / PLATFORM_APP_ORIGIN (GitHub Actions) are baked into the images at build time and must equal the values above."
 echo "  Support email on the Help page = GitHub repository variable SUPPORT_EMAIL (baked into the web image)."
 
 if [ "$missing_required" -ne 0 ]; then

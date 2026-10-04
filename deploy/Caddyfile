@@ -1,7 +1,8 @@
 # Caddy reverse proxy for Rooman Billing (used by docker-compose.caddy.yml).
-# Automatic HTTPS via Let's Encrypt for {$DOMAIN}. Everything - the SPA, /api/ and
-# the Razorpay webhook URL https://{$DOMAIN}/api/v1/webhooks/razorpay - goes to the
-# frontend container, whose nginx forwards /api/ to the backend.
+# Automatic HTTPS via Let's Encrypt for {$DOMAIN}, the ONE public domain. Everything - the tenant
+# app (/admin), the platform / Super Admin console (/superadmin), /api/ and the Razorpay webhook URL
+# https://{$DOMAIN}/api/v1/webhooks/razorpay - goes to the frontend container, whose nginx forwards
+# /api/ to the backend.
 
 {
 	email {$ACME_EMAIL}
@@ -20,41 +21,13 @@
 		-Server
 	}
 
-	# CSV imports: allow up to 10 MB request bodies (matches nginx client_max_body_size).
-	request_body {
-		max_size 10MB
-	}
-
-	reverse_proxy frontend:80 {
-		header_up X-Forwarded-Proto {scheme}
-		header_up X-Real-IP {remote_host}
-	}
-}
-
-# Platform (Rooman staff / Super Admin) console: its own origin, hostname different from {$DOMAIN}.
-# {$PLATFORM_DOMAIN} must be the host of PLATFORM_APP_ORIGIN in .env.production. The platform-web
-# container serves only the console bundle and proxies only /api/v1/platform/ to the backend.
-# Optionally restrict to office/VPN ranges with an `@allowed remote_ip ...` matcher.
-{$PLATFORM_DOMAIN} {
-	encode zstd gzip
-
-	log {
-		output stdout
-		format json
-	}
-
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		-Server
-	}
-
-	# Website CMS media uploads are the one larger platform request (nginx caps every other route
-	# at 64 KB); this is only the outer bound.
+	# Outer bound only: nginx caps every request at 10 MB (CSV imports) except the platform CMS
+	# media upload (/api/v1/platform/website/assets, Platform Administrators only), capped at 32 MB.
 	request_body {
 		max_size 33MB
 	}
 
-	reverse_proxy platform-web:80 {
+	reverse_proxy frontend:80 {
 		header_up X-Forwarded-Proto {scheme}
 		header_up X-Real-IP {remote_host}
 	}
