@@ -120,11 +120,11 @@ The console ships inside the `frontend` (web) image; there is no extra service. 
 
 ```bash
 curl -sI https://<DOMAIN>/superadmin | head -1             # 200 (the console document)
-# Create the first Super Admin on the server (no default account; the TOTP secret is shown once):
+# Create the first Super Admin on the server (no default account):
 docker compose --env-file .env.production -f docker-compose.prod.yml exec backend   python -m backend.app.cli.platform_staff create --email you@example.com --name "Your Name"   --role platform_administrator --password-stdin
 ```
 
-Sign in at `https://<DOMAIN>/superadmin` (password, then the authenticator code). Tenant users sign
+Sign in at `https://<DOMAIN>/superadmin` with email and password. Tenant users sign
 in at `https://<DOMAIN>/admin`. See [`platform-console-deployment.md`](platform-console-deployment.md).
 
 If you front the stack with your own reverse proxy instead of the Caddy overlay, route the whole

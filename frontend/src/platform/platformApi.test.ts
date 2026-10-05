@@ -57,12 +57,28 @@ describe('platformApi', () => {
     expect(fetchMock.mock.calls[0][1].headers['X-Platform-CSRF']).toBe('host-prefixed-456');
   });
 
-  it('step-up posts only the code, with the CSRF header', async () => {
+  it('login posts email and password to /login and returns the signed-in staff', async () => {
+    const me = { staff: { id: 's1', email: 'ops@rooman.test', full_name: 'Olga Ops', role: 'platform_administrator' }, session_id: 'sess-1', session_expires_at: 'x', access_expires_in: 600 };
+    fetchMock.mockResolvedValue(jsonResponse(200, me));
+    const result = await platformApi.login('ops@rooman.test', 'Platform-Passw0rd-2026!');
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/v1/platform/auth/login');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual({ email: 'ops@rooman.test', password: 'Platform-Passw0rd-2026!' });
+    expect(result).toEqual(me);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // no second (2FA) request
+  });
+
+  it('has no two-factor sign-in call', () => {
+    expect((platformApi as Record<string, unknown>).verifyTwoFactor).toBeUndefined();
+  });
+
+  it('step-up posts only the password, with the CSRF header', async () => {
     fetchMock.mockResolvedValue(jsonResponse(200, { step_up_expires_at: '2026-09-30T10:15:00Z', expires_in: 900 }));
-    const result = await platformApi.stepUp('123456');
+    const result = await platformApi.stepUp('Platform-Passw0rd-2026!');
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('/api/v1/platform/auth/step-up');
-    expect(JSON.parse(init.body)).toEqual({ code: '123456' });
+    expect(JSON.parse(init.body)).toEqual({ password: 'Platform-Passw0rd-2026!' });
     expect(init.headers['X-Platform-CSRF']).toBe('csrf-value-123');
     expect(result.expires_in).toBe(900);
   });

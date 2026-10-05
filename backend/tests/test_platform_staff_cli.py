@@ -29,15 +29,16 @@ def test_password_is_never_a_command_line_argument():
                   "--password", PASSWORD])
 
 
-def test_create_enrols_totp_and_shows_secret_once(db, monkeypatch, capsys):
+def test_create_prints_no_secret(db, monkeypatch, capsys):
     email = f"boot-{uuid.uuid4().hex[:6]}@rooman.test"
     code, out, _ = _run(monkeypatch, capsys, ["create", "--email", email, "--name", "Boot Admin",
                                               "--role", "platform_administrator", "--password-stdin"], PASSWORD + "\n")
     assert code == 0
-    assert "otpauth://totp/" in out and PASSWORD not in out
+    assert "Platform staff member created." in out and email in out and "platform_administrator" in out
+    assert PASSWORD not in out and "secret" not in out.lower() and "otpauth" not in out
     db.expire_all()
     staff = db.scalars(select(PlatformStaff).where(PlatformStaff.email == email)).first()
-    assert staff is not None and staff.totp_enabled_at is not None and staff.is_active
+    assert staff is not None and staff.is_active and staff.totp_enabled_at is None
     assert staff.hashed_password not in out
     assert db.scalars(select(PlatformAuditLog).where(
         PlatformAuditLog.platform_staff_id == staff.id, PlatformAuditLog.action == "PLATFORM_STAFF_CREATED")).first()
@@ -58,13 +59,16 @@ def test_create_refuses_weak_password_and_duplicates(db, monkeypatch, capsys):
                                       "--password-stdin"], PASSWORD + "\n")[0] == 1
 
 
-def test_deactivate_and_reset_two_factor(db, monkeypatch, capsys):
+def test_deactivate(db, monkeypatch, capsys):
     email = f"cycle-{uuid.uuid4().hex[:6]}@rooman.test"
     _run(monkeypatch, capsys, ["create", "--email", email, "--name", "C", "--role", "platform_operations",
                                "--password-stdin"], PASSWORD + "\n")
     assert _run(monkeypatch, capsys, ["deactivate", "--email", email, "--reason", "left"])[0] == 0
     db.expire_all()
     assert db.scalars(select(PlatformStaff).where(PlatformStaff.email == email)).first().is_active is False
-    code, out, _ = _run(monkeypatch, capsys, ["reset-2fa", "--email", email, "--reason", "lost phone"])
-    assert code == 0 and "otpauth://totp/" in out
     assert _run(monkeypatch, capsys, ["deactivate", "--email", "nobody@rooman.test", "--reason", "x"])[0] == 1
+
+
+def test_reset_2fa_command_no_longer_exists():
+    with pytest.raises(SystemExit):
+        cli.main(["reset-2fa", "--email", "a@rooman.test", "--reason", "lost phone"])

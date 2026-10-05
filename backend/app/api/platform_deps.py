@@ -159,7 +159,7 @@ def require_platform_roles(allowed: FrozenSet[PlatformRole]) -> Callable[..., Pl
 
 def require_platform_roles_with_step_up(allowed: FrozenSet[PlatformRole]) -> Callable[..., PlatformContext]:
     """Role check first (a role that may never do this is refused without being asked for a
-    code), then a recent step-up on this session (see require_recent_platform_step_up)."""
+    password), then a recent step-up on this session (see require_recent_platform_step_up)."""
 
     def dependency(
         request: Request, ctx: PlatformContext = Depends(get_platform_context), db: Session = Depends(get_db)
@@ -175,9 +175,9 @@ def require_recent_platform_step_up(
     request: Request, ctx: PlatformContext = Depends(get_platform_context), db: Session = Depends(get_db)
 ) -> PlatformContext:
     """For sensitive platform actions: the CURRENT session must have completed POST
-    /platform/auth/step-up (a fresh TOTP) within PLATFORM_STEP_UP_MINUTES. Otherwise 403
-    STEP_UP_REQUIRED (the client asks for a code, then retries). Combine with a role dependency
-    for authorization; this only proves recent presence of the second factor."""
+    /platform/auth/step-up (re-entering the current password) within PLATFORM_STEP_UP_MINUTES.
+    Otherwise 403 STEP_UP_REQUIRED (the client asks for the password, then retries). Combine with a
+    role dependency for authorization; this only proves the staff member re-authenticated recently."""
     _enforce_step_up(request, ctx, db)
     return ctx
 

@@ -12,7 +12,7 @@ Rooman Billing is ONE public website on ONE origin (the origin of `FRONTEND_URL`
 | Entry document | `index.html` -> `src/main.tsx` | `superadmin.html` -> `src/platform/main.tsx` (router `basename="/superadmin"`) |
 | Build / image | one `npm run build` -> `dist/` (both documents, shared hashed `assets/`), one web image `frontend/Dockerfile` | same |
 | nginx | `docker/nginx.conf`, `security-headers.conf` | same server; `/superadmin*` and `/api/v1/platform/` use `platform-security-headers.conf` |
-| Auth | bearer tokens (no cookies) | HttpOnly cookies + CSRF header, mandatory TOTP, step-up |
+| Auth | bearer tokens (no cookies) | HttpOnly cookies + CSRF header, email + password sign-in, password step-up |
 
 Same origin does **not** mean shared authorization. The console shares no router, auth provider,
 API client or storage with the tenant SPA; the tenant bundle contains no console route
@@ -83,8 +83,8 @@ could:
 
 What still limits it: the platform tokens are HttpOnly, so the script cannot steal the session
 for use elsewhere; sessions are short (10-minute access token, idle and absolute limits); without
-a step-up in the last 15 minutes the sensitive actions above need a fresh authenticator code,
-which a script cannot produce; both apps run under a `script-src 'self'` CSP with no third-party
+a step-up in the last 15 minutes the sensitive actions above need the staff member's password,
+which a script does not have (it could only phish it with a fake prompt on the same origin); both apps run under a `script-src 'self'` CSP with no third-party
 scripts on the console; tenant tokens and platform tokens remain unusable on each other's routes;
 every platform action is audited. Recommended operating practice: Rooman staff use the console in
 a separate browser profile (or browser) from any tenant account, and sign out when done.
@@ -172,10 +172,9 @@ database prepared as described in `docs/database-security.md`.
 
 ## 5. Step-up re-authentication
 
-`POST /api/v1/platform/auth/step-up` with `{"code": "<TOTP>"}` on a signed-in platform session
-(cookie + CSRF header, or bearer). Password is not accepted. The code is replay-protected (never
-the one used to sign in, never twice) and shares the per-account MFA throttle with sign-in; the
-endpoint is also IP rate-limited. On success the **current session** records `step_up_at` /
+`POST /api/v1/platform/auth/step-up` with `{"password": "<current password>"}` on a signed-in
+platform session (cookie + CSRF header, or bearer). Wrong passwords are throttled per account
+(separately from the sign-in throttle); the endpoint is also IP rate-limited. On success the **current session** records `step_up_at` /
 `step_up_expires_at` (15 minutes by default, 1-15, never beyond the session's own expiry). No
 token or cookie is issued.
 
@@ -183,8 +182,8 @@ token or cookie is issued.
 `STEP_UP_REQUIRED` unless this exact session stepped up within the window. The window is re-derived
 from `step_up_at` with the current setting (lowering it shortens existing windows; nothing extends
 one - not use, not refresh). It ends with logout, logout-all, revocation of the session, password
-reset, 2FA reset and deactivation. Audited as `PLATFORM_STEP_UP_SUCCEEDED`, `_FAILED`,
-`_REQUIRED`; codes are never recorded.
+reset and deactivation. Audited as `PLATFORM_STEP_UP_SUCCEEDED`, `_FAILED`, `_REQUIRED`;
+passwords are never recorded.
 
 ## 6. Platform Roles and Privileges
 

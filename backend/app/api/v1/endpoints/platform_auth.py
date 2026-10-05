@@ -1,18 +1,17 @@
 """Platform (Rooman staff) authentication. Mounted at /platform/auth.
 
-Entirely separate from /auth (tenant users): its own principal (PlatformStaff), mandatory TOTP,
-its own sessions and signing key, and HttpOnly cookies scoped to the platform API paths. Tenant
+Entirely separate from /auth (tenant users): its own principal (PlatformStaff), its own sessions
+and signing key, and HttpOnly cookies scoped to the platform API paths. Tenant
 tokens are not accepted anywhere here, and nothing here can reach tenant data.
 
-    POST /login     email + password  -> single-use 2FA challenge (no session yet)
-    POST /2fa       challenge + TOTP  -> session cookies
+    POST /login     email + password  -> session cookies
     POST /refresh   refresh cookie    -> rotated session cookies        (CSRF header required)
     GET  /me        current staff member and session
     GET  /sessions  the caller's active sessions
     DELETE /sessions/{id}             revoke one of the caller's sessions
     POST /logout    end this session
     POST /logout-all end every session of the caller
-    POST /step-up   fresh TOTP        -> this session may perform sensitive actions for a few
+    POST /step-up   current password  -> this session may perform sensitive actions for a few
                                          minutes (require_recent_platform_step_up)
 """
 from fastapi import APIRouter, Depends, Request, Response, status
@@ -35,7 +34,6 @@ from backend.app.core.rate_limit import auth_rate_limit, limiter
 from backend.app.core.security import generate_opaque_token
 from backend.app.models.base import utcnow
 from backend.app.schemas.platform import (
-    PlatformLoginChallengeOut,
     PlatformLoginRequest,
     PlatformLogoutAllOut,
     PlatformMeOut,
@@ -44,7 +42,6 @@ from backend.app.schemas.platform import (
     PlatformStepUpOut,
     PlatformStepUpRequest,
     PlatformStaffOut,
-    PlatformTwoFactorRequest,
 )
 from backend.app.services import platform_auth_service
 
@@ -70,19 +67,11 @@ def _no_store(response: Response) -> None:
     response.headers["Cache-Control"] = "no-store"
 
 
-@router.post("/login", response_model=PlatformLoginChallengeOut, summary="Platform sign-in, step 1: email and password")
+@router.post("/login", response_model=PlatformMeOut, summary="Platform sign-in: email and password")
 @limiter.limit(auth_rate_limit)
 def platform_login(request: Request, response: Response, body: PlatformLoginRequest, db: Session = Depends(get_db)):
     _no_store(response)
-    issued = platform_auth_service.login(db, body.email, body.password, client_ip(request), user_agent(request))
-    return PlatformLoginChallengeOut(challenge_token=issued.challenge_token, expires_in=issued.expires_in)
-
-
-@router.post("/2fa", response_model=PlatformMeOut, summary="Platform sign-in, step 2: TOTP code (mandatory)")
-@limiter.limit(auth_rate_limit)
-def platform_two_factor(request: Request, response: Response, body: PlatformTwoFactorRequest, db: Session = Depends(get_db)):
-    _no_store(response)
-    est = platform_auth_service.verify_2fa(db, body.challenge_token, body.code, client_ip(request), user_agent(request))
+    est = platform_auth_service.login(db, body.email, body.password, client_ip(request), user_agent(request))
     set_session_cookies(response, est.access_token, est.refresh_secret, generate_opaque_token(24))
     return _me(est.staff, est.session)
 
@@ -148,7 +137,7 @@ def platform_logout_all(response: Response, ctx: PlatformContext = Depends(requi
     return PlatformLogoutAllOut(sessions_revoked=count)
 
 
-@router.post("/step-up", response_model=PlatformStepUpOut, summary="Re-confirm with a fresh authenticator code")
+@router.post("/step-up", response_model=PlatformStepUpOut, summary="Re-confirm with the current password")
 @limiter.limit(auth_rate_limit)
 def platform_step_up(
     request: Request,
@@ -158,5 +147,5 @@ def platform_step_up(
     db: Session = Depends(get_db),
 ):
     _no_store(response)
-    expires = platform_auth_service.step_up(db, ctx.staff, ctx.session, body.code, ctx.ip_address, ctx.user_agent)
+    expires = platform_auth_service.step_up(db, ctx.staff, ctx.session, body.password, ctx.ip_address, ctx.user_agent)
     return PlatformStepUpOut(step_up_expires_at=expires, expires_in=max(0, int((expires - utcnow()).total_seconds())))

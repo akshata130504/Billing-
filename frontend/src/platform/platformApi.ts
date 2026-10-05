@@ -48,12 +48,6 @@ export interface PlatformStepUp {
   expires_in: number;
 }
 
-export interface PlatformChallenge {
-  two_factor_required: true;
-  challenge_token: string;
-  expires_in: number;
-}
-
 export class PlatformApiError extends Error {
   constructor(message: string, public status: number, public code?: string, public details?: Record<string, unknown>) {
     super(message);
@@ -130,15 +124,13 @@ export async function consoleRequest<T>(method: string, path: string, body?: unk
 }
 
 export const platformApi = {
-  login: (email: string, password: string) => request<PlatformChallenge>('POST', '/login', { email, password }),
-  verifyTwoFactor: (challenge_token: string, code: string) =>
-    request<PlatformMe>('POST', '/2fa', { challenge_token, code }),
+  login: (email: string, password: string) => request<PlatformMe>('POST', '/login', { email, password }),
   me: () => request<PlatformMe>('GET', '/me'),
   refresh: () => request<PlatformMe>('POST', '/refresh'),
   sessions: () => request<{ sessions: PlatformSessionInfo[] }>('GET', '/sessions'),
   revokeSession: (id: string) => request<void>('DELETE', `/sessions/${encodeURIComponent(id)}`),
   logout: () => request<void>('POST', '/logout'),
   logoutAll: () => request<{ sessions_revoked: number }>('POST', '/logout-all'),
-  /** Re-confirm identity with a fresh authenticator code before a sensitive action. */
-  stepUp: (code: string) => request<PlatformStepUp>('POST', '/step-up', { code }),
+  /** Re-confirm identity with the current password before a sensitive action. */
+  stepUp: (password: string) => request<PlatformStepUp>('POST', '/step-up', { password }),
 };

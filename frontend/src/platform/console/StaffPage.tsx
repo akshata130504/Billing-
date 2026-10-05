@@ -24,13 +24,13 @@ const ACTIONS: Record<StaffAction, { label: string; description: string; notes: 
   },
   activate: {
     label: 'Reactivate',
-    description: 'The staff member can sign in again with their password and authenticator app.',
+    description: 'The staff member can sign in again with their email and password.',
     notes: ['Sessions that existed before deactivation stay ended.'],
     danger: false,
   },
   'revoke-sessions': {
     label: 'Revoke sessions',
-    description: 'Ends every session of this staff member. They must sign in again with their authenticator.',
+    description: 'Ends every session of this staff member. They must sign in again.',
     notes: [],
     danger: true,
   },
@@ -70,7 +70,7 @@ export function StaffPage() {
     <div className="space-y-6">
       <PageHeader
         title="Platform staff"
-        subtitle="Rooman staff who operate the platform. New staff, role changes and 2FA resets are done with the server-side bootstrap command, not here."
+        subtitle="Rooman staff who operate the platform. New staff, role changes and password resets are done with the server-side bootstrap command, not here."
       />
       {error && <ErrorState message={error} onRetry={() => void load()} />}
       {!staff && !error && <LoadingState message="Loading staff..." />}
@@ -107,9 +107,6 @@ export function StaffPage() {
                       <td className="hidden px-4 py-3 text-slate-700 md:table-cell">{formatDateTime(member.last_login_at)}</td>
                       <td className="hidden px-4 py-3 md:table-cell">
                         <div className="flex flex-wrap gap-1">
-                          <Badge variant={member.two_factor_enrolled ? 'success' : 'danger'} size="sm">
-                            {member.two_factor_enrolled ? '2FA on' : '2FA missing'}
-                          </Badge>
                           <Badge variant="neutral" size="sm">{member.active_sessions} session(s)</Badge>
                           {member.sign_in_locked && <Badge variant="warning" size="sm">Sign-in locked</Badge>}
                         </div>
@@ -144,7 +141,6 @@ export function StaffPage() {
             <dl className="grid gap-3 sm:grid-cols-2">
               <Field label="Role"><RoleBadge role={selected.role} /></Field>
               <Field label="Status">{selected.is_active ? 'Active' : `Deactivated ${formatDateTime(selected.deactivated_at)}`}</Field>
-              <Field label="Two-factor sign-in">{selected.two_factor_enrolled ? 'Enrolled' : 'Not enrolled'}</Field>
               <Field label="Last sign-in">{formatDateTime(selected.last_login_at)}</Field>
               <Field label="Created">{formatDateTime(selected.created_at)}</Field>
               <Field label="Sign-in throttle">{selected.sign_in_locked ? 'Locked after failed attempts' : 'Normal'}</Field>

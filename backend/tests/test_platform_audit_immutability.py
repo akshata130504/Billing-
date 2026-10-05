@@ -5,7 +5,6 @@ do not pretend it does: there the module is skipped. The test database is built 
 metadata.create_all, which installs the same trigger as migration 0028 (see models/platform.py);
 test_migration_0028.py covers the migrated path and the privilege revocation.
 """
-import time
 import uuid
 
 import pytest
@@ -17,7 +16,6 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
 from backend.app.core.database import engine
-from backend.app.core.totp import totp
 from backend.app.models.platform import PlatformAuditLog, PlatformRole
 from backend.app.services import platform_audit
 from backend.app.services import platform_auth_service as svc
@@ -148,31 +146,28 @@ def test_audit_service_and_auth_events_still_write(db):
     """The application never updates or deletes audit rows, so every auth flow still works."""
     from backend.app.main import app
 
-    enrolment = svc.create_staff(db, email=f"imm-{uuid.uuid4().hex[:8]}@rooman.test", full_name="Imm",
-                                 role=PlatformRole.PLATFORM_SUPPORT, password=PASSWORD, actor="test")
+    staff = svc.create_staff(db, email=f"imm-{uuid.uuid4().hex[:8]}@rooman.test", full_name="Imm",
+                             role=PlatformRole.PLATFORM_SUPPORT, password=PASSWORD, actor="test")
     client = TestClient(app, base_url=settings.platform_origin)
-    assert client.post("/api/v1/platform/auth/login", json={"email": enrolment.staff.email, "password": "wrong-Passw0rd-x1"}).status_code == 401
-    first = client.post("/api/v1/platform/auth/login", json={"email": enrolment.staff.email, "password": PASSWORD})
-    assert first.status_code == 200
-    resp = client.post("/api/v1/platform/auth/2fa", json={"challenge_token": first.json()["challenge_token"],
-                                                         "code": totp(enrolment.totp_secret, at=time.time())})
+    assert client.post("/api/v1/platform/auth/login", json={"email": staff.email, "password": "wrong-Passw0rd-x1"}).status_code == 401
+    resp = client.post("/api/v1/platform/auth/login", json={"email": staff.email, "password": PASSWORD})
     assert resp.status_code == 200, resp.text
     csrf = {"X-Platform-CSRF": client.cookies.get("rb_platform_csrf", path="/")}
     assert client.post("/api/v1/platform/auth/logout-all", headers=csrf).status_code == 200
     db.expire_all()
     actions = set(db.scalars(select(PlatformAuditLog.action).where(
-        PlatformAuditLog.platform_staff_id == enrolment.staff.id)))
-    assert {"PLATFORM_STAFF_CREATED", "PLATFORM_LOGIN_FAILED", "PLATFORM_LOGIN_PASSWORD_VERIFIED",
-            "PLATFORM_2FA_SUCCEEDED", "PLATFORM_LOGIN_SUCCEEDED", "PLATFORM_ALL_SESSIONS_REVOKED"} <= actions
+        PlatformAuditLog.platform_staff_id == staff.id)))
+    assert {"PLATFORM_STAFF_CREATED", "PLATFORM_LOGIN_FAILED", "PLATFORM_LOGIN_SUCCEEDED",
+            "PLATFORM_ALL_SESSIONS_REVOKED"} <= actions
 
 
 def test_staff_referenced_by_audit_rows_cannot_be_deleted(db):
     """ON DELETE RESTRICT: removing a staff member can never cascade into (or null out) history."""
-    enrolment = svc.create_staff(db, email=f"imm-{uuid.uuid4().hex[:8]}@rooman.test", full_name="Imm",
-                                 role=PlatformRole.PLATFORM_SUPPORT, password=PASSWORD, actor="test")
+    staff = svc.create_staff(db, email=f"imm-{uuid.uuid4().hex[:8]}@rooman.test", full_name="Imm",
+                             role=PlatformRole.PLATFORM_SUPPORT, password=PASSWORD, actor="test")
     with engine.connect() as conn:
         with pytest.raises(DBAPIError):
-            conn.execute(sa.text("DELETE FROM platform_staff WHERE id = :i"), {"i": enrolment.staff.id})
+            conn.execute(sa.text("DELETE FROM platform_staff WHERE id = :i"), {"i": staff.id})
         conn.rollback()
 
 

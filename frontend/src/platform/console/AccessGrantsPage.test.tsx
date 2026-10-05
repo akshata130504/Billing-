@@ -81,7 +81,7 @@ describe('tenant access grants in the console', () => {
     }));
   });
 
-  it('enters the tenant: opens the workspace tab, asks for a fresh code, and hands the token over by postMessage only', async () => {
+  it('enters the tenant: opens the workspace tab, asks for the password again, and hands the token over by postMessage only', async () => {
     api.list.mockResolvedValue({ items: [grant()] });
     api.enter
       .mockRejectedValueOnce(new PlatformApiError('Confirm it is you.', 403, 'STEP_UP_REQUIRED'))
@@ -92,7 +92,7 @@ describe('tenant access grants in the console', () => {
     renderAt();
     fireEvent.click(await screen.findByRole('button', { name: /Enter tenant/ }));
     expect(open).toHaveBeenCalledWith(`${TENANT_APP_ORIGIN}/platform-access`, 'rooman-platform-access-g1');
-    fireEvent.change(await screen.findByLabelText(/^Authenticator code/), { target: { value: '123456' } });
+    fireEvent.change(await screen.findByLabelText(/^Password/), { target: { value: 'Platform-Passw0rd-2026!' } });
     fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
     await waitFor(() => expect(api.enter).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(popup.postMessage).toHaveBeenCalledWith({ type: GRANT_MESSAGE, token: 'grant-token-abc' }, TENANT_APP_ORIGIN));

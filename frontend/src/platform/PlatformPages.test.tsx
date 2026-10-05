@@ -14,7 +14,6 @@ vi.mock('./platformApi', async () => {
     ...actual,
     platformApi: {
       login: vi.fn(),
-      verifyTwoFactor: vi.fn(),
       me: vi.fn(),
       refresh: vi.fn(),
       sessions: vi.fn(),
@@ -62,63 +61,60 @@ function renderAt(path: string) {
 }
 
 describe('Platform staff sign-in', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    consoleMock.dashboard.mockResolvedValue(DASHBOARD);
+  });
 
-  it('asks for the authenticator code after the password and only then signs in', async () => {
-    api.login.mockResolvedValue({ two_factor_required: true, challenge_token: 'chal-1', expires_in: 300 });
-    api.verifyTwoFactor.mockResolvedValue(ME);
+  it('has an Email input, a Password input and a Sign In button', () => {
+    renderAt('/login');
+    expect(screen.getByLabelText(/^Email/)).toHaveAttribute('type', 'email');
+    expect(screen.getByLabelText(/^Password/)).toHaveAttribute('type', 'password');
+    expect(screen.getByRole('button', { name: 'Sign In' })).toBeInTheDocument();
+  });
+
+  it('has no authenticator / one-time code input', () => {
+    const { container } = renderAt('/login');
+    expect(container.querySelector('[autocomplete="one-time-code"]')).toBeNull();
+    expect(screen.queryByLabelText(/authenticator|code/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Continue|Verify/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('textbox')).toHaveLength(1); // only the email field
+  });
+
+  it('signs in with email and password and opens the Super Admin dashboard', async () => {
+    api.login.mockResolvedValue(ME);
     api.me.mockResolvedValue(ME);
-    api.sessions.mockResolvedValue({ sessions: [] });
     renderAt('/login');
 
-    fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'ops@rooman.test' } });
+    fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: '  ops@rooman.test ' } });
     fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: 'Platform-Passw0rd-2026!' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
 
-    const codeInput = await screen.findByLabelText(/^Authenticator code/);
-    expect(api.login).toHaveBeenCalledWith('ops@rooman.test', 'Platform-Passw0rd-2026!');
-    expect(api.verifyTwoFactor).not.toHaveBeenCalled();
-    fireEvent.change(codeInput, { target: { value: '123456' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Verify and sign in' }));
-
-    await waitFor(() => expect(api.verifyTwoFactor).toHaveBeenCalledWith('chal-1', '123456'));
-    expect(await screen.findByText('Olga Ops')).toBeInTheDocument();
+    await waitFor(() => expect(api.login).toHaveBeenCalledWith('ops@rooman.test', 'Platform-Passw0rd-2026!'));
+    expect(api.login).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole('heading', { name: 'Platform dashboard' })).toBeInTheDocument();
     expect(window.localStorage.length).toBe(0); // nothing about the platform session is stored in JS
   });
 
-  it('shows the generic error for bad credentials and stays on the password step', async () => {
+  it('shows the server error for bad credentials, clears the password and stays on sign-in', async () => {
     api.login.mockRejectedValue(new PlatformApiError('Invalid email or password.', 401));
     renderAt('/login');
     fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'x@rooman.test' } });
     fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: 'nope' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Invalid email or password.');
-    expect(screen.queryByLabelText(/^Authenticator code/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/^Password/)).toHaveValue('');
+    expect(screen.getByText('Platform staff sign-in')).toBeInTheDocument();
+    expect(consoleMock.dashboard).not.toHaveBeenCalled();
   });
 
-  it('shows a wrong-code error and stays on the code step', async () => {
-    api.login.mockResolvedValue({ two_factor_required: true, challenge_token: 'chal-1', expires_in: 300 });
-    api.verifyTwoFactor.mockRejectedValue(new PlatformApiError('The authentication code is invalid or has already been used.', 401));
+  it('shows a generic message when sign-in fails for a non-API reason', async () => {
+    api.login.mockRejectedValue(new Error('boom'));
     renderAt('/login');
-    fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'ops@rooman.test' } });
+    fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'x@rooman.test' } });
     fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: 'pw' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    fireEvent.change(await screen.findByLabelText(/^Authenticator code/), { target: { value: '000000' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Verify and sign in' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('invalid or has already been used');
-    expect(screen.getByLabelText(/^Authenticator code/)).toBeInTheDocument();
-  });
-
-  it('goes back to the password step when the challenge expired', async () => {
-    api.login.mockResolvedValue({ two_factor_required: true, challenge_token: 'chal-1', expires_in: 300 });
-    api.verifyTwoFactor.mockRejectedValue(new PlatformApiError('This sign-in attempt is invalid or has expired. Please sign in again.', 401));
-    renderAt('/login');
-    fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'ops@rooman.test' } });
-    fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: 'pw' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    fireEvent.change(await screen.findByLabelText(/^Authenticator code/), { target: { value: '123456' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Verify and sign in' }));
-    expect(await screen.findByLabelText(/^Password/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Sign-in failed. Please try again.');
   });
 });
 
@@ -220,20 +216,16 @@ describe('Served at /superadmin', () => {
     expect(screen.getByTestId('where')).toHaveTextContent(/^\/superadmin\/login$/);
   });
 
-  it('password then mandatory authenticator code, then the console at /superadmin', async () => {
-    api.login.mockResolvedValue({ two_factor_required: true, challenge_token: 'chal-9', expires_in: 300 });
-    api.verifyTwoFactor.mockResolvedValue(ME);
+  it('email and password sign in, then the console at /superadmin', async () => {
+    api.login.mockResolvedValue(ME);
     api.me.mockResolvedValue(ME);
+    consoleMock.dashboard.mockResolvedValue(DASHBOARD);
     renderSuperadmin('/superadmin/login');
+    expect(screen.getByTestId('where')).toHaveTextContent(/^\/superadmin\/login$/);
     fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'ops@rooman.test' } });
     fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: 'Platform-Passw0rd-2026!' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    const codeInput = await screen.findByLabelText(/^Authenticator code/);
-    expect(api.verifyTwoFactor).not.toHaveBeenCalled(); // no session from the password alone
-    expect(screen.getByTestId('where')).toHaveTextContent(/^\/superadmin\/login$/);
-    fireEvent.change(codeInput, { target: { value: '123456' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Verify and sign in' }));
-    await waitFor(() => expect(api.verifyTwoFactor).toHaveBeenCalledWith('chal-9', '123456'));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
+    await waitFor(() => expect(api.login).toHaveBeenCalledWith('ops@rooman.test', 'Platform-Passw0rd-2026!'));
     expect(await screen.findByRole('heading', { name: 'Platform dashboard' })).toBeInTheDocument();
     expect(screen.getByTestId('where')).toHaveTextContent(/^\/superadmin\/$/);
   });

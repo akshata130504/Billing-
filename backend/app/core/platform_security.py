@@ -33,7 +33,7 @@ def _signing_key() -> str:
 
 
 def create_platform_access_token(*, staff_id: str, session_id: str, role: str, auth_time: datetime) -> str:
-    """Short-lived access token for an authenticated (password + TOTP) platform session."""
+    """Short-lived access token for an authenticated (email + password) platform session."""
     now = datetime.now(timezone.utc)
     payload: Dict[str, Any] = {
         "sub": staff_id,
@@ -42,7 +42,7 @@ def create_platform_access_token(*, staff_id: str, session_id: str, role: str, a
         "aud": PLATFORM_TOKEN_AUDIENCE,
         "iss": PLATFORM_TOKEN_ISSUER,
         "typ": PLATFORM_ACCESS_TOKEN_TYPE,
-        "amr": ["pwd", "otp"],
+        "amr": ["pwd"],
         "auth_time": int(auth_time.timestamp()),
         "iat": now.timestamp(),
         "exp": int((now + timedelta(minutes=settings.PLATFORM_ACCESS_TOKEN_EXPIRE_MINUTES)).timestamp()),

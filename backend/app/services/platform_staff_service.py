@@ -134,7 +134,7 @@ def activate(db: Session, staff_id: str, actor: Actor, *, reason: str) -> Dict[s
         _refuse(db, actor, target, platform_audit.STAFF_ACTIVATED, "This staff member is already active.", reason)
     target.is_active = True
     target.deactivated_at = None
-    # Anything issued before re-activation stays dead: a fresh sign-in (with TOTP) is required.
+    # Anything issued before re-activation stays dead: a fresh sign-in is required.
     target.tokens_valid_after = utcnow()
     _audit(db, actor, platform_audit.STAFF_ACTIVATED, target, reason=reason)
     db.commit()

@@ -5,50 +5,26 @@ import { Input } from '../components/common/Input';
 import { PlatformApiError, platformApi } from './platformApi';
 
 /**
- * Rooman platform staff sign-in: email + password, then a mandatory authenticator code.
+ * Rooman platform staff sign-in: email + password.
  * Separate from the tenant /login page; not linked from the tenant app.
  */
 export function PlatformLoginPage() {
   const navigate = useNavigate();
-  const [step, setStep] = useState<'password' | 'code'>('password');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [code, setCode] = useState('');
-  const [challenge, setChallenge] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const submitPassword = async (e: FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      const result = await platformApi.login(email.trim(), password);
-      setChallenge(result.challenge_token);
-      setPassword('');
-      setStep('code');
-    } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : 'Sign-in failed. Please try again.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const submitCode = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setBusy(true);
-    try {
-      await platformApi.verifyTwoFactor(challenge, code.trim());
+      await platformApi.login(email.trim(), password);
       navigate('/', { replace: true });
     } catch (err) {
-      const message = err instanceof PlatformApiError ? err.message : 'Verification failed. Please try again.';
-      setError(message);
-      setCode('');
-      if (err instanceof PlatformApiError && /expired|invalid or has expired/i.test(message)) {
-        setStep('password');
-        setChallenge('');
-      }
+      setError(err instanceof PlatformApiError ? err.message : 'Sign-in failed. Please try again.');
+      setPassword('');
     } finally {
       setBusy(false);
     }
@@ -67,25 +43,13 @@ export function PlatformLoginPage() {
           </div>
         )}
 
-        {step === 'password' ? (
-          <form className="mt-5 space-y-4" onSubmit={submitPassword}>
-            <Input label="Email" type="email" autoComplete="username" value={email}
-              onChange={(e) => setEmail(e.target.value)} required />
-            <Input label="Password" type="password" autoComplete="current-password" value={password}
-              onChange={(e) => setPassword(e.target.value)} required />
-            <Button type="submit" className="w-full" isLoading={busy}>Continue</Button>
-          </form>
-        ) : (
-          <form className="mt-5 space-y-4" onSubmit={submitCode}>
-            <Input label="Authenticator code" inputMode="numeric" autoComplete="one-time-code" maxLength={10}
-              value={code} onChange={(e) => setCode(e.target.value)} required autoFocus />
-            <Button type="submit" className="w-full" isLoading={busy}>Verify and sign in</Button>
-            <button type="button" className="w-full text-sm text-slate-500 hover:text-slate-700"
-              onClick={() => { setStep('password'); setChallenge(''); setCode(''); }}>
-              Start over
-            </button>
-          </form>
-        )}
+        <form className="mt-5 space-y-4" onSubmit={submit}>
+          <Input label="Email" type="email" autoComplete="username" value={email}
+            onChange={(e) => setEmail(e.target.value)} required />
+          <Input label="Password" type="password" autoComplete="current-password" value={password}
+            onChange={(e) => setPassword(e.target.value)} required />
+          <Button type="submit" className="w-full" isLoading={busy}>Sign In</Button>
+        </form>
       </div>
     </div>
   );
