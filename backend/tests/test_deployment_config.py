@@ -9,9 +9,16 @@ drops the console from the web image, or drops the preflight fails CI.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+from sqlalchemy.engine import make_url
+
+from backend.app.core.config import Settings
 
 REPO = Path(__file__).resolve().parents[2]
 RETIRED = ("PLATFORM_APP_ORIGIN", "PLATFORM_DOMAIN", "TENANT_APP_ORIGIN", "platform-web", "Dockerfile.platform")
@@ -187,3 +194,110 @@ def test_check_env_only_warns_about_retired_origin_settings(tmp_path):
     result = _check_env(tmp_path, stale)
     assert result.returncode == 0, result.stdout
     assert "FAIL (optional)" in result.stdout
+
+
+# --------------------------------------------------------------------------- database roles
+# The exact environment docker-compose.prod.yml gives the API and the scheduler, resolved against a
+# .env.production like .env.production.example, must pass the production Settings validation with
+# the runtime connection on APP_POSTGRES_USER and Alembic on the owner role - before and after the
+# entrypoint drops the owner credentials. A compose file that makes POSTGRES_USER the runtime role
+# again (POSTGRES_USER: ${APP_POSTGRES_USER}) refuses to start in production and fails here.
+
+ENV_PRODUCTION = {
+    "POSTGRES_SERVER": "db", "POSTGRES_PORT": "5432", "POSTGRES_DB": "rooman_billing",
+    "POSTGRES_USER": "rooman", "POSTGRES_PASSWORD": "owner-secret-0123456789",
+    "APP_POSTGRES_USER": "rooman_app", "APP_POSTGRES_PASSWORD": "app-secret-0123456789",
+}
+OWNER_PASSWORD = ENV_PRODUCTION["POSTGRES_PASSWORD"]
+DB_KEYS = ("POSTGRES_", "APP_POSTGRES_", "MIGRATION_", "DATABASE_URL")
+PROD_BASE = {
+    "ENVIRONMENT": "production", "DEBUG": False,
+    "SECRET_KEY": "a-cryptographically-secure-random-secret-key-67890",
+    "ALLOWED_ORIGINS": ["https://billing.example.com"], "FRONTEND_URL": "https://billing.example.com",
+    "SMTP_HOST": "smtp.example.com",
+}
+
+
+def _resolve(value: str, env: dict) -> str:
+    value = value.strip()
+    if value[:1] in "\"'":
+        return value[1:-1]
+    required = re.fullmatch(r"\$\{([A-Z_]+):\?[^}]*\}", value)
+    if required:
+        assert env.get(required.group(1)), f"compose requires {required.group(1)}"
+        return env[required.group(1)]
+    default = re.fullmatch(r"\$\{([A-Z_]+):-([^}]*)\}", value)
+    if default:
+        return env.get(default.group(1)) or default.group(2)
+    assert "${" not in value, value
+    return value
+
+
+def _container_db_env(service: str) -> dict:
+    """env_file (.env.production) overlaid with the service's `environment:` block - DB keys only."""
+    block = _service_block(_read("docker-compose.prod.yml"), service)
+    environment = re.search(r"^    environment:\n((?:^      .*\n)+)", block, re.M)
+    assert environment, f"{service} has no environment block"
+    env = dict(ENV_PRODUCTION)
+    for key, value in re.findall(r"^      ([A-Z_]+): (.*)$", environment.group(1), re.M):
+        if key.startswith(DB_KEYS):
+            env[key] = _resolve(value, ENV_PRODUCTION)
+    return env
+
+
+def _after_entrypoint(env: dict) -> dict:
+    """What backend/docker/entrypoint.sh leaves for the container command."""
+    script = _read("backend/docker/entrypoint.sh")
+    assert "unset MIGRATION_DATABASE_URL MIGRATION_POSTGRES_USER MIGRATION_POSTGRES_PASSWORD" in script
+    assert re.search(r'if \[ -n "\$\{APP_POSTGRES_USER:-\}" \]; then\n\s+unset POSTGRES_PASSWORD\n', script)
+    dropped = {"MIGRATION_DATABASE_URL", "MIGRATION_POSTGRES_USER", "MIGRATION_POSTGRES_PASSWORD"}
+    if env.get("APP_POSTGRES_USER"):
+        dropped.add("POSTGRES_PASSWORD")
+    return {k: v for k, v in env.items() if k not in dropped}
+
+
+def _settings(monkeypatch, env: dict):
+    # Only the container environment counts: no inherited DB variables from the test process.
+    for key in [k for k in os.environ if k.startswith(DB_KEYS)]:
+        monkeypatch.delenv(key)
+    monkeypatch.delenv("PLATFORM_JWT_SECRET", raising=False)
+    return Settings(_env_file=None, **PROD_BASE, **env)
+
+
+def _user_and_password(url: str) -> tuple:
+    parsed = make_url(url)
+    return parsed.username, parsed.password
+
+
+def test_compose_keeps_postgres_user_as_the_owner_role():
+    compose = _read("docker-compose.prod.yml")
+    assert not re.search(r"^\s+POSTGRES_(USER|PASSWORD): \$\{APP_POSTGRES_", compose, re.M)
+    for name in ("backend", "scheduler"):
+        env = _container_db_env(name)
+        assert env["POSTGRES_USER"] == "rooman" and env["APP_POSTGRES_USER"] == "rooman_app"
+        assert "DATABASE_URL" not in env  # the compose deployment assembles the URLs from the roles
+
+
+def test_backend_migrates_as_owner_and_serves_as_runtime_role(monkeypatch):
+    env = _container_db_env("backend")
+    migrating = _settings(monkeypatch, env)  # the entrypoint's wait + Alembic step
+    assert _user_and_password(migrating.sync_database_url) == ("rooman_app", "app-secret-0123456789")
+    assert _user_and_password(migrating.migration_database_url) == ("rooman", OWNER_PASSWORD)
+
+    serving = _settings(monkeypatch, _after_entrypoint(env))  # gunicorn
+    assert _user_and_password(serving.sync_database_url) == ("rooman_app", "app-secret-0123456789")
+    assert OWNER_PASSWORD not in _after_entrypoint(env).values()
+
+
+def test_scheduler_never_receives_the_owner_password(monkeypatch):
+    env = _container_db_env("scheduler")
+    assert OWNER_PASSWORD not in env.values()
+    for stage in (env, _after_entrypoint(env)):
+        s = _settings(monkeypatch, stage)
+        assert _user_and_password(s.sync_database_url) == ("rooman_app", "app-secret-0123456789")
+
+
+def test_production_still_refuses_postgres_user_as_the_runtime_role(monkeypatch):
+    env = {**_container_db_env("backend"), "POSTGRES_USER": "rooman_app"}
+    with pytest.raises(ValidationError, match="APP_POSTGRES_USER must differ from POSTGRES_USER"):
+        _settings(monkeypatch, env)

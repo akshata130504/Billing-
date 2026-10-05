@@ -93,10 +93,14 @@ services:
       POSTGRES_PORT: "5432"
       # Least privilege (REQUIRED, docs/database-security.md): the API connects as the DML-only
       # APP_POSTGRES_USER role while the entrypoint's Alembic step runs as the owner
-      # (POSTGRES_USER). The entrypoint unsets MIGRATION_* before gunicorn starts. The app
-      # refuses to start in production as a SUPERUSER/BYPASSRLS role (RLS would be ignored).
-      POSTGRES_USER: ${APP_POSTGRES_USER:?set APP_POSTGRES_USER (least-privilege runtime role, deploy/db-least-privilege.sh) in .env.production}
-      POSTGRES_PASSWORD: ${APP_POSTGRES_PASSWORD:?set APP_POSTGRES_PASSWORD in .env.production}
+      # (POSTGRES_USER, passed as MIGRATION_*). POSTGRES_USER stays the owner role - it must
+      # differ from APP_POSTGRES_USER or the API refuses to start. The entrypoint unsets
+      # MIGRATION_* and POSTGRES_PASSWORD before gunicorn starts. The app refuses to start in
+      # production as a SUPERUSER/BYPASSRLS role (RLS would be ignored).
+      APP_POSTGRES_USER: ${APP_POSTGRES_USER:?set APP_POSTGRES_USER (least-privilege runtime role, deploy/db-least-privilege.sh) in .env.production}
+      APP_POSTGRES_PASSWORD: ${APP_POSTGRES_PASSWORD:?set APP_POSTGRES_PASSWORD in .env.production}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env.production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
       MIGRATION_POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env.production}
       MIGRATION_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
@@ -142,8 +146,12 @@ services:
       POSTGRES_SERVER: db
       POSTGRES_PORT: "5432"
       # Runtime role only (see backend); the scheduler never needs the owner credentials.
-      POSTGRES_USER: ${APP_POSTGRES_USER:?set APP_POSTGRES_USER (least-privilege runtime role, deploy/db-least-privilege.sh) in .env.production}
-      POSTGRES_PASSWORD: ${APP_POSTGRES_PASSWORD:?set APP_POSTGRES_PASSWORD in .env.production}
+      # POSTGRES_USER names the owner role (so it differs from APP_POSTGRES_USER); its password
+      # is blanked here so the owner secret from env_file never reaches this container.
+      APP_POSTGRES_USER: ${APP_POSTGRES_USER:?set APP_POSTGRES_USER (least-privilege runtime role, deploy/db-least-privilege.sh) in .env.production}
+      APP_POSTGRES_PASSWORD: ${APP_POSTGRES_PASSWORD:?set APP_POSTGRES_PASSWORD in .env.production}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env.production}
+      POSTGRES_PASSWORD: ""
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     volumes:
       - uploads_data:/app/backend/uploads

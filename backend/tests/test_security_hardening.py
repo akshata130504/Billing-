@@ -404,6 +404,83 @@ def test_migration_url_falls_back_to_runtime():
     assert s.migration_database_url == s.sync_database_url
 
 
+def test_runtime_url_uses_app_postgres_user():
+    s = Settings(
+        _env_file=None,
+        DATABASE_URL=None,
+        POSTGRES_SERVER="db",
+        POSTGRES_PORT=5432,
+        POSTGRES_DB="rooman_billing",
+        POSTGRES_USER="rooman",
+        POSTGRES_PASSWORD="ownerpassword",
+        APP_POSTGRES_USER="rooman_app",
+        APP_POSTGRES_PASSWORD="apppassword",
+    )
+    assert s.sync_database_url == "postgresql+psycopg://rooman_app:apppassword@db:5432/rooman_billing"
+    assert "rooman:" not in s.sync_database_url
+    assert s.migration_database_url == "postgresql+psycopg://rooman:ownerpassword@db:5432/rooman_billing"
+
+
+def test_production_fails_without_app_postgres_user_when_no_database_url():
+    with pytest.raises(ValidationError) as exc:
+        prod(
+            DATABASE_URL=None,
+            POSTGRES_SERVER="db",
+            POSTGRES_PORT=5432,
+            POSTGRES_DB="rooman_billing",
+            POSTGRES_USER="rooman",
+            POSTGRES_PASSWORD="ownerpassword12345",
+            APP_POSTGRES_USER=None,
+        )
+    assert "APP_POSTGRES_USER must be set in production" in str(exc.value)
+
+
+def test_production_fails_when_app_postgres_user_equals_postgres_user():
+    with pytest.raises(ValidationError) as exc:
+        prod(
+            DATABASE_URL=None,
+            POSTGRES_SERVER="db",
+            POSTGRES_PORT=5432,
+            POSTGRES_DB="rooman_billing",
+            POSTGRES_USER="rooman",
+            POSTGRES_PASSWORD="ownerpassword12345",
+            APP_POSTGRES_USER="rooman",
+            APP_POSTGRES_PASSWORD="apppassword123456",
+        )
+    assert "APP_POSTGRES_USER must differ from POSTGRES_USER" in str(exc.value)
+
+
+def test_production_fails_when_app_postgres_password_too_short():
+    with pytest.raises(ValidationError) as exc:
+        prod(
+            DATABASE_URL=None,
+            POSTGRES_SERVER="db",
+            POSTGRES_PORT=5432,
+            POSTGRES_DB="rooman_billing",
+            POSTGRES_USER="rooman",
+            POSTGRES_PASSWORD="ownerpassword12345",
+            APP_POSTGRES_USER="rooman_app",
+            APP_POSTGRES_PASSWORD="short",
+        )
+    assert "APP_POSTGRES_PASSWORD must be at least 16 characters" in str(exc.value)
+
+
+def test_production_succeeds_with_app_postgres_credentials():
+    p = prod(
+        DATABASE_URL=None,
+        POSTGRES_SERVER="db",
+        POSTGRES_PORT=5432,
+        POSTGRES_DB="rooman_billing",
+        POSTGRES_USER="rooman",
+        POSTGRES_PASSWORD="ownerpassword12345",
+        APP_POSTGRES_USER="rooman_app",
+        APP_POSTGRES_PASSWORD="apppassword12345678",
+    )
+    assert p.is_production
+    assert p.sync_database_url == "postgresql+psycopg://rooman_app:apppassword12345678@db:5432/rooman_billing"
+    assert p.migration_database_url == "postgresql+psycopg://rooman:ownerpassword12345@db:5432/rooman_billing"
+
+
 def test_migration_url_uses_owner_credentials():
     s = Settings(
         _env_file=None, DATABASE_URL=None, POSTGRES_USER="rooman_app", POSTGRES_PASSWORD="a", POSTGRES_SERVER="db",
