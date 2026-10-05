@@ -257,6 +257,10 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "rooman_billing"
+    # Least-privilege runtime role (APP_POSTGRES_USER / APP_POSTGRES_PASSWORD).
+    # When set, the runtime application connects as this role. Unset = connects as POSTGRES_USER.
+    APP_POSTGRES_USER: str | None = None
+    APP_POSTGRES_PASSWORD: str | None = None
     DATABASE_URL: str | None = None
     # Optional separate owner/migration credentials (least privilege, docs/database-security.md).
     # Alembic and the container entrypoint's migration step use these; the running app uses
@@ -290,7 +294,9 @@ class Settings(BaseSettings):
         """Runtime (application) connection URL."""
         if self.DATABASE_URL:
             return self.DATABASE_URL
-        return self._assemble_url(self.POSTGRES_USER, self.POSTGRES_PASSWORD)
+        runtime_user = self.APP_POSTGRES_USER or self.POSTGRES_USER
+        runtime_password = self.APP_POSTGRES_PASSWORD if self.APP_POSTGRES_USER else self.POSTGRES_PASSWORD
+        return self._assemble_url(runtime_user, runtime_password)
 
     @property
     def migration_database_url(self) -> str:
@@ -308,6 +314,9 @@ class Settings(BaseSettings):
                     .render_as_string(hide_password=False)
                 )
             return self._assemble_url(self.MIGRATION_POSTGRES_USER, self.MIGRATION_POSTGRES_PASSWORD or "")
+        # When APP_POSTGRES_USER is set and differs from POSTGRES_USER, POSTGRES_USER is the migration/owner role
+        if self.APP_POSTGRES_USER and self.POSTGRES_USER and self.POSTGRES_USER != self.APP_POSTGRES_USER:
+            return self._assemble_url(self.POSTGRES_USER, self.POSTGRES_PASSWORD)
         return self.sync_database_url
 
     def db_connect_args(self, url: Optional[str] = None) -> Dict[str, Any]:
@@ -508,6 +517,20 @@ class Settings(BaseSettings):
                 problems.append("DATABASE_URL must point at PostgreSQL, not SQLite")
             if "postgres:postgres@" in self.sync_database_url:
                 problems.append("database password must not be the default 'postgres'")
+            if not self.DATABASE_URL:
+                if not self.APP_POSTGRES_USER:
+                    problems.append(
+                        "APP_POSTGRES_USER must be set in production to enforce least privilege (deploy/db-least-privilege.sh)"
+                    )
+                elif self.APP_POSTGRES_USER == self.POSTGRES_USER:
+                    problems.append("APP_POSTGRES_USER must differ from POSTGRES_USER (least-privilege runtime role)")
+                elif len(self.APP_POSTGRES_PASSWORD or "") < 16:
+                    problems.append("APP_POSTGRES_PASSWORD must be at least 16 characters")
+            elif self.MIGRATION_POSTGRES_USER:
+                from sqlalchemy.engine import make_url
+                runtime_user = make_url(self.DATABASE_URL).username
+                if runtime_user and runtime_user == self.MIGRATION_POSTGRES_USER:
+                    problems.append("DATABASE_URL runtime user must differ from MIGRATION_POSTGRES_USER")
             if any(o.startswith(("http://localhost", "http://127.0.0.1")) for o in self.ALLOWED_ORIGINS):
                 problems.append("ALLOWED_ORIGINS must not include localhost or 127.0.0.1")
             if not (self.SMTP_HOST or "").strip():
