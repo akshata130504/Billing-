@@ -3,13 +3,12 @@
 The tenant app is served at /admin and the platform (Rooman staff) console at /superadmin, both on
 the origin of FRONTEND_URL (conftest: http://localhost:5173). Sharing the origin shares no
 authorization: platform API paths accept only the platform session (cookies, CSRF double submit,
-TOTP), refuse every other browser origin and every cross-site fetch, and tenant routes never accept
+step-up), refuse every other browser origin and every cross-site fetch, and tenant routes never accept
 platform credentials (and vice versa).
 
 The tenant app authenticates with bearer tokens only (no cookies, no CSRF token), so "tenant
 cookies / tenant CSRF" on the platform side are covered by the bearer and forged-cookie checks.
 """
-import time
 import uuid
 from http.cookies import SimpleCookie
 
@@ -24,8 +23,7 @@ from backend.app.api.platform_deps import (
     cookie_specs,
 )
 from backend.app.core.config import Settings, settings
-from backend.app.core.totp import totp
-from backend.app.models.platform import PlatformRole, PlatformStaff
+from backend.app.models.platform import PlatformRole
 from backend.app.services import platform_auth_service as svc
 
 APP = "http://localhost:5173"  # the one application origin (/admin and /superadmin)
@@ -54,15 +52,8 @@ def _staff(db):
                             role=PlatformRole.PLATFORM_ADMINISTRATOR, password=PASSWORD, actor="test")
 
 
-def _sign_in(client, db, enrolment):
-    db.expire_all()
-    staff = db.get(PlatformStaff, enrolment.staff.id)
-    staff.totp_last_used_step = None
-    db.commit()
-    first = client.post(f"{AUTH}/login", json={"email": enrolment.staff.email, "password": PASSWORD})
-    assert first.status_code == 200, first.text
-    resp = client.post(f"{AUTH}/2fa", json={"challenge_token": first.json()["challenge_token"],
-                                            "code": totp(enrolment.totp_secret, at=time.time())})
+def _sign_in(client, db, staff):
+    resp = client.post(f"{AUTH}/login", json={"email": staff.email, "password": PASSWORD})
     assert resp.status_code == 200, resp.text
     return resp
 
@@ -199,17 +190,17 @@ def test_tenant_responses_unchanged(tenant):
     "",
 ])
 def test_foreign_origins_are_refused_on_platform_paths(platform_client, db, origin):
-    enrolment = _staff(db)
+    staff = _staff(db)
     login = platform_client.post(f"{AUTH}/login", headers={"Origin": origin},
-                                 json={"email": enrolment.staff.email, "password": PASSWORD})
+                                 json={"email": staff.email, "password": PASSWORD})
     assert login.status_code == 403
     assert "access-control-allow-origin" not in login.headers
     assert platform_client.get(f"{AUTH}/me", headers={"Origin": origin}).status_code == 403
 
 
 def test_application_origin_and_no_origin_are_accepted(platform_client, db):
-    enrolment = _staff(db)
-    body = {"email": enrolment.staff.email, "password": PASSWORD}
+    staff = _staff(db)
+    body = {"email": staff.email, "password": PASSWORD}
     assert platform_client.post(f"{AUTH}/login", headers={"Origin": APP}, json=body).status_code == 200
     assert platform_client.post(f"{AUTH}/login", headers={"Origin": "HTTP://LOCALHOST:5173"}, json=body).status_code == 200
     assert platform_client.post(f"{AUTH}/login", json=body).status_code == 200  # non-browser client
@@ -217,9 +208,9 @@ def test_application_origin_and_no_origin_are_accepted(platform_client, db):
 
 @pytest.mark.parametrize("site,allowed", [("same-origin", True), ("none", True), ("same-site", False), ("cross-site", False)])
 def test_sec_fetch_site(platform_client, db, site, allowed):
-    enrolment = _staff(db)
+    staff = _staff(db)
     resp = platform_client.post(f"{AUTH}/login", headers={"Sec-Fetch-Site": site},
-                                json={"email": enrolment.staff.email, "password": PASSWORD})
+                                json={"email": staff.email, "password": PASSWORD})
     assert (resp.status_code == 200) is allowed, (site, resp.status_code)
 
 
@@ -281,9 +272,9 @@ def test_cors_preflight_from_other_origins_is_refused(platform_client, origin):
 
 
 def test_cors_actual_response_only_names_the_application_origin(platform_client, db):
-    enrolment = _staff(db)
+    staff = _staff(db)
     resp = platform_client.post(f"{AUTH}/login", headers={"Origin": APP},
-                                json={"email": enrolment.staff.email, "password": PASSWORD})
+                                json={"email": staff.email, "password": PASSWORD})
     assert resp.headers["access-control-allow-origin"] == APP
     assert resp.headers["access-control-allow-credentials"] == "true"
     assert "origin" in resp.headers.get("vary", "").lower()

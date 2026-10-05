@@ -155,7 +155,7 @@ describe('website CMS editor', () => {
     expect(within(dialog).getByText(/Changed sections: hero/)).toBeInTheDocument();
     fireEvent.change(within(dialog).getByLabelText(/^Reason/), { target: { value: 'Launch the new hero headline' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Publish' }));
-    fireEvent.change(await within(dialog).findByLabelText(/^Authenticator code/), { target: { value: '123456' } });
+    fireEvent.change(await within(dialog).findByLabelText(/^Password/), { target: { value: 'Platform-Passw0rd-2026!' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Verify and publish' }));
     await waitFor(() => expect(api.publish).toHaveBeenCalledTimes(2));
     expect(api.publish).toHaveBeenLastCalledWith(4, 'Launch the new hero headline');

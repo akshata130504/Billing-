@@ -11,7 +11,7 @@ vi.mock('../platformApi', async () => {
   return {
     ...actual,
     platformApi: {
-      login: vi.fn(), verifyTwoFactor: vi.fn(), me: vi.fn(), refresh: vi.fn(), sessions: vi.fn(),
+      login: vi.fn(), me: vi.fn(), refresh: vi.fn(), sessions: vi.fn(),
       revokeSession: vi.fn(), logout: vi.fn(), logoutAll: vi.fn(), stepUp: vi.fn(),
     },
   };
@@ -263,7 +263,7 @@ describe('organization detail', () => {
     expect(screen.queryByRole('button', { name: 'Reject Organization' })).not.toBeInTheDocument();
   });
 
-  it('suspends with reason and ticket, asking for a fresh code when the server requires step-up', async () => {
+  it('suspends with reason and ticket, asking for the password when the server requires step-up', async () => {
     api.organization.mockResolvedValueOnce(orgDetail()).mockResolvedValue(
       orgDetail({ status: 'suspended', allowed_actions: ['reactivate', 'schedule_deletion', 'pause_jobs'] })
     );
@@ -282,11 +282,12 @@ describe('organization detail', () => {
     fireEvent.change(within(dialog).getByLabelText(/^Ticket reference/), { target: { value: 'SUP-1234' } });
     fireEvent.click(submit);
 
-    const code = await within(dialog).findByLabelText(/^Authenticator code/);
-    fireEvent.change(code, { target: { value: '123456' } });
+    const password = await within(dialog).findByLabelText(/^Password/);
+    expect(password).toHaveAttribute('type', 'password');
+    fireEvent.change(password, { target: { value: 'Platform-Passw0rd-2026!' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Verify and suspend' }));
 
-    await waitFor(() => expect(auth.stepUp).toHaveBeenCalledWith('123456'));
+    await waitFor(() => expect(auth.stepUp).toHaveBeenCalledWith('Platform-Passw0rd-2026!'));
     await waitFor(() => expect(api.lifecycle).toHaveBeenCalledTimes(2));
     expect(api.lifecycle).toHaveBeenLastCalledWith('org-1', 'suspend', { reason: 'Unpaid platform invoice for 90 days', ticket_ref: 'SUP-1234' });
     expect(await screen.findByText('Suspend organization done')).toBeInTheDocument();

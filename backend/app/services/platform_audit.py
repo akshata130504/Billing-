@@ -15,7 +15,7 @@ from backend.app.models.identity import Organization
 from backend.app.models.platform import PlatformAuditLog, PlatformStaff
 
 # Event names (see docs/platform-administration-design.md, section 10).
-LOGIN_PASSWORD_VERIFIED = "PLATFORM_LOGIN_PASSWORD_VERIFIED"  # step 1 ok, 2FA challenge issued
+LOGIN_PASSWORD_VERIFIED = "PLATFORM_LOGIN_PASSWORD_VERIFIED"  # former two-step sign-in (historical rows)
 LOGIN_FAILED = "PLATFORM_LOGIN_FAILED"
 TWO_FACTOR_SUCCEEDED = "PLATFORM_2FA_SUCCEEDED"
 TWO_FACTOR_FAILED = "PLATFORM_2FA_FAILED"
@@ -30,7 +30,7 @@ STAFF_DEACTIVATED = "PLATFORM_STAFF_DEACTIVATED"
 STAFF_ACTIVATED = "PLATFORM_STAFF_ACTIVATED"
 TWO_FACTOR_RESET = "PLATFORM_2FA_RESET"
 PASSWORD_RESET = "PLATFORM_PASSWORD_RESET"
-STEP_UP_SUCCEEDED = "PLATFORM_STEP_UP_SUCCEEDED"  # fresh TOTP accepted for this session
+STEP_UP_SUCCEEDED = "PLATFORM_STEP_UP_SUCCEEDED"  # password re-entered on this session
 STEP_UP_FAILED = "PLATFORM_STEP_UP_FAILED"
 STEP_UP_REQUIRED = "PLATFORM_STEP_UP_REQUIRED"  # a sensitive action was refused: no recent step-up
 ACCESS_DENIED = "PLATFORM_ACCESS_DENIED"  # a platform route refused the caller's platform role

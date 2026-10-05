@@ -1,7 +1,7 @@
 """Platform identity: Rooman staff who operate the platform (docs/platform-administration-design.md).
 
 A completely separate security principal from tenant users. Platform staff have no Membership in
-any organization, sign in on /api/v1/platform/auth with mandatory TOTP, and receive tokens signed
+any organization, sign in on /api/v1/platform/auth with email and password, and receive tokens signed
 with a different key and audience from tenant tokens. None of these tables use TenantMixin and
 none reference organizations: platform data never cascades from a tenant.
 """
@@ -48,7 +48,8 @@ class PlatformStaff(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     is_active = Column(Boolean, nullable=False, default=True)
     deactivated_at = Column(DateTime(timezone=True), nullable=True)
-    # Mandatory TOTP: an account without totp_enabled_at can never complete sign-in.
+    # Unused since sign-in became email + password only; kept (no destructive migration) so data
+    # from the former TOTP sign-in stays intact. Never read for authentication.
     totp_secret = Column(String(255), nullable=True)  # encrypted (core/security.encrypt_secret)
     totp_enabled_at = Column(DateTime(timezone=True), nullable=True)
     totp_last_used_step = Column(Integer, nullable=True)
@@ -79,7 +80,7 @@ class PlatformSession(UUIDPrimaryKeyMixin, Base):
     revoke_reason = Column(String(64), nullable=True)
     ip_address = Column(String(64), nullable=True)
     user_agent = Column(String(400), nullable=True)
-    # Step-up re-authentication (fresh TOTP) for sensitive actions, bound to THIS session. It is
+    # Step-up re-authentication (current password) for sensitive actions, bound to THIS session. It is
     # never extended: a new step-up sets both values afresh, and it expires with the session (and on
     # revocation / logout / logout-all / password or 2FA reset, via revoked_at and tokens_valid_after).
     step_up_at = Column(DateTime(timezone=True), nullable=True)
@@ -87,10 +88,9 @@ class PlatformSession(UUIDPrimaryKeyMixin, Base):
 
 
 class PlatformLoginChallenge(UUIDPrimaryKeyMixin, Base):
-    """The second step of a platform sign-in: proves the password step succeeded.
-
-    Single use (consumed_at), short-lived, and invalidated after too many wrong codes. Grants
-    nothing by itself: only /platform/auth/2fa with a valid TOTP code turns it into a session.
+    """Unused: the second step of the former two-step (TOTP) platform sign-in. Sign-in is now one
+    step (email + password), so no challenge is created any more; the table is kept so existing
+    rows and migrations stay intact.
     """
 
     __tablename__ = "platform_login_challenges"

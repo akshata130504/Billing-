@@ -1,6 +1,6 @@
 """Platform (Rooman staff) authentication request/response models.
 
-Responses never include password hashes, TOTP secrets or state, or any token value: the session
+Responses never include password hashes, TOTP data, or any token value: the session
 travels in HttpOnly cookies set by the endpoints.
 """
 from typing import List, Optional
@@ -13,17 +13,6 @@ from backend.app.schemas.organization import EmailAddress, UTCDateTime
 class PlatformLoginRequest(BaseModel):
     email: EmailAddress
     password: str = Field(min_length=1, max_length=256)
-
-
-class PlatformLoginChallengeOut(BaseModel):
-    two_factor_required: bool = True
-    challenge_token: str
-    expires_in: int
-
-
-class PlatformTwoFactorRequest(BaseModel):
-    challenge_token: str = Field(min_length=1, max_length=512)
-    code: str = Field(min_length=6, max_length=10)
 
 
 class PlatformStaffOut(BaseModel):
@@ -60,7 +49,7 @@ class PlatformLogoutAllOut(BaseModel):
 
 
 class PlatformStepUpRequest(BaseModel):
-    code: str = Field(min_length=6, max_length=10)
+    password: str = Field(min_length=1, max_length=256)
 
 
 class PlatformStepUpOut(BaseModel):

@@ -24,8 +24,8 @@ const MIN_REASON = 10;
 
 /**
  * Confirmation for a lifecycle or staff action: reason (always) and ticket (where the design
- * requires one). If the server answers STEP_UP_REQUIRED, the dialog asks for a fresh
- * authenticator code, confirms it with /platform/auth/step-up and retries the same action once.
+ * requires one). If the server answers STEP_UP_REQUIRED, the dialog asks for the current
+ * password, confirms it with /platform/auth/step-up and retries the same action once.
  */
 export function ActionDialog<T>({
   isOpen, title, description, confirmLabel, danger = false, requireTicket = false, notes = [],
@@ -33,8 +33,8 @@ export function ActionDialog<T>({
 }: ActionDialogProps<T>) {
   const [reason, setReason] = useState('');
   const [ticket, setTicket] = useState('');
-  const [code, setCode] = useState('');
-  const [step, setStep] = useState<'details' | 'code'>('details');
+  const [password, setPassword] = useState('');
+  const [step, setStep] = useState<'details' | 'password'>('details');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -42,7 +42,7 @@ export function ActionDialog<T>({
     if (!isOpen) return;
     setReason('');
     setTicket('');
-    setCode('');
+    setPassword('');
     setStep('details');
     setError(null);
     setBusy(false);
@@ -56,7 +56,7 @@ export function ActionDialog<T>({
       onDone(await onSubmit(body()));
     } catch (err) {
       if (err instanceof PlatformApiError && err.code === 'STEP_UP_REQUIRED') {
-        setStep('code');
+        setStep('password');
         setError(null);
         return;
       }
@@ -73,15 +73,15 @@ export function ActionDialog<T>({
     setBusy(false);
   };
 
-  const submitCode = async (e: FormEvent) => {
+  const submitPassword = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await platformApi.stepUp(code.trim());
+      await platformApi.stepUp(password);
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : 'The code could not be verified.');
-      setCode('');
+      setError(err instanceof PlatformApiError ? err.message : 'The password could not be verified.');
+      setPassword('');
       setBusy(false);
       return;
     }
@@ -135,24 +135,24 @@ export function ActionDialog<T>({
           </div>
         </form>
       ) : (
-        <form onSubmit={submitCode} className="space-y-4" aria-label="Confirm with authenticator code">
+        <form onSubmit={submitPassword} className="space-y-4" aria-label="Confirm with your password">
           <div className="flex gap-3 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-slate-700">
             <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" aria-hidden="true" />
-            <span>This is a sensitive action. Enter a fresh code from your authenticator app to continue.</span>
+            <span>This is a sensitive action. Enter your password to continue.</span>
           </div>
           <Input
-            label="Authenticator code"
-            value={code}
-            onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            inputMode="numeric"
-            autoComplete="one-time-code"
+            label="Password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
             required
             autoFocus
           />
           {error && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={busy}>Cancel</Button>
-            <Button type="submit" variant={danger ? 'danger' : 'primary'} size="sm" isLoading={busy} disabled={code.length !== 6}>
+            <Button type="submit" variant={danger ? 'danger' : 'primary'} size="sm" isLoading={busy} disabled={!password}>
               Verify and {confirmLabel.toLowerCase()}
             </Button>
           </div>

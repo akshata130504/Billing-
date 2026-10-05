@@ -5,7 +5,6 @@ Suspension acts through the Phase 1 scheduler safeguards; the end-to-end schedul
 the lifecycle through the platform API and reuse the Phase 1 fixtures.
 """
 import json
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -16,7 +15,6 @@ from sqlalchemy import select
 from backend.app.api.platform_deps import CSRF_COOKIE, CSRF_HEADER, get_platform_context
 from backend.app.core.config import settings
 from backend.app.core.database import engine
-from backend.app.core.totp import totp
 from backend.app.models import Customer, MemberRole, Organization, OrganizationStatus
 from backend.app.models.platform import PlatformAuditLog, PlatformRole, PlatformStaff
 from backend.app.services import org_lifecycle
@@ -50,27 +48,17 @@ class Staff:
         from backend.app.main import app
 
         self.db = db
-        self.enrolment = auth_svc.create_staff(
+        self.staff = auth_svc.create_staff(
             db, email=f"console-{uuid.uuid4().hex[:8]}@rooman.test", full_name=f"Console {role.value}",
             role=role, password=PASSWORD, actor="test",
         )
-        self.id = self.enrolment.staff.id
+        self.id = self.staff.id
+        self.email = self.staff.email
         self.client = TestClient(app, base_url=PLATFORM)
         self.sign_in()
 
     def sign_in(self):
-        self.db.expire_all()
-        staff = self.db.get(PlatformStaff, self.id)
-        staff.totp_last_used_step = None
-        self.db.commit()
-        first = self.client.post(f"{API}/auth/login", json={"email": self.enrolment.staff.email, "password": PASSWORD})
-        assert first.status_code == 200, first.text
-        # Current step, not the previous one: the server accepts its own step +/- 1, so a current-step
-        # code stays valid even if a 30 s boundary passes before the request is verified (a previous-
-        # step code would then fall outside the window and be refused). Replay protection is
-        # unaffected: totp_last_used_step was cleared above and step_up() pins it again.
-        resp = self.client.post(f"{API}/auth/2fa", json={"challenge_token": first.json()["challenge_token"],
-                                                         "code": totp(self.enrolment.totp_secret, at=time.time())})
+        resp = self.client.post(f"{API}/auth/login", json={"email": self.email, "password": PASSWORD})
         assert resp.status_code == 200, resp.text
         self.session_id = resp.json()["session_id"]
         return resp
@@ -85,11 +73,7 @@ class Staff:
         return self.client.post(f"{API}{path}", json=body or {}, headers=self.csrf(), **kw)
 
     def step_up(self):
-        self.db.expire_all()
-        staff = self.db.get(PlatformStaff, self.id)
-        staff.totp_last_used_step = int(time.time() // 30) - 1  # below the current step, whatever sign-in used
-        self.db.commit()
-        resp = self.post("/auth/step-up", {"code": totp(self.enrolment.totp_secret, at=time.time())})
+        resp = self.post("/auth/step-up", {"password": PASSWORD})
         assert resp.status_code == 200, resp.text
 
 
@@ -176,7 +160,7 @@ def test_every_console_route_requires_platform_authentication():
     def depends_on_context(dependant):
         return any(d.call is get_platform_context or depends_on_context(d) for d in dependant.dependencies)
 
-    open_routes = {f"{API}/auth/login", f"{API}/auth/2fa", f"{API}/auth/refresh"}
+    open_routes = {f"{API}/auth/login", f"{API}/auth/refresh"}
     platform_routes = [r for r in app.routes if isinstance(r, APIRoute) and r.path.startswith(f"{API}/")]
     assert len(platform_routes) >= 25
     unguarded = [r.path for r in platform_routes if r.path not in open_routes and not depends_on_context(r.dependant)]
@@ -521,7 +505,7 @@ def test_staff_list_and_detail_hold_no_credentials(admin, ops, db):
     assert resp.status_code == 200
     items = {s["id"]: s for s in resp.json()["items"]}
     assert set(items[ops.id]) == STAFF_KEYS
-    assert items[ops.id]["role"] == "platform_operations" and items[ops.id]["two_factor_enrolled"] is True
+    assert items[ops.id]["role"] == "platform_operations" and items[ops.id]["two_factor_enrolled"] is False
     assert items[ops.id]["active_sessions"] == 1 and items[ops.id]["last_login_at"]
     detail = admin.get(f"/staff/{ops.id}")
     assert detail.status_code == 200
@@ -529,7 +513,7 @@ def test_staff_list_and_detail_hold_no_credentials(admin, ops, db):
     assert body["sessions"][0]["id"] == ops.session_id and body["is_self"] is False
     staff = db.get(PlatformStaff, ops.id)
     for text in (resp.text, detail.text):
-        assert staff.hashed_password not in text and staff.totp_secret not in text
+        assert staff.hashed_password not in text
         assert not (_keys(json.loads(text)) & {"hashed_password", "totp_secret", "refresh_token_hash", "token_hash"})
 
 
@@ -587,7 +571,7 @@ def test_audit_view_filters_and_pages(admin, db, tenant):
     assert resp.status_code == 200
     body = resp.json()
     assert body["total"] == 1 and body["items"][0]["ticket_ref"] == "SUP-8"
-    assert body["items"][0]["staff_email_snapshot"] == admin.enrolment.staff.email
+    assert body["items"][0]["staff_email_snapshot"] == admin.email
     everything = admin.get("/audit", params={"page_size": 5}).json()
     assert len(everything["items"]) == 5 and everything["total"] > 5
     assert admin.get("/audit", params={"result": "maybe"}).status_code == 422
@@ -601,7 +585,7 @@ def test_audit_entries_never_carry_credentials(admin, db):
     assert resp.status_code == 200
     for item in resp.json()["items"]:
         assert not (_keys(item.get("details") or {}) & {"password", "code", "token", "secret", "totp"})
-    assert admin.enrolment.totp_secret not in resp.text and PASSWORD not in resp.text
+    assert PASSWORD not in resp.text
 
 
 def test_audit_has_no_write_methods(admin):

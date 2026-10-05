@@ -1,6 +1,6 @@
 """Platform (Rooman staff) identity and authentication - phase 2.
 
-Covers the separate PlatformStaff principal, mandatory TOTP, platform sessions and cookies, the
+Covers the separate PlatformStaff principal, email + password sign-in (no TOTP), platform sessions and cookies, the
 separate platform token (key, audience, issuer, type), token confusion in both directions, role
 dependencies, isolation from tenant auth, and the platform audit trail.
 """
@@ -42,14 +42,14 @@ from backend.app.core.security import (
     TOKEN_ISSUER,
     create_access_token,
     decode_access_token,
+    encrypt_secret,
     verify_password,
 )
-from backend.app.core.totp import totp
+from backend.app.core.totp import generate_totp_secret
 from backend.app.models import MemberRole
 from backend.app.models.base import utcnow
 from backend.app.models.platform import (
     PlatformAuditLog,
-    PlatformLoginChallenge,
     PlatformRole,
     PlatformSession,
     PlatformStaff,
@@ -87,17 +87,6 @@ def _staff(db, role=ADMIN, email=None):
     )
 
 
-def _code(secret, steps=0):
-    now = time.time()
-    if steps < 0 and 30 - (now % 30) < 2.5:
-        # The server accepts its own 30 s step +/- 1. A code for the PREVIOUS step made in the last
-        # moments of a window falls outside that range if the boundary passes before the request is
-        # verified (slow CI / loaded machine), so wait for the next window instead of racing it.
-        time.sleep(30 - (now % 30) + 0.2)
-        now = time.time()
-    return totp(secret, at=now + steps * 30)
-
-
 def _fresh_client():
     from backend.app.main import app
 
@@ -110,22 +99,25 @@ def _tenant_client():
     return TestClient(app, base_url=PLATFORM_BASE)  # same origin as the platform console
 
 
-def _challenge(client, enrolment, password=PASSWORD):
-    return client.post(f"{AUTH}/login", json={"email": enrolment.staff.email, "password": password})
+def _login(client, staff, password=PASSWORD):
+    return client.post(f"{AUTH}/login", json={"email": staff.email, "password": password})
 
 
-def _sign_in(client, db, enrolment, steps=0):
-    """Full sign-in; returns the 2FA response. Allows repeated sign-ins in one test."""
-    db.expire_all()
-    staff = db.get(PlatformStaff, enrolment.staff.id)
-    staff.totp_last_used_step = None
-    db.commit()
-    first = _challenge(client, enrolment)
-    assert first.status_code == 200, first.text
-    resp = client.post(f"{AUTH}/2fa", json={"challenge_token": first.json()["challenge_token"],
-                                            "code": _code(enrolment.totp_secret, steps)})
+def _sign_in(client, staff):
+    """Full sign-in (email + password); returns the login response."""
+    resp = _login(client, staff)
     assert resp.status_code == 200, resp.text
     return resp
+
+
+def _give_legacy_totp(db, staff):
+    """Simulate a staff member enrolled under the former two-step (TOTP) sign-in."""
+    secret = generate_totp_secret()
+    row = db.get(PlatformStaff, staff.id)
+    row.totp_secret = encrypt_secret(secret)
+    row.totp_enabled_at = utcnow()
+    db.commit()
+    return secret
 
 
 def _access(client):
@@ -168,23 +160,21 @@ def _audit(db, staff_id=None, action=None):
 # --- platform identity ------------------------------------------------------------------------------------
 
 
-def test_create_staff_hashes_password_and_encrypts_totp(db):
-    enrolment = _staff(db)
+def test_create_staff_hashes_password_and_needs_no_totp(db):
+    staff = _staff(db)
     db.expire_all()
-    staff = db.get(PlatformStaff, enrolment.staff.id)
+    staff = db.get(PlatformStaff, staff.id)
     assert staff.hashed_password != PASSWORD and verify_password(PASSWORD, staff.hashed_password)
-    assert staff.totp_enabled_at is not None
-    assert staff.totp_secret and enrolment.totp_secret not in staff.totp_secret  # stored encrypted
-    assert enrolment.otpauth_uri.startswith("otpauth://totp/")
+    assert staff.totp_secret is None and staff.totp_enabled_at is None
     assert staff.role == ADMIN and staff.is_active
 
 
 def test_platform_staff_is_not_a_tenant_user(db):
     from backend.app.models import Membership, User
 
-    enrolment = _staff(db)
-    assert db.scalars(select(User).where(User.email == enrolment.staff.email)).first() is None
-    assert db.scalars(select(Membership).where(Membership.user_id == enrolment.staff.id)).first() is None
+    staff = _staff(db)
+    assert db.scalars(select(User).where(User.email == staff.email)).first() is None
+    assert db.scalars(select(Membership).where(Membership.user_id == staff.id)).first() is None
     assert {m.value for m in MemberRole} == {"owner", "admin", "finance", "viewer"}  # tenant roles unchanged
 
 
@@ -198,47 +188,61 @@ def test_weak_platform_passwords_refused(db, password):
 
 
 def test_duplicate_staff_email_refused(db):
-    enrolment = _staff(db)
+    staff = _staff(db)
     with pytest.raises(AppException):
-        _staff(db, email=enrolment.staff.email.upper())
+        _staff(db, email=staff.email.upper())
 
 
-def test_password_alone_never_establishes_a_session(client, db):
-    enrolment = _staff(db)
-    resp = _challenge(client, enrolment)
-    assert resp.status_code == 200
+def test_email_and_password_establish_a_platform_session(client, db):
+    staff = _staff(db)
+    resp = _login(client, staff)
+    assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body == {"two_factor_required": True, "challenge_token": body["challenge_token"], "expires_in": 300}
-    assert _access(client) is None and client.cookies.get(REFRESH_COOKIE, path=f"{AUTH}") is None
+    assert set(body) == {"staff", "session_id", "session_expires_at", "access_expires_in"}
+    assert body["staff"]["email"] == staff.email and body["staff"]["role"] == "platform_administrator"
+    assert _access(client) and client.cookies.get(REFRESH_COOKIE, path=AUTH)
     db.expire_all()
-    assert db.scalars(select(PlatformSession).where(PlatformSession.staff_id == enrolment.staff.id)).first() is None
-    # The challenge itself is not a credential for anything.
-    assert client.get(f"{AUTH}/me", headers=_bearer(body["challenge_token"])).status_code == 401
+    session = db.get(PlatformSession, body["session_id"])
+    assert session is not None and session.staff_id == staff.id and session.revoked_at is None
+    assert db.get(PlatformStaff, staff.id).last_login_at is not None
+    assert client.get(f"{AUTH}/me").json()["session_id"] == body["session_id"]
 
 
 @pytest.mark.parametrize("case", ["unknown", "wrong_password", "inactive"])
 def test_login_failures_look_identical(client, db, case):
-    enrolment = _staff(db)
+    staff = _staff(db)
     if case == "unknown":
         body = {"email": f"nobody-{uuid.uuid4().hex[:6]}@rooman.test", "password": PASSWORD}
     elif case == "wrong_password":
-        body = {"email": enrolment.staff.email, "password": PASSWORD + "x"}
+        body = {"email": staff.email, "password": PASSWORD + "x"}
     else:
-        svc.deactivate_staff(db, email=enrolment.staff.email, reason="test", actor="test")
-        body = {"email": enrolment.staff.email, "password": PASSWORD}
+        svc.deactivate_staff(db, email=staff.email, reason="test", actor="test")
+        body = {"email": staff.email, "password": PASSWORD}
     resp = client.post(f"{AUTH}/login", json=body)
     assert resp.status_code == 401
     assert resp.json()["error"]["message"] == svc.INVALID_CREDENTIALS
 
 
-def test_staff_without_two_factor_cannot_sign_in(client, db):
-    enrolment = _staff(db)
-    staff = db.get(PlatformStaff, enrolment.staff.id)
-    staff.totp_enabled_at = None
-    db.commit()
-    resp = _challenge(client, enrolment)
-    assert resp.status_code == 401
-    assert resp.json()["error"]["message"] == svc.INVALID_CREDENTIALS
+def test_staff_with_legacy_totp_signs_in_with_password_only(client, db):
+    """Existing administrators enrolled under the former TOTP sign-in need no code now."""
+    staff = _staff(db)
+    _give_legacy_totp(db, staff)
+    resp = _login(client, staff)
+    assert resp.status_code == 200, resp.text
+    assert client.get(f"{AUTH}/me").status_code == 200
+
+
+def test_login_response_never_contains_totp_or_token_material(client, db):
+    staff = _staff(db)
+    secret = _give_legacy_totp(db, staff)
+    resp = _login(client, staff)
+    assert resp.status_code == 200
+    text = resp.text.lower()
+    for needle in ("totp", "otpauth", "secret", "challenge", "two_factor", "access_token", "refresh"):
+        assert needle not in text, needle
+    db.expire_all()
+    stored = db.get(PlatformStaff, staff.id).totp_secret
+    assert secret not in resp.text and stored not in resp.text
 
 
 def test_tenant_user_credentials_do_not_work_on_platform_login(client, tenant):
@@ -248,29 +252,29 @@ def test_tenant_user_credentials_do_not_work_on_platform_login(client, tenant):
 
 
 def test_password_brute_force_is_throttled(client, db):
-    enrolment = _staff(db)
-    codes = [_challenge(client, enrolment, password="Wrong-Passw0rd-xx").status_code for _ in range(svc.MAX_FAILED_LOGINS)]
+    staff = _staff(db)
+    codes = [_login(client, staff, password="Wrong-Passw0rd-xx").status_code for _ in range(svc.MAX_FAILED_LOGINS)]
     assert codes == [401] * svc.MAX_FAILED_LOGINS
-    locked = _challenge(client, enrolment)  # even the right password is refused while locked
+    locked = _login(client, staff)  # even the right password is refused while locked
     assert locked.status_code == 401
     assert locked.json()["error"]["message"] == svc.TOO_MANY_ATTEMPTS
-    assert _audit(db, enrolment.staff.id, "PLATFORM_ACCOUNT_LOCKED")
+    assert _audit(db, staff.id, "PLATFORM_ACCOUNT_LOCKED")
 
 
-# --- mandatory 2FA ------------------------------------------------------------------------------------------
+# --- password-only sign-in ------------------------------------------------------------------------------
 
 
-def test_valid_totp_establishes_session_with_secure_cookies(client, db):
-    enrolment = _staff(db)
-    resp = _sign_in(client, db, enrolment)
+def test_sign_in_sets_secure_session_cookies(client, db):
+    staff = _staff(db)
+    resp = _sign_in(client, staff)
     body = resp.json()
-    assert body["staff"]["email"] == enrolment.staff.email and body["staff"]["role"] == "platform_administrator"
+    assert body["staff"]["email"] == staff.email and body["staff"]["role"] == "platform_administrator"
     assert "access_token" not in resp.text and "refresh" not in json.dumps(body)
     set_cookies = "\n".join(resp.headers.get_list("set-cookie")).lower()
     for name in (ACCESS_COOKIE, REFRESH_COOKIE):
         line = next(l for l in resp.headers.get_list("set-cookie") if l.startswith(name))
         assert "httponly" in line.lower() and "samesite=strict" in line.lower()
-    assert "path=/api/v1/platform;" in set_cookies or "path=/api/v1/platform\n" in set_cookies or "path=/api/v1/platform" in set_cookies
+    assert "path=/api/v1/platform" in set_cookies
     assert f"path={AUTH.lower()}" in set_cookies
     csrf_line = next(l for l in resp.headers.get_list("set-cookie") if l.startswith(CSRF_COOKIE))
     assert "httponly" not in csrf_line.lower()
@@ -280,92 +284,54 @@ def test_valid_totp_establishes_session_with_secure_cookies(client, db):
 
 def test_cookies_are_secure_in_production_like_settings(client, db, monkeypatch):
     monkeypatch.setattr(settings, "PLATFORM_COOKIE_SECURE", True)
-    resp = _sign_in(client, db, _staff(db))
+    resp = _sign_in(client, _staff(db))
     for line in resp.headers.get_list("set-cookie"):
         assert "secure" in line.lower()
 
 
-@pytest.mark.parametrize("code", ["000000", "12345", "abcdef", ""])
-def test_invalid_or_missing_totp_rejected(client, db, code):
-    enrolment = _staff(db)
-    challenge = _challenge(client, enrolment).json()["challenge_token"]
-    resp = client.post(f"{AUTH}/2fa", json={"challenge_token": challenge, "code": code})
-    assert resp.status_code in (401, 422)
+def test_two_factor_step_endpoint_is_gone(client, db):
+    resp = client.post(f"{AUTH}/2fa", json={"challenge_token": "x", "code": "123456"})
+    assert resp.status_code in (404, 405)
+
+
+def test_wrong_password_establishes_no_session(client, db):
+    staff = _staff(db)
+    resp = _login(client, staff, password="Wrong-Passw0rd-xx")
+    assert resp.status_code == 401 and resp.json()["error"]["message"] == svc.INVALID_CREDENTIALS
+    assert _access(client) is None and client.cookies.get(REFRESH_COOKIE, path=AUTH) is None
+    db.expire_all()
+    assert db.scalars(select(PlatformSession).where(PlatformSession.staff_id == staff.id)).first() is None
+
+
+def test_inactive_staff_cannot_sign_in_even_with_legacy_totp(client, db):
+    staff = _staff(db)
+    _give_legacy_totp(db, staff)
+    svc.deactivate_staff(db, email=staff.email, reason="test", actor="test")
+    resp = _login(client, staff)
+    assert resp.status_code == 401 and resp.json()["error"]["message"] == svc.INVALID_CREDENTIALS
     assert _access(client) is None
+    assert _audit(db, staff.id, "PLATFORM_LOGIN_FAILED")[-1].details["reason"] == "inactive"
 
 
-def test_totp_code_cannot_be_replayed(client, db):
-    enrolment = _staff(db)
-    code = _code(enrolment.totp_secret)
-    first = client.post(f"{AUTH}/2fa", json={"challenge_token": _challenge(client, enrolment).json()["challenge_token"], "code": code})
-    assert first.status_code == 200
-    again = client.post(f"{AUTH}/2fa", json={"challenge_token": _challenge(client, enrolment).json()["challenge_token"], "code": code})
-    assert again.status_code == 401
-    assert again.json()["error"]["message"] == svc.INVALID_CODE
+def test_platform_login_keeps_its_rate_limit(db, monkeypatch):
+    """The per-client request limit (slowapi) still applies to platform sign-in, on top of the
+    per-account throttle."""
+    from backend.app.main import app
 
-
-def test_challenge_is_single_use(client, db):
-    enrolment = _staff(db)
-    challenge = _challenge(client, enrolment).json()["challenge_token"]
-    assert client.post(f"{AUTH}/2fa", json={"challenge_token": challenge, "code": _code(enrolment.totp_secret)}).status_code == 200
-    reuse = client.post(f"{AUTH}/2fa", json={"challenge_token": challenge, "code": _code(enrolment.totp_secret, 1)})
-    assert reuse.status_code == 401
-    assert reuse.json()["error"]["message"] == svc.CHALLENGE_INVALID
-
-
-def test_expired_challenge_rejected(client, db):
-    enrolment = _staff(db)
-    challenge = _challenge(client, enrolment).json()["challenge_token"]
-    row = db.scalars(select(PlatformLoginChallenge).where(PlatformLoginChallenge.staff_id == enrolment.staff.id)).first()
-    row.expires_at = utcnow() - timedelta(seconds=1)
-    db.commit()
-    resp = client.post(f"{AUTH}/2fa", json={"challenge_token": challenge, "code": _code(enrolment.totp_secret)})
-    assert resp.status_code == 401 and resp.json()["error"]["message"] == svc.CHALLENGE_INVALID
-
-
-def test_unknown_challenge_rejected(client, db):
-    resp = client.post(f"{AUTH}/2fa", json={"challenge_token": "not-a-challenge", "code": "123456"})
-    assert resp.status_code == 401 and resp.json()["error"]["message"] == svc.CHALLENGE_INVALID
-
-
-def test_new_login_voids_older_challenges(client, db):
-    enrolment = _staff(db)
-    old = _challenge(client, enrolment).json()["challenge_token"]
-    _challenge(client, enrolment)
-    resp = client.post(f"{AUTH}/2fa", json={"challenge_token": old, "code": _code(enrolment.totp_secret)})
-    assert resp.status_code == 401 and resp.json()["error"]["message"] == svc.CHALLENGE_INVALID
-
-
-def test_challenge_dies_after_too_many_wrong_codes(client, db):
-    enrolment = _staff(db)
-    challenge = _challenge(client, enrolment).json()["challenge_token"]
-    for _ in range(svc.MAX_CHALLENGE_ATTEMPTS):
-        assert client.post(f"{AUTH}/2fa", json={"challenge_token": challenge, "code": "000000"}).status_code == 401
-    resp = client.post(f"{AUTH}/2fa", json={"challenge_token": challenge, "code": _code(enrolment.totp_secret)})
-    assert resp.status_code == 401 and resp.json()["error"]["message"] == svc.CHALLENGE_INVALID
-
-
-def test_code_brute_force_locks_the_account_step(client, db):
-    enrolment = _staff(db)
-    for _ in range(svc.MAX_FAILED_LOGINS):
-        challenge = _challenge(client, enrolment).json()["challenge_token"]
-        client.post(f"{AUTH}/2fa", json={"challenge_token": challenge, "code": "000000"})
-    challenge = _challenge(client, enrolment).json()["challenge_token"]
-    resp = client.post(f"{AUTH}/2fa", json={"challenge_token": challenge, "code": _code(enrolment.totp_secret)})
-    assert resp.status_code == 401 and resp.json()["error"]["message"] == svc.TOO_MANY_ATTEMPTS
-    assert _audit(db, enrolment.staff.id, "PLATFORM_ACCOUNT_LOCKED")
-
-
-def test_deactivated_between_steps_cannot_finish(client, db):
-    enrolment = _staff(db)
-    challenge = _challenge(client, enrolment).json()["challenge_token"]
-    svc.deactivate_staff(db, email=enrolment.staff.email, reason="test", actor="test")
-    resp = client.post(f"{AUTH}/2fa", json={"challenge_token": challenge, "code": _code(enrolment.totp_secret)})
-    assert resp.status_code == 401
+    monkeypatch.setattr(settings, "AUTH_RATE_LIMIT", "2/minute")
+    staff = _staff(db)
+    # TCP peer = our private proxy forwarding X-Real-IP, as in production.
+    proxied = TestClient(app, base_url=PLATFORM_BASE, client=("172.18.0.5", 50000))
+    proxied.headers.update({"X-Real-IP": f"10.7.{uuid.uuid4().int % 250}.{uuid.uuid4().int % 250}"})
+    assert _login(proxied, staff, password="Wrong-Passw0rd-xx").status_code == 401
+    assert _login(proxied, staff, password="Wrong-Passw0rd-xx").status_code == 401
+    limited = _login(proxied, staff)  # even the right password, once over the limit
+    assert limited.status_code == 429 and limited.json()["error"]["code"] == "RATE_LIMITED"
+    assert _access(proxied) is None
 
 
 def test_tenant_two_factor_endpoints_unaffected(client, tenant):
-    """Platform 2FA is isolated: the tenant /auth/login/mfa flow still refuses a platform challenge."""
+    """Platform sign-in is isolated: the tenant /auth/login/mfa flow keeps its own 2FA step."""
     resp = _tenant_client().post("/api/v1/auth/login/mfa", json={"mfa_token": "not-a-tenant-token", "code": "000000"})
     assert resp.status_code == 401
 
@@ -374,8 +340,8 @@ def test_tenant_two_factor_endpoints_unaffected(client, tenant):
 
 
 def test_session_created_and_listed(client, db):
-    enrolment = _staff(db)
-    me = _sign_in(client, db, enrolment).json()
+    staff = _staff(db)
+    me = _sign_in(client, staff).json()
     sessions = client.get(f"{AUTH}/sessions").json()["sessions"]
     assert [s["id"] for s in sessions] == [me["session_id"]] and sessions[0]["current"] is True
     row = db.get(PlatformSession, me["session_id"])
@@ -384,51 +350,51 @@ def test_session_created_and_listed(client, db):
 
 
 def test_multiple_sessions_and_revoke_one(db):
-    enrolment = _staff(db)
+    staff = _staff(db)
     a, b = _fresh_client(), _fresh_client()
-    sid_a = _sign_in(a, db, enrolment).json()["session_id"]
-    sid_b = _sign_in(b, db, enrolment, steps=1).json()["session_id"]
+    sid_a = _sign_in(a, staff).json()["session_id"]
+    sid_b = _sign_in(b, staff).json()["session_id"]
     assert {s["id"] for s in a.get(f"{AUTH}/sessions").json()["sessions"]} == {sid_a, sid_b}
     assert a.delete(f"{AUTH}/sessions/{sid_b}", headers=_csrf(a)).status_code == 204
     assert b.get(f"{AUTH}/me").status_code == 401
     assert a.get(f"{AUTH}/me").status_code == 200
-    assert _audit(db, enrolment.staff.id, "PLATFORM_SESSION_REVOKED")
+    assert _audit(db, staff.id, "PLATFORM_SESSION_REVOKED")
 
 
 def test_cannot_revoke_another_staff_members_session(db):
     one, other = _staff(db), _staff(db, role=SUPPORT)
     a, b = _fresh_client(), _fresh_client()
-    _sign_in(a, db, one)
-    sid_other = _sign_in(b, db, other).json()["session_id"]
+    _sign_in(a, one)
+    sid_other = _sign_in(b, other).json()["session_id"]
     assert a.delete(f"{AUTH}/sessions/{sid_other}", headers=_csrf(a)).status_code == 404
     assert b.get(f"{AUTH}/me").status_code == 200
 
 
 def test_logout_revokes_session_and_clears_cookies(client, db):
-    enrolment = _staff(db)
-    _sign_in(client, db, enrolment)
+    staff = _staff(db)
+    _sign_in(client, staff)
     token = _access(client)
     resp = client.post(f"{AUTH}/logout", headers=_csrf(client))
     assert resp.status_code == 204
     assert client.get(f"{AUTH}/me", headers=_bearer(token)).status_code == 401  # the old token is dead
-    assert _audit(db, enrolment.staff.id, "PLATFORM_LOGOUT")
+    assert _audit(db, staff.id, "PLATFORM_LOGOUT")
 
 
 def test_logout_all_revokes_every_session(db):
-    enrolment = _staff(db)
+    staff = _staff(db)
     a, b = _fresh_client(), _fresh_client()
-    _sign_in(a, db, enrolment)
-    _sign_in(b, db, enrolment, steps=1)
+    _sign_in(a, staff)
+    _sign_in(b, staff)
     resp = a.post(f"{AUTH}/logout-all", headers=_csrf(a))
     assert resp.status_code == 200 and resp.json()["sessions_revoked"] == 2
     assert a.get(f"{AUTH}/me").status_code == 401
     assert b.get(f"{AUTH}/me").status_code == 401
-    assert _audit(db, enrolment.staff.id, "PLATFORM_ALL_SESSIONS_REVOKED")
+    assert _audit(db, staff.id, "PLATFORM_ALL_SESSIONS_REVOKED")
 
 
 def test_refresh_rotates_and_detects_reuse(client, db):
-    enrolment = _staff(db)
-    _sign_in(client, db, enrolment)
+    staff = _staff(db)
+    _sign_in(client, staff)
     old_secret = client.cookies.get(REFRESH_COOKIE, path=AUTH)
     first = client.post(f"{AUTH}/refresh", headers=_csrf(client))
     assert first.status_code == 200, first.text
@@ -440,17 +406,17 @@ def test_refresh_rotates_and_detects_reuse(client, db):
     thief.cookies.set(CSRF_COOKIE, "x", path="/")
     assert thief.post(f"{AUTH}/refresh", headers={CSRF_HEADER: "x"}).status_code == 401
     assert client.get(f"{AUTH}/me").status_code == 401
-    assert _audit(db, enrolment.staff.id, "PLATFORM_REFRESH_REUSE_DETECTED")
+    assert _audit(db, staff.id, "PLATFORM_REFRESH_REUSE_DETECTED")
 
 
 def test_refresh_requires_csrf(client, db):
-    _sign_in(client, db, _staff(db))
+    _sign_in(client, _staff(db))
     assert client.post(f"{AUTH}/refresh").status_code == 403
     assert client.post(f"{AUTH}/refresh", headers={CSRF_HEADER: "wrong"}).status_code == 403
 
 
 def test_cookie_authenticated_writes_require_csrf(client, db):
-    _sign_in(client, db, _staff(db))
+    _sign_in(client, _staff(db))
     assert client.post(f"{AUTH}/logout").status_code == 403
     assert client.post(f"{AUTH}/logout-all", headers={CSRF_HEADER: "forged"}).status_code == 403
     assert client.get(f"{AUTH}/me").status_code == 200  # reads need no CSRF
@@ -458,7 +424,7 @@ def test_cookie_authenticated_writes_require_csrf(client, db):
 
 @pytest.mark.parametrize("field", ["expires_at", "idle_expires_at"])
 def test_expired_session_rejected(client, db, field):
-    me = _sign_in(client, db, _staff(db)).json()
+    me = _sign_in(client, _staff(db)).json()
     row = db.get(PlatformSession, me["session_id"])
     setattr(row, field, utcnow() - timedelta(seconds=1))
     db.commit()
@@ -467,22 +433,21 @@ def test_expired_session_rejected(client, db, field):
 
 
 def test_deactivation_kills_live_sessions(client, db):
-    enrolment = _staff(db)
-    _sign_in(client, db, enrolment)
-    svc.deactivate_staff(db, email=enrolment.staff.email, reason="left", actor="test")
+    staff = _staff(db)
+    _sign_in(client, staff)
+    svc.deactivate_staff(db, email=staff.email, reason="left", actor="test")
     assert client.get(f"{AUTH}/me").status_code == 401
-    assert _audit(db, enrolment.staff.id, "PLATFORM_STAFF_DEACTIVATED")
+    assert _audit(db, staff.id, "PLATFORM_STAFF_DEACTIVATED")
 
 
-def test_password_and_two_factor_reset_revoke_sessions(db):
-    enrolment = _staff(db)
+def test_password_reset_revokes_sessions(db):
+    staff = _staff(db)
     a = _fresh_client()
-    _sign_in(a, db, enrolment)
-    svc.set_password(db, email=enrolment.staff.email, password="Another-Passw0rd-2026", actor="test")
+    _sign_in(a, staff)
+    svc.set_password(db, email=staff.email, password="Another-Passw0rd-2026", actor="test")
     assert a.get(f"{AUTH}/me").status_code == 401
-    new = svc.reset_two_factor(db, email=enrolment.staff.email, reason="lost phone", actor="test")
-    assert new.totp_secret != enrolment.totp_secret
-    assert _audit(db, enrolment.staff.id, "PLATFORM_PASSWORD_RESET") and _audit(db, enrolment.staff.id, "PLATFORM_2FA_RESET")
+    assert _audit(db, staff.id, "PLATFORM_PASSWORD_RESET")
+    assert _login(_fresh_client(), staff, password="Another-Passw0rd-2026").status_code == 200
 
 
 # --- tokens and confusion (A-M) -----------------------------------------------------------------------------
@@ -498,7 +463,7 @@ def test_B_tenant_token_on_platform_endpoint_rejected(client, tenant):
 
 
 def test_C_platform_token_on_platform_endpoint_succeeds(client, db):
-    _sign_in(client, db, _staff(db))
+    _sign_in(client, _staff(db))
     token = _access(client)
     assert _fresh_client().get(f"{AUTH}/me", headers=_bearer(token)).status_code == 200
     claims = jwt.decode(token, options={"verify_signature": False})
@@ -507,7 +472,7 @@ def test_C_platform_token_on_platform_endpoint_succeeds(client, db):
 
 
 def test_D_platform_token_on_tenant_endpoint_rejected(client, db, tenant):
-    _sign_in(client, db, _staff(db))
+    _sign_in(client, _staff(db))
     token = _access(client)
     assert _tenant_client().get(TENANT_ME, headers=_bearer(token)).status_code == 401
     with pytest.raises(jwt.PyJWTError):
@@ -516,7 +481,7 @@ def test_D_platform_token_on_tenant_endpoint_rejected(client, db, tenant):
 
 @pytest.mark.parametrize("aud", ["tenant", "platform-support", "", ["platform", "tenant"]])
 def test_E_wrong_audience_rejected(client, db, aud):
-    me = _sign_in(client, db, _staff(db)).json()
+    me = _sign_in(client, _staff(db)).json()
     token = _sign(_platform_claims(me["staff"]["id"], me["session_id"], aud=aud), settings.PLATFORM_JWT_SECRET)
     with pytest.raises(jwt.PyJWTError):
         decode_platform_access_token(token)
@@ -525,20 +490,20 @@ def test_E_wrong_audience_rejected(client, db, aud):
 
 @pytest.mark.parametrize("iss", ["rooman-billing", "rooman-billing-platform-x", ""])
 def test_F_wrong_issuer_rejected(client, db, iss):
-    me = _sign_in(client, db, _staff(db)).json()
+    me = _sign_in(client, _staff(db)).json()
     token = _sign(_platform_claims(me["staff"]["id"], me["session_id"], iss=iss), settings.PLATFORM_JWT_SECRET)
     assert _fresh_client().get(f"{AUTH}/me", headers=_bearer(token)).status_code == 401
 
 
 @pytest.mark.parametrize("extra", [{"typ": "access"}, {"typ": "platform_refresh"}, {"type": "access"}, {"org": "x"}])
 def test_G_wrong_token_type_rejected(client, db, extra):
-    me = _sign_in(client, db, _staff(db)).json()
+    me = _sign_in(client, _staff(db)).json()
     token = _sign(_platform_claims(me["staff"]["id"], me["session_id"], **extra), settings.PLATFORM_JWT_SECRET)
     assert _fresh_client().get(f"{AUTH}/me", headers=_bearer(token)).status_code == 401
 
 
 def test_H_expired_platform_token_rejected(client, db):
-    me = _sign_in(client, db, _staff(db)).json()
+    me = _sign_in(client, _staff(db)).json()
     past = time.time() - 3600
     token = _sign(_platform_claims(me["staff"]["id"], me["session_id"], iat=past, exp=int(past + 600)), settings.PLATFORM_JWT_SECRET)
     with pytest.raises(jwt.ExpiredSignatureError):
@@ -547,7 +512,7 @@ def test_H_expired_platform_token_rejected(client, db):
 
 
 def test_I_revoked_session_token_rejected(client, db):
-    me = _sign_in(client, db, _staff(db)).json()
+    me = _sign_in(client, _staff(db)).json()
     token = _access(client)
     row = db.get(PlatformSession, me["session_id"])
     row.revoked_at = utcnow()
@@ -556,7 +521,7 @@ def test_I_revoked_session_token_rejected(client, db):
 
 
 def test_J_tenant_key_cannot_mint_platform_token(client, db):
-    me = _sign_in(client, db, _staff(db)).json()
+    me = _sign_in(client, _staff(db)).json()
     forged = _sign(_platform_claims(me["staff"]["id"], me["session_id"]), settings.SECRET_KEY)
     with pytest.raises(jwt.InvalidSignatureError):
         decode_platform_access_token(forged)
@@ -575,7 +540,7 @@ def test_K_platform_key_cannot_mint_tenant_token(client, tenant):
 
 @pytest.mark.parametrize("missing", ["sub", "sid", "aud", "iss", "typ", "exp", "iat", "jti"])
 def test_L_missing_required_claims_rejected(client, db, missing):
-    me = _sign_in(client, db, _staff(db)).json()
+    me = _sign_in(client, _staff(db)).json()
     token = _sign(_platform_claims(me["staff"]["id"], me["session_id"], **{missing: ...}), settings.PLATFORM_JWT_SECRET)
     with pytest.raises(jwt.PyJWTError):
         decode_platform_access_token(token)
@@ -583,7 +548,7 @@ def test_L_missing_required_claims_rejected(client, db, missing):
 
 
 def test_M_malformed_tokens_rejected(client, db):
-    _sign_in(client, db, _staff(db))
+    _sign_in(client, _staff(db))
     good = _access(client)
     enc = lambda obj: base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()  # noqa: E731
     head, body, sig = good.split(".")
@@ -596,18 +561,18 @@ def test_M_malformed_tokens_rejected(client, db):
 
 def test_token_for_deleted_or_foreign_session_rejected(client, db):
     one, two = _staff(db), _staff(db)
-    me_one = _sign_in(client, db, one).json()
+    me_one = _sign_in(client, one).json()
     # A validly signed token pairing staff two with staff one's session.
-    token = create_platform_access_token(staff_id=two.staff.id, session_id=me_one["session_id"], role="platform_administrator", auth_time=utcnow())
+    token = create_platform_access_token(staff_id=two.id, session_id=me_one["session_id"], role="platform_administrator", auth_time=utcnow())
     assert _fresh_client().get(f"{AUTH}/me", headers=_bearer(token)).status_code == 401
-    token = create_platform_access_token(staff_id=one.staff.id, session_id=str(uuid.uuid4()), role="platform_administrator", auth_time=utcnow())
+    token = create_platform_access_token(staff_id=one.id, session_id=str(uuid.uuid4()), role="platform_administrator", auth_time=utcnow())
     assert _fresh_client().get(f"{AUTH}/me", headers=_bearer(token)).status_code == 401
 
 
 def test_platform_disabled_without_key(client, db, monkeypatch):
     monkeypatch.setattr(settings, "PLATFORM_JWT_SECRET", "")
-    enrolment = _staff(db)
-    assert _challenge(client, enrolment).status_code == 503
+    staff = _staff(db)
+    assert _login(client, staff).status_code == 503
     assert client.get(f"{AUTH}/me").status_code == 503
     with pytest.raises(platform_security.PlatformAuthNotConfigured):
         create_platform_access_token(staff_id="x", session_id="y", role="z", auth_time=utcnow())
@@ -666,7 +631,7 @@ def _role_app():
     ids=["administrator", "operations", "support"],
 )
 def test_role_dependencies(client, db, role, expected):
-    _sign_in(client, db, _staff(db, role=role))
+    _sign_in(client, _staff(db, role=role))
     token = _access(client)
     roles = _role_app()
     for path, status in expected.items():
@@ -674,11 +639,11 @@ def test_role_dependencies(client, db, role, expected):
 
 
 def test_role_comes_from_database_not_token(client, db):
-    enrolment = _staff(db, role=SUPPORT)
-    _sign_in(client, db, enrolment)
+    staff = _staff(db, role=SUPPORT)
+    _sign_in(client, staff)
     # A token claiming administrator for a support staff member does not grant it.
     me = client.get(f"{AUTH}/me").json()
-    token = create_platform_access_token(staff_id=enrolment.staff.id, session_id=me["session_id"],
+    token = create_platform_access_token(staff_id=staff.id, session_id=me["session_id"],
                                          role="platform_administrator", auth_time=utcnow())
     assert _role_app().get("/admin", headers=_bearer(token)).status_code == 403
 
@@ -704,7 +669,7 @@ def test_no_wildcard_role_exists():
 def test_platform_session_is_not_tenant_session(client, db, tenant):
     """Signing in as platform staff yields nothing that tenant endpoints accept, and a tenant sign-in
     yields nothing platform endpoints accept - with cookies or bearer tokens."""
-    _sign_in(client, db, _staff(db))
+    _sign_in(client, _staff(db))
     # Same origin, separate authorization: tenant endpoints on this very origin refuse the browser
     # that holds a live platform session...
     assert client.get(TENANT_ME).status_code == 401
@@ -725,13 +690,13 @@ def test_platform_session_is_not_tenant_session(client, db, tenant):
 
 
 def test_platform_routes_expose_no_tenant_data(client, db):
-    me = _sign_in(client, db, _staff(db)).json()
+    me = _sign_in(client, _staff(db)).json()
     assert set(me) == {"staff", "session_id", "session_expires_at", "access_expires_in"}
     assert set(me["staff"]) == {"id", "email", "full_name", "role", "last_login_at"}
     from backend.app.main import app
 
     platform_paths = {r.path for r in app.routes if getattr(r, "path", "").startswith("/api/v1/platform/")}
-    auth_paths = {f"{AUTH}/{p}" for p in ("login", "2fa", "refresh", "me", "sessions", "sessions/{session_id}", "logout", "logout-all", "step-up")}
+    auth_paths = {f"{AUTH}/{p}" for p in ("login", "refresh", "me", "sessions", "sessions/{session_id}", "logout", "logout-all", "step-up")}
     # Phase 3 console (metadata only; see test_platform_console.py for what each returns).
     console = "/api/v1/platform"
     org = f"{console}/organizations/{{organization_id}}"
@@ -760,46 +725,44 @@ def test_platform_routes_expose_no_tenant_data(client, db):
 
 
 def test_successful_sign_in_is_audited(client, db):
-    enrolment = _staff(db)
-    me = _sign_in(client, db, enrolment, steps=0).json()
-    actions = [row.action for row in _audit(db, enrolment.staff.id)]
-    for expected in ("PLATFORM_STAFF_CREATED", "PLATFORM_LOGIN_PASSWORD_VERIFIED", "PLATFORM_2FA_SUCCEEDED", "PLATFORM_LOGIN_SUCCEEDED"):
+    staff = _staff(db)
+    me = _sign_in(client, staff).json()
+    actions = [row.action for row in _audit(db, staff.id)]
+    for expected in ("PLATFORM_STAFF_CREATED", "PLATFORM_LOGIN_SUCCEEDED"):
         assert expected in actions, actions
-    ok = _audit(db, enrolment.staff.id, "PLATFORM_LOGIN_SUCCEEDED")[-1]
+    assert "PLATFORM_2FA_SUCCEEDED" not in actions and "PLATFORM_LOGIN_PASSWORD_VERIFIED" not in actions
+    ok = _audit(db, staff.id, "PLATFORM_LOGIN_SUCCEEDED")[-1]
     assert ok.session_id == me["session_id"] and ok.result == "success"
-    assert ok.ip_address and ok.user_agent and ok.staff_email_snapshot == enrolment.staff.email
+    assert ok.details == {"role": "platform_administrator", "method": "password"}
+    assert ok.ip_address and ok.user_agent and ok.staff_email_snapshot == staff.email
 
 
 def test_failures_are_audited_including_unknown_emails(client, db):
-    enrolment = _staff(db)
-    _challenge(client, enrolment, password="Wrong-Passw0rd-xx")
+    staff = _staff(db)
+    _login(client, staff, password="Wrong-Passw0rd-xx")
     stranger = f"stranger-{uuid.uuid4().hex[:6]}@rooman.test"
     client.post(f"{AUTH}/login", json={"email": stranger, "password": "Whatever-Passw0rd-1"})
-    challenge = _challenge(client, enrolment).json()["challenge_token"]
-    client.post(f"{AUTH}/2fa", json={"challenge_token": challenge, "code": "000000"})
-    failed = _audit(db, enrolment.staff.id, "PLATFORM_LOGIN_FAILED")[-1]
+    failed = _audit(db, staff.id, "PLATFORM_LOGIN_FAILED")[-1]
     assert failed.result == "failure" and failed.details["reason"] == "bad_password"
     unknown = _audit(db, action="PLATFORM_LOGIN_FAILED")
     assert any(r.platform_staff_id is None and r.staff_email_snapshot == stranger for r in unknown)
-    assert _audit(db, enrolment.staff.id, "PLATFORM_2FA_FAILED")[-1].result == "failure"
 
 
 def test_audit_never_contains_credentials(client, db):
-    enrolment = _staff(db)
-    code = _code(enrolment.totp_secret)
-    _challenge(client, enrolment, password="Wrong-Passw0rd-xx")
-    challenge = _challenge(client, enrolment).json()["challenge_token"]
-    client.post(f"{AUTH}/2fa", json={"challenge_token": challenge, "code": code})
+    staff = _staff(db)
+    totp_secret = _give_legacy_totp(db, staff)
+    _login(client, staff, password="Wrong-Passw0rd-xx")
+    _sign_in(client, staff)
     refresh_secret = client.cookies.get(REFRESH_COOKIE, path=AUTH)
     access = _access(client)
     client.post(f"{AUTH}/logout", headers=_csrf(client))
     dump = json.dumps([
         {c.name: str(getattr(row, c.name)) for c in PlatformAuditLog.__table__.columns}
-        for row in _audit(db, enrolment.staff.id)
+        for row in _audit(db, staff.id)
     ])
-    for secret in (PASSWORD, "Wrong-Passw0rd-xx", code, enrolment.totp_secret, challenge, refresh_secret, access):
+    for secret in (PASSWORD, "Wrong-Passw0rd-xx", totp_secret, refresh_secret, access):
         assert secret and secret not in dump
-    staff = db.get(PlatformStaff, enrolment.staff.id)
+    staff = db.get(PlatformStaff, staff.id)
     assert staff.hashed_password not in dump and staff.totp_secret not in dump
 
 

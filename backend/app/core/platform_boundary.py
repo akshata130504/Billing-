@@ -3,7 +3,7 @@
 The platform console is served at /superadmin on the ONE official application origin (the origin
 of FRONTEND_URL, settings.platform_origin) - the same origin as the tenant app at /admin. Sharing
 the origin does not share authorization: platform requests authenticate only with the platform
-session cookies (separate signing key, audience and token type, mandatory TOTP), tenant bearer
+session cookies (separate signing key, audience and token type), tenant bearer
 tokens are never accepted there, and platform cookies are never accepted by tenant routes.
 
 On platform API paths (/api/v1/platform/...) this module enforces, for every request:
