@@ -61,6 +61,10 @@ fi
 
 # The owner/migration credentials are only needed for the step above.
 unset MIGRATION_DATABASE_URL MIGRATION_POSTGRES_USER MIGRATION_POSTGRES_PASSWORD
+# With a separate runtime role, POSTGRES_PASSWORD is the owner's password - drop it too.
+if [ -n "${APP_POSTGRES_USER:-}" ]; then
+  unset POSTGRES_PASSWORD
+fi
 
 # Only gunicorn takes the worker flag; other commands (scheduler, one-off python)
 # are exec'd untouched.
