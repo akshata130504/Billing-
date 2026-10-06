@@ -6,6 +6,9 @@ import type {
   InvitationDetails,
   LoginRequest,
   MeResponse,
+  SignupCompleteRequest,
+  SignupConfirmEmailRequest,
+  SignupConfirmEmailResponse,
   SignupResponse,
   SignupVerificationRequest,
   SignupVerificationResponse,
@@ -41,6 +44,16 @@ export const authService = {
 
   resendSignupOtp: async (email: string): Promise<SignupVerificationResponse> => {
     const { data } = await apiClient.post<SignupVerificationResponse>('/auth/signup/resend-otp', { email });
+    return data;
+  },
+
+  confirmSignupEmail: async (body: SignupConfirmEmailRequest): Promise<SignupConfirmEmailResponse> => {
+    const { data } = await apiClient.post<SignupConfirmEmailResponse>('/auth/signup/confirm-email', body);
+    return data;
+  },
+
+  completeSignup: async (body: SignupCompleteRequest): Promise<SignupResponse> => {
+    const { data } = await apiClient.post<SignupResponse>('/auth/signup/complete', body);
     return data;
   },
 

@@ -164,6 +164,46 @@ def decode_mfa_token(token: str) -> Dict[str, Any]:
     return payload
 
 
+SIGNUP_TOKEN_TYPE = "signup_email_verified"
+SIGNUP_TOKEN_AUDIENCE = "signup"
+
+
+def create_signup_verification_token(pending_id: str, email: str, expires_at: datetime) -> str:
+    """Proof that the owner of `email` entered the correct sign-up OTP.
+
+    Redeemable only at /auth/signup/complete (aud="signup", type=signup_email_verified), so
+    decode_access_token and the grant/MFA decoders all refuse it. It names the pending signup
+    row, which is deleted when the account is created, so it cannot be replayed.
+    """
+    now = datetime.now(timezone.utc)
+    payload: Dict[str, Any] = {
+        "sub": pending_id,
+        "email": email,
+        "type": SIGNUP_TOKEN_TYPE,
+        "aud": SIGNUP_TOKEN_AUDIENCE,
+        "iss": TOKEN_ISSUER,
+        "iat": now.timestamp(),
+        "exp": int(expires_at.timestamp()),
+        "jti": secrets.token_hex(8),
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def decode_signup_verification_token(token: str) -> Dict[str, Any]:
+    """Verify a sign-up verification token. Raises jwt.PyJWTError on any problem."""
+    payload = jwt.decode(
+        token,
+        settings.SECRET_KEY,
+        algorithms=[settings.JWT_ALGORITHM],
+        audience=SIGNUP_TOKEN_AUDIENCE,
+        issuer=TOKEN_ISSUER,
+        options={"require": ["exp", "iat", "sub", "email", "aud", "iss"]},
+    )
+    if payload.get("type") != SIGNUP_TOKEN_TYPE:
+        raise jwt.InvalidTokenError("Not a signup verification token")
+    return payload
+
+
 def _decode_legacy_access_token(token: str) -> Dict[str, Any]:
     """Accept a pre-aud/iss tenant access token, only while one could still legitimately exist.
 
