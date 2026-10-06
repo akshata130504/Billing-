@@ -19,7 +19,6 @@ import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { toApiError } from '../../services/apiClient';
 import { catalogCpqService } from '../../services/catalogCpqService';
-import { dashboardSummaryService } from '../../services/dashboardSummaryService';
 import type { OfferingOut, PriceBookOut, OfferingIn, PriceBookIn } from '../../types/catalog_cpq';
 import { OfferingModal } from './components/OfferingModal';
 import { PriceBookModal } from './components/PriceBookModal';
@@ -27,6 +26,20 @@ import { PriceBookModal } from './components/PriceBookModal';
 const PAGE_SIZE = 25;
 
 type CatalogTab = 'all' | 'products' | 'services' | 'plans' | 'bundles' | 'price_books';
+type StatusFilter = 'active' | 'archived' | 'all';
+
+const STATUS_OPTIONS: Array<{ id: StatusFilter; label: string }> = [
+  { id: 'active', label: 'Active' },
+  { id: 'archived', label: 'Archived' },
+  { id: 'all', label: 'All' },
+];
+
+// Maps the UI filter onto the backend `is_active` query param (undefined = both).
+const STATUS_TO_IS_ACTIVE: Record<StatusFilter, boolean | undefined> = {
+  active: true,
+  archived: false,
+  all: undefined,
+};
 
 const TAB_TYPE: Partial<Record<CatalogTab, string>> = {
   products: 'product',
@@ -64,6 +77,7 @@ export function CatalogPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
 
   // Modals state
   const [isOfferingModalOpen, setIsOfferingModalOpen] = useState(false);
@@ -77,17 +91,38 @@ export function CatalogPage() {
   const [offeringToUnarchive, setOfferingToUnarchive] = useState<OfferingOut | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
 
+  // Tab / KPI counts always represent ACTIVE offerings (same search), whatever the status filter says.
+  const loadCounts = useCallback(async () => {
+    try {
+      const search = searchQuery.trim() || undefined;
+      const activeTotal = (type?: string) =>
+        catalogCpqService
+          .listOfferings({ search, type, is_active: true, page: 1, page_size: 1 })
+          .then((res) => res.total ?? 0);
+      const [all, product, service, plan, bundle] = await Promise.all([
+        activeTotal(),
+        activeTotal('product'),
+        activeTotal('service'),
+        activeTotal('plan'),
+        activeTotal('bundle'),
+      ]);
+      setCounts({ all, active: all, product, service, plan, bundle });
+    } catch (err) {
+      setLoadError(toApiError(err).message);
+    }
+  }, [searchQuery]);
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
       setLoadError(null);
       const search = searchQuery.trim() || undefined;
       const isPriceBooks = activeTab === 'price_books';
-      // KPI counts come from one server-side catalog summary (whole catalog, same search).
-      const [offeringData, pbData, summary] = await Promise.all([
+      const [offeringData, pbData] = await Promise.all([
         catalogCpqService.listOfferings({
           search,
           type: TAB_TYPE[activeTab],
+          is_active: STATUS_TO_IS_ACTIVE[statusFilter],
           page: isPriceBooks ? 1 : page,
           page_size: PAGE_SIZE,
         }),
@@ -96,34 +131,38 @@ export function CatalogPage() {
           page: isPriceBooks ? page : 1,
           page_size: PAGE_SIZE,
         }),
-        dashboardSummaryService.catalog({ search }),
       ]);
       setOfferings(offeringData.items || []);
       setOfferingsTotal(offeringData.total ?? 0);
       setPriceBooks(pbData.items || []);
       setPriceBooksTotal(pbData.total ?? 0);
-      const byType = summary.offerings.by_type || {};
-      setCounts({
-        all: summary.offerings.total,
-        active: summary.offerings.active,
-        product: byType.product ?? 0,
-        service: byType.service ?? 0,
-        plan: byType.plan ?? 0,
-        bundle: byType.bundle ?? 0,
-      });
+      // The current page can disappear after an archive / restore; step back to the last real page.
+      if (!isPriceBooks) {
+        const lastPage = Math.max(1, Math.ceil((offeringData.total ?? 0) / PAGE_SIZE));
+        if (page > lastPage) setPage(lastPage);
+      }
     } catch (err) {
       setLoadError(toApiError(err).message);
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, activeTab, page]);
+  }, [searchQuery, activeTab, statusFilter, page]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    void loadCounts();
+  }, [loadCounts]);
+
   const changeTab = (tab: CatalogTab) => {
     setActiveTab(tab);
+    setPage(1);
+  };
+
+  const changeStatusFilter = (value: StatusFilter) => {
+    setStatusFilter(value);
     setPage(1);
   };
 
@@ -162,7 +201,7 @@ export function CatalogPage() {
       await catalogCpqService.createOffering(data);
     }
     showToast('success', editingOffering ? 'Offering updated' : 'Offering created');
-    await loadData();
+    await Promise.all([loadData(), loadCounts()]);
   };
 
   const handleConfirmArchive = async () => {
@@ -172,7 +211,7 @@ export function CatalogPage() {
       await catalogCpqService.archiveOffering(offeringToArchive.id);
       setOfferingToArchive(null);
       showToast('success', 'Offering archived');
-      await loadData();
+      await Promise.all([loadData(), loadCounts()]);
     } catch (err) {
       showToast('error', 'Could not archive offering', toApiError(err).message);
     } finally {
@@ -187,7 +226,7 @@ export function CatalogPage() {
       await catalogCpqService.unarchiveOffering(offeringToUnarchive.id);
       setOfferingToUnarchive(null);
       showToast('success', 'Offering unarchived');
-      await loadData();
+      await Promise.all([loadData(), loadCounts()]);
     } catch (err) {
       setOfferingToUnarchive(null);
       showToast('error', 'Could not unarchive offering', toApiError(err).message);
@@ -312,16 +351,41 @@ export function CatalogPage() {
           ))}
         </div>
 
-        <div className="relative min-w-[220px]">
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder={activeTab === 'price_books' ? 'Search price books by name, segment...' : 'Search offerings by SKU, name...'}
-            aria-label={activeTab === 'price_books' ? 'Search price books' : 'Search offerings'}
-            value={searchQuery}
-            onChange={(e) => changeSearch(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
-          />
+        <div className="flex items-center gap-2">
+          {activeTab !== 'price_books' && (
+            <div
+              className="flex items-center gap-0.5 p-0.5 rounded-lg border border-slate-200 bg-white shrink-0"
+              role="group"
+              aria-label="Status filter"
+            >
+              {STATUS_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => changeStatusFilter(opt.id)}
+                  aria-pressed={statusFilter === opt.id}
+                  className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
+                    statusFilter === opt.id
+                      ? 'bg-slate-900 text-white'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="relative min-w-[220px]">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder={activeTab === 'price_books' ? 'Search price books by name, segment...' : 'Search offerings by SKU, name...'}
+              aria-label={activeTab === 'price_books' ? 'Search price books' : 'Search offerings'}
+              value={searchQuery}
+              onChange={(e) => changeSearch(e.target.value)}
+              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+          </div>
         </div>
       </div>
 
@@ -422,7 +486,9 @@ export function CatalogPage() {
               {filteredOfferings.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-4 py-8 text-center text-slate-400 italic">
-                    No offerings found for this view. Create your first offering to get started.
+                    {statusFilter === 'active' && !searchQuery.trim()
+                      ? 'No offerings found for this view. Create your first offering to get started.'
+                      : 'No offerings match the current filters.'}
                   </td>
                 </tr>
               ) : (

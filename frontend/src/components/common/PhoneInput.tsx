@@ -71,7 +71,7 @@ export const PhoneInput: React.FC<PhoneInputProps> = ({
           disabled={disabled}
           numberInputProps={{
             className:
-              'h-full flex-1 min-w-0 border-0 bg-transparent py-0 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-0 disabled:cursor-not-allowed',
+              'h-full flex-1 min-w-0 border-0 bg-transparent py-0 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 disabled:cursor-not-allowed',
           }}
         />
       </div>
