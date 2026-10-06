@@ -177,6 +177,8 @@ class OfferingCounts(BaseModel):
     active: int
     inactive: int
     by_type: Dict[str, int]
+    active_by_type: Dict[str, int]
+    inactive_by_type: Dict[str, int]
 
 
 class PriceBookCounts(BaseModel):

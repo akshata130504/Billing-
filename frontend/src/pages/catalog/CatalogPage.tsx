@@ -19,6 +19,7 @@ import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { toApiError } from '../../services/apiClient';
 import { catalogCpqService } from '../../services/catalogCpqService';
+import { dashboardSummaryService } from '../../services/dashboardSummaryService';
 import type { OfferingOut, PriceBookOut, OfferingIn, PriceBookIn } from '../../types/catalog_cpq';
 import { OfferingModal } from './components/OfferingModal';
 import { PriceBookModal } from './components/PriceBookModal';
@@ -50,14 +51,26 @@ const TAB_TYPE: Partial<Record<CatalogTab, string>> = {
 
 interface CatalogCounts {
   all: number;
-  active: number;
   product: number;
   service: number;
   plan: number;
   bundle: number;
 }
 
-const EMPTY_COUNTS: CatalogCounts = { all: 0, active: 0, product: 0, service: 0, plan: 0, bundle: 0 };
+const EMPTY_COUNTS: CatalogCounts = { all: 0, product: 0, service: 0, plan: 0, bundle: 0 };
+const EMPTY_STATUS_COUNTS: Record<StatusFilter, CatalogCounts> = {
+  active: EMPTY_COUNTS,
+  archived: EMPTY_COUNTS,
+  all: EMPTY_COUNTS,
+};
+
+const toCounts = (total: number, byType: Record<string, number>): CatalogCounts => ({
+  all: total,
+  product: byType.product ?? 0,
+  service: byType.service ?? 0,
+  plan: byType.plan ?? 0,
+  bundle: byType.bundle ?? 0,
+});
 
 export function CatalogPage() {
   const { showToast } = useToast();
@@ -70,7 +83,8 @@ export function CatalogPage() {
   const [offeringsTotal, setOfferingsTotal] = useState(0);
   const [priceBooks, setPriceBooks] = useState<PriceBookOut[]>([]);
   const [priceBooksTotal, setPriceBooksTotal] = useState(0);
-  const [counts, setCounts] = useState<CatalogCounts>(EMPTY_COUNTS);
+  // Offering counts per status filter, all from one catalog summary (same search).
+  const [statusCounts, setStatusCounts] = useState<Record<StatusFilter, CatalogCounts>>(EMPTY_STATUS_COUNTS);
   // Capped list of active offerings for the bundle / price-book pickers in the modals.
   const [pickerOfferings, setPickerOfferings] = useState<OfferingOut[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,22 +105,16 @@ export function CatalogPage() {
   const [offeringToUnarchive, setOfferingToUnarchive] = useState<OfferingOut | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
 
-  // Tab / KPI counts always represent ACTIVE offerings (same search), whatever the status filter says.
+  // Loaded on search change / after a mutation only; switching the status filter just picks a different set.
   const loadCounts = useCallback(async () => {
     try {
       const search = searchQuery.trim() || undefined;
-      const activeTotal = (type?: string) =>
-        catalogCpqService
-          .listOfferings({ search, type, is_active: true, page: 1, page_size: 1 })
-          .then((res) => res.total ?? 0);
-      const [all, product, service, plan, bundle] = await Promise.all([
-        activeTotal(),
-        activeTotal('product'),
-        activeTotal('service'),
-        activeTotal('plan'),
-        activeTotal('bundle'),
-      ]);
-      setCounts({ all, active: all, product, service, plan, bundle });
+      const { offerings: o } = await dashboardSummaryService.catalog({ search });
+      setStatusCounts({
+        active: toCounts(o.active, o.active_by_type || {}),
+        archived: toCounts(o.inactive, o.inactive_by_type || {}),
+        all: toCounts(o.total, o.by_type || {}),
+      });
     } catch (err) {
       setLoadError(toApiError(err).message);
     }
@@ -249,12 +257,16 @@ export function CatalogPage() {
   const filteredOfferings = offerings;
   const filteredPriceBooks = priceBooks;
 
-  // KPI stats: organization-wide totals for the current search.
-  const activeCount = counts.active;
-  const productsCount = counts.product;
-  const servicesCount = counts.service;
-  const plansCount = counts.plan;
-  const bundlesCount = counts.bundle;
+  // KPI cards: always the ACTIVE catalog, independent of the status filter.
+  const kpi = statusCounts.active;
+  const activeCount = kpi.all;
+  const productsCount = kpi.product;
+  const servicesCount = kpi.service;
+  const plansCount = kpi.plan;
+  const bundlesCount = kpi.bundle;
+
+  // Tab badges: follow the selected status filter.
+  const tabCounts = statusCounts[statusFilter];
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -325,11 +337,11 @@ export function CatalogPage() {
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-b border-slate-200 pb-2">
         <div className="flex items-center gap-1 overflow-x-auto">
           {[
-            { id: 'all', label: 'All Offerings', count: counts.all },
-            { id: 'products', label: 'Products', count: productsCount },
-            { id: 'services', label: 'Services', count: servicesCount },
-            { id: 'plans', label: 'Plans', count: plansCount },
-            { id: 'bundles', label: 'Bundles', count: bundlesCount },
+            { id: 'all', label: 'All Offerings', count: tabCounts.all },
+            { id: 'products', label: 'Products', count: tabCounts.product },
+            { id: 'services', label: 'Services', count: tabCounts.service },
+            { id: 'plans', label: 'Plans', count: tabCounts.plan },
+            { id: 'bundles', label: 'Bundles', count: tabCounts.bundle },
             { id: 'price_books', label: 'Price Books', count: priceBooksTotal },
           ].map((tab) => (
             <button

@@ -81,7 +81,14 @@ export interface QuotesSummary {
 }
 
 export interface CatalogSummary {
-  offerings: { total: number; active: number; inactive: number; by_type: Record<string, number> };
+  offerings: {
+    total: number;
+    active: number;
+    inactive: number;
+    by_type: Record<string, number>;
+    active_by_type: Record<string, number>;
+    inactive_by_type: Record<string, number>;
+  };
   price_books: { total: number; by_status: Record<string, number> };
 }
 
