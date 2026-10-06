@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session, object_session, selectinload
@@ -121,12 +121,25 @@ def line_inputs(items: Iterable) -> List[LineInput]:
     ]
 
 
-def validate_line_references(db: Session, organization_id: str, items: Iterable) -> None:
+def validate_line_references(
+    db: Session,
+    organization_id: str,
+    items: Iterable,
+    retained_lines: Optional[Mapping[str, Optional[str]]] = None,
+) -> None:
     """Reject catalog references on posted lines that are certainly invalid: an id that does
     not exist in THIS organization (cross-tenant and unknown ids look identical, so nothing
     about other tenants leaks), a line carrying both product_id and plan_id, or a plan/product
     that belongs to a different offering than the line's offering_id. Custom lines (no ids)
-    are always fine."""
+    are always fine.
+
+    An ARCHIVED offering (is_active = false) is accepted only on a line that is already on this
+    invoice and is being kept: ``retained_lines`` maps each stored line id of the invoice to its
+    offering id. A posted archived line is retained only when it names a stored line of this
+    invoice, that stored line has the same offering, and no earlier posted line already claimed
+    it; anything else (no id, another invoice's id, another offering's id, a second claim, a
+    removed and re-added line) is a NEW use and is rejected. Only the user-facing create/update
+    path calls this; system-generated invoices (renewals, proration, ...) are not restricted."""
     from backend.app.models.catalog import Plan, Product
     from backend.app.models.catalog_cpq import Offering
 
@@ -172,6 +185,34 @@ def validate_line_references(db: Session, organization_id: str, items: Iterable)
                 fields[f"items[{idx}].product_id"] = "product does not belong to the line's offering"
     if fields:
         raise ValidationAppError("One or more line items reference an invalid catalog item.", {"fields": fields})
+
+    retained = retained_lines or {}
+    claimed: set = set()
+    archived_fields: Dict[str, str] = {}
+    for idx, item in enumerate(rows):
+        offering_id = getattr(item, "offering_id", None)
+        offering = offerings.get(offering_id) if offering_id else None
+        if offering is None or offering.is_active:
+            continue
+        line_id = getattr(item, "id", None)
+        if not line_id:
+            reason = "archived offering cannot be added to an invoice line"
+        elif line_id not in retained:
+            reason = "line id does not belong to this invoice"
+        elif retained[line_id] != offering_id:
+            reason = "line id belongs to a different offering"
+        elif line_id in claimed:
+            reason = "line id is already used by another line"
+        else:
+            claimed.add(line_id)
+            continue
+        archived_fields[f"items[{idx}].offering_id"] = reason
+    if archived_fields:
+        raise ValidationAppError(
+            "An archived offering cannot be used on a new invoice line; it can only stay on a line "
+            "that is already on this invoice.",
+            {"fields": archived_fields},
+        )
 
 
 def _user(session: Optional[Session], user_id: Optional[str]) -> Optional[User]:
@@ -574,7 +615,10 @@ def _ensure_draft(invoice: Invoice, verb: str) -> None:
 def update_invoice(db: Session, ctx: CurrentContext, invoice: Invoice, data: InvoiceUpdate) -> Invoice:
     _ensure_draft(invoice, "edited")
     if data.items is not None:
-        validate_line_references(db, ctx.organization_id, data.items)
+        # The stored lines (read before they are rebuilt) are the only lines of this invoice that
+        # may keep an archived offering.
+        retained_lines = {line.id: line.offering_id for line in invoice.items}
+        validate_line_references(db, ctx.organization_id, data.items, retained_lines)
     before = snapshot(invoice)
     changes = data.model_dump(exclude_unset=True)
 
@@ -614,6 +658,7 @@ def update_invoice(db: Session, ctx: CurrentContext, invoice: Invoice, data: Inv
                 invoice.items.append(
                     InvoiceItem(
                         organization_id=ctx.organization_id,
+                        offering_id=line.offering_id,
                         product_id=line.product_id,
                         plan_id=line.plan_id,
                         description=line.description,

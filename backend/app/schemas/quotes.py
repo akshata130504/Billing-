@@ -12,6 +12,31 @@ from backend.app.schemas.common_refs import CustomerRef, LineItemIn, LineItemOut
 _MAX_TEXT_LENGTH = 10000
 
 
+class QuoteLineItemIn(LineItemIn):
+    """A quote line as posted by the client. ``id`` is the stored id of an existing line of THIS
+    quote that the client is keeping (it lets the server tell a retained line from a removed and
+    re-added one); omit it on new lines. Quote-specific so the shared LineItemIn contract used by
+    invoices and CPQ is unchanged."""
+
+    id: Optional[str] = None
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _empty_id_to_none(cls, value):
+        return None if value == "" else value
+
+
+def _accept_shared_line_items(value):
+    """Python callers may still pass plain LineItemIn objects; pydantic would reject a parent-class
+    instance for a QuoteLineItemIn field, so upgrade them (they simply carry no line id)."""
+    if isinstance(value, (list, tuple)):
+        return [
+            item.model_dump() if isinstance(item, LineItemIn) and not isinstance(item, QuoteLineItemIn) else item
+            for item in value
+        ]
+    return value
+
+
 class QuoteCreate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -23,7 +48,12 @@ class QuoteCreate(BaseModel):
     discount_pct: Decimal = Field(Decimal("0"), ge=0, le=100)
     notes: Optional[str] = Field(None, max_length=_MAX_TEXT_LENGTH)
     terms: Optional[str] = Field(None, max_length=_MAX_TEXT_LENGTH)
-    items: List[LineItemIn] = Field(..., min_length=1)
+    items: List[QuoteLineItemIn] = Field(..., min_length=1)
+
+    @field_validator("items", mode="before")
+    @classmethod
+    def _shared_line_items(cls, value):
+        return _accept_shared_line_items(value)
 
     @field_validator("currency")
     @classmethod
@@ -60,7 +90,12 @@ class QuoteUpdate(BaseModel):
     discount_pct: Optional[Decimal] = Field(None, ge=0, le=100)
     notes: Optional[str] = Field(None, max_length=_MAX_TEXT_LENGTH)
     terms: Optional[str] = Field(None, max_length=_MAX_TEXT_LENGTH)
-    items: Optional[List[LineItemIn]] = Field(None, min_length=1)
+    items: Optional[List[QuoteLineItemIn]] = Field(None, min_length=1)
+
+    @field_validator("items", mode="before")
+    @classmethod
+    def _shared_line_items(cls, value):
+        return _accept_shared_line_items(value)
 
     @field_validator("currency")
     @classmethod

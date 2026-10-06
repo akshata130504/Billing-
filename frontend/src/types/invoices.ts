@@ -62,6 +62,8 @@ export interface InvoiceLineItemOut {
 }
 
 export interface InvoiceLineItemIn {
+  /** Stored id of an existing line of this invoice that is being kept; never set on new lines. */
+  id?: string;
   offering_id?: string;
   plan_id?: string;
   name: string;
