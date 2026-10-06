@@ -67,7 +67,7 @@ describe('<CatalogPage /> archived offerings', () => {
     await waitFor(() => expect(screen.getByText('Archived One')).toBeInTheDocument());
 
     const archived = rowOf('Archived One');
-    expect(screen.getByText('Archived')).toBeInTheDocument();
+    expect(archived).toHaveTextContent('Archived');
     expect(within(archived, 'Edit Offering')).toBeNull();
     expect(within(archived, 'Archive Offering')).toBeNull();
     expect(within(archived, 'Unarchive Offering')).not.toBeNull();
