@@ -9,8 +9,10 @@ import { ExpenseFormModal } from './components/ExpenseFormModal';
 import { DeleteExpenseModal } from './components/DeleteExpenseModal';
 import { ImportExpenseModal } from './components/ImportExpenseModal';
 import { Plus, UploadCloud, Receipt } from 'lucide-react';
+import { usePageSpec } from '../../appUi/usePageSpec';
 
 export function ExpensesPage() {
+  const ui = usePageSpec('expenses');
   const {
     expenses,
     addExpense,
@@ -146,13 +148,13 @@ export function ExpensesPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-1">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold text-slate-900 tracking-tight">Expenses</h1>
+            <h1 className="text-xl font-bold text-slate-900 tracking-tight" {...ui.edit('header')}>{ui.text('header', 'title')}</h1>
             <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
               {filteredExpenses.length}
             </span>
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Track operating costs, billable expenses and reimbursable expenses.
+          <p className="text-xs text-slate-500 mt-0.5" {...ui.edit('header')}>
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
 
@@ -181,33 +183,28 @@ export function ExpensesPage() {
       </div>
 
       {/* Module Sub-navigation Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200/80">
-        <NavLink
-          to="/expenses"
-          end
-          className={({ isActive }) =>
-            `inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border-b-2 transition-colors -mb-px ${
-              isActive
-                ? 'border-brand-600 text-brand-700'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`
-          }
-        >
-          <Receipt className="w-3.5 h-3.5" />
-          <span>All Expenses</span>
-        </NavLink>
-        <NavLink
-          to="/expenses/recurring"
-          className={({ isActive }) =>
-            `inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border-b-2 transition-colors -mb-px ${
-              isActive
-                ? 'border-brand-600 text-brand-700'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`
-          }
-        >
-          <span>Recurring Expenses</span>
-        </NavLink>
+      <div className="flex items-center gap-2 border-b border-slate-200/80" {...ui.edit('tabs')}>
+        {ui.shown('tabs').map((t) => {
+          const to = t.key === 'all' ? '/expenses' : '/expenses/recurring';
+          return (
+            <NavLink
+              key={t.key}
+              to={to}
+              end={t.key === 'all'}
+              {...ui.edit(`tabs.${t.key}`)}
+              className={({ isActive }) =>
+                `inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border-b-2 transition-colors -mb-px ${
+                  isActive
+                    ? 'border-brand-600 text-brand-700'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`
+              }
+            >
+              {t.key === 'all' && <Receipt className="w-3.5 h-3.5" />}
+              <span>{t.label}</span>
+            </NavLink>
+          );
+        })}
       </div>
 
       {/* Summary Area */}

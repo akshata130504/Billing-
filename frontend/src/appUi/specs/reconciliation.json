@@ -1,0 +1,119 @@
+{
+  "key": "reconciliation",
+  "title": "Reconciliation",
+  "route": "/control-center/reconciliation",
+  "nav_item": "reconciliation",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "eyebrow",
+          "label": "Eyebrow",
+          "kind": "label",
+          "default": "Control Center"
+        },
+        {
+          "name": "badge",
+          "label": "Badge",
+          "kind": "label",
+          "default": "Financial Integrity"
+        },
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Reconciliation Workspace"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Review how recorded payments have been allocated against invoices, and manually allocate any that still need it."
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty table messages",
+      "fields": [
+        {
+          "name": "none",
+          "label": "No records",
+          "kind": "body",
+          "default": "No reconciliation records match this filter."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "Summary cards",
+      "captions": true,
+      "items": [
+        {
+          "key": "auto_matched",
+          "label": "Auto-Reconciled",
+          "caption": "Fully allocated automatically"
+        },
+        {
+          "key": "matched",
+          "label": "Manual Matched",
+          "caption": "Fully allocated manually"
+        },
+        {
+          "key": "unmatched",
+          "label": "Unmatched Records",
+          "caption": "No allocation yet"
+        },
+        {
+          "key": "exception",
+          "label": "Exceptions",
+          "caption": "Partially allocated"
+        },
+        {
+          "key": "total",
+          "label": "Total Audited",
+          "caption": "All reconciliation records"
+        }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Reconciliation table columns",
+      "items": [
+        {
+          "key": "payment_number",
+          "label": "Payment Ref",
+          "required": true
+        },
+        {
+          "key": "customer",
+          "label": "Customer"
+        },
+        {
+          "key": "date",
+          "label": "Date"
+        },
+        {
+          "key": "amount",
+          "label": "Amount"
+        },
+        {
+          "key": "unallocated",
+          "label": "Unallocated"
+        },
+        {
+          "key": "status",
+          "label": "Recon Status"
+        },
+        {
+          "key": "actions",
+          "label": "Actions"
+        }
+      ]
+    }
+  ]
+}

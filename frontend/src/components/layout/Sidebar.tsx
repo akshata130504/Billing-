@@ -1,4 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import type { LucideIcon } from 'lucide-react';
+import { uiIcon } from '../../appUi/icons';
+import { NAV_SECTION_DEFS, resolveList, visible, type NavigationConfig } from '../../appUi/registry';
+import { usePageUi, useUiEditable } from '../../appUi/UiConfigContext';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../../utils/cn';
 import { RoomanLogo } from '../common/RoomanLogo';
@@ -57,97 +61,110 @@ export interface SidebarProps {
 }
 
 interface SidebarItem {
+  /** Stable key for UI configuration (appUi/keys.json). */
+  key: string;
   title: string;
   path: string;
   icon: React.ComponentType<{ className?: string }>;
 }
 
 interface SidebarSection {
+  /** Stable key for UI configuration (appUi/keys.json). */
+  key: string;
   title: string;
   items: SidebarItem[];
 }
 
 export const sidebarSections: SidebarSection[] = [
   {
+    key: 'workspace',
     title: 'WORKSPACE',
     items: [
-      { title: 'Overview', path: '/dashboard', icon: LayoutDashboard },
-      { title: 'Customers', path: '/customers', icon: Users },
-      { title: 'Catalog', path: '/catalog', icon: Package },
+      { key: 'overview', title: 'Overview', path: '/dashboard', icon: LayoutDashboard },
+      { key: 'customers', title: 'Customers', path: '/customers', icon: Users },
+      { key: 'catalog', title: 'Catalog', path: '/catalog', icon: Package },
     ],
   },
   {
+    key: 'revenue',
     title: 'REVENUE',
     items: [
-      { title: 'Quotes', path: '/quotes', icon: FileText },
-      { title: 'CPQ', path: '/cpq', icon: Calculator },
-      { title: 'Invoices', path: '/invoices', icon: Receipt },
-      { title: 'Credit Notes', path: '/credit-notes', icon: ReceiptText },
-      { title: 'Payments', path: '/payments', icon: CreditCard },
-      { title: 'Collections', path: '/collections', icon: ShieldCheck },
+      { key: 'quotes', title: 'Quotes', path: '/quotes', icon: FileText },
+      { key: 'cpq', title: 'CPQ', path: '/cpq', icon: Calculator },
+      { key: 'invoices', title: 'Invoices', path: '/invoices', icon: Receipt },
+      { key: 'credit_notes', title: 'Credit Notes', path: '/credit-notes', icon: ReceiptText },
+      { key: 'payments', title: 'Payments', path: '/payments', icon: CreditCard },
+      { key: 'collections', title: 'Collections', path: '/collections', icon: ShieldCheck },
     ],
   },
   {
+    key: 'subscriptions',
     title: 'SUBSCRIPTIONS',
     items: [
-      { title: 'Plans & Pricing', path: '/plans-pricing', icon: Layers },
-      { title: 'Subscriptions', path: '/subscriptions', icon: Repeat },
-      { title: 'Trials', path: '/trials', icon: Clock },
-      { title: 'Usage / Metering', path: '/usage', icon: Gauge },
-      { title: 'Proration', path: '/proration', icon: Percent },
-      { title: 'Dunning', path: '/dunning', icon: AlertTriangle },
+      { key: 'plans_pricing', title: 'Plans & Pricing', path: '/plans-pricing', icon: Layers },
+      { key: 'subscriptions', title: 'Subscriptions', path: '/subscriptions', icon: Repeat },
+      { key: 'trials', title: 'Trials', path: '/trials', icon: Clock },
+      { key: 'usage', title: 'Usage / Metering', path: '/usage', icon: Gauge },
+      { key: 'proration', title: 'Proration', path: '/proration', icon: Percent },
+      { key: 'dunning', title: 'Dunning', path: '/dunning', icon: AlertTriangle },
     ],
   },
   {
+    key: 'customer_experience',
     title: 'CUSTOMER EXPERIENCE',
     items: [
-      { title: 'Customer Lifecycle', path: '/customer-lifecycle', icon: UserCheck },
-      { title: 'Customer Portal', path: '/customer-portal', icon: Globe },
-      { title: 'Hosted Payment Pages', path: '/hosted-payment-pages', icon: ExternalLink },
+      { key: 'customer_lifecycle', title: 'Customer Lifecycle', path: '/customer-lifecycle', icon: UserCheck },
+      { key: 'customer_portal', title: 'Customer Portal', path: '/customer-portal', icon: Globe },
+      { key: 'hosted_payment_pages', title: 'Hosted Payment Pages', path: '/hosted-payment-pages', icon: ExternalLink },
     ],
   },
   {
+    key: 'operations',
     title: 'OPERATIONS',
     items: [
-      { title: 'Expenses', path: '/expenses', icon: Coins },
-      { title: 'Projects', path: '/projects', icon: Briefcase },
-      { title: 'Timesheets', path: '/timesheets', icon: Timer },
+      { key: 'expenses', title: 'Expenses', path: '/expenses', icon: Coins },
+      { key: 'projects', title: 'Projects', path: '/projects', icon: Briefcase },
+      { key: 'timesheets', title: 'Timesheets', path: '/timesheets', icon: Timer },
     ],
   },
   {
+    key: 'insights',
     title: 'INSIGHTS',
     items: [
-      { title: 'Revenue Intelligence', path: '/revenue-intelligence', icon: LineChart },
-      { title: 'Reports & Analytics', path: '/reports', icon: BarChart3 },
-      { title: 'AI in Billing', path: '/ai-billing', icon: Sparkles },
-      { title: 'Activity', path: '/activity', icon: Activity },
+      { key: 'revenue_intelligence', title: 'Revenue Intelligence', path: '/revenue-intelligence', icon: LineChart },
+      { key: 'reports', title: 'Reports & Analytics', path: '/reports', icon: BarChart3 },
+      { key: 'ai_billing', title: 'AI in Billing', path: '/ai-billing', icon: Sparkles },
+      { key: 'activity', title: 'Activity', path: '/activity', icon: Activity },
     ],
   },
   {
+    key: 'platforms',
     title: 'PLATFORMS',
     items: [
-      { title: 'Mobile', path: '/platforms/mobile', icon: Smartphone },
-      { title: 'Desktop', path: '/platforms/desktop', icon: Monitor },
+      { key: 'mobile', title: 'Mobile', path: '/platforms/mobile', icon: Smartphone },
+      { key: 'desktop', title: 'Desktop', path: '/platforms/desktop', icon: Monitor },
     ],
   },
   {
+    key: 'control_center',
     title: 'CONTROL CENTER',
     items: [
-      { title: 'Action Center', path: '/control-center/action-center', icon: Inbox },
-      { title: 'Approval Center', path: '/control-center/approvals', icon: FileCheck },
-      { title: 'Billing Calendar', path: '/control-center/calendar', icon: Calendar },
-      { title: 'Reconciliation', path: '/control-center/reconciliation', icon: ArrowLeftRight },
-      { title: 'Audit Log', path: '/control-center/audit-log', icon: History },
-      { title: 'Data Migration', path: '/control-center/migration', icon: UploadCloud },
+      { key: 'action_center', title: 'Action Center', path: '/control-center/action-center', icon: Inbox },
+      { key: 'approvals', title: 'Approval Center', path: '/control-center/approvals', icon: FileCheck },
+      { key: 'billing_calendar', title: 'Billing Calendar', path: '/control-center/calendar', icon: Calendar },
+      { key: 'reconciliation', title: 'Reconciliation', path: '/control-center/reconciliation', icon: ArrowLeftRight },
+      { key: 'audit_log', title: 'Audit Log', path: '/control-center/audit-log', icon: History },
+      { key: 'data_migration', title: 'Data Migration', path: '/control-center/migration', icon: UploadCloud },
     ],
   },
   {
+    key: 'system',
     title: 'SYSTEM',
     items: [
-      { title: 'Automation', path: '/automation', icon: Zap },
-      { title: 'Customization', path: '/customization', icon: Palette },
-      { title: 'Integrations', path: '/integrations', icon: Boxes },
-      { title: 'Settings', path: '/settings', icon: Settings },
+      { key: 'automation', title: 'Automation', path: '/automation', icon: Zap },
+      { key: 'customization', title: 'Customization', path: '/customization', icon: Palette },
+      { key: 'integrations', title: 'Integrations', path: '/integrations', icon: Boxes },
+      { key: 'settings', title: 'Settings', path: '/settings', icon: Settings },
     ],
   },
 ];
@@ -225,6 +242,26 @@ const SECTION_VISUALS: Record<string, SectionVisualConfig> = {
   },
 };
 
+/** The navigation as configured in the visual editor, merged over the built-in definition. */
+function resolveNavigation(config: NavigationConfig): Array<SidebarSection & { label: string }> {
+  const sectionOverrides = config.sections ?? [];
+  return visible(resolveList(NAV_SECTION_DEFS, sectionOverrides))
+    .map((resolvedSection) => {
+      const base = sidebarSections.find((s) => s.key === resolvedSection.key);
+      if (!base) return null;
+      const itemOverrides = sectionOverrides.find((s) => s.key === base.key)?.items ?? [];
+      const itemDefs = base.items.map((i) => ({ key: i.key, label: i.title, required: i.key === 'settings' }));
+      const items: SidebarItem[] = visible(resolveList(itemDefs, itemOverrides)).map((resolvedItem) => {
+        const item = base.items.find((i) => i.key === resolvedItem.key)!;
+        const icon = itemOverrides.find((o) => o.key === item.key)?.icon;
+        return { ...item, title: resolvedItem.label, icon: uiIcon(icon, item.icon as LucideIcon) as SidebarItem['icon'] };
+      });
+      const section: SidebarSection & { label: string } = { ...base, label: resolvedSection.label, items };
+      return section;
+    })
+    .filter((s): s is SidebarSection & { label: string } => s !== null && s.items.length > 0);
+}
+
 export function Sidebar({
   isOpen,
   onClose,
@@ -232,6 +269,9 @@ export function Sidebar({
   onToggleCollapse,
 }: SidebarProps) {
   const location = useLocation();
+  const navigationConfig = usePageUi('navigation');
+  const sections = useMemo(() => resolveNavigation(navigationConfig), [navigationConfig]);
+  const editable = useUiEditable();
 
   // Initialize expanded sections from sessionStorage (defaulting to WORKSPACE)
   const [expandedSections, setExpandedSections] = useState<string[]>(() => {
@@ -325,7 +365,7 @@ export function Sidebar({
       'group flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 select-none',
       collapsed && 'lg:justify-center lg:px-2',
       isActive
-        ? 'bg-[#25247A] text-white font-semibold shadow-xs border border-[#3F51C9]/40'
+        ? 'bg-[var(--sidebar-active,#25247A)] text-white font-semibold shadow-xs border border-[#3F51C9]/40'
         : 'text-slate-300 hover:text-white hover:bg-white/5'
     );
 
@@ -345,7 +385,7 @@ export function Sidebar({
       {/* Sidebar Aside */}
       <aside
         className={cn(
-          'fixed top-0 bottom-0 left-0 z-50 w-60 bg-[#171B63] text-white border-r border-[#25247A] flex flex-col justify-between transition-[transform,width] duration-200 ease-in-out lg:translate-x-0 lg:static lg:z-auto',
+          'fixed top-0 bottom-0 left-0 z-50 w-60 bg-[var(--sidebar-bg,#171B63)] text-white border-r border-[#25247A] flex flex-col justify-between transition-[transform,width] duration-200 ease-in-out lg:translate-x-0 lg:static lg:z-auto',
           collapsed && 'lg:w-[72px]',
           isOpen ? 'translate-x-0' : '-translate-x-full'
         )}
@@ -390,7 +430,7 @@ export function Sidebar({
 
         {/* Collapsible Accordion Navigation Sections */}
         <div className={cn('flex-1 overflow-y-auto px-3 py-3.5 space-y-3', collapsed && 'lg:px-2')}>
-          {sidebarSections.map((section) => {
+          {sections.map((section) => {
             const isExpanded = expandedSections.includes(section.title);
             const visual = SECTION_VISUALS[section.title] ?? DEFAULT_SECTION_VISUAL;
             const SectionIcon = visual.icon;
@@ -400,6 +440,7 @@ export function Sidebar({
                 {/* Clickable Section Header */}
                 <button
                   type="button"
+                  {...editable(`nav.section.${section.key}`)}
                   onClick={() => toggleSection(section.title)}
                   className={cn(
                     'w-full flex items-center justify-between px-2.5 py-1.5 rounded-[9px] text-[10.5px] font-bold tracking-wider uppercase transition-all duration-150 cursor-pointer select-none group',
@@ -407,12 +448,12 @@ export function Sidebar({
                     collapsed && 'lg:justify-center lg:px-1.5'
                   )}
                   aria-expanded={isExpanded}
-                  title={collapsed ? section.title : undefined}
+                  title={collapsed ? section.label : undefined}
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <SectionIcon className={cn('w-3.5 h-3.5 shrink-0', visual.iconColor)} />
                     <span className={cn('truncate', visual.labelColor, collapsed && 'lg:hidden')}>
-                      {section.title}
+                      {section.label}
                     </span>
                   </div>
                   <span className={cn('shrink-0 text-slate-400 group-hover:text-slate-200 transition-transform', collapsed && 'lg:hidden')}>
@@ -453,6 +494,7 @@ export function Sidebar({
                       return (
                         <NavLink
                           key={item.path}
+                          {...editable(`nav.item.${item.key}`)}
                           to={item.path}
                           onClick={() => {
                             if (window.innerWidth < 1024) onClose();

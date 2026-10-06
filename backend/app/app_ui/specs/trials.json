@@ -1,0 +1,57 @@
+{
+  "key": "trials",
+  "title": "Trials",
+  "route": "/trials",
+  "nav_item": "trials",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        { "name": "back_link", "label": "Back link", "kind": "label", "default": "Back to Subscriptions" },
+        { "name": "title", "label": "Heading", "kind": "heading", "default": "Trial Center & Pipeline" },
+        { "name": "subtitle", "label": "Subtitle", "kind": "body", "default": "Monitor active trial periods, track expiration timelines, and convert prospects into recurring revenue." }
+      ]
+    },
+    {
+      "id": "section",
+      "label": "Trials table",
+      "fields": [
+        { "name": "title", "label": "Section heading", "kind": "heading", "default": "Active Trial Accounts" }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty state",
+      "fields": [
+        { "name": "title", "label": "Title", "kind": "heading", "default": "No active trials" },
+        { "name": "description", "label": "Description", "kind": "body", "default": "There are currently no customers in an active trial evaluation period." }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "KPI cards",
+      "captions": true,
+      "items": [
+        { "key": "active", "label": "Active Trials", "caption": "Potential customer pipeline" },
+        { "key": "expiring", "label": "Expiring Within 7 Days", "caption": "High-priority conversion window" },
+        { "key": "total_base", "label": "Total Subscriptions Base", "caption": "{active} currently paid & active" }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Table columns",
+      "items": [
+        { "key": "subscription", "label": "Trial / Subscription", "required": true },
+        { "key": "customer", "label": "Customer" },
+        { "key": "plan", "label": "Plan & Terms" },
+        { "key": "window", "label": "Trial Window" },
+        { "key": "timeline", "label": "Timeline" },
+        { "key": "mrr", "label": "Potential MRR" },
+        { "key": "actions", "label": "Actions" }
+      ]
+    }
+  ]
+}

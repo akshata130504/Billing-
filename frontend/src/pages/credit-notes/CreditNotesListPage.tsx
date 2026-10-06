@@ -20,10 +20,12 @@ import {
 import { formatDate, formatMoney } from '../../utils/format';
 import { CreateCreditNoteModal } from './CreateCreditNoteModal';
 import { CREDIT_NOTE_STATUS_LABELS, creditNoteStatusLabel, creditNoteStatusVariant } from './creditNoteUi';
+import { usePageSpec } from '../../appUi/usePageSpec';
 
 const PAGE_SIZE = 25;
 
 export function CreditNotesListPage() {
+  const ui = usePageSpec('credit_notes');
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasRole } = useAuth();
@@ -94,53 +96,73 @@ export function CreditNotesListPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        eyebrow="Revenue"
-        title="Credit Notes"
-        subtitle="Credits issued to customers, their remaining balance, and where they were applied."
-        actions={
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void load()}
-              title="Refresh"
-              leadingIcon={<RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />}
-            >
-              Refresh
-            </Button>
-            {canCreate && (
+      <div {...ui.edit('header')}>
+        <PageHeader
+          eyebrow={ui.text('header', 'eyebrow')}
+          title={ui.text('header', 'title')}
+          subtitle={ui.text('header', 'subtitle')}
+          actions={
+            <div className="flex items-center gap-2">
               <Button
-                variant="primary"
+                variant="outline"
                 size="sm"
-                leadingIcon={<Plus className="w-4 h-4" />}
-                onClick={() => setCreateOpen(true)}
+                onClick={() => void load()}
+                title="Refresh"
+                leadingIcon={<RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />}
               >
-                New Credit Note
+                Refresh
               </Button>
-            )}
-          </div>
-        }
-      />
+              {canCreate && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  leadingIcon={<Plus className="w-4 h-4" />}
+                  onClick={() => setCreateOpen(true)}
+                >
+                  New Credit Note
+                </Button>
+              )}
+            </div>
+          }
+        />
+      </div>
 
       {summary && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" aria-label="Credit note totals">
-          <StatCard
-            title="Issued"
-            value={tile('issued_total')}
-            comparisonText={`${summary.total_count - (summary.count_by_status.void ?? 0) - (summary.count_by_status.draft ?? 0)} credit notes`}
-          />
-          <StatCard title="Applied" value={tile('applied_total')} comparisonText="Used against invoices" />
-          <StatCard
-            title="Remaining balance"
-            value={tile('remaining_balance')}
-            comparisonText={`${(summary.count_by_status.issued ?? 0) + (summary.count_by_status.partially_applied ?? 0)} with credit left`}
-          />
-          <StatCard
-            title="Voided"
-            value={tile('voided_total')}
-            comparisonText={`${summary.count_by_status.void ?? 0} voided`}
-          />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" aria-label="Credit note totals" {...ui.edit('kpis')}>
+          {ui.render('kpis', {
+            issued: (item, edit) => (
+              <div key="issued" {...edit}>
+                <StatCard
+                  title={item.label}
+                  value={tile('issued_total')}
+                  comparisonText={item.caption || `${summary.total_count - (summary.count_by_status.void ?? 0) - (summary.count_by_status.draft ?? 0)} credit notes`}
+                />
+              </div>
+            ),
+            applied: (item, edit) => (
+              <div key="applied" {...edit}>
+                <StatCard title={item.label} value={tile('applied_total')} comparisonText={item.caption || "Used against invoices"} />
+              </div>
+            ),
+            balance: (item, edit) => (
+              <div key="balance" {...edit}>
+                <StatCard
+                  title={item.label}
+                  value={tile('remaining_balance')}
+                  comparisonText={item.caption || `${(summary.count_by_status.issued ?? 0) + (summary.count_by_status.partially_applied ?? 0)} with credit left`}
+                />
+              </div>
+            ),
+            voided: (item, edit) => (
+              <div key="voided" {...edit}>
+                <StatCard
+                  title={item.label}
+                  value={tile('voided_total')}
+                  comparisonText={item.caption || `${summary.count_by_status.void ?? 0} voided`}
+                />
+              </div>
+            ),
+          })}
         </div>
       )}
 
@@ -187,7 +209,7 @@ export function CreditNotesListPage() {
         ) : visible.length === 0 ? (
           <EmptyState
             icon={<ReceiptText className="w-6 h-6" />}
-            title={filtered ? 'No matching credit notes' : 'No credit notes yet'}
+            title={filtered ? 'No matching credit notes' : ui.text('empty', 'none')}
             description={
               filtered
                 ? 'Try a different customer or status.'
@@ -207,14 +229,16 @@ export function CreditNotesListPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-600 border-collapse">
                 <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                  <tr>
-                    <th className="px-4 py-3">Credit Note #</th>
-                    <th className="px-4 py-3">Customer</th>
-                    <th className="px-4 py-3">Date</th>
-                    <th className="px-4 py-3">Reason</th>
-                    <th className="px-4 py-3 text-right">Total</th>
-                    <th className="px-4 py-3 text-right">Balance</th>
-                    <th className="px-4 py-3">Status</th>
+                  <tr {...ui.edit('columns')}>
+                    {ui.shown('columns').map((col) => (
+                      <th
+                        key={col.key}
+                        className={`px-4 py-3${col.key === 'total' || col.key === 'remaining' || col.key === 'actions' ? ' text-right' : ''}`}
+                        {...ui.edit(`columns.${col.key}`)}
+                      >
+                        {col.label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -228,24 +252,63 @@ export function CreditNotesListPage() {
                       tabIndex={0}
                       className="hover:bg-slate-50/80 transition-colors cursor-pointer focus:outline-none focus:bg-slate-50"
                     >
-                      <td className="px-4 py-3 font-mono font-semibold text-slate-900">{note.credit_note_number}</td>
-                      <td className="px-4 py-3">
-                        <p className="font-semibold text-slate-900">{note.customer?.display_name ?? '—'}</p>
-                        {note.customer?.customer_number && (
-                          <p className="text-[10px] text-slate-400">{note.customer.customer_number}</p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">{formatDate(note.created_at)}</td>
-                      <td className="px-4 py-3 max-w-xs truncate">{note.reason || '—'}</td>
-                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                        {formatMoney(note.total, note.currency)}
-                      </td>
-                      <td className="px-4 py-3 text-right">{formatMoney(note.balance_remaining, note.currency)}</td>
-                      <td className="px-4 py-3">
-                        <Badge size="sm" variant={creditNoteStatusVariant(note.status)}>
-                          {creditNoteStatusLabel(note.status)}
-                        </Badge>
-                      </td>
+                      {ui.shown('columns').map((col) => {
+                        if (col.key === 'credit_note_number') {
+                          return (
+                            <td key="credit_note_number" className="px-4 py-3 font-mono font-semibold text-slate-900">
+                              {note.credit_note_number}
+                            </td>
+                          );
+                        }
+                        if (col.key === 'customer') {
+                          return (
+                            <td key="customer" className="px-4 py-3">
+                              <p className="font-semibold text-slate-900">{note.customer?.display_name ?? '—'}</p>
+                              {note.customer?.customer_number && (
+                                <p className="text-[10px] text-slate-400">{note.customer.customer_number}</p>
+                              )}
+                            </td>
+                          );
+                        }
+                        if (col.key === 'date') {
+                          return (
+                            <td key="date" className="px-4 py-3">
+                              {formatDate(note.created_at)}
+                            </td>
+                          );
+                        }
+                        if (col.key === 'total') {
+                          return (
+                            <td key="total" className="px-4 py-3 text-right font-semibold text-slate-900">
+                              {formatMoney(note.total, note.currency)}
+                            </td>
+                          );
+                        }
+                        if (col.key === 'remaining') {
+                          return (
+                            <td key="remaining" className="px-4 py-3 text-right">
+                              {formatMoney(note.balance_remaining, note.currency)}
+                            </td>
+                          );
+                        }
+                        if (col.key === 'status') {
+                          return (
+                            <td key="status" className="px-4 py-3">
+                              <Badge size="sm" variant={creditNoteStatusVariant(note.status)}>
+                                {creditNoteStatusLabel(note.status)}
+                              </Badge>
+                            </td>
+                          );
+                        }
+                        if (col.key === 'actions') {
+                          return (
+                            <td key="actions" className="px-4 py-3 text-right">
+                              <span className="text-xs text-brand-600 font-medium">View</span>
+                            </td>
+                          );
+                        }
+                        return null;
+                      })}
                     </tr>
                   ))}
                 </tbody>

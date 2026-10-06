@@ -5,8 +5,7 @@ export function DesktopPlatformPage() {
   return (
     <PlatformPage
       family="desktop"
-      title="Desktop"
-      subtitle="Windows and macOS shells: registered devices, trust status, and how the thin desktop client signs in against this API."
+      uiKey="desktop"
       icon={<Monitor className="w-4 h-4" />}
     />
   );

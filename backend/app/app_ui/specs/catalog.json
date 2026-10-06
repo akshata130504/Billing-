@@ -1,0 +1,134 @@
+{
+  "key": "catalog",
+  "title": "Products",
+  "route": "/catalog",
+  "nav_item": "catalog",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Commercial Product Catalog"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Master commercial catalog answering what Rooman sells: products, services, subscriptions, and bundles."
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty table messages",
+      "fields": [
+        {
+          "name": "none",
+          "label": "No offerings",
+          "kind": "body",
+          "default": "No offerings found."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "KPI cards",
+      "captions": true,
+      "items": [
+        {
+          "key": "active",
+          "label": "Active Offerings",
+          "caption": "Ready for sale"
+        },
+        {
+          "key": "products",
+          "label": "Products",
+          "caption": "Physical and digital goods"
+        },
+        {
+          "key": "services",
+          "label": "Services",
+          "caption": "Professional services"
+        },
+        {
+          "key": "plans",
+          "label": "Recurring Plans",
+          "caption": "Subscriptions"
+        },
+        {
+          "key": "bundles",
+          "label": "Curated Bundles",
+          "caption": "Multi-product packages"
+        }
+      ]
+    },
+    {
+      "id": "tabs",
+      "label": "Offering tabs",
+      "items": [
+        {
+          "key": "all",
+          "label": "All Offerings",
+          "required": true
+        },
+        {
+          "key": "products",
+          "label": "Products"
+        },
+        {
+          "key": "services",
+          "label": "Services"
+        },
+        {
+          "key": "plans",
+          "label": "Plans"
+        },
+        {
+          "key": "bundles",
+          "label": "Bundles"
+        },
+        {
+          "key": "price_books",
+          "label": "Price Books"
+        }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Offering table columns",
+      "items": [
+        {
+          "key": "sku",
+          "label": "SKU & Name",
+          "required": true
+        },
+        {
+          "key": "type",
+          "label": "Offering Type"
+        },
+        {
+          "key": "accounting",
+          "label": "Category / Tax"
+        },
+        {
+          "key": "pricing",
+          "label": "Base Price"
+        },
+        {
+          "key": "status",
+          "label": "Status"
+        },
+        {
+          "key": "actions",
+          "label": "Actions"
+        }
+      ]
+    }
+  ]
+}

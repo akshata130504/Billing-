@@ -1,0 +1,101 @@
+{
+  "key": "payments",
+  "title": "Payments",
+  "route": "/payments",
+  "nav_item": "payments",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Payments"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Track customer payments, invoice settlements and refunds."
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty table messages",
+      "fields": [
+        {
+          "name": "none",
+          "label": "No payments",
+          "kind": "body",
+          "default": "No payments recorded yet."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "Summary cards",
+      "items": [
+        {
+          "key": "collected",
+          "label": "Total Collected"
+        },
+        {
+          "key": "pending",
+          "label": "Pending"
+        },
+        {
+          "key": "refunded",
+          "label": "Refunded"
+        },
+        {
+          "key": "failed",
+          "label": "Failed"
+        }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Payment table columns",
+      "items": [
+        {
+          "key": "reference",
+          "label": "Payment #",
+          "required": true
+        },
+        {
+          "key": "customer",
+          "label": "Customer"
+        },
+        {
+          "key": "invoice",
+          "label": "Invoice"
+        },
+        {
+          "key": "date",
+          "label": "Date"
+        },
+        {
+          "key": "method",
+          "label": "Method"
+        },
+        {
+          "key": "amount",
+          "label": "Amount"
+        },
+        {
+          "key": "status",
+          "label": "Status"
+        },
+        {
+          "key": "actions",
+          "label": "Actions"
+        }
+      ]
+    }
+  ]
+}

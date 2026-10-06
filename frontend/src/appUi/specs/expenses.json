@@ -1,0 +1,120 @@
+{
+  "key": "expenses",
+  "title": "Expenses",
+  "route": "/expenses",
+  "nav_item": "expenses",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Expenses"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Track operating costs, billable expenses and reimbursable expenses."
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty table messages",
+      "fields": [
+        {
+          "name": "none",
+          "label": "No expenses",
+          "kind": "body",
+          "default": "No expenses recorded yet."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "Summary cards",
+      "items": [
+        {
+          "key": "total",
+          "label": "Total Expenses"
+        },
+        {
+          "key": "billable",
+          "label": "Billable Expenses"
+        },
+        {
+          "key": "reimbursable",
+          "label": "Reimbursable"
+        },
+        {
+          "key": "monthly",
+          "label": "Incurred This Month"
+        }
+      ]
+    },
+    {
+      "id": "tabs",
+      "label": "Expense tabs",
+      "items": [
+        {
+          "key": "all",
+          "label": "All Expenses",
+          "required": true
+        },
+        {
+          "key": "recurring",
+          "label": "Recurring Expenses"
+        }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Expense table columns",
+      "items": [
+        {
+          "key": "expense",
+          "label": "Expense",
+          "required": true
+        },
+        {
+          "key": "category",
+          "label": "Category"
+        },
+        {
+          "key": "customer",
+          "label": "Customer"
+        },
+        {
+          "key": "project",
+          "label": "Project"
+        },
+        {
+          "key": "date",
+          "label": "Date"
+        },
+        {
+          "key": "billable",
+          "label": "Billable"
+        },
+        {
+          "key": "amount",
+          "label": "Amount"
+        },
+        {
+          "key": "status",
+          "label": "Status"
+        },
+        {
+          "key": "actions",
+          "label": "Actions"
+        }
+      ]
+    }
+  ]
+}

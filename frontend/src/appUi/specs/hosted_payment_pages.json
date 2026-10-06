@@ -1,0 +1,62 @@
+{
+  "key": "hosted_payment_pages",
+  "title": "Hosted Payment Pages",
+  "route": "/hosted-payment-pages",
+  "nav_item": "hosted_payment_pages",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        { "name": "eyebrow", "label": "Eyebrow", "kind": "label", "default": "Customer Experience" },
+        { "name": "title", "label": "Heading", "kind": "heading", "default": "Hosted Payment Pages" },
+        { "name": "subtitle", "label": "Subtitle", "kind": "body", "default": "Generate secure, expiring checkout links for invoices, subscriptions and card capture — branded with your own templates." }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty states",
+      "fields": [
+        { "name": "sessions_title", "label": "No sessions title", "kind": "heading", "default": "No checkout sessions yet" },
+        { "name": "sessions_description", "label": "No sessions description", "kind": "body", "default": "Create a hosted checkout link to let a customer pay an invoice, start a subscription or save a card without signing in." },
+        { "name": "filtered_hint", "label": "No sessions for a status filter (hint)", "kind": "body", "default": "Try a different status filter." },
+        { "name": "templates_title", "label": "No templates title", "kind": "heading", "default": "No checkout templates" },
+        { "name": "templates_description", "label": "No templates description", "kind": "body", "default": "Templates control the colours, logo, button text and redirect of your hosted pages. A “Standard Checkout” default is created automatically the first time a session is generated without one." }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "KPI stat cards",
+      "items": [
+        { "key": "total", "label": "Total sessions" },
+        { "key": "awaiting", "label": "Awaiting payment" },
+        { "key": "successful", "label": "Successful" },
+        { "key": "closed", "label": "Failed / expired" }
+      ]
+    },
+    {
+      "id": "tabs",
+      "label": "Tabs",
+      "hide": false,
+      "items": [
+        { "key": "sessions", "label": "Sessions" },
+        { "key": "templates", "label": "Templates" }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Sessions table columns",
+      "items": [
+        { "key": "ref", "label": "Reference", "required": true },
+        { "key": "customer", "label": "Customer" },
+        { "key": "amount", "label": "Amount" },
+        { "key": "status", "label": "Status" },
+        { "key": "expires", "label": "Expires" },
+        { "key": "created", "label": "Created" },
+        { "key": "actions", "label": "Actions" }
+      ]
+    }
+  ]
+}

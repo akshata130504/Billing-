@@ -1,4 +1,5 @@
 import { CalendarRange, Calculator, ReceiptText, Clock } from 'lucide-react';
+import { usePageSpec } from '../../appUi/usePageSpec';
 
 const STEPS = [
   {
@@ -24,14 +25,14 @@ const STEPS = [
 ];
 
 export function ProrationExplainerCard() {
+  const ui = usePageSpec('proration');
   return (
     <div className="bg-white rounded-xl border border-slate-200/90 shadow-card p-5">
       <div className="flex items-start justify-between gap-4 mb-4">
-        <div>
-          <h2 className="text-sm font-semibold text-slate-900 tracking-tight">How proration is calculated</h2>
+        <div {...ui.edit('explainer')}>
+          <h2 className="text-sm font-semibold text-slate-900 tracking-tight">{ui.text('explainer', 'title')}</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Mid-cycle plan and quantity changes are settled against the current period only. The next renewal bills the new
-            terms in full.
+            {ui.text('explainer', 'description')}
           </p>
         </div>
         <code className="hidden md:block shrink-0 text-[11px] font-mono text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5">

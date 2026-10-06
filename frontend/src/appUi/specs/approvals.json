@@ -1,0 +1,107 @@
+{
+  "key": "approvals",
+  "title": "Approval Center",
+  "route": "/control-center/approvals",
+  "nav_item": "approvals",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "eyebrow",
+          "label": "Eyebrow",
+          "kind": "label",
+          "default": "Control Center"
+        },
+        {
+          "name": "badge",
+          "label": "Badge",
+          "kind": "label",
+          "default": "Governance & Compliance"
+        },
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Approval Center"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Authorize quote discounts, invoice discounts, refunds, and invoice voids requiring manager sign-off."
+        },
+        {
+          "name": "pending",
+          "label": "Pending counter",
+          "kind": "label",
+          "default": "{count} Pending Decisions",
+          "hint": "{count} is the number of pending requests."
+        }
+      ]
+    },
+    {
+      "id": "notice",
+      "label": "Notices",
+      "fields": [
+        {
+          "name": "read_only",
+          "label": "Read-only member notice",
+          "kind": "body",
+          "default": "Only Admins and Owners can approve or reject requests. You can still review request details."
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty list messages",
+      "fields": [
+        {
+          "name": "title_all",
+          "label": "No requests - title",
+          "kind": "heading",
+          "default": "No approval requests"
+        },
+        {
+          "name": "title_status",
+          "label": "No requests with a status - title",
+          "kind": "heading",
+          "default": "No {status} approvals",
+          "hint": "{status} is the selected status: pending, approved or rejected."
+        },
+        {
+          "name": "description",
+          "label": "Description",
+          "kind": "body",
+          "default": "There are no approval requests matching this criteria."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "tabs",
+      "label": "Status tabs",
+      "items": [
+        {
+          "key": "pending",
+          "label": "Pending Review",
+          "required": true
+        },
+        {
+          "key": "approved",
+          "label": "Approved"
+        },
+        {
+          "key": "rejected",
+          "label": "Rejected"
+        },
+        {
+          "key": "all",
+          "label": "All Requests"
+        }
+      ]
+    }
+  ]
+}

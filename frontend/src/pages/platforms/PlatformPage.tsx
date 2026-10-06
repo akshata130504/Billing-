@@ -22,18 +22,21 @@ import {
 import { DevicesTable } from './DevicesTable';
 import { RegisterDeviceModal } from './RegisterDeviceModal';
 import { ConnectionDetailsCard } from './ConnectionDetailsCard';
+import { usePageSpec } from '../../appUi/usePageSpec';
+import { fillTokens } from '../../appUi/registry';
 
 const ACTIVE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 export interface PlatformPageProps {
   family: PlatformFamily;
-  title: string;
-  subtitle: string;
+  /** Visual-editor page spec ('mobile' / 'desktop'): each platform page is configured on its own. */
+  uiKey: 'mobile' | 'desktop';
   icon: React.ReactNode;
 }
 
-export function PlatformPage({ family, title, subtitle, icon }: PlatformPageProps) {
+export function PlatformPage({ family, uiKey, icon }: PlatformPageProps) {
   const { showToast } = useToast();
+  const ui = usePageSpec(uiKey);
   const { user } = useAuth();
   // POST /devices and DELETE /devices/{id} require no particular role — any authenticated
   // org member can register or revoke their own device.
@@ -142,18 +145,20 @@ export function PlatformPage({ family, title, subtitle, icon }: PlatformPageProp
   };
 
   const registeredBy = user?.full_name || user?.email || 'You';
+  const platformList = familyPlatforms.map((p) => PLATFORM_LABELS[p]).join(' · ');
+  const platformChoices = familyPlatforms.map((p) => PLATFORM_LABELS[p]).join(' or ');
 
   return (
     <div className="space-y-6 pb-12">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
+        <div {...ui.edit('header')}>
           <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">
             {icon}
-            Platforms
+            {ui.text('header', 'eyebrow')}
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{title}</h1>
-          <p className="text-sm text-slate-500 mt-1">{subtitle}</p>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{ui.text('header', 'title')}</h1>
+          <p className="text-sm text-slate-500 mt-1">{ui.text('header', 'subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={handleRefresh} leadingIcon={<RefreshCw className="w-4 h-4" />}>
@@ -168,35 +173,49 @@ export function PlatformPage({ family, title, subtitle, icon }: PlatformPageProp
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard
-          title="Registered devices"
-          value={devicesLoading ? '—' : stats.registered}
-          comparisonText={familyPlatforms.map((p) => PLATFORM_LABELS[p]).join(' · ')}
-          icon={<Smartphone className="w-4 h-4" />}
-        />
-        <StatCard
-          title="Active (30 days)"
-          value={devicesLoading ? '—' : stats.active}
-          comparisonText="Trusted devices seen in the last 30 days"
-          icon={<Activity className="w-4 h-4" />}
-        />
-        <StatCard
-          title="Revoked"
-          value={devicesLoading ? '—' : stats.revoked}
-          comparisonText="Records kept for audit; identifiers cannot be re-used"
-          icon={<ShieldOff className="w-4 h-4" />}
-        />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4" {...ui.edit('stats')}>
+        {ui.render('stats', {
+          registered: (item, edit) => (
+            <div className="grid" {...edit}>
+              <StatCard
+                title={item.label}
+                value={devicesLoading ? '—' : stats.registered}
+                comparisonText={fillTokens(item.caption ?? '', { platforms: platformList })}
+                icon={<Smartphone className="w-4 h-4" />}
+              />
+            </div>
+          ),
+          active: (item, edit) => (
+            <div className="grid" {...edit}>
+              <StatCard
+                title={item.label}
+                value={devicesLoading ? '—' : stats.active}
+                comparisonText={item.caption}
+                icon={<Activity className="w-4 h-4" />}
+              />
+            </div>
+          ),
+          revoked: (item, edit) => (
+            <div className="grid" {...edit}>
+              <StatCard
+                title={item.label}
+                value={devicesLoading ? '—' : stats.revoked}
+                comparisonText={item.caption}
+                icon={<ShieldOff className="w-4 h-4" />}
+              />
+            </div>
+          ),
+        })}
       </div>
 
       {/* Filters */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm" {...ui.edit('filters')}>
         <div className="flex flex-col md:flex-row gap-3 items-center justify-between">
           <div className="relative flex-1 w-full">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
-              placeholder="Search device name, identifier, app version..."
+              placeholder={ui.text('filters', 'search_placeholder')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-9 pr-4 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-colors"
@@ -208,7 +227,7 @@ export function PlatformPage({ family, title, subtitle, icon }: PlatformPageProp
               onChange={(e) => setPlatformFilter(e.target.value as 'all' | DevicePlatform)}
               className="px-3 py-2 text-xs font-medium bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="all">All platforms</option>
+              <option value="all">{ui.text('filters', 'all_platforms')}</option>
               {familyPlatforms.map((p) => (
                 <option key={p} value={p}>
                   {PLATFORM_LABELS[p]}
@@ -220,7 +239,7 @@ export function PlatformPage({ family, title, subtitle, icon }: PlatformPageProp
               onChange={(e) => setStatusFilter(e.target.value as 'all' | DeviceTrustStatus)}
               className="px-3 py-2 text-xs font-medium bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="all">All statuses</option>
+              <option value="all">{ui.text('filters', 'all_statuses')}</option>
               {(Object.keys(TRUST_STATUS_LABELS) as DeviceTrustStatus[]).map((s) => (
                 <option key={s} value={s}>
                   {TRUST_STATUS_LABELS[s]}
@@ -233,57 +252,61 @@ export function PlatformPage({ family, title, subtitle, icon }: PlatformPageProp
 
       {/* Devices table */}
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-900">Registered devices</h2>
+        <div className="flex items-center justify-between" {...ui.edit('devices')}>
+          <h2 className="text-sm font-semibold text-slate-900">{ui.text('devices', 'title')}</h2>
           {!devicesLoading && !devicesError && (
             <span className="text-xs text-slate-500">
-              {visibleDevices.length} of {familyDevices.length} · your devices in this organization
+              {ui.text('devices', 'count', { shown: String(visibleDevices.length), total: String(familyDevices.length) })}
             </span>
           )}
         </div>
         {devicesLoading ? (
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm py-8">
-            <LoadingState message={`Loading ${title.toLowerCase()} devices...`} />
+            <LoadingState message={`Loading ${family} devices...`} />
           </div>
         ) : devicesError ? (
           <ErrorState title="Devices could not be loaded" message={devicesError} onRetry={() => void loadDevices()} />
         ) : familyDevices.length === 0 ? (
-          <EmptyState
-            icon={icon}
-            title={`No ${title.toLowerCase()} devices registered`}
-            description={
-              canWrite
-                ? `Devices appear here once a ${familyPlatforms.map((p) => PLATFORM_LABELS[p]).join(' or ')} client signs in through the native exchange, or you can register one manually.`
-                : `Devices appear here once a ${familyPlatforms.map((p) => PLATFORM_LABELS[p]).join(' or ')} client signs in through the native exchange.`
-            }
-            action={
-              canWrite ? (
-                <Button variant="primary" size="sm" onClick={() => setRegisterOpen(true)} leadingIcon={<Plus className="w-4 h-4" />}>
-                  Register device
-                </Button>
-              ) : undefined
-            }
-          />
+          <div {...ui.edit('empty')}>
+            <EmptyState
+              icon={icon}
+              title={ui.text('empty', 'title')}
+              description={
+                canWrite
+                  ? ui.text('empty', 'description', { platforms: platformChoices })
+                  : `Devices appear here once a ${platformChoices} client signs in through the native exchange.`
+              }
+              action={
+                canWrite ? (
+                  <Button variant="primary" size="sm" onClick={() => setRegisterOpen(true)} leadingIcon={<Plus className="w-4 h-4" />}>
+                    Register device
+                  </Button>
+                ) : undefined
+              }
+            />
+          </div>
         ) : visibleDevices.length === 0 ? (
-          <EmptyState
-            title="No devices match these filters"
-            description="Try a different platform, status or search term."
-            action={
-              hasFilters ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setSearch('');
-                    setStatusFilter('all');
-                    setPlatformFilter('all');
-                  }}
-                >
-                  Clear filters
-                </Button>
-              ) : undefined
-            }
-          />
+          <div {...ui.edit('empty')}>
+            <EmptyState
+              title={ui.text('empty', 'filtered_title')}
+              description={ui.text('empty', 'filtered_description')}
+              action={
+                hasFilters ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSearch('');
+                      setStatusFilter('all');
+                      setPlatformFilter('all');
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                ) : undefined
+              }
+            />
+          </div>
         ) : (
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             <DevicesTable
@@ -292,6 +315,8 @@ export function PlatformPage({ family, title, subtitle, icon }: PlatformPageProp
               canWrite={canWrite}
               onRevoke={setRevokeTarget}
               revokingId={revokingId}
+              columns={ui.shown('columns')}
+              edit={ui.edit}
             />
           </div>
         )}
@@ -304,6 +329,12 @@ export function PlatformPage({ family, title, subtitle, icon }: PlatformPageProp
         loading={bootstrapLoading}
         error={bootstrapError}
         onRetry={() => void loadBootstrap()}
+        texts={{
+          title: ui.text('connection', 'title'),
+          signInTitle: ui.text('connection', 'sign_in_title'),
+          signInDescription: ui.text('connection', 'sign_in_description'),
+        }}
+        editProps={ui.edit('connection')}
       />
 
       <RegisterDeviceModal

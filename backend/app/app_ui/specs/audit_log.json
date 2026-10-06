@@ -1,0 +1,76 @@
+{
+  "key": "audit_log",
+  "title": "Audit Log",
+  "route": "/control-center/audit-log",
+  "nav_item": "audit_log",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        { "name": "eyebrow", "label": "Eyebrow", "kind": "label", "default": "Control Center" },
+        { "name": "badge", "label": "Badge", "kind": "label", "default": "SOC 2 / ISO Compliance" },
+        { "name": "title", "label": "Heading", "kind": "heading", "default": "Immutable Audit Trail" },
+        { "name": "subtitle", "label": "Subtitle", "kind": "body", "default": "Chronological log of rate modifications, invoice voidings, discount approvals, and other financial events recorded across the organization." }
+      ]
+    },
+    {
+      "id": "notice",
+      "label": "Immutability notice",
+      "fields": [
+        { "name": "title", "label": "Title", "kind": "heading", "default": "Append-Only Financial Ledger Active" },
+        { "name": "description", "label": "Description", "kind": "body", "default": "Audit log entries are write-once and cannot be edited or deleted by any administrative account." }
+      ]
+    },
+    {
+      "id": "filters",
+      "label": "Filter placeholders",
+      "fields": [
+        { "name": "search_placeholder", "label": "Search box placeholder", "kind": "label", "default": "Search actor, entity, IP..." },
+        { "name": "action_placeholder", "label": "Action filter placeholder", "kind": "label", "default": "Filter by action (e.g. INVOICE_VOIDED)" }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty table message",
+      "fields": [
+        { "name": "filtered", "label": "No entries match the filters", "kind": "body", "default": "No audit log entries match the current filters." }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "subsystems",
+      "label": "Subsystem filter tabs",
+      "hide": false,
+      "items": [
+        { "key": "all", "label": "All Subsystems" },
+        { "key": "invoice", "label": "Invoices" },
+        { "key": "quote", "label": "Quotes" },
+        { "key": "subscription", "label": "Subscriptions" },
+        { "key": "payment", "label": "Payments" },
+        { "key": "customer", "label": "Customers" },
+        { "key": "product", "label": "Products" },
+        { "key": "plan", "label": "Plans" },
+        { "key": "approval", "label": "Approvals" },
+        { "key": "membership", "label": "Team Membership" },
+        { "key": "organization", "label": "Organization" },
+        { "key": "user", "label": "User Accounts" },
+        { "key": "import", "label": "Data Imports" }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Table columns",
+      "items": [
+        { "key": "timestamp", "label": "Timestamp" },
+        { "key": "actor", "label": "Actor" },
+        { "key": "action", "label": "Action", "required": true },
+        { "key": "entity", "label": "Affected Entity" },
+        { "key": "status", "label": "Status" },
+        { "key": "ip_address", "label": "IP Address" },
+        { "key": "details", "label": "Details", "required": true }
+      ]
+    }
+  ]
+}

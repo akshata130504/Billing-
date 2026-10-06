@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import {
@@ -63,6 +63,8 @@ import {
   type InsightTone,
   type SubscriptionMix,
 } from '../../types/revenueIntelligence';
+import { usePageSpec } from '../../appUi/usePageSpec';
+import type { EditableProps } from '../../appUi/UiConfigContext';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -354,6 +356,7 @@ function Section({
   onExport,
   isExporting,
   className,
+  edit,
   children,
 }: {
   title: string;
@@ -363,10 +366,12 @@ function Section({
   onExport?: (section: ReportExportSection) => void;
   isExporting?: boolean;
   className?: string;
+  /** Visual-editor selection props. */
+  edit?: EditableProps;
   children: ReactNode;
 }) {
   return (
-    <Card className={className}>
+    <Card className={className} {...edit}>
       <CardHeader>
         <div className="min-w-0">
           <CardTitle className="flex items-center gap-2">
@@ -557,13 +562,14 @@ const TONE_STYLE: Record<InsightTone, { icon: typeof Info; iconClass: string; bo
 };
 
 function InsightsPanel({ insights }: { insights: Insight[] }) {
+  const ui = usePageSpec('revenue_intelligence');
   if (insights.length === 0) {
     return (
       <EmptyState
         className="border-0 py-6"
         icon={<Sparkles className="w-6 h-6 stroke-1" />}
-        title="No observations yet"
-        description="Insights are generated from your invoicing, collections and subscription figures as soon as there is data to read."
+        title={ui.text('insights', 'empty_title')}
+        description={ui.text('insights', 'empty_description')}
       />
     );
   }
@@ -595,6 +601,7 @@ function TopCustomersTable({
   revenue: RevenueAnalyticsOut;
   receivables?: ReceivablesAnalyticsOut;
 }) {
+  const ui = usePageSpec('revenue_intelligence');
   const rows = revenue.revenue_by_customer;
   if (rows.length === 0) {
     return (
@@ -608,46 +615,65 @@ function TopCustomersTable({
   }
   const total = rows.reduce((acc, r) => acc + num(r.amount), 0);
   const outstandingById = new Map((receivables?.top_customers_by_outstanding ?? []).map((r) => [r.customer.id, r.amount]));
+  const columns = ui.shown('customer_columns');
+  const headerClass: Record<string, string> = {
+    rank: 'px-4 py-2.5 w-8',
+    customer: 'px-4 py-2.5',
+    revenue: 'px-4 py-2.5 text-right',
+    share: 'px-4 py-2.5 text-right',
+    outstanding: 'px-4 py-2.5 text-right',
+  };
+  const cells: Record<string, (row: (typeof rows)[number], i: number) => ReactNode> = {
+    rank: (_row, i) => <td className="px-4 py-2.5 text-slate-400 tabular-nums">{i + 1}</td>,
+    customer: (row) => (
+      <td className="px-4 py-2.5">
+        <Link to={`/customers/${row.customer.id}`} className="font-semibold text-slate-900 hover:text-brand-600">
+          {row.customer.display_name}
+        </Link>
+        <p className="text-[11px] text-slate-500">{row.customer.customer_number}</p>
+      </td>
+    ),
+    revenue: (row) => <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-slate-900">{formatMoney(row.amount)}</td>,
+    share: (row) => {
+      const share = pct(num(row.amount), total);
+      return (
+        <td className="px-4 py-2.5 text-right">
+          <div className="inline-flex items-center gap-2">
+            <span className="hidden sm:block w-16 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+              <span className="block h-full rounded-full bg-brand-500" style={{ width: `${Math.max(share, 2)}%` }} />
+            </span>
+            <span className="tabular-nums text-slate-600">{formatPercent(share, 0)}</span>
+          </div>
+        </td>
+      );
+    },
+    outstanding: (row) => {
+      const outstanding = outstandingById.get(row.customer.id);
+      return (
+        <td className={cn('px-4 py-2.5 text-right tabular-nums', outstanding && num(outstanding) > 0 ? 'text-amber-700 font-semibold' : 'text-slate-400')}>
+          {outstanding ? formatMoney(outstanding) : '—'}
+        </td>
+      );
+    },
+  };
   return (
     <div className="overflow-x-auto border border-slate-100 rounded-lg">
       <table className="w-full text-xs text-left">
         <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200/80">
-          <tr>
-            <th className="px-4 py-2.5 w-8">#</th>
-            <th className="px-4 py-2.5">Customer</th>
-            <th className="px-4 py-2.5 text-right">Revenue</th>
-            <th className="px-4 py-2.5 text-right">Share</th>
-            <th className="px-4 py-2.5 text-right">Outstanding</th>
+          <tr {...ui.edit('customer_columns')}>
+            {columns.map((col) => (
+              <th key={col.key} className={headerClass[col.key]} {...ui.edit(`customer_columns.${col.key}`)}>
+                {col.label}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {rows.map((row, i) => {
-            const share = pct(num(row.amount), total);
-            const outstanding = outstandingById.get(row.customer.id);
-            return (
-              <tr key={row.customer.id} className="hover:bg-slate-50/60">
-                <td className="px-4 py-2.5 text-slate-400 tabular-nums">{i + 1}</td>
-                <td className="px-4 py-2.5">
-                  <Link to={`/customers/${row.customer.id}`} className="font-semibold text-slate-900 hover:text-brand-600">
-                    {row.customer.display_name}
-                  </Link>
-                  <p className="text-[11px] text-slate-500">{row.customer.customer_number}</p>
-                </td>
-                <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-slate-900">{formatMoney(row.amount)}</td>
-                <td className="px-4 py-2.5 text-right">
-                  <div className="inline-flex items-center gap-2">
-                    <span className="hidden sm:block w-16 h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                      <span className="block h-full rounded-full bg-brand-500" style={{ width: `${Math.max(share, 2)}%` }} />
-                    </span>
-                    <span className="tabular-nums text-slate-600">{formatPercent(share, 0)}</span>
-                  </div>
-                </td>
-                <td className={cn('px-4 py-2.5 text-right tabular-nums', outstanding && num(outstanding) > 0 ? 'text-amber-700 font-semibold' : 'text-slate-400')}>
-                  {outstanding ? formatMoney(outstanding) : '—'}
-                </td>
-              </tr>
-            );
-          })}
+          {rows.map((row, i) => (
+            <tr key={row.customer.id} className="hover:bg-slate-50/60">
+              {columns.map((col) => <Fragment key={col.key}>{cells[col.key]?.(row, i)}</Fragment>)}
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
@@ -663,6 +689,7 @@ export function RevenueIntelligencePage() {
   const { showToast } = useToast();
   const queryClient = useQueryClient();
   const [exportingSection, setExportingSection] = useState<ReportExportSection | null>(null);
+  const ui = usePageSpec('revenue_intelligence');
 
   const rawRange = searchParams.get('range');
   const range: ReportRangeKey = isRange(rawRange) ? rawRange : 'this_year';
@@ -753,8 +780,8 @@ export function RevenueIntelligencePage() {
     body = (
       <EmptyState
         icon={<CalendarClock className="w-6 h-6 stroke-1" />}
-        title="Choose a custom date range"
-        description="Select both a start and end date above to load revenue intelligence for that window."
+        title={ui.text('empty', 'custom_title')}
+        description={ui.text('empty', 'custom_description')}
       />
     );
   } else if (kpisQuery.isPending) {
@@ -769,75 +796,118 @@ export function RevenueIntelligencePage() {
     body = (
       <>
         {/* KPI row */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-          <StatCard
-            title="MRR"
-            value={mix ? formatMoney(mix.mrr) : mixQuery.isError ? '—' : '…'}
-            comparisonText={mix ? `${formatNumber(mix.active)} active ${mix.active === 1 ? 'subscription' : 'subscriptions'}` : mixQuery.isError ? 'Subscription summary unavailable' : undefined}
-            icon={<Repeat className="w-4 h-4" />}
-          />
-          <StatCard
-            title={mix?.arrDerived === false ? 'ARR' : 'ARR (MRR × 12)'}
-            value={mix ? formatMoney(mix.arr) : mixQuery.isError ? '—' : '…'}
-            comparisonText={mix ? 'Annualised recurring revenue' : undefined}
-            icon={<TrendingUp className="w-4 h-4" />}
-          />
-          <StatCard
-            title="Net Revenue"
-            value={formatMoney(kpis.net_revenue)}
-            comparisonText={`Gross ${formatMoney(kpis.total_revenue)}`}
-            icon={<Banknote className="w-4 h-4" />}
-          />
-          <StatCard
-            title="Collection Rate"
-            value={formatPercent(kpis.collection_rate)}
-            comparisonText={
-              kpis.collection_rate === null
-                ? 'Nothing invoiced in this range'
-                : `${formatMoney(kpis.total_collected)} of ${formatMoney(kpis.total_invoiced)}`
-            }
-            icon={<Percent className="w-4 h-4" />}
-          />
-          <StatCard
-            title="Outstanding"
-            value={formatMoney(kpis.outstanding_receivables)}
-            comparisonText={num(kpis.outstanding_receivables) > 0 ? 'Open receivables' : 'No open receivables'}
-            icon={<Wallet className="w-4 h-4" />}
-          />
-          <StatCard
-            title="Overdue"
-            value={formatMoney(kpis.overdue_receivables)}
-            comparisonText={
-              num(kpis.overdue_receivables) > 0
-                ? `${formatPercent(pct(num(kpis.overdue_receivables), num(kpis.outstanding_receivables)), 0)} of outstanding`
-                : 'Nothing past due'
-            }
-            isPositive={num(kpis.overdue_receivables) === 0}
-            icon={<AlertTriangle className="w-4 h-4" />}
-          />
-          <StatCard
-            title="Avg Days to Payment"
-            value={avgDays === null ? '—' : `${avgDays.toFixed(1)} days`}
-            comparisonText={avgDays === null ? 'No paid invoices in this range' : 'From issue to full payment'}
-            icon={<Clock3 className="w-4 h-4" />}
-          />
-          <StatCard
-            title="Total Invoiced"
-            value={formatMoney(kpis.total_invoiced)}
-            comparisonText={
-              invoicesQuery.data
-                ? `${formatNumber(invoicesQuery.data.total_count)} ${invoicesQuery.data.total_count === 1 ? 'invoice' : 'invoices'}`
-                : undefined
-            }
-            icon={<ReceiptText className="w-4 h-4" />}
-          />
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4" {...ui.edit('kpis')}>
+          {ui.render('kpis', {
+            mrr: (item, edit) => (
+              <div {...edit} className="flex">
+                <StatCard
+                  className="flex-1"
+                  title={item.label}
+                  value={mix ? formatMoney(mix.mrr) : mixQuery.isError ? '—' : '…'}
+                  comparisonText={mix ? `${formatNumber(mix.active)} active ${mix.active === 1 ? 'subscription' : 'subscriptions'}` : mixQuery.isError ? 'Subscription summary unavailable' : undefined}
+                  icon={<Repeat className="w-4 h-4" />}
+                />
+              </div>
+            ),
+            arr: (item, edit) => (
+              <div {...edit} className="flex">
+                <StatCard
+                  className="flex-1"
+                  // The "(MRR × 12)" qualifier is factual (ARR derived from MRR), so it stays code-controlled.
+                  title={mix?.arrDerived === false ? item.label : `${item.label} (MRR × 12)`}
+                  value={mix ? formatMoney(mix.arr) : mixQuery.isError ? '—' : '…'}
+                  comparisonText={mix ? 'Annualised recurring revenue' : undefined}
+                  icon={<TrendingUp className="w-4 h-4" />}
+                />
+              </div>
+            ),
+            net_revenue: (item, edit) => (
+              <div {...edit} className="flex">
+                <StatCard
+                  className="flex-1"
+                  title={item.label}
+                  value={formatMoney(kpis.net_revenue)}
+                  comparisonText={`Gross ${formatMoney(kpis.total_revenue)}`}
+                  icon={<Banknote className="w-4 h-4" />}
+                />
+              </div>
+            ),
+            collection_rate: (item, edit) => (
+              <div {...edit} className="flex">
+                <StatCard
+                  className="flex-1"
+                  title={item.label}
+                  value={formatPercent(kpis.collection_rate)}
+                  comparisonText={
+                    kpis.collection_rate === null
+                      ? 'Nothing invoiced in this range'
+                      : `${formatMoney(kpis.total_collected)} of ${formatMoney(kpis.total_invoiced)}`
+                  }
+                  icon={<Percent className="w-4 h-4" />}
+                />
+              </div>
+            ),
+            outstanding: (item, edit) => (
+              <div {...edit} className="flex">
+                <StatCard
+                  className="flex-1"
+                  title={item.label}
+                  value={formatMoney(kpis.outstanding_receivables)}
+                  comparisonText={num(kpis.outstanding_receivables) > 0 ? 'Open receivables' : 'No open receivables'}
+                  icon={<Wallet className="w-4 h-4" />}
+                />
+              </div>
+            ),
+            overdue: (item, edit) => (
+              <div {...edit} className="flex">
+                <StatCard
+                  className="flex-1"
+                  title={item.label}
+                  value={formatMoney(kpis.overdue_receivables)}
+                  comparisonText={
+                    num(kpis.overdue_receivables) > 0
+                      ? `${formatPercent(pct(num(kpis.overdue_receivables), num(kpis.outstanding_receivables)), 0)} of outstanding`
+                      : 'Nothing past due'
+                  }
+                  isPositive={num(kpis.overdue_receivables) === 0}
+                  icon={<AlertTriangle className="w-4 h-4" />}
+                />
+              </div>
+            ),
+            avg_days: (item, edit) => (
+              <div {...edit} className="flex">
+                <StatCard
+                  className="flex-1"
+                  title={item.label}
+                  value={avgDays === null ? '—' : `${avgDays.toFixed(1)} days`}
+                  comparisonText={avgDays === null ? 'No paid invoices in this range' : 'From issue to full payment'}
+                  icon={<Clock3 className="w-4 h-4" />}
+                />
+              </div>
+            ),
+            total_invoiced: (item, edit) => (
+              <div {...edit} className="flex">
+                <StatCard
+                  className="flex-1"
+                  title={item.label}
+                  value={formatMoney(kpis.total_invoiced)}
+                  comparisonText={
+                    invoicesQuery.data
+                      ? `${formatNumber(invoicesQuery.data.total_count)} ${invoicesQuery.data.total_count === 1 ? 'invoice' : 'invoices'}`
+                      : undefined
+                  }
+                  icon={<ReceiptText className="w-4 h-4" />}
+                />
+              </div>
+            ),
+          })}
         </div>
 
         {!hasAnyData && !invoicesQuery.isPending && !mixQuery.isPending && (
           <EmptyState
             icon={<LineChart className="w-6 h-6 stroke-1" />}
-            title={`No billing activity for ${label}`}
-            description="No invoices, payments or subscriptions fall in this range yet. The charts below will fill in as soon as billing starts — try a wider range to see history."
+            title={ui.text('empty', 'no_activity_title', { range: label })}
+            description={ui.text('empty', 'no_activity_description')}
             action={
               range !== 'last_12_months' ? (
                 <Button variant="outline" size="sm" onClick={() => selectRange('last_12_months')}>
@@ -852,8 +922,9 @@ export function RevenueIntelligencePage() {
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           <Section
             className="xl:col-span-2"
-            title="Revenue Over Time"
-            description={`Recognised revenue per ${revenueQuery.data?.granularity === 'day' ? 'day' : 'month'} for ${label}.`}
+            title={ui.text('revenue_trend', 'title')}
+            description={ui.text('revenue_trend', 'description', { unit: revenueQuery.data?.granularity === 'day' ? 'day' : 'month', range: label })}
+            edit={ui.edit('revenue_trend')}
             icon={<TrendingUp className="w-4 h-4 text-brand-600" />}
             exportSection="revenue_over_time"
             onExport={runExport}
@@ -883,8 +954,9 @@ export function RevenueIntelligencePage() {
           </Section>
 
           <Section
-            title="Insights"
-            description="Observations derived from the figures on this page."
+            title={ui.text('insights', 'title')}
+            description={ui.text('insights', 'description')}
+            edit={ui.edit('insights')}
             icon={<Sparkles className="w-4 h-4 text-brand-600" />}
           >
             <InsightsPanel insights={insights} />
@@ -893,8 +965,9 @@ export function RevenueIntelligencePage() {
 
         {/* Invoiced vs collected */}
         <Section
-          title="Invoiced vs Collected"
-          description="How much was billed in each period against how much cash actually came in."
+          title={ui.text('invoiced_vs_collected', 'title')}
+          description={ui.text('invoiced_vs_collected', 'description')}
+          edit={ui.edit('invoiced_vs_collected')}
           icon={<BarChart3 className="w-4 h-4 text-brand-600" />}
           exportSection="invoiced_vs_collected"
           onExport={runExport}
@@ -914,7 +987,8 @@ export function RevenueIntelligencePage() {
         {/* Plan / product / aging */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <Section
-            title="Revenue by Plan"
+            title={ui.text('revenue_by_plan', 'title')}
+            edit={ui.edit('revenue_by_plan')}
             icon={<Layers className="w-4 h-4 text-brand-600" />}
             exportSection="revenue_by_plan"
             onExport={runExport}
@@ -933,7 +1007,8 @@ export function RevenueIntelligencePage() {
           </Section>
 
           <Section
-            title="Revenue by Product"
+            title={ui.text('revenue_by_product', 'title')}
+            edit={ui.edit('revenue_by_product')}
             icon={<Package className="w-4 h-4 text-brand-600" />}
             exportSection="revenue_by_product"
             onExport={runExport}
@@ -952,8 +1027,9 @@ export function RevenueIntelligencePage() {
           </Section>
 
           <Section
-            title="Receivables Aging"
-            description="Open balances by how long they have been due."
+            title={ui.text('aging', 'title')}
+            description={ui.text('aging', 'description')}
+            edit={ui.edit('aging')}
             icon={<Wallet className="w-4 h-4 text-brand-600" />}
             exportSection="outstanding_by_aging"
             onExport={runExport}
@@ -980,8 +1056,9 @@ export function RevenueIntelligencePage() {
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           <Section
             className="xl:col-span-2"
-            title="Top Customers"
-            description="Ranked by recognised revenue in the range; outstanding balances are current, not range-bound."
+            title={ui.text('top_customers', 'title')}
+            description={ui.text('top_customers', 'description')}
+            edit={ui.edit('top_customers')}
             icon={<Users className="w-4 h-4 text-brand-600" />}
             exportSection="revenue_by_customer"
             onExport={runExport}
@@ -993,8 +1070,9 @@ export function RevenueIntelligencePage() {
           </Section>
 
           <Section
-            title="Subscription Mix"
-            description="Recurring revenue and where your subscriptions stand today."
+            title={ui.text('subscription_mix', 'title')}
+            description={ui.text('subscription_mix', 'description')}
+            edit={ui.edit('subscription_mix')}
             icon={<Repeat className="w-4 h-4 text-brand-600" />}
           >
             <Resolved query={mixQuery} loadingMessage="Loading subscriptions...">
@@ -1005,19 +1083,20 @@ export function RevenueIntelligencePage() {
 
         {/* Cash summary */}
         <Section
-          title="Cash Summary"
-          description={`Payments, refunds and customer coverage for ${label}.`}
+          title={ui.text('cash_summary', 'title')}
+          description={ui.text('cash_summary', 'description', { range: label })}
+          edit={ui.edit('cash_summary')}
           icon={<CreditCard className="w-4 h-4 text-brand-600" />}
         >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
             <Resolved query={paymentsQuery} loadingMessage="Loading payments...">
               {(p) => (
                 <div>
-                  <MetricRow label="Gross payments" value={formatMoney(p.total_payments)} hint={`${formatNumber(p.payment_count)} ${p.payment_count === 1 ? 'payment' : 'payments'}`} />
-                  <MetricRow label="Refunds" value={formatMoney(p.refund_amount)} />
-                  <MetricRow label="Net collected" value={formatMoney(p.net_collected)} />
+                  <MetricRow label={ui.text('cash_summary', 'gross_payments')} value={formatMoney(p.total_payments)} hint={`${formatNumber(p.payment_count)} ${p.payment_count === 1 ? 'payment' : 'payments'}`} />
+                  <MetricRow label={ui.text('cash_summary', 'refunds')} value={formatMoney(p.refund_amount)} />
+                  <MetricRow label={ui.text('cash_summary', 'net_collected')} value={formatMoney(p.net_collected)} />
                   <MetricRow
-                    label="Top payment method"
+                    label={ui.text('cash_summary', 'top_method')}
                     value={p.method_breakdown.length > 0 ? methodLabel([...p.method_breakdown].sort((a, b) => num(b.amount) - num(a.amount))[0].method) : '—'}
                   />
                 </div>
@@ -1026,11 +1105,11 @@ export function RevenueIntelligencePage() {
             <Resolved query={customersQuery} loadingMessage="Loading customers...">
               {(c) => (
                 <div>
-                  <MetricRow label="Total customers" value={formatNumber(c.total_customers)} />
-                  <MetricRow label="Active in range" value={formatNumber(c.active_customers)} hint="Customers with billing activity" />
-                  <MetricRow label="Carrying a balance" value={formatNumber(c.customers_with_outstanding_balance)} />
+                  <MetricRow label={ui.text('cash_summary', 'total_customers')} value={formatNumber(c.total_customers)} />
+                  <MetricRow label={ui.text('cash_summary', 'active_customers')} value={formatNumber(c.active_customers)} hint={ui.text('cash_summary', 'active_customers_hint')} />
+                  <MetricRow label={ui.text('cash_summary', 'with_balance')} value={formatNumber(c.customers_with_outstanding_balance)} />
                   <MetricRow
-                    label="Average invoice value"
+                    label={ui.text('cash_summary', 'average_invoice')}
                     value={formatMoney(kpis.average_invoice_value)}
                     hint={kpis.average_invoice_value === null ? 'No invoices in range' : undefined}
                   />
@@ -1046,9 +1125,9 @@ export function RevenueIntelligencePage() {
   return (
     <div className="space-y-6 pb-12">
       <PageHeader
-        eyebrow="Insights"
-        title="Revenue Intelligence"
-        subtitle="An executive view of recurring revenue, collections and receivables health — with plain-English observations drawn from your live numbers."
+        eyebrow={<span {...ui.edit('header')}>{ui.text('header', 'eyebrow')}</span>}
+        title={<span {...ui.edit('header')}>{ui.text('header', 'title')}</span>}
+        subtitle={<span {...ui.edit('header')}>{ui.text('header', 'subtitle')}</span>}
         actions={
           <div className="flex items-center gap-2">
             <Link

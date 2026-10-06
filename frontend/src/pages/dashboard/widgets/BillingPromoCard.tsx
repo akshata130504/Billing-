@@ -1,7 +1,7 @@
 import { ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-export function BillingPromoCard() {
+export function BillingPromoCard({ title = 'Streamline Your Billing' }: { title?: string } = {}) {
   const navigate = useNavigate();
 
   return (
@@ -50,7 +50,7 @@ export function BillingPromoCard() {
       {/* Card Typography Content */}
       <div className="relative z-10 space-y-1">
         <h4 className="text-sm font-bold text-[#11194F] tracking-tight leading-snug">
-          Streamline Your Billing
+          {title}
         </h4>
         <h4 className="text-sm font-bold text-[#11194F] tracking-tight leading-snug">
           Empower Your Growth

@@ -47,14 +47,9 @@ import {
   caseStatusBadge,
   caseStatusLabel,
 } from './dunningUi';
+import { usePageSpec } from '../../appUi/usePageSpec';
 
 type TabId = 'cases' | 'policies' | 'cards';
-
-const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
-  { id: 'cases', label: 'Cases', icon: <Siren className="w-3.5 h-3.5" /> },
-  { id: 'policies', label: 'Policies', icon: <ShieldCheck className="w-3.5 h-3.5" /> },
-  { id: 'cards', label: 'Expiring Cards', icon: <CreditCard className="w-3.5 h-3.5" /> },
-];
 
 const CARD_WINDOWS = [30, 60, 90];
 
@@ -65,6 +60,7 @@ interface Loadable<T> {
 }
 
 export function DunningPage() {
+  const ui = usePageSpec('dunning');
   const { showToast } = useToast();
   const { hasRole } = useAuth();
   const canActOnCases = hasRole('finance');
@@ -268,9 +264,9 @@ export function DunningPage() {
             <Repeat className="w-4 h-4" />
             Subscriptions
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Dunning</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Recover failed subscription payments with automated retries, customer notifications, and policy-driven final actions.
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight" {...ui.edit('header')}>{ui.text('header', 'title')}</h1>
+          <p className="text-sm text-slate-500 mt-1" {...ui.edit('header')}>
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -299,70 +295,98 @@ export function DunningPage() {
       {metricsError ? (
         <ErrorState title="Metrics unavailable" message={metricsError} onRetry={loadMetrics} />
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-          <StatCard
-            title="Active Cases"
-            value={metrics?.active_cases ?? '—'}
-            comparisonText={metrics ? `${metrics.total_cases} total cases` : undefined}
-            icon={<Siren className="w-4 h-4" />}
-          />
-          <StatCard
-            title="Amount at Risk"
-            value={metrics ? formatMoney(metrics.total_amount_at_risk, currency, { compact: true }) : '—'}
-            comparisonText="Across open cases"
-            icon={<AlertTriangle className="w-4 h-4" />}
-          />
-          <StatCard
-            title="Recovered"
-            value={metrics ? formatMoney(metrics.total_amount_recovered, currency, { compact: true }) : '—'}
-            comparisonText={metrics ? `${metrics.recovered_cases} cases recovered` : undefined}
-            icon={<BadgeIndianRupee className="w-4 h-4" />}
-          />
-          <StatCard
-            title="Recovery Rate"
-            value={metrics ? formatPercent(metrics.recovery_rate_pct) : '—'}
-            comparisonText="Recovered ÷ closed cases"
-            icon={<TrendingUp className="w-4 h-4" />}
-          />
-          <StatCard
-            title="Paused"
-            value={metrics?.paused_cases ?? '—'}
-            comparisonText="Awaiting manual resume"
-            icon={<PauseCircle className="w-4 h-4" />}
-          />
-          <StatCard
-            title="Exhausted"
-            value={metrics?.exhausted_cases ?? '—'}
-            comparisonText={metrics ? `${metrics.stopped_cases} stopped manually` : undefined}
-            icon={<Clock className="w-4 h-4" />}
-          />
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4" {...ui.edit('kpis')}>
+          {ui.render('kpis', {
+            active_cases: (item, edit) => (
+              <div key="active_cases" {...edit}>
+                <StatCard
+                  title={item.label}
+                  value={metrics?.active_cases ?? '—'}
+                  comparisonText={item.caption || (metrics ? `${metrics.total_cases} total cases` : undefined)}
+                  icon={<Siren className="w-4 h-4" />}
+                />
+              </div>
+            ),
+            at_risk: (item, edit) => (
+              <div key="at_risk" {...edit}>
+                <StatCard
+                  title={item.label}
+                  value={metrics ? formatMoney(metrics.total_amount_at_risk, currency, { compact: true }) : '—'}
+                  comparisonText={item.caption || "Across open cases"}
+                  icon={<AlertTriangle className="w-4 h-4" />}
+                />
+              </div>
+            ),
+            recovered: (item, edit) => (
+              <div key="recovered" {...edit}>
+                <StatCard
+                  title={item.label}
+                  value={metrics ? formatMoney(metrics.total_amount_recovered, currency, { compact: true }) : '—'}
+                  comparisonText={item.caption || (metrics ? `${metrics.recovered_cases} cases recovered` : undefined)}
+                  icon={<BadgeIndianRupee className="w-4 h-4" />}
+                />
+              </div>
+            ),
+            recovery_rate: (item, edit) => (
+              <div key="recovery_rate" {...edit}>
+                <StatCard
+                  title={item.label}
+                  value={metrics ? formatPercent(metrics.recovery_rate_pct) : '—'}
+                  comparisonText={item.caption || "Recovered ÷ closed cases"}
+                  icon={<TrendingUp className="w-4 h-4" />}
+                />
+              </div>
+            ),
+            paused: (item, edit) => (
+              <div key="paused" {...edit}>
+                <StatCard
+                  title={item.label}
+                  value={metrics?.paused_cases ?? '—'}
+                  comparisonText={item.caption || "Awaiting manual resume"}
+                  icon={<PauseCircle className="w-4 h-4" />}
+                />
+              </div>
+            ),
+            exhausted: (item, edit) => (
+              <div key="exhausted" {...edit}>
+                <StatCard
+                  title={item.label}
+                  value={metrics?.exhausted_cases ?? '—'}
+                  comparisonText={item.caption || (metrics ? `${metrics.stopped_cases} stopped manually` : undefined)}
+                  icon={<Clock className="w-4 h-4" />}
+                />
+              </div>
+            ),
+          })}
         </div>
       )}
 
       {/* Tabs + filters */}
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
         <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
-            {TABS.map((t) => {
-              const isActive = tab === t.id;
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none" {...ui.edit('tabs')}>
+            {ui.shown('tabs').map((t) => {
+              const tabId = t.key as TabId;
+              const isActive = tab === tabId;
               const count =
-                t.id === 'cases'
+                tabId === 'cases'
                   ? metrics?.active_cases
-                  : t.id === 'policies'
+                  : tabId === 'policies'
                     ? policies.data.length
                     : cards.data.length;
               return (
                 <button
-                  key={t.id}
+                  key={t.key}
                   type="button"
-                  onClick={() => setTab(t.id)}
+                  {...ui.edit(`tabs.${t.key}`)}
+                  onClick={() => setTab(tabId)}
                   className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
                     isActive
                       ? 'bg-brand-50 text-brand-700 border border-brand-200/60 shadow-xs'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 border border-transparent'
                   }`}
                 >
-                  {t.icon}
+                  {tabId === 'cases' ? <Siren className="w-3.5 h-3.5" /> : tabId === 'policies' ? <ShieldCheck className="w-3.5 h-3.5" /> : <CreditCard className="w-3.5 h-3.5" />}
                   {t.label}
                   {count !== undefined && (
                     <span
@@ -445,7 +469,7 @@ export function DunningPage() {
               icon={<CheckCircle2 className="w-8 h-8 text-emerald-500" />}
               title={
                 cases.data.length === 0 && statusFilter === 'active'
-                  ? 'No active dunning cases'
+                  ? ui.text('empty', 'none')
                   : 'No cases match this filter'
               }
               description={
@@ -472,14 +496,16 @@ export function DunningPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm text-slate-600">
                 <thead className="bg-slate-50/80 text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-200">
-                  <tr>
-                    <th className="px-5 py-3.5">Case</th>
-                    <th className="px-5 py-3.5">Customer</th>
-                    <th className="px-5 py-3.5">Invoice</th>
-                    <th className="px-5 py-3.5 text-right">Amount Due</th>
-                    <th className="px-5 py-3.5">Attempts</th>
-                    <th className="px-5 py-3.5">Next Retry</th>
-                    <th className="px-5 py-3.5">Status</th>
+                  <tr {...ui.edit('columns')}>
+                    {ui.shown('columns').map((col) => (
+                      <th
+                        key={col.key}
+                        className={`px-5 py-3.5${col.key === 'actions' ? ' text-right' : ''}`}
+                        {...ui.edit(`columns.${col.key}`)}
+                      >
+                        {col.label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -491,88 +517,124 @@ export function DunningPage() {
                         className="hover:bg-slate-50/70 transition-colors cursor-pointer group"
                         onClick={() => setSelectedCaseId(c.id)}
                       >
-                        <td className="px-5 py-4">
-                          <div className="font-semibold text-slate-900 font-mono text-xs group-hover:text-blue-600 transition-colors">
-                            {c.case_number}
-                          </div>
-                          <div className="text-xs text-slate-400 mt-0.5">
-                            {humanize(c.trigger_reason)} · {formatDate(c.created_at)}
-                          </div>
-                        </td>
-                        <td className="px-5 py-4">
-                          <Link
-                            to={`/customers/${c.customer_id}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="font-medium text-slate-800 hover:text-brand-700 hover:underline"
-                          >
-                            {customerNames[c.customer_id] ?? (
-                              <span className="font-mono text-xs text-slate-500">{c.customer_id.slice(0, 8)}…</span>
-                            )}
-                          </Link>
-                          {c.subscription_id && (
-                            <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
-                              <Repeat className="w-3 h-3" />
-                              Subscription
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-5 py-4">
-                          <Link
-                            to={`/invoices/${c.invoice_id}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="inline-flex items-center gap-1.5 text-brand-700 hover:underline font-medium"
-                          >
-                            <FileText className="w-3.5 h-3.5" />
-                            <span className="font-mono text-xs">{c.invoice_id.slice(0, 8)}…</span>
-                            <ExternalLink className="w-3 h-3 text-slate-400" />
-                          </Link>
-                        </td>
-                        <td className="px-5 py-4 text-right font-semibold text-slate-900 tabular-nums">
-                          {formatMoney(c.amount_due, c.currency)}
-                        </td>
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-2">
-                            <div className="w-16 h-2 bg-slate-100 rounded-full overflow-hidden">
-                              <div
-                                className={`h-full transition-all ${
-                                  c.status === 'recovered'
-                                    ? 'bg-emerald-500'
-                                    : c.status === 'exhausted'
-                                      ? 'bg-rose-500'
-                                      : 'bg-brand-500'
-                                }`}
-                                style={{
-                                  width: `${c.max_attempts > 0 ? Math.min(100, (c.attempt_count / c.max_attempts) * 100) : 0}%`,
-                                }}
-                              />
-                            </div>
-                            <span className="text-xs font-semibold text-slate-700 tabular-nums">
-                              {c.attempt_count}/{c.max_attempts}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-5 py-4 text-xs">
-                          {c.next_retry_at && ACTIVE_CASE_STATUSES.includes(c.status) ? (
-                            <div className={overdue ? 'text-amber-700 font-medium' : 'text-slate-700'}>
-                              <div className="flex items-center gap-1">
-                                <Clock className="w-3 h-3 text-slate-400" />
-                                {formatRelative(c.next_retry_at)}
-                              </div>
-                              <div className="text-slate-400 mt-0.5">{formatDateTime(c.next_retry_at)}</div>
-                            </div>
-                          ) : c.status === 'paused' ? (
-                            <span className="text-amber-600">Paused {formatRelative(c.paused_at)}</span>
-                          ) : c.status === 'recovered' ? (
-                            <span className="text-emerald-600">Recovered {formatRelative(c.recovered_at)}</span>
-                          ) : (
-                            <span className="text-slate-400 italic">None scheduled</span>
-                          )}
-                        </td>
-                        <td className="px-5 py-4">
-                          <Badge variant={caseStatusBadge(c.status)} dot>
-                            {caseStatusLabel(c.status)}
-                          </Badge>
-                        </td>
+                        {ui.shown('columns').map((col) => {
+                          if (col.key === 'case') {
+                            return (
+                              <td key="case" className="px-5 py-4">
+                                <div className="font-semibold text-slate-900 font-mono text-xs group-hover:text-blue-600 transition-colors">
+                                  {c.case_number}
+                                </div>
+                                <div className="text-xs text-slate-400 mt-0.5">
+                                  {humanize(c.trigger_reason)} · {formatDate(c.created_at)}
+                                </div>
+                              </td>
+                            );
+                          }
+                          if (col.key === 'customer') {
+                            return (
+                              <td key="customer" className="px-5 py-4">
+                                <Link
+                                  to={`/customers/${c.customer_id}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="font-medium text-slate-800 hover:text-brand-700 hover:underline"
+                                >
+                                  {customerNames[c.customer_id] ?? (
+                                    <span className="font-mono text-xs text-slate-500">{c.customer_id.slice(0, 8)}…</span>
+                                  )}
+                                </Link>
+                                {c.subscription_id && (
+                                  <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
+                                    <Repeat className="w-3 h-3" />
+                                    Subscription
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          }
+                          if (col.key === 'invoice') {
+                            return (
+                              <td key="invoice" className="px-5 py-4">
+                                <Link
+                                  to={`/invoices/${c.invoice_id}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="inline-flex items-center gap-1.5 text-brand-700 hover:underline font-medium"
+                                >
+                                  <FileText className="w-3.5 h-3.5" />
+                                  <span className="font-mono text-xs">{c.invoice_id.slice(0, 8)}…</span>
+                                  <ExternalLink className="w-3 h-3 text-slate-400" />
+                                </Link>
+                                <div className="text-xs font-semibold text-slate-900 mt-0.5">
+                                  {formatMoney(c.amount_due, c.currency)}
+                                </div>
+                              </td>
+                            );
+                          }
+                          if (col.key === 'status') {
+                            return (
+                              <td key="status" className="px-5 py-4">
+                                <Badge variant={caseStatusBadge(c.status)} dot>
+                                  {caseStatusLabel(c.status)}
+                                </Badge>
+                              </td>
+                            );
+                          }
+                          if (col.key === 'retries') {
+                            return (
+                              <td key="retries" className="px-5 py-4">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-16 h-2 bg-slate-100 rounded-full overflow-hidden">
+                                    <div
+                                      className={`h-full transition-all ${
+                                        c.status === 'recovered'
+                                          ? 'bg-emerald-500'
+                                          : c.status === 'exhausted'
+                                            ? 'bg-rose-500'
+                                            : 'bg-brand-500'
+                                      }`}
+                                      style={{
+                                        width: `${c.max_attempts > 0 ? Math.min(100, (c.attempt_count / c.max_attempts) * 100) : 0}%`,
+                                      }}
+                                    />
+                                  </div>
+                                  <span className="text-xs font-semibold text-slate-700 tabular-nums">
+                                    {c.attempt_count}/{c.max_attempts}
+                                  </span>
+                                </div>
+                              </td>
+                            );
+                          }
+                          if (col.key === 'next_attempt') {
+                            return (
+                              <td key="next_attempt" className="px-5 py-4 text-xs">
+                                {c.next_retry_at && ACTIVE_CASE_STATUSES.includes(c.status) ? (
+                                  <div className={overdue ? 'text-amber-700 font-medium' : 'text-slate-700'}>
+                                    <div className="flex items-center gap-1">
+                                      <Clock className="w-3 h-3 text-slate-400" />
+                                      {formatRelative(c.next_retry_at)}
+                                    </div>
+                                    <div className="text-slate-400 mt-0.5">{formatDateTime(c.next_retry_at)}</div>
+                                  </div>
+                                ) : c.status === 'paused' ? (
+                                  <span className="text-amber-600">Paused {formatRelative(c.paused_at)}</span>
+                                ) : c.status === 'recovered' ? (
+                                  <span className="text-emerald-600">Recovered {formatRelative(c.recovered_at)}</span>
+                                ) : (
+                                  <span className="text-slate-400 italic">None scheduled</span>
+                                )}
+                              </td>
+                            );
+                          }
+                          if (col.key === 'actions') {
+                            return (
+                              <td key="actions" className="px-5 py-4 text-right">
+                                <Button variant="outline" size="sm" onClick={() => setSelectedCaseId(c.id)}>
+                                  Inspect
+                                </Button>
+                              </td>
+                            );
+                          }
+                          return null;
+                        })}
                       </tr>
                     );
                   })}

@@ -10,8 +10,10 @@ import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { Button } from '../../components/common/Button';
 import { useToast } from '../../components/common/Toast';
 import { Plus, Briefcase, Search } from 'lucide-react';
+import { usePageSpec } from '../../appUi/usePageSpec';
 
 export function ProjectsPage() {
+  const ui = usePageSpec('projects');
   const {
     projects,
     addProject,
@@ -135,19 +137,17 @@ export function ProjectsPage() {
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-5">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4" {...ui.edit('header')}>
         <div>
           <div className="flex items-center gap-2 mb-1 text-xs text-slate-500 font-medium">
-            <span>OPERATIONS</span>
-            <span>/</span>
-            <span className="text-slate-900 font-semibold">PROJECTS</span>
+            <span>{ui.text('header', 'eyebrow')}</span>
           </div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5">
             <Briefcase className="w-6 h-6 text-brand-600 shrink-0" />
-            <span>Projects</span>
+            <span>{ui.text('header', 'title')}</span>
           </h1>
           <p className="text-xs sm:text-sm text-slate-600 mt-1 max-w-2xl leading-relaxed">
-            Manage customer projects, billable time and project-based billing.
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
 
@@ -176,11 +176,13 @@ export function ProjectsPage() {
 
       {/* Project Records List or Empty State */}
       {filteredProjects.length === 0 ? (
-        <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-12 text-center">
+        <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-12 text-center" {...ui.edit('empty')}>
           <div className="w-12 h-12 rounded-full bg-blue-50 text-brand-600 flex items-center justify-center mx-auto mb-3">
             <Search className="w-6 h-6" />
           </div>
-          <h3 className="text-base font-bold text-slate-900">No projects found</h3>
+          <h3 className="text-base font-bold text-slate-900">
+            {ui.text('empty', 'none')}
+          </h3>
           <p className="text-xs text-slate-500 mt-1.5 max-w-sm mx-auto">
             Try adjusting your search query, status tabs, or selected customer.
           </p>

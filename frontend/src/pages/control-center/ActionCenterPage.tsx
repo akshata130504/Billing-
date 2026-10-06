@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ComponentType } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '../../components/common/Card';
@@ -24,13 +24,25 @@ import {
   CheckCircle2,
   Calendar,
 } from 'lucide-react';
+import { usePageSpec, type ItemRenderer } from '../../appUi/usePageSpec';
 
 type CategoryFilter = 'all' | ActionCategory;
+
+/** Metric card styling per category; labels, captions, order and visibility come from the page spec. */
+const KPI_STYLES: Record<ActionCategory, { icon: ComponentType<{ className?: string }>; active: string; chip: string; caption: string }> = {
+  overdue: { icon: AlertTriangle, active: 'bg-rose-50/70 border-rose-300 shadow-xs', chip: 'bg-rose-50 text-rose-600', caption: 'text-rose-600' },
+  failed_payment: { icon: CreditCard, active: 'bg-amber-50/70 border-amber-300 shadow-xs', chip: 'bg-amber-50 text-amber-600', caption: 'text-amber-600' },
+  expiring_trial: { icon: Clock, active: 'bg-blue-50/70 border-blue-300 shadow-xs', chip: 'bg-blue-50 text-blue-600', caption: 'text-blue-600' },
+  pending_quote: { icon: FileText, active: 'bg-purple-50/70 border-purple-300 shadow-xs', chip: 'bg-purple-50 text-purple-600', caption: 'text-purple-600' },
+  pending_approval: { icon: ShieldCheck, active: 'bg-teal-50/70 border-teal-300 shadow-xs', chip: 'bg-teal-50 text-teal-600', caption: 'text-teal-600' },
+};
+const KPI_KEYS = Object.keys(KPI_STYLES) as ActionCategory[];
 
 export function ActionCenterPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const ui = usePageSpec('action_center');
   const [selectedCategory, setSelectedCategory] = useState<CategoryFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -75,6 +87,34 @@ export function ActionCenterPage() {
       total: items.length,
     }),
     [counts, items.length]
+  );
+
+  const kpiRenderers: Record<string, ItemRenderer> = Object.fromEntries(
+    KPI_KEYS.map((key): [string, ItemRenderer] => {
+      const style = KPI_STYLES[key];
+      const Icon = style.icon;
+      return [
+        key,
+        (item, edit) => (
+          <div
+            {...edit}
+            onClick={() => setSelectedCategory(key)}
+            className={`p-4 rounded-xl border transition-all cursor-pointer ${
+              selectedCategory === key ? style.active : 'bg-white border-slate-200/90 hover:border-slate-300'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500">{item.label}</span>
+              <span className={`p-1.5 rounded-lg ${style.chip}`}>
+                <Icon className="w-4 h-4" />
+              </span>
+            </div>
+            <p className="text-xl font-bold text-slate-900 mt-2">{stats[key]}</p>
+            <p className={`text-[11px] font-medium mt-0.5 ${style.caption}`}>{item.caption}</p>
+          </div>
+        ),
+      ];
+    })
   );
 
   const handleExecuteAction = (item: ActionItem) => {
@@ -153,22 +193,22 @@ export function ActionCenterPage() {
     <div className="space-y-6">
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
+        <div {...ui.edit('header')}>
           <div className="flex items-center gap-2 mb-1">
             <span className="text-xs font-semibold uppercase tracking-wider text-brand-600">
-              Control Center
+              {ui.text('header', 'eyebrow')}
             </span>
             <span className="text-slate-300">•</span>
             <Badge variant="primary" size="sm">
-              Operator Cockpit
+              {ui.text('header', 'badge')}
             </Badge>
           </div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
             <ShieldAlert className="w-6 h-6 text-rose-600" />
-            Action Center
+            {ui.text('header', 'title')}
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-            Triage urgent operational exceptions requiring immediate billing admin intervention, payment retries, and customer follow-ups.
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
 
@@ -191,96 +231,8 @@ export function ActionCenterPage() {
       ) : (
         <>
           {/* Metric Counters */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-            <div
-              onClick={() => setSelectedCategory('overdue')}
-              className={`p-4 rounded-xl border transition-all cursor-pointer ${
-                selectedCategory === 'overdue'
-                  ? 'bg-rose-50/70 border-rose-300 shadow-xs'
-                  : 'bg-white border-slate-200/90 hover:border-slate-300'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-slate-500">Overdue Invoices</span>
-                <span className="p-1.5 rounded-lg bg-rose-50 text-rose-600">
-                  <AlertTriangle className="w-4 h-4" />
-                </span>
-              </div>
-              <p className="text-xl font-bold text-slate-900 mt-2">{stats.overdue}</p>
-              <p className="text-[11px] text-rose-600 font-medium mt-0.5">Requires reminder notice</p>
-            </div>
-
-            <div
-              onClick={() => setSelectedCategory('failed_payment')}
-              className={`p-4 rounded-xl border transition-all cursor-pointer ${
-                selectedCategory === 'failed_payment'
-                  ? 'bg-amber-50/70 border-amber-300 shadow-xs'
-                  : 'bg-white border-slate-200/90 hover:border-slate-300'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-slate-500">Failed Payments</span>
-                <span className="p-1.5 rounded-lg bg-amber-50 text-amber-600">
-                  <CreditCard className="w-4 h-4" />
-                </span>
-              </div>
-              <p className="text-xl font-bold text-slate-900 mt-2">{stats.failed_payment}</p>
-              <p className="text-[11px] text-amber-600 font-medium mt-0.5">Payment gateway retry</p>
-            </div>
-
-            <div
-              onClick={() => setSelectedCategory('expiring_trial')}
-              className={`p-4 rounded-xl border transition-all cursor-pointer ${
-                selectedCategory === 'expiring_trial'
-                  ? 'bg-blue-50/70 border-blue-300 shadow-xs'
-                  : 'bg-white border-slate-200/90 hover:border-slate-300'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-slate-500">Expiring Trials</span>
-                <span className="p-1.5 rounded-lg bg-blue-50 text-blue-600">
-                  <Clock className="w-4 h-4" />
-                </span>
-              </div>
-              <p className="text-xl font-bold text-slate-900 mt-2">{stats.expiring_trial}</p>
-              <p className="text-[11px] text-blue-600 font-medium mt-0.5">Ready for paid upgrade</p>
-            </div>
-
-            <div
-              onClick={() => setSelectedCategory('pending_quote')}
-              className={`p-4 rounded-xl border transition-all cursor-pointer ${
-                selectedCategory === 'pending_quote'
-                  ? 'bg-purple-50/70 border-purple-300 shadow-xs'
-                  : 'bg-white border-slate-200/90 hover:border-slate-300'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-slate-500">Pending Quotes</span>
-                <span className="p-1.5 rounded-lg bg-purple-50 text-purple-600">
-                  <FileText className="w-4 h-4" />
-                </span>
-              </div>
-              <p className="text-xl font-bold text-slate-900 mt-2">{stats.pending_quote}</p>
-              <p className="text-[11px] text-purple-600 font-medium mt-0.5">Awaiting customer e-sign</p>
-            </div>
-
-            <div
-              onClick={() => setSelectedCategory('pending_approval')}
-              className={`p-4 rounded-xl border transition-all cursor-pointer ${
-                selectedCategory === 'pending_approval'
-                  ? 'bg-teal-50/70 border-teal-300 shadow-xs'
-                  : 'bg-white border-slate-200/90 hover:border-slate-300'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-slate-500">Pending Approvals</span>
-                <span className="p-1.5 rounded-lg bg-teal-50 text-teal-600">
-                  <ShieldCheck className="w-4 h-4" />
-                </span>
-              </div>
-              <p className="text-xl font-bold text-slate-900 mt-2">{stats.pending_approval}</p>
-              <p className="text-[11px] text-teal-600 font-medium mt-0.5">Awaiting sign-off</p>
-            </div>
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4" {...ui.edit('kpis')}>
+            {ui.render('kpis', kpiRenderers)}
           </div>
 
           {/* Filter and Search Bar */}
@@ -288,17 +240,14 @@ export function ActionCenterPage() {
             <CardContent className="p-4">
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
                 {/* Category Tabs */}
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-                  {[
-                    { key: 'all', label: `All Attention (${stats.total})` },
-                    { key: 'overdue', label: `Overdue Invoices (${stats.overdue})` },
-                    { key: 'failed_payment', label: `Failed Payments (${stats.failed_payment})` },
-                    { key: 'expiring_trial', label: `Expiring Trials (${stats.expiring_trial})` },
-                    { key: 'pending_quote', label: `Pending Quotes (${stats.pending_quote})` },
-                    { key: 'pending_approval', label: `Pending Approvals (${stats.pending_approval})` },
-                  ].map((tab) => (
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0" {...ui.edit('tabs')}>
+                  {ui.shown('tabs').map((item) => ({
+                    key: item.key,
+                    label: `${item.label} (${item.key === 'all' ? stats.total : stats[item.key as ActionCategory]})`,
+                  })).map((tab) => (
                     <button
                       key={tab.key}
+                      {...ui.edit(`tabs.${tab.key}`)}
                       type="button"
                       onClick={() => setSelectedCategory(tab.key as CategoryFilter)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
@@ -330,14 +279,14 @@ export function ActionCenterPage() {
           {/* Action Items List */}
           <div className="space-y-3">
             {filteredItems.length === 0 ? (
-              <Card>
+              <Card {...ui.edit('empty')}>
                 <CardContent className="py-12 text-center">
                   <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3">
                     <CheckCircle2 className="w-6 h-6" />
                   </div>
-                  <h3 className="text-sm font-bold text-slate-900">All Clear! No Pending Urgent Items</h3>
+                  <h3 className="text-sm font-bold text-slate-900">{ui.text('empty', 'title')}</h3>
                   <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                    No items match the selected filter. Any high-urgency exceptions will immediately surface in this cockpit.
+                    {ui.text('empty', 'description')}
                   </p>
                 </CardContent>
               </Card>
@@ -379,8 +328,8 @@ export function ActionCenterPage() {
                       <div className="flex items-center justify-between lg:justify-end gap-4 border-t lg:border-t-0 pt-3 lg:pt-0 border-slate-100 shrink-0">
                         {item.amount && (
                           <div className="text-left lg:text-right">
-                            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
-                              Impact Value
+                            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block" {...ui.edit('items')}>
+                              {ui.text('items', 'impact')}
                             </span>
                             <span className="text-sm font-bold text-slate-900 tabular-nums">
                               {item.amount}

@@ -1,4 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
+import {
+  INVOICES_COLUMN_DEFS,
+  INVOICES_EMPTY_DEFAULTS,
+  INVOICES_HEADER_DEFAULTS,
+  INVOICES_KPI_DEFS,
+  resolveList,
+  visible,
+} from '../../appUi/registry';
+import { usePageUi, useUiEditable } from '../../appUi/UiConfigContext';
 import { useNavigate } from 'react-router-dom';
 import {
   FileText,
@@ -20,6 +29,8 @@ import { useAuth } from '../../hooks/useAuth';
 import { toApiError } from '../../services/apiClient';
 
 export const InvoicesListPage: React.FC = () => {
+  const ui = usePageUi('invoices');
+  const editable = useUiEditable();
   const { hasRole } = useAuth();
   const canCreate = hasRole('finance');
   const navigate = useNavigate();
@@ -117,15 +128,100 @@ export const InvoicesListPage: React.FC = () => {
     { id: 'void', label: 'Void', count: kpis.void_count ?? 0 },
   ];
 
+  const kpiCards: Record<string, { value: ReactNode; valueClass: string; icon: ReactNode; iconClass: string }> = {
+    outstanding: {
+      value: `₹${Number(kpis.total_outstanding).toLocaleString()}`,
+      valueClass: 'text-gray-900',
+      icon: <AlertTriangle className="w-6 h-6" />,
+      iconClass: 'bg-red-50 text-red-600',
+    },
+    paid: {
+      value: kpis.paid_count,
+      valueClass: 'text-gray-900',
+      icon: <CheckCircle className="w-6 h-6" />,
+      iconClass: 'bg-emerald-50 text-emerald-600',
+    },
+    overdue: {
+      value: kpis.overdue_count,
+      valueClass: 'text-red-600',
+      icon: <Clock className="w-6 h-6" />,
+      iconClass: 'bg-amber-50 text-amber-600',
+    },
+    revenue: {
+      value: `₹${Number(kpis.total_revenue).toLocaleString()}`,
+      valueClass: 'text-emerald-600',
+      icon: <DollarSign className="w-6 h-6" />,
+      iconClass: 'bg-indigo-50 text-indigo-600',
+    },
+  };
+
+  const columnDefs: Record<string, { align?: 'right'; cellClass: string; render: (inv: Invoice) => ReactNode }> = {
+    invoice_number: { cellClass: 'font-semibold text-indigo-600', render: (inv) => inv.invoice_number },
+    customer: {
+      cellClass: '',
+      render: (inv) => (
+        <>
+          <div className="font-medium text-gray-900">
+            {inv.customer?.display_name || inv.customer?.displayName || inv.customer?.name || 'Customer'}
+          </div>
+          {inv.customer?.email && <div className="text-xs text-gray-500">{inv.customer.email}</div>}
+        </>
+      ),
+    },
+    date: { cellClass: 'text-gray-600', render: (inv) => inv.issue_date || inv.invoice_date },
+    due_date: { cellClass: 'text-gray-600', render: (inv) => inv.due_date },
+    total: {
+      align: 'right',
+      cellClass: 'text-right font-semibold text-gray-900',
+      render: (inv) => `₹${Number(inv.total || inv.total_amount || 0).toLocaleString()}`,
+    },
+    paid: {
+      align: 'right',
+      cellClass: 'text-right text-emerald-600 font-medium',
+      render: (inv) => `₹${Number(inv.amount_paid || inv.paid_amount || 0).toLocaleString()}`,
+    },
+    balance: {
+      align: 'right',
+      cellClass: 'text-right font-bold text-gray-900',
+      render: (inv) => `₹${Number(inv.amount_due || inv.balance_due || 0).toLocaleString()}`,
+    },
+    status: {
+      cellClass: '',
+      render: (inv) => (
+        <Badge variant={getStatusBadgeVariant(inv.status)}>{String(inv.status).replace(/_/g, ' ')}</Badge>
+      ),
+    },
+    actions: {
+      align: 'right',
+      cellClass: 'text-right',
+      render: (inv) => (
+        <div className="flex justify-end items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => navigate(`/invoices/${inv.id}`)}
+            leadingIcon={<Eye className="w-3.5 h-3.5" />}
+          >
+            View
+          </Button>
+        </div>
+      ),
+    },
+  };
+  // Visual-editor configuration: column order, labels and visibility over the defaults.
+  const configuredColumns = visible(resolveList(INVOICES_COLUMN_DEFS, ui.columns))
+    .filter((item) => columnDefs[item.key])
+    .map((item) => ({ key: item.key, label: item.label, ...columnDefs[item.key] }));
+
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div {...editable('invoices.header')} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Invoices</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Manage billing, track client balances, and collect payments
-          </p>
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
+            {ui.header?.title ?? INVOICES_HEADER_DEFAULTS.title}
+          </h1>
+          <p className="text-sm text-gray-500 mt-1">{ui.header?.subtitle ?? INVOICES_HEADER_DEFAULTS.subtitle}</p>
         </div>
         <div className="flex items-center gap-3">
           <Button
@@ -150,45 +246,23 @@ export const InvoicesListPage: React.FC = () => {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Outstanding</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">₹{Number(kpis.total_outstanding).toLocaleString()}</p>
-          </div>
-          <div className="p-3 bg-red-50 text-red-600 rounded-lg">
-            <AlertTriangle className="w-6 h-6" />
-          </div>
-        </div>
-
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Paid Invoices</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{kpis.paid_count}</p>
-          </div>
-          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg">
-            <CheckCircle className="w-6 h-6" />
-          </div>
-        </div>
-
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Overdue</p>
-            <p className="text-2xl font-bold text-red-600 mt-1">{kpis.overdue_count}</p>
-          </div>
-          <div className="p-3 bg-amber-50 text-amber-600 rounded-lg">
-            <Clock className="w-6 h-6" />
-          </div>
-        </div>
-
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Revenue</p>
-            <p className="text-2xl font-bold text-emerald-600 mt-1">₹{Number(kpis.total_revenue).toLocaleString()}</p>
-          </div>
-          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg">
-            <DollarSign className="w-6 h-6" />
-          </div>
-        </div>
+        {visible(resolveList(INVOICES_KPI_DEFS, ui.kpis)).map((kpi) => {
+          const card = kpiCards[kpi.key];
+          if (!card) return null;
+          return (
+            <div
+              key={kpi.key}
+              {...editable(`invoices.kpi.${kpi.key}`)}
+              className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between"
+            >
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{kpi.label}</p>
+                <p className={`text-2xl font-bold mt-1 ${card.valueClass}`}>{card.value}</p>
+              </div>
+              <div className={`p-3 rounded-lg ${card.iconClass}`}>{card.icon}</div>
+            </div>
+          );
+        })}
       </div>
 
       {/* Tabs */}
@@ -252,13 +326,15 @@ export const InvoicesListPage: React.FC = () => {
             Loading invoices...
           </div>
         ) : invoices.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">
+          <div {...editable('invoices.empty')} className="p-12 text-center text-gray-500">
             <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-            <h3 className="text-base font-medium text-gray-900 mb-1">No invoices found</h3>
+            <h3 className="text-base font-medium text-gray-900 mb-1">
+              {ui.empty?.title ?? INVOICES_EMPTY_DEFAULTS.title}
+            </h3>
             <p className="text-sm text-gray-500 mb-4">
               {searchTerm || activeTab !== 'all'
                 ? 'Try adjusting your search or tab filters.'
-                : 'Create your first invoice to start billing your customers.'}
+                : (ui.empty?.description ?? INVOICES_EMPTY_DEFAULTS.description)}
             </p>
             {canCreate && (
               <Button
@@ -271,19 +347,15 @@ export const InvoicesListPage: React.FC = () => {
             )}
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div {...editable('invoices.columns')} className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
                 <tr>
-                  <th className="px-6 py-3.5">Invoice #</th>
-                  <th className="px-6 py-3.5">Customer</th>
-                  <th className="px-6 py-3.5">Date</th>
-                  <th className="px-6 py-3.5">Due Date</th>
-                  <th className="px-6 py-3.5 text-right">Total</th>
-                  <th className="px-6 py-3.5 text-right">Paid</th>
-                  <th className="px-6 py-3.5 text-right">Balance</th>
-                  <th className="px-6 py-3.5">Status</th>
-                  <th className="px-6 py-3.5 text-right">Actions</th>
+                  {configuredColumns.map((col) => (
+                    <th key={col.key} className={`px-6 py-3.5 ${col.align === 'right' ? 'text-right' : ''}`}>
+                      {col.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 bg-white text-sm">
@@ -293,45 +365,15 @@ export const InvoicesListPage: React.FC = () => {
                     onClick={() => navigate(`/invoices/${inv.id}`)}
                     className="hover:bg-gray-50/75 cursor-pointer transition-colors"
                   >
-                    <td className="px-6 py-4 font-semibold text-indigo-600">
-                      {inv.invoice_number}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="font-medium text-gray-900">
-                        {inv.customer?.display_name || inv.customer?.displayName || inv.customer?.name || 'Customer'}
-                      </div>
-                      {inv.customer?.email && (
-                        <div className="text-xs text-gray-500">{inv.customer.email}</div>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 text-gray-600">{inv.issue_date || inv.invoice_date}</td>
-                    <td className="px-6 py-4 text-gray-600">{inv.due_date}</td>
-                    <td className="px-6 py-4 text-right font-semibold text-gray-900">
-                      ₹{Number(inv.total || inv.total_amount || 0).toLocaleString()}
-                    </td>
-                    <td className="px-6 py-4 text-right text-emerald-600 font-medium">
-                      ₹{Number(inv.amount_paid || inv.paid_amount || 0).toLocaleString()}
-                    </td>
-                    <td className="px-6 py-4 text-right font-bold text-gray-900">
-                      ₹{Number(inv.amount_due || inv.balance_due || 0).toLocaleString()}
-                    </td>
-                    <td className="px-6 py-4">
-                      <Badge variant={getStatusBadgeVariant(inv.status)}>
-                        {String(inv.status).replace(/_/g, ' ')}
-                      </Badge>
-                    </td>
-                    <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex justify-end items-center gap-2">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => navigate(`/invoices/${inv.id}`)}
-                          leadingIcon={<Eye className="w-3.5 h-3.5" />}
-                        >
-                          View
-                        </Button>
-                      </div>
-                    </td>
+                    {configuredColumns.map((col) => (
+                      <td
+                        key={col.key}
+                        className={`px-6 py-4 ${col.cellClass}`}
+                        onClick={col.key === 'actions' ? (e) => e.stopPropagation() : undefined}
+                      >
+                        {col.render(inv)}
+                      </td>
+                    ))}
                   </tr>
                 ))}
               </tbody>

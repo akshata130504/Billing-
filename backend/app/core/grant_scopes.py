@@ -18,6 +18,7 @@ GRANT_READ_ROUTES: Dict[str, GrantScope] = {
     # READ_METADATA: organization profile and team list (names, roles). Always granted.
     "/organization": GrantScope.READ_METADATA,
     "/team": GrantScope.READ_METADATA,
+    "/ui-config": GrantScope.READ_METADATA,  # global presentation settings, no tenant data
     # READ_CUSTOMERS: customers, contacts, customer lifecycle.
     "/customers": GrantScope.READ_CUSTOMERS,
     "/customers/{customer_id}": GrantScope.READ_CUSTOMERS,

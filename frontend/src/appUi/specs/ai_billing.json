@@ -1,0 +1,50 @@
+{
+  "key": "ai_billing",
+  "title": "AI in Billing",
+  "route": "/ai-billing",
+  "nav_item": "ai_billing",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        { "name": "eyebrow", "label": "Eyebrow", "kind": "label", "default": "Insights" },
+        { "name": "title", "label": "Heading", "kind": "heading", "default": "AI in Billing" },
+        { "name": "subtitle", "label": "Subtitle", "kind": "body", "default": "Ask questions answered from your live invoices and subscriptions, draft credit notes that only post after you confirm, and generate reminder text you can edit. Every request is logged and cites its sources." }
+      ]
+    },
+    {
+      "id": "rail",
+      "label": "Side rail",
+      "fields": [
+        { "name": "how_it_works", "label": "How it works heading", "kind": "label", "default": "How it works" },
+        { "name": "activity", "label": "Recent activity heading", "kind": "label", "default": "Recent activity" },
+        { "name": "view_all", "label": "View all link", "kind": "label", "default": "View all" },
+        { "name": "activity_empty", "label": "No activity message", "kind": "label", "default": "Nothing logged yet." }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "KPI stat cards",
+      "items": [
+        { "key": "requests", "label": "Requests logged" },
+        { "key": "questions", "label": "Questions answered" },
+        { "key": "drafts", "label": "Action drafts" },
+        { "key": "texts", "label": "Texts generated" }
+      ]
+    },
+    {
+      "id": "tabs",
+      "label": "Workspace tabs",
+      "captions": true,
+      "items": [
+        { "key": "ask", "label": "Ask", "required": true, "caption": "Grounded answers with sources" },
+        { "key": "draft", "label": "Draft an action", "caption": "Propose → validate → confirm" },
+        { "key": "writing", "label": "Writing assistant", "caption": "Reminders and notes" },
+        { "key": "history", "label": "History", "caption": "Every request, logged" }
+      ]
+    }
+  ]
+}

@@ -14,6 +14,7 @@ import {
   type MobileBootstrapOut,
   type PlatformFamily,
 } from '../../types/devices';
+import type { EditableProps } from '../../appUi/UiConfigContext';
 
 /** Absolute API base the native clients must point at (same one this web app uses). */
 export function resolveApiBaseUrl(): string {
@@ -47,9 +48,13 @@ export interface ConnectionDetailsCardProps {
   loading: boolean;
   error: string | null;
   onRetry: () => void;
+  /** Configured card titles (visual editor); the built-in wording is used when omitted. */
+  texts?: { title: string; signInTitle: string; signInDescription: string };
+  /** Visual-editor selection props for the cards. */
+  editProps?: EditableProps;
 }
 
-export function ConnectionDetailsCard({ family, bootstrap, loading, error, onRetry }: ConnectionDetailsCardProps) {
+export function ConnectionDetailsCard({ family, bootstrap, loading, error, onRetry, texts, editProps }: ConnectionDetailsCardProps) {
   const { showToast } = useToast();
   const apiBaseUrl = resolveApiBaseUrl();
   const [copied, setCopied] = React.useState(false);
@@ -83,13 +88,13 @@ export function ConnectionDetailsCard({ family, bootstrap, loading, error, onRet
   );
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4" {...editProps}>
       {/* Bootstrap / connection */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Link2 className="w-4 h-4 text-brand-600" />
-            Connection details
+            {texts?.title ?? 'Connection details'}
           </CardTitle>
           <CardDescription>
             Live response from <span className="font-mono text-xs">GET /mobile/bootstrap</span> — the payload a{' '}
@@ -165,12 +170,13 @@ export function ConnectionDetailsCard({ family, bootstrap, loading, error, onRet
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <KeyRound className="w-4 h-4 text-brand-600" />
-            {family === 'mobile' ? 'Native sign-in flow' : 'Sign in on desktop'}
+            {texts?.signInTitle ?? (family === 'mobile' ? 'Native sign-in flow' : 'Sign in on desktop')}
           </CardTitle>
           <CardDescription>
-            {family === 'mobile'
-              ? 'How the iOS and Android apps obtain a session and a trusted device in one round trip.'
-              : 'There are no installers published yet. The desktop shell is a thin client that talks to this API using the same native exchange as mobile.'}
+            {texts?.signInDescription ??
+              (family === 'mobile'
+                ? 'How the iOS and Android apps obtain a session and a trusted device in one round trip.'
+                : 'There are no installers published yet. The desktop shell is a thin client that talks to this API using the same native exchange as mobile.')}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

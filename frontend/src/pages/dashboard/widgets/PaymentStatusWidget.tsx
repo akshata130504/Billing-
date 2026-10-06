@@ -1,12 +1,14 @@
 import type { DashboardPipeline, DashboardMetrics, DashboardCustomerHealth } from '../../../types';
 
 export interface PaymentStatusWidgetProps {
+  /** Card title (configurable in the Super Admin visual editor). */
+  title?: string;
   pipeline?: DashboardPipeline;
   metrics?: DashboardMetrics;
   customerHealth?: DashboardCustomerHealth;
 }
 
-export function PaymentStatusWidget({ pipeline }: PaymentStatusWidgetProps = {}) {
+export function PaymentStatusWidget({ pipeline, title = 'Payment Status' }: PaymentStatusWidgetProps = {}) {
   const paidCount = pipeline?.paid_this_period?.count ?? 0;
   const pendingCount = (pipeline?.sent?.count ?? 0) + (pipeline?.partially_paid?.count ?? 0);
   const overdueCount = pipeline?.overdue?.count ?? 0;
@@ -45,7 +47,7 @@ export function PaymentStatusWidget({ pipeline }: PaymentStatusWidgetProps = {})
     <div className="bg-white p-4 sm:p-5 rounded-2xl border border-[#E7E9F2] shadow-sm space-y-4">
       {/* Header */}
       <h3 className="text-sm font-bold text-[#11194F] tracking-tight">
-        Payment Status
+        {title}
       </h3>
 
       <div className="flex flex-col min-[360px]:flex-row items-center justify-between gap-3 sm:gap-4">

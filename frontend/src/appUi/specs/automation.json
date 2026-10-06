@@ -1,0 +1,122 @@
+{
+  "key": "automation",
+  "title": "Automation",
+  "route": "/automation",
+  "nav_item": "automation",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "eyebrow",
+          "label": "Eyebrow",
+          "kind": "label",
+          "default": "System"
+        },
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Automation"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Event-driven rules, recurring schedules and a full execution log for everything the platform runs on your behalf."
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty table messages",
+      "fields": [
+        {
+          "name": "none",
+          "label": "No rules",
+          "kind": "body",
+          "default": "No automation rules yet."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "KPI stat cards",
+      "items": [
+        {
+          "key": "active_rules",
+          "label": "Active Rules"
+        },
+        {
+          "key": "active_schedules",
+          "label": "Active Schedules"
+        },
+        {
+          "key": "runs_today",
+          "label": "Runs Today"
+        },
+        {
+          "key": "success_rate",
+          "label": "Success / Failed Today"
+        }
+      ]
+    },
+    {
+      "id": "tabs",
+      "label": "Navigation tabs",
+      "items": [
+        {
+          "key": "rules",
+          "label": "Rules",
+          "required": true
+        },
+        {
+          "key": "schedules",
+          "label": "Schedules"
+        },
+        {
+          "key": "logs",
+          "label": "Logs"
+        }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Rule table columns",
+      "items": [
+        {
+          "key": "rule",
+          "label": "Rule",
+          "required": true
+        },
+        {
+          "key": "trigger",
+          "label": "Trigger"
+        },
+        {
+          "key": "conditions",
+          "label": "Conditions"
+        },
+        {
+          "key": "actions",
+          "label": "Actions"
+        },
+        {
+          "key": "enabled",
+          "label": "Enabled"
+        },
+        {
+          "key": "last_run",
+          "label": "Last run"
+        },
+        {
+          "key": "manage",
+          "label": "Manage"
+        }
+      ]
+    }
+  ]
+}

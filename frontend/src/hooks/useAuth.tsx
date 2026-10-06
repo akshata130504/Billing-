@@ -57,7 +57,7 @@ export interface AuthContextValue {
   hasRole: (min: MemberRole) => boolean;
 }
 
-const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+export const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();

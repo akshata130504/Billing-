@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { Fragment, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '../../components/common/Card';
@@ -12,6 +12,7 @@ import { queryKeys } from '../../hooks/queries';
 import { useAuth } from '../../hooks/useAuth';
 import { formatDateTime, humanize, type BadgeVariant } from '../../utils/format';
 import type { ImportEntity, ImportResult, ImportRowError } from '../../types/api';
+import { usePageSpec } from '../../appUi/usePageSpec';
 import {
   UploadCloud,
   FileSpreadsheet,
@@ -138,6 +139,7 @@ export function DataMigrationPage() {
   const { showToast } = useToast();
   const { hasRole } = useAuth();
   const canImport = hasRole('finance');
+  const ui = usePageSpec('data_migration');
 
   const [selectedEntity, setSelectedEntity] = useState<ImportEntity>('customers');
   const [dragOver, setDragOver] = useState(false);
@@ -148,6 +150,8 @@ export function DataMigrationPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const activeConfig = entityConfigs.find((c) => c.key === selectedEntity)!;
+  // Display name of the selected data model (configurable label; import behaviour stays in code).
+  const activeTitle = ui.label('entities', activeConfig.key);
 
   const importsHistory = useQuery({
     queryKey: queryKeys.controlCenter.imports(),
@@ -166,7 +170,7 @@ export function DataMigrationPage() {
   const handleDownloadTemplate = async () => {
     try {
       await downloadAuthenticated(controlCenterService.importTemplateUrl(selectedEntity), `${selectedEntity}_template.csv`);
-      showToast('info', 'Template downloaded', `Downloaded the CSV template for ${activeConfig.title}.`);
+      showToast('info', 'Template downloaded', `Downloaded the CSV template for ${activeTitle}.`);
     } catch (err) {
       showToast('error', 'Download failed', toApiError(err).message);
     }
@@ -194,7 +198,7 @@ export function DataMigrationPage() {
       showToast(
         result.failed_rows > 0 ? 'warning' : 'success',
         result.failed_rows > 0 ? 'Import completed with errors' : 'Import successful',
-        `Imported ${result.imported_rows} of ${result.total_rows} ${activeConfig.title.toLowerCase()} row(s).`
+        `Imported ${result.imported_rows} of ${result.total_rows} ${activeTitle.toLowerCase()} row(s).`
       );
     },
     onError: (err) => {
@@ -222,27 +226,62 @@ export function DataMigrationPage() {
     fileInputRef.current?.click();
   };
 
+  const historyColumns = ui.shown('columns');
+  const historyAlign: Record<string, string> = { imported: ' text-right', failed: ' text-right', total: ' text-right', when: ' text-right' };
+  // Outer columns keep the wider padding whatever the configured order.
+  const historyPad = (index: number) => (index === 0 || index === historyColumns.length - 1 ? 'px-5' : 'px-3');
+  const historyCells: Record<string, (job: ImportResult, createdAt: string | null | undefined, pad: string) => ReactNode> = {
+    entity: (job, _c, pad) => <td className={`py-2.5 ${pad} text-xs font-medium text-slate-900 capitalize`}>{job.entity}</td>,
+    file: (job, _c, pad) => (
+      <td className={`py-2.5 ${pad} text-xs text-slate-600 truncate max-w-[220px]`}>
+        {job.file_name}
+      </td>
+    ),
+    status: (job, _c, pad) => (
+      <td className={`py-2.5 ${pad}`}>
+        <Badge variant={STATUS_BADGE[job.status] ?? 'neutral'} size="sm">
+          {humanize(job.status)}
+        </Badge>
+      </td>
+    ),
+    imported: (job, _c, pad) => (
+      <td className={`py-2.5 ${pad} text-xs text-right text-emerald-600 font-semibold`}>
+        {job.imported_rows}
+      </td>
+    ),
+    failed: (job, _c, pad) => (
+      <td className={`py-2.5 ${pad} text-xs text-right font-semibold text-rose-600`}>
+        {job.failed_rows}
+      </td>
+    ),
+    total: (job, _c, pad) => <td className={`py-2.5 ${pad} text-xs text-right text-slate-500`}>{job.total_rows}</td>,
+    when: (_job, createdAt, pad) => (
+      <td className={`py-2.5 ${pad} text-xs text-right text-slate-500 whitespace-nowrap`}>
+        {createdAt ? formatDateTime(createdAt) : '—'}
+      </td>
+    ),
+  };
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
+        <div {...ui.edit('header')}>
           <div className="flex items-center gap-2 mb-1">
             <span className="text-xs font-semibold uppercase tracking-wider text-brand-600">
-              Control Center
+              {ui.text('header', 'eyebrow')}
             </span>
             <span className="text-slate-300">•</span>
             <Badge variant="primary" size="sm">
-              Self-Service Import
+              {ui.text('header', 'badge')}
             </Badge>
           </div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
             <UploadCloud className="w-6 h-6 text-brand-600" />
-            Data Migration & Onboarding
+            {ui.text('header', 'title')}
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-            Import customers, products and plans via validated CSV templates. Every import is validated in a
-            dry run first, so nothing is written until you confirm.
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
 
@@ -268,16 +307,18 @@ export function DataMigrationPage() {
 
       {/* Entity Selector Cards */}
       <div>
-        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2.5">
-          1. Select Target Data Model
+        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2.5" {...ui.edit('upload')}>
+          {ui.text('upload', 'select_title')}
         </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" {...ui.edit('entities')}>
           {entityConfigs.map((config) => {
             const Icon = config.icon;
             const isSelected = selectedEntity === config.key;
+            const item = ui.items('entities').find((i) => i.key === config.key);
             return (
               <div
                 key={config.key}
+                {...ui.edit(`entities.${config.key}`)}
                 onClick={() => {
                   setSelectedEntity(config.key);
                   handleReset();
@@ -298,8 +339,8 @@ export function DataMigrationPage() {
                   </span>
                   {isSelected && <CheckCircle2 className="w-4 h-4 text-brand-600" />}
                 </div>
-                <h4 className="text-xs font-bold text-slate-900 mt-2.5">{config.title}</h4>
-                <p className="text-[10px] text-slate-500 mt-0.5 line-clamp-2">{config.description}</p>
+                <h4 className="text-xs font-bold text-slate-900 mt-2.5">{item?.label ?? config.title}</h4>
+                <p className="text-[10px] text-slate-500 mt-0.5 line-clamp-2">{item?.caption ?? config.description}</p>
               </div>
             );
           })}
@@ -346,15 +387,15 @@ export function DataMigrationPage() {
                 <div className="w-12 h-12 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center mx-auto mb-3">
                   <UploadCloud className="w-6 h-6" />
                 </div>
-                <h4 className="text-sm font-bold text-slate-900">
-                  Drop your CSV file here, or browse
+                <h4 className="text-sm font-bold text-slate-900" {...ui.edit('upload')}>
+                  {ui.text('upload', 'drop_title')}
                 </h4>
                 <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
                   Supports .csv exports up to 5 MB and 5,000 rows.
                 </p>
                 <div className="mt-4 inline-flex items-center gap-2 text-xs font-semibold text-brand-600 bg-brand-50 px-3 py-1.5 rounded-lg border border-brand-100">
                   <FileSpreadsheet className="w-4 h-4" />
-                  <span>Click to choose a file</span>
+                  <span>{ui.text('upload', 'choose_file')}</span>
                 </div>
               </div>
 
@@ -362,7 +403,7 @@ export function DataMigrationPage() {
               <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2.5">
                 <div>
                   <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                    Required columns for {activeConfig.title}:
+                    {ui.text('upload', 'required_columns', { entity: activeTitle })}
                   </span>
                   <div className="flex flex-wrap gap-1.5">
                     {activeConfig.requiredFields.map((field) => (
@@ -377,7 +418,7 @@ export function DataMigrationPage() {
                 </div>
                 <div>
                   <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                    Optional columns:
+                    {ui.text('upload', 'optional_columns')}
                   </span>
                   <div className="flex flex-wrap gap-1.5">
                     {activeConfig.optionalFields.map((field) => (
@@ -399,7 +440,7 @@ export function DataMigrationPage() {
               <RefreshCw className="w-8 h-8 text-brand-600 animate-spin mx-auto" />
               <h4 className="text-sm font-bold text-slate-900">Validating {selectedFile?.name}...</h4>
               <p className="text-xs text-slate-500">
-                Checking every row against the {activeConfig.title.toLowerCase()} schema — nothing is written yet.
+                Checking every row against the {activeTitle.toLowerCase()} schema — nothing is written yet.
               </p>
             </div>
           )}
@@ -504,7 +545,7 @@ export function DataMigrationPage() {
             <div className="py-12 text-center space-y-3">
               <RefreshCw className="w-8 h-8 text-brand-600 animate-spin mx-auto" />
               <h4 className="text-sm font-bold text-slate-900">
-                Importing {activeConfig.title} Records...
+                Importing {activeTitle} Records...
               </h4>
               <p className="text-xs text-slate-500">Writing valid rows into your organization's database.</p>
             </div>
@@ -528,7 +569,7 @@ export function DataMigrationPage() {
                   {finalResult.failed_rows > 0 ? 'Migration Completed With Errors' : 'Data Migration Complete!'}
                 </h4>
                 <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                  Imported {finalResult.imported_rows} of {finalResult.total_rows} {activeConfig.title.toLowerCase()}{' '}
+                  Imported {finalResult.imported_rows} of {finalResult.total_rows} {activeTitle.toLowerCase()}{' '}
                   row(s) into your Rooman Billing workspace.
                   {finalResult.failed_rows > 0 && ` ${finalResult.failed_rows} row(s) failed and were skipped.`}
                 </p>
@@ -548,7 +589,7 @@ export function DataMigrationPage() {
                   Import Another File
                 </Button>
                 <Button variant="primary" size="sm" onClick={() => navigate(activeConfig.route)}>
-                  View Imported {activeConfig.title}
+                  View Imported {activeTitle}
                 </Button>
               </div>
             </div>
@@ -558,9 +599,9 @@ export function DataMigrationPage() {
 
       {/* Import History */}
       <div>
-        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5" {...ui.edit('history')}>
           <History className="w-3.5 h-3.5" />
-          Recent Imports
+          {ui.text('history', 'title')}
         </h3>
         <Card>
           <CardContent className="p-0">
@@ -572,19 +613,24 @@ export function DataMigrationPage() {
                 onRetry={() => void importsHistory.refetch()}
               />
             ) : (importsHistory.data?.items.length ?? 0) === 0 ? (
-              <p className="py-8 text-center text-xs text-slate-400">No imports have been run yet.</p>
+              <p className="py-8 text-center text-xs text-slate-400" {...ui.edit('history')}>{ui.text('history', 'empty')}</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm min-w-[640px]">
                   <thead>
-                    <tr className="text-xs font-semibold text-slate-500 uppercase tracking-wider text-left border-b border-slate-100">
-                      <th className="py-2.5 px-5">Entity</th>
-                      <th className="py-2.5 px-3">File</th>
-                      <th className="py-2.5 px-3">Status</th>
-                      <th className="py-2.5 px-3 text-right">Imported</th>
-                      <th className="py-2.5 px-3 text-right">Failed</th>
-                      <th className="py-2.5 px-3 text-right">Total</th>
-                      <th className="py-2.5 px-5 text-right">When</th>
+                    <tr
+                      className="text-xs font-semibold text-slate-500 uppercase tracking-wider text-left border-b border-slate-100"
+                      {...ui.edit('columns')}
+                    >
+                      {historyColumns.map((col, index) => (
+                        <th
+                          key={col.key}
+                          className={`py-2.5 ${historyPad(index)}${historyAlign[col.key] ?? ''}`}
+                          {...ui.edit(`columns.${col.key}`)}
+                        >
+                          {col.label}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -596,25 +642,9 @@ export function DataMigrationPage() {
                       const createdAt = (job as ImportResult & { created_at?: string | null }).created_at;
                       return (
                         <tr key={job.id ?? `${job.entity}-${job.file_name}`}>
-                          <td className="py-2.5 px-5 text-xs font-medium text-slate-900 capitalize">{job.entity}</td>
-                          <td className="py-2.5 px-3 text-xs text-slate-600 truncate max-w-[220px]">
-                            {job.file_name}
-                          </td>
-                          <td className="py-2.5 px-3">
-                            <Badge variant={STATUS_BADGE[job.status] ?? 'neutral'} size="sm">
-                              {humanize(job.status)}
-                            </Badge>
-                          </td>
-                          <td className="py-2.5 px-3 text-xs text-right text-emerald-600 font-semibold">
-                            {job.imported_rows}
-                          </td>
-                          <td className="py-2.5 px-3 text-xs text-right font-semibold text-rose-600">
-                            {job.failed_rows}
-                          </td>
-                          <td className="py-2.5 px-3 text-xs text-right text-slate-500">{job.total_rows}</td>
-                          <td className="py-2.5 px-5 text-xs text-right text-slate-500 whitespace-nowrap">
-                            {createdAt ? formatDateTime(createdAt) : '—'}
-                          </td>
+                          {historyColumns.map((col, index) => (
+                            <Fragment key={col.key}>{historyCells[col.key]?.(job, createdAt, historyPad(index))}</Fragment>
+                          ))}
                         </tr>
                       );
                     })}

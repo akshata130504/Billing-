@@ -1,0 +1,86 @@
+{
+  "key": "settings",
+  "title": "Settings",
+  "route": "/settings",
+  "nav_item": "settings",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Settings & Workspace Preferences"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Manage your profile, security, notification rules, organization profile, team members and system settings."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "general_tabs",
+      "label": "General navigation items",
+      "items": [
+        {
+          "key": "profile",
+          "label": "My Profile"
+        },
+        {
+          "key": "preferences",
+          "label": "Account Preferences"
+        },
+        {
+          "key": "notifications",
+          "label": "Notifications"
+        }
+      ]
+    },
+    {
+      "id": "org_tabs",
+      "label": "Organization navigation items",
+      "items": [
+        {
+          "key": "organization",
+          "label": "Organization"
+        },
+        {
+          "key": "users",
+          "label": "Users & Roles"
+        },
+        {
+          "key": "billing",
+          "label": "Billing & numbering"
+        },
+        {
+          "key": "integrations",
+          "label": "Integrations"
+        }
+      ]
+    },
+    {
+      "id": "security_tabs",
+      "label": "Security & support navigation items",
+      "items": [
+        {
+          "key": "security",
+          "label": "Security"
+        },
+        {
+          "key": "platform-access",
+          "label": "Platform access"
+        },
+        {
+          "key": "help",
+          "label": "Help & Documentation"
+        }
+      ]
+    }
+  ]
+}

@@ -26,6 +26,7 @@ import { EmptyState } from '../../components/common/EmptyState';
 import { PageHeader } from '../../components/common/PageHeader';
 import { formatDate, formatDateTime, formatNumber, formatRelative, humanize, toIsoDate } from '../../utils/format';
 import { cn } from '../../utils/cn';
+import { usePageSpec, type SpecUi } from '../../appUi/usePageSpec';
 
 // ---------------------------------------------------------------------------
 // Static config
@@ -35,13 +36,14 @@ const PAGE_SIZE = 25;
 
 type ActivityCategory = ActivityItem['category'];
 
-const CATEGORY_FILTERS: { key: ActivityCategoryFilter; label: string; icon: typeof Activity }[] = [
-  { key: 'all', label: 'All activity', icon: Activity },
-  { key: 'billing', label: 'Billing', icon: ReceiptText },
-  { key: 'customers', label: 'Customers', icon: Users },
-  { key: 'payments', label: 'Payments', icon: CreditCard },
-  { key: 'system', label: 'System', icon: Settings2 },
-];
+/** Filter chip icons; labels, order and visibility come from the page spec (`filters`). */
+const CATEGORY_FILTER_ICONS: Record<ActivityCategoryFilter, typeof Activity> = {
+  all: Activity,
+  billing: ReceiptText,
+  customers: Users,
+  payments: CreditCard,
+  system: Settings2,
+};
 
 const CATEGORY_STYLE: Record<ActivityCategory, { icon: typeof Activity; bg: string; text: string; label: string }> = {
   billing: { icon: ReceiptText, bg: 'bg-blue-50', text: 'text-brand-600', label: 'Billing' },
@@ -188,6 +190,7 @@ function FilterBar({
   onTo,
   onClear,
   hasClientFilters,
+  ui,
 }: {
   category: ActivityCategoryFilter;
   onCategory: (c: ActivityCategoryFilter) => void;
@@ -199,21 +202,24 @@ function FilterBar({
   onTo: (v: string) => void;
   onClear: () => void;
   hasClientFilters: boolean;
+  ui: SpecUi;
 }) {
   return (
     <Card>
       <CardContent className="p-4 space-y-3">
-        <div className="flex items-center gap-2 flex-wrap" role="tablist" aria-label="Activity category">
-          {CATEGORY_FILTERS.map((f) => {
-            const Icon = f.icon;
-            const active = f.key === category;
+        <div className="flex items-center gap-2 flex-wrap" role="tablist" aria-label="Activity category" {...ui.edit('filters')}>
+          {ui.shown('filters').map((f) => {
+            const key = f.key as ActivityCategoryFilter;
+            const Icon = CATEGORY_FILTER_ICONS[key] ?? Activity;
+            const active = key === category;
             return (
               <button
                 key={f.key}
+                {...ui.edit(`filters.${f.key}`)}
                 type="button"
                 role="tab"
                 aria-selected={active}
-                onClick={() => onCategory(f.key)}
+                onClick={() => onCategory(key)}
                 className={cn(
                   'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors',
                   active
@@ -258,6 +264,7 @@ function FilterBar({
 // ---------------------------------------------------------------------------
 
 export function ActivityPage() {
+  const ui = usePageSpec('activity');
   const [category, setCategory] = useState<ActivityCategoryFilter>('all');
   const [search, setSearch] = useState('');
   const [from, setFrom] = useState('');
@@ -330,13 +337,18 @@ export function ActivityPage() {
     body = <ErrorState message={toApiError(query.error).message} onRetry={() => void query.refetch()} />;
   } else if (loadedItems.length === 0) {
     body = (
+      <div {...ui.edit('empty')}>
       <EmptyState
         icon={<Activity className="w-6 h-6 stroke-1" />}
-        title={category === 'all' ? 'No activity yet' : `No ${CATEGORY_STYLE[category as ActivityCategory]?.label.toLowerCase() ?? category} activity yet`}
+        title={
+          category === 'all'
+            ? ui.text('empty', 'none_title')
+            : ui.text('empty', 'category_title', { category: ui.label('filters', category).toLowerCase() })
+        }
         description={
           category === 'all'
-            ? 'Every change made in your organization — invoices, customers, payments and settings — will show up here as it happens.'
-            : 'Nothing in this category has been recorded yet. Switch to "All activity" to see everything.'
+            ? ui.text('empty', 'none_description')
+            : ui.text('empty', 'category_description')
         }
         action={
           category !== 'all' ? (
@@ -346,16 +358,18 @@ export function ActivityPage() {
           ) : undefined
         }
       />
+      </div>
     );
   } else if (visibleItems.length === 0) {
     body = (
+      <div {...ui.edit('empty')}>
       <EmptyState
         icon={<Search className="w-6 h-6 stroke-1" />}
-        title="No matching activity"
+        title={ui.text('empty', 'no_match_title')}
         description={
           query.hasNextPage
-            ? `None of the ${formatNumber(loadedItems.length)} loaded events match. Load more to search further back, or clear the filters.`
-            : 'No events match your search or date range. Try widening the range or clearing the filters.'
+            ? ui.text('empty', 'no_match_more', { count: formatNumber(loadedItems.length) })
+            : ui.text('empty', 'no_match_description')
         }
         action={
           <div className="flex items-center gap-2">
@@ -370,6 +384,7 @@ export function ActivityPage() {
           </div>
         }
       />
+      </div>
     );
   } else {
     body = (
@@ -407,7 +422,7 @@ export function ActivityPage() {
               Load more
             </Button>
           ) : (
-            <p className="text-xs text-slate-500">You have reached the beginning of the log.</p>
+            <p className="text-xs text-slate-500" {...ui.edit('feed')}>{ui.text('feed', 'end_of_log')}</p>
           )}
         </div>
       </div>
@@ -416,10 +431,11 @@ export function ActivityPage() {
 
   return (
     <div className="space-y-6 pb-12">
+      <div {...ui.edit('header')}>
       <PageHeader
-        eyebrow="Insights"
-        title="Activity"
-        subtitle="A chronological feed of everything that happens in your organization, derived from the audit log."
+        eyebrow={ui.text('header', 'eyebrow')}
+        title={ui.text('header', 'title')}
+        subtitle={ui.text('header', 'subtitle')}
         actions={
           <Button
             variant="outline"
@@ -434,6 +450,7 @@ export function ActivityPage() {
           </Button>
         }
       />
+      </div>
 
       <FilterBar
         category={category}
@@ -446,11 +463,12 @@ export function ActivityPage() {
         onTo={setTo}
         onClear={clearClientFilters}
         hasClientFilters={hasClientFilters}
+        ui={ui}
       />
 
       {hasClientFilters && !query.isPending && !query.isError && query.hasNextPage && visibleItems.length > 0 && (
-        <p className="text-[11px] text-slate-400 -mt-3">
-          Search and date filters apply to the {formatNumber(loadedItems.length)} events loaded so far. Load more to include older activity.
+        <p className="text-[11px] text-slate-400 -mt-3" {...ui.edit('feed')}>
+          {ui.text('feed', 'filter_note', { count: formatNumber(loadedItems.length) })}
         </p>
       )}
 

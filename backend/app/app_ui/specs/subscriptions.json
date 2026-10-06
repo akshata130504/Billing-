@@ -1,0 +1,137 @@
+{
+  "key": "subscriptions",
+  "title": "Subscriptions",
+  "route": "/subscriptions",
+  "nav_item": "subscriptions",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Subscriptions"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Manage recurring customer subscriptions, billing intervals, and commercial contracts."
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty table messages",
+      "fields": [
+        {
+          "name": "none",
+          "label": "No subscriptions",
+          "kind": "body",
+          "default": "No subscriptions found."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "KPI cards",
+      "captions": true,
+      "items": [
+        {
+          "key": "mrr",
+          "label": "Monthly Recurring (MRR)",
+          "caption": "Active recurring base"
+        },
+        {
+          "key": "arr",
+          "label": "Annual Recurring (ARR)",
+          "caption": "Normalized annualized run-rate"
+        },
+        {
+          "key": "active",
+          "label": "Active Subscriptions",
+          "caption": "With auto-renewal"
+        },
+        {
+          "key": "churn",
+          "label": "Churn Risk and Inactive",
+          "caption": "Paused or past due"
+        }
+      ]
+    },
+    {
+      "id": "tabs",
+      "label": "Status tabs",
+      "items": [
+        {
+          "key": "all",
+          "label": "All Subscriptions",
+          "required": true
+        },
+        {
+          "key": "active",
+          "label": "Active"
+        },
+        {
+          "key": "trialing",
+          "label": "Trialing"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "past_due",
+          "label": "Past Due"
+        },
+        {
+          "key": "cancelled",
+          "label": "Cancelled"
+        },
+        {
+          "key": "draft",
+          "label": "Draft"
+        }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Subscription table columns",
+      "items": [
+        {
+          "key": "subscription",
+          "label": "Subscription",
+          "required": true
+        },
+        {
+          "key": "customer",
+          "label": "Customer"
+        },
+        {
+          "key": "plan",
+          "label": "Plan & Interval"
+        },
+        {
+          "key": "mrr",
+          "label": "MRR"
+        },
+        {
+          "key": "period",
+          "label": "Billing Period"
+        },
+        {
+          "key": "status",
+          "label": "Status"
+        },
+        {
+          "key": "actions",
+          "label": "Actions"
+        }
+      ]
+    }
+  ]
+}

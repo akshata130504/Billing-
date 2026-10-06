@@ -35,6 +35,8 @@ import { useAuth } from '../../hooks/useAuth';
 import { formatDateTime } from '../../utils/format';
 import { cn } from '../../utils/cn';
 import { validateSlug } from '../../utils/validation';
+import { usePageSpec, type ItemRenderer } from '../../appUi/usePageSpec';
+import type { EditableProps } from '../../appUi/UiConfigContext';
 
 // ---------------------------------------------------------------------------
 // Form model
@@ -101,77 +103,30 @@ function diff(saved: FormState, current: FormState): CustomerPortalSettingsUpdat
   return patch as CustomerPortalSettingsUpdate;
 }
 
-interface ToggleDef {
-  key: PortalToggleKey;
-  label: string;
-  description: string;
-}
-
-const ACCESS_TOGGLES: ToggleDef[] = [
-  {
-    key: 'allow_self_signup',
-    label: 'Allow self sign-up',
-    description:
-      'Customers can create their own portal login. Their email must match the customer record or one of its contacts.',
-  },
-  {
-    key: 'auto_invite_enabled',
-    label: 'Auto-invite new customers',
-    description: 'Email a portal invitation to new customers (with an email address) as soon as they are created.',
-  },
-  {
-    key: 'enable_identity_verification_public_links',
-    label: 'Identity verification on public links',
-    description: 'Ask customers to verify who they are before opening shared invoice or quote links.',
-  },
-  {
-    key: 'allow_document_upload',
-    label: 'Allow document upload',
-    description: 'Customers can attach supporting documents (POs, remittance advice) from the portal.',
-  },
-  {
-    key: 'allow_document_forwarding',
-    label: 'Allow document forwarding',
-    description: 'Customers can forward invoices and statements to other email addresses.',
-  },
+/**
+ * Toggle rows per section. Labels and descriptions come from the page spec
+ * (appUi/specs/customer_portal.json); the keys decide which setting each row controls.
+ */
+const ACCESS_TOGGLES: PortalToggleKey[] = [
+  'allow_self_signup',
+  'auto_invite_enabled',
+  'enable_identity_verification_public_links',
+  'allow_document_upload',
+  'allow_document_forwarding',
 ];
 
-const PAYMENT_TOGGLES: ToggleDef[] = [
-  {
-    key: 'prevent_duplicate_payments',
-    label: 'Prevent duplicate payments',
-    description:
-      'Block a new hosted checkout for an invoice while another payment attempt on it is still processing.',
-  },
-  {
-    key: 'allow_save_payment_methods',
-    label: 'Allow saving payment methods',
-    description: 'Show the "save this card" option during checkout so customers can pay faster next time.',
-  },
-  {
-    key: 'save_payment_method_default',
-    label: 'Save payment method by default',
-    description: 'Pre-tick the "save this card" option on hosted checkout pages.',
-  },
-  {
-    key: 'prevent_deselecting_save_payment',
-    label: 'Lock the save option',
-    description: 'Customers cannot untick "save this card" — useful for subscriptions that need a card on file.',
-  },
+const PAYMENT_TOGGLES: PortalToggleKey[] = [
+  'prevent_duplicate_payments',
+  'allow_save_payment_methods',
+  'save_payment_method_default',
+  'prevent_deselecting_save_payment',
 ];
 
-const TRIAL_TOGGLES: ToggleDef[] = [
-  {
-    key: 'trials_allow_customer_extension',
-    label: 'Customers can extend their own trial',
-    description: 'Exposes the self-service "extend trial" action (1–30 days per extension) in the portal.',
-  },
-  {
-    key: 'trials_activate_immediately',
-    label: 'Activate immediately on early conversion',
-    description: 'When a customer converts a trial early, the subscription goes live straight away.',
-  },
-];
+const TRIAL_TOGGLES: PortalToggleKey[] = ['trials_allow_customer_extension', 'trials_activate_immediately'];
+
+/** Spec item key of a toggle (spec keys are capped at 40 characters). */
+const toggleItemKey = (key: PortalToggleKey): string =>
+  key === 'enable_identity_verification_public_links' ? 'identity_verification' : key;
 
 // ---------------------------------------------------------------------------
 // Small UI helpers
@@ -183,15 +138,17 @@ function ToggleRow({
   checked,
   disabled,
   onChange,
+  edit,
 }: {
   label: string;
   description: string;
   checked: boolean;
   disabled?: boolean;
   onChange: (next: boolean) => void;
+  edit?: EditableProps;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-3.5">
+    <div className="flex items-start justify-between gap-4 py-3.5" {...edit}>
       <div className="min-w-0">
         <p className="text-sm font-medium text-slate-900">{label}</p>
         <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{description}</p>
@@ -226,16 +183,19 @@ function SectionCard({
   description,
   children,
   className,
+  edit,
 }: {
   icon: React.ReactNode;
   title: string;
   description?: string;
   children: React.ReactNode;
   className?: string;
+  /** Visual-editor selection props for the section heading. */
+  edit?: EditableProps;
 }) {
   return (
     <div className={cn('bg-white rounded-xl border border-slate-200 shadow-sm', className)}>
-      <div className="px-5 py-4 border-b border-slate-100 flex items-start gap-3">
+      <div className="px-5 py-4 border-b border-slate-100 flex items-start gap-3" {...edit}>
         <div className="p-2 rounded-lg bg-brand-50 text-brand-600 shrink-0">{icon}</div>
         <div>
           <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
@@ -275,6 +235,7 @@ export function CustomerPortalPage() {
   const { showToast } = useToast();
   const { hasRole, organization } = useAuth();
   const canEdit = hasRole('admin');
+  const ui = usePageSpec('customer_portal');
 
   const [settings, setSettings] = useState<CustomerPortalSettings | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
@@ -371,22 +332,38 @@ export function CustomerPortalPage() {
   const signupUrl = `${apiOrigin}/api/v1/portal/auth/signup`;
   const loginUrl = `${apiOrigin}/api/v1/portal/auth/login`;
 
+  /** Spec-driven toggle rows for one section, in configured order. */
+  const toggleRows = (list: string, keys: PortalToggleKey[], isDisabled: (key: PortalToggleKey) => boolean) => {
+    if (!form) return null;
+    const renderers: Record<string, ItemRenderer> = {};
+    keys.forEach((key) => {
+      renderers[toggleItemKey(key)] = (item, edit) => (
+        <ToggleRow
+          label={item.label}
+          description={item.caption ?? ''}
+          checked={form[key]}
+          disabled={isDisabled(key)}
+          onChange={(v) => set(key, v)}
+          edit={edit}
+        />
+      );
+    });
+    return ui.render(list, renderers);
+  };
+
   // ---------------------------------------------------------------------------
 
   return (
     <div className="space-y-6 pb-12">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
+        <div {...ui.edit('header')}>
           <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">
             <HeartHandshake className="w-4 h-4" />
-            Customer Experience
+            {ui.text('header', 'eyebrow')}
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Customer Portal</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Control what your customers can see and do when they sign in to view invoices, subscriptions and
-            saved payment methods.
-          </p>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{ui.text('header', 'title')}</h1>
+          <p className="text-sm text-slate-500 mt-1">{ui.text('header', 'subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -435,23 +412,24 @@ export function CustomerPortalPage() {
 
             <SectionCard
               icon={<Globe className="w-4 h-4" />}
-              title="Portal identity"
-              description="How the portal introduces itself to your customers."
+              title={ui.text('identity', 'title')}
+              description={ui.text('identity', 'description')}
+              edit={ui.edit('identity')}
             >
               <div className="py-5 space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Input
-                    label="Portal name"
+                    label={ui.text('identity', 'name_label')}
                     required
                     maxLength={100}
                     value={form.portal_name}
                     disabled={!canEdit}
                     error={fieldErrors.portal_name}
                     onChange={(e) => set('portal_name', e.target.value)}
-                    helperText="Shown in the portal header and dashboard."
+                    helperText={ui.text('identity', 'name_help')}
                   />
                   <Input
-                    label="URL slug"
+                    label={ui.text('identity', 'slug_label')}
                     maxLength={64}
                     value={form.portal_url_slug ?? ''}
                     disabled={!canEdit}
@@ -461,7 +439,7 @@ export function CustomerPortalPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1.5">Banner message</label>
+                  <label className="block text-xs font-medium text-slate-700 mb-1.5">{ui.text('identity', 'banner_label')}</label>
                   <textarea
                     rows={3}
                     value={form.banner_message ?? ''}
@@ -470,71 +448,49 @@ export function CustomerPortalPage() {
                     placeholder="e.g. Our finance team is closed on 2 October. Payments will be reconciled the next working day."
                     className="block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 disabled:bg-slate-50 disabled:text-slate-400"
                   />
-                  <p className="mt-1.5 text-xs text-slate-500">
-                    Displayed at the top of the customer dashboard. Leave empty to hide the banner.
-                  </p>
+                  <p className="mt-1.5 text-xs text-slate-500">{ui.text('identity', 'banner_help')}</p>
                 </div>
               </div>
             </SectionCard>
 
             <SectionCard
               icon={<ShieldCheck className="w-4 h-4" />}
-              title="Access & security"
-              description="Who can sign in and what they can share."
+              title={ui.text('access', 'title')}
+              description={ui.text('access', 'description')}
+              edit={ui.edit('access')}
             >
-              <div className="divide-y divide-slate-100">
-                {ACCESS_TOGGLES.map((tg) => (
-                  <ToggleRow
-                    key={tg.key}
-                    label={tg.label}
-                    description={tg.description}
-                    checked={form[tg.key]}
-                    disabled={!canEdit}
-                    onChange={(v) => set(tg.key, v)}
-                  />
-                ))}
+              <div className="divide-y divide-slate-100" {...ui.edit('access_toggles')}>
+                {toggleRows('access_toggles', ACCESS_TOGGLES, () => !canEdit)}
               </div>
             </SectionCard>
 
             <SectionCard
               icon={<CreditCard className="w-4 h-4" />}
-              title="Payments & saved cards"
-              description="These also govern the hosted checkout pages your customers pay through."
+              title={ui.text('payments', 'title')}
+              description={ui.text('payments', 'description')}
+              edit={ui.edit('payments')}
             >
-              <div className="divide-y divide-slate-100">
-                {PAYMENT_TOGGLES.map((tg) => (
-                  <ToggleRow
-                    key={tg.key}
-                    label={tg.label}
-                    description={tg.description}
-                    checked={form[tg.key]}
-                    disabled={!canEdit || (tg.key !== 'allow_save_payment_methods' && tg.key !== 'prevent_duplicate_payments' && !form.allow_save_payment_methods)}
-                    onChange={(v) => set(tg.key, v)}
-                  />
-                ))}
+              <div className="divide-y divide-slate-100" {...ui.edit('payment_toggles')}>
+                {toggleRows(
+                  'payment_toggles',
+                  PAYMENT_TOGGLES,
+                  (key) => !canEdit || (key !== 'allow_save_payment_methods' && key !== 'prevent_duplicate_payments' && !form.allow_save_payment_methods)
+                )}
               </div>
             </SectionCard>
 
             <SectionCard
               icon={<Clock className="w-4 h-4" />}
-              title="Trials"
-              description="Self-service trial controls available to customers on trialing subscriptions."
+              title={ui.text('trials', 'title')}
+              description={ui.text('trials', 'description')}
+              edit={ui.edit('trials')}
             >
-              <div className="divide-y divide-slate-100">
-                {TRIAL_TOGGLES.map((tg) => (
-                  <ToggleRow
-                    key={tg.key}
-                    label={tg.label}
-                    description={tg.description}
-                    checked={form[tg.key]}
-                    disabled={!canEdit}
-                    onChange={(v) => set(tg.key, v)}
-                  />
-                ))}
+              <div className="divide-y divide-slate-100" {...ui.edit('trial_toggles')}>
+                {toggleRows('trial_toggles', TRIAL_TOGGLES, () => !canEdit)}
                 <div className="py-4 grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
                   <Input
                     type="number"
-                    label="Maximum extensions per trial"
+                    label={ui.text('trials', 'max_extensions_label')}
                     min={0}
                     max={10}
                     step={1}
@@ -584,8 +540,9 @@ export function CustomerPortalPage() {
           <div className="space-y-6">
             <SectionCard
               icon={<KeyRound className="w-4 h-4" />}
-              title="Portal access"
-              description="How customers get in today."
+              title={ui.text('portal_access', 'title')}
+              description={ui.text('portal_access', 'description')}
+              edit={ui.edit('portal_access')}
             >
               <div className="py-5 space-y-4">
                 <div className="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
@@ -645,8 +602,9 @@ export function CustomerPortalPage() {
 
             <SectionCard
               icon={<Sparkles className="w-4 h-4" />}
-              title="What customers see"
-              description={dirty ? 'Preview reflects your unsaved changes.' : 'Read-only preview of portal capabilities.'}
+              title={ui.text('preview', 'title')}
+              description={dirty ? ui.text('preview', 'description_dirty') : ui.text('preview', 'description')}
+              edit={ui.edit('preview')}
             >
               <div className="py-5 space-y-4">
                 {/* Mini dashboard frame */}

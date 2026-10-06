@@ -1,0 +1,124 @@
+{
+  "key": "timesheets",
+  "title": "Timesheets",
+  "route": "/timesheets",
+  "nav_item": "timesheets",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Timesheets & Time Tracking"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Log time against customers and projects, manage approvals, and convert billable hours directly into invoices."
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty table messages",
+      "fields": [
+        {
+          "name": "none",
+          "label": "No entries",
+          "kind": "body",
+          "default": "No time entries logged"
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "KPI stat cards",
+      "items": [
+        {
+          "key": "total_hours",
+          "label": "Total Hours"
+        },
+        {
+          "key": "billable_hours",
+          "label": "Billable Hours"
+        },
+        {
+          "key": "non_billable",
+          "label": "Non-Billable"
+        },
+        {
+          "key": "billable_amount",
+          "label": "Billable Amount"
+        },
+        {
+          "key": "unbilled_value",
+          "label": "Unbilled Value"
+        },
+        {
+          "key": "pending_approval",
+          "label": "Pending Approval"
+        }
+      ]
+    },
+    {
+      "id": "tabs",
+      "label": "View tabs",
+      "items": [
+        {
+          "key": "list",
+          "label": "List View",
+          "required": true
+        },
+        {
+          "key": "weekly",
+          "label": "Weekly Matrix"
+        }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Timesheet table columns",
+      "items": [
+        {
+          "key": "date",
+          "label": "Date",
+          "required": true
+        },
+        {
+          "key": "member",
+          "label": "Member"
+        },
+        {
+          "key": "project_customer",
+          "label": "Customer & Project"
+        },
+        {
+          "key": "task",
+          "label": "Description"
+        },
+        {
+          "key": "hours",
+          "label": "Hours"
+        },
+        {
+          "key": "rate_amount",
+          "label": "Rate / Amount"
+        },
+        {
+          "key": "status",
+          "label": "Status"
+        },
+        {
+          "key": "actions",
+          "label": "Actions"
+        }
+      ]
+    }
+  ]
+}

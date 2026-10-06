@@ -15,6 +15,7 @@ api_router = APIRouter()
 ROUTERS = [
     ("health", "", ["Health"]),
     ("meta", "/meta", ["Meta"]),
+    ("ui_config", "/ui-config", ["Meta"]),
     ("auth", "/auth", ["Auth"]),
     ("platform_auth", "/platform/auth", ["Platform Auth"]),
     ("platform_overview", "/platform", ["Platform Console"]),
@@ -22,6 +23,7 @@ ROUTERS = [
     ("platform_staff", "/platform/staff", ["Platform Console"]),
     ("platform_website", "/platform/website", ["Platform Console"]),
     ("platform_access_grants", "/platform/access-grants", ["Platform Console"]),
+    ("platform_app_ui", "/platform/app-ui", ["Platform Console"]),
     ("users", "/users", ["Users"]),
     ("organization", "", ["Organization & Team"]),
     ("platform_access", "", ["Organization & Team"]),

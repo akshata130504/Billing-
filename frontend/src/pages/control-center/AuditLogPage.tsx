@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
@@ -11,6 +11,7 @@ import { controlCenterService, downloadAuthenticated, toApiError } from '../../s
 import { queryKeys } from '../../hooks/queries';
 import { formatDateTime } from '../../utils/format';
 import type { AuditExportFormat, AuditLogOut, AuditLogParams, AuditStatus } from '../../types/api';
+import { usePageSpec } from '../../appUi/usePageSpec';
 import {
   History,
   Search,
@@ -68,6 +69,7 @@ function getStatusBadge(status: AuditStatus) {
 
 export function AuditLogPage() {
   const { showToast } = useToast();
+  const ui = usePageSpec('audit_log');
 
   const [page, setPage] = useState(1);
   const [entityType, setEntityType] = useState<string>('all');
@@ -123,27 +125,81 @@ export function AuditLogPage() {
     }
   };
 
+  // Subsystem filter values come from ENTITY_TYPE_OPTIONS (code); only the tab labels and their
+  // order are configurable.
+  const subsystemValues = new Set(['all', ...ENTITY_TYPE_OPTIONS.map((o) => o.value)]);
+  const subsystemTabs = ui.shown('subsystems').filter((item) => subsystemValues.has(item.key));
+
+  const columns = ui.shown('columns');
+  const logCells: Record<string, (entry: AuditLogOut) => ReactNode> = {
+    timestamp: (entry) => (
+      <td className="px-4 py-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+        {formatDateTime(entry.created_at)}
+      </td>
+    ),
+    actor: (entry) => (
+      <td className="px-4 py-3">
+        <div className="font-bold text-slate-900">{entry.actor_label}</div>
+        {entry.actor?.email && (
+          <div className="text-[10px] text-slate-400">{entry.actor.email}</div>
+        )}
+      </td>
+    ),
+    action: (entry) => (
+      <td className="px-4 py-3">
+        <span className="font-mono font-bold text-slate-800 text-[11px] bg-slate-100 px-1.5 py-0.5 rounded">
+          {entry.action}
+        </span>
+      </td>
+    ),
+    entity: (entry) => (
+      <td className="px-4 py-3">
+        <span className="font-semibold text-slate-900">
+          {entry.entity_label || entry.entity_id || '—'}
+        </span>
+        <span className="text-[10px] text-slate-400 block">{entry.entity_type}</span>
+      </td>
+    ),
+    status: (entry) => <td className="px-4 py-3">{getStatusBadge(entry.status)}</td>,
+    ip_address: (entry) => (
+      <td className="px-4 py-3 font-mono text-[11px] text-slate-500">
+        {entry.ip_address || '—'}
+      </td>
+    ),
+    details: (entry) => (
+      <td className="px-4 py-3 text-right">
+        <Button
+          variant="outline"
+          size="sm"
+          leadingIcon={<Eye className="w-3.5 h-3.5" />}
+          onClick={() => setSelectedEntry(entry)}
+        >
+          Diff
+        </Button>
+      </td>
+    ),
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
+        <div {...ui.edit('header')}>
           <div className="flex items-center gap-2 mb-1">
             <span className="text-xs font-semibold uppercase tracking-wider text-brand-600">
-              Control Center
+              {ui.text('header', 'eyebrow')}
             </span>
             <span className="text-slate-300">•</span>
             <Badge variant="primary" size="sm">
-              SOC 2 / ISO Compliance
+              {ui.text('header', 'badge')}
             </Badge>
           </div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
             <History className="w-6 h-6 text-brand-600" />
-            Immutable Audit Trail
+            {ui.text('header', 'title')}
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-            Chronological log of rate modifications, invoice voidings, discount approvals, and other
-            financial events recorded across the organization.
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
 
@@ -172,17 +228,17 @@ export function AuditLogPage() {
       </div>
 
       {/* Security & Immutability Notice */}
-      <div className="p-3.5 rounded-xl bg-slate-900 text-white flex items-center justify-between gap-4 shadow-sm">
+      <div className="p-3.5 rounded-xl bg-slate-900 text-white flex items-center justify-between gap-4 shadow-sm" {...ui.edit('notice')}>
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg bg-white/10 text-emerald-400">
             <Lock className="w-4 h-4" />
           </div>
           <div>
             <p className="text-xs font-bold text-slate-100">
-              Append-Only Financial Ledger Active
+              {ui.text('notice', 'title')}
             </p>
             <p className="text-[11px] text-slate-400">
-              Audit log entries are write-once and cannot be edited or deleted by any administrative account.
+              {ui.text('notice', 'description')}
             </p>
           </div>
         </div>
@@ -193,11 +249,12 @@ export function AuditLogPage() {
         <CardContent className="p-4 space-y-3">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
             {/* Entity Type Filter */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 text-xs">
-              {[{ value: 'all', label: 'All Subsystems' }, ...ENTITY_TYPE_OPTIONS].map((tab) => (
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 text-xs" {...ui.edit('subsystems')}>
+              {subsystemTabs.map((item) => ({ value: item.key, label: item.label })).map((tab) => (
                 <button
                   key={tab.value}
                   type="button"
+                  {...ui.edit(`subsystems.${tab.value}`)}
                   onClick={() => setEntityType(tab.value)}
                   className={`px-3 py-1.5 rounded-lg font-medium whitespace-nowrap transition-colors cursor-pointer ${
                     entityType === tab.value
@@ -211,11 +268,11 @@ export function AuditLogPage() {
             </div>
 
             {/* Live Search */}
-            <div className="relative w-full sm:w-64 shrink-0">
+            <div className="relative w-full sm:w-64 shrink-0" {...ui.edit('filters')}>
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search actor, entity, IP..."
+                placeholder={ui.text('filters', 'search_placeholder')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 outline-none focus:bg-white transition-colors"
@@ -227,7 +284,7 @@ export function AuditLogPage() {
             <div className="w-full sm:w-56">
               <input
                 type="text"
-                placeholder="Filter by action (e.g. INVOICE_VOIDED)"
+                placeholder={ui.text('filters', 'action_placeholder')}
                 value={actionQuery}
                 onChange={(e) => setActionQuery(e.target.value)}
                 className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 outline-none focus:bg-white transition-colors font-mono"
@@ -282,59 +339,28 @@ export function AuditLogPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
               <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200/80">
-                <tr>
-                  <th className="px-4 py-3">Timestamp</th>
-                  <th className="px-4 py-3">Actor</th>
-                  <th className="px-4 py-3">Action</th>
-                  <th className="px-4 py-3">Affected Entity</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">IP Address</th>
-                  <th className="px-4 py-3 text-right">Details</th>
+                <tr {...ui.edit('columns')}>
+                  {columns.map((col) => (
+                    <th
+                      key={col.key}
+                      className={`px-4 py-3${col.key === 'details' ? ' text-right' : ''}`}
+                      {...ui.edit(`columns.${col.key}`)}
+                    >
+                      {col.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {logs.map((entry) => (
                   <tr key={entry.id} className="hover:bg-slate-50/70 transition-colors">
-                    <td className="px-4 py-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">
-                      {formatDateTime(entry.created_at)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="font-bold text-slate-900">{entry.actor_label}</div>
-                      {entry.actor?.email && (
-                        <div className="text-[10px] text-slate-400">{entry.actor.email}</div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="font-mono font-bold text-slate-800 text-[11px] bg-slate-100 px-1.5 py-0.5 rounded">
-                        {entry.action}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="font-semibold text-slate-900">
-                        {entry.entity_label || entry.entity_id || '—'}
-                      </span>
-                      <span className="text-[10px] text-slate-400 block">{entry.entity_type}</span>
-                    </td>
-                    <td className="px-4 py-3">{getStatusBadge(entry.status)}</td>
-                    <td className="px-4 py-3 font-mono text-[11px] text-slate-500">
-                      {entry.ip_address || '—'}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        leadingIcon={<Eye className="w-3.5 h-3.5" />}
-                        onClick={() => setSelectedEntry(entry)}
-                      >
-                        Diff
-                      </Button>
-                    </td>
+                    {columns.map((col) => <Fragment key={col.key}>{logCells[col.key]?.(entry)}</Fragment>)}
                   </tr>
                 ))}
                 {logs.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-10 text-center text-slate-400">
-                      No audit log entries match the current filters.
+                    <td colSpan={columns.length} className="px-4 py-10 text-center text-slate-400" {...ui.edit('empty')}>
+                      {ui.text('empty', 'filtered')}
                     </td>
                   </tr>
                 )}
