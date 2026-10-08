@@ -192,7 +192,9 @@ def test_directory_lists_metadata_only(admin, db, tenant):
     assert body["total"] == 1 and body["page"] == 1
     item = body["items"][0]
     assert set(item) == {"id", "name", "slug", "status", "jobs_paused", "member_count", "created_at",
-                         "updated_at", "status_changed_at", "deletion_scheduled_for"}
+                         "updated_at", "status_changed_at", "deletion_scheduled_for",
+                         # plan metadata (trial end, seat limit, module access) - no financial data
+                         "trial_ends_at", "seat_limit", "module_access"}
     assert item["id"] == tenant.organization.id and item["status"] == "active"
     assert item["member_count"] == 2
     assert "Zebra Secret Customer" not in resp.text

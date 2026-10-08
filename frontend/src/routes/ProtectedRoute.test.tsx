@@ -9,6 +9,8 @@ let auth: {
   role: Role;
   status: string;
   reason?: string | null;
+  /** /auth/me access.status (the server's effective status), when present. */
+  accessStatus?: string;
   organizations: { id: string; name: string; slug: string; role: string }[];
 };
 const switchOrganization = vi.fn();
@@ -20,11 +22,17 @@ vi.mock('../hooks/useAuth', () => ({
     isLoading: false,
     organization: { id: 'org-1', name: 'Acme Pvt Ltd', slug: 'acme', status: auth.status, status_reason: auth.reason ?? null },
     organizations: auth.organizations,
+    access: auth.accessStatus ? { status: auth.accessStatus, trial_ends_at: null, nav_items: [] } : null,
     logout: vi.fn(),
     refreshMe,
     switchOrganization,
     hasRole: (min: Role) => RANK[auth.role] >= RANK[min],
   }),
+}));
+
+vi.mock('../pages/subscription-access/SubscriptionRequestPage', () => ({
+  SubscriptionRequestPage: () => <div>Subscription page</div>,
+  TrialExpiredScreen: ({ organizationName }: { organizationName: string }) => <div>Trial ended for {organizationName}</div>,
 }));
 
 import { ProtectedRoute } from './index';
@@ -52,6 +60,21 @@ describe('ProtectedRoute organization lifecycle', () => {
     renderGuard();
     expect(screen.getByText('Workspace content')).toBeInTheDocument();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('renders the workspace during the trial', () => {
+    auth.status = 'trial';
+    auth.accessStatus = 'trial';
+    renderGuard();
+    expect(screen.getByText('Workspace content')).toBeInTheDocument();
+  });
+
+  it('shows only the subscription screen once the server says the trial has ended', async () => {
+    auth.status = 'trial'; // stored status not yet updated by the scheduler
+    auth.accessStatus = 'trial_expired';
+    renderGuard();
+    expect(await screen.findByText('Trial ended for Acme Pvt Ltd')).toBeInTheDocument();
+    expect(screen.queryByText('Workspace content')).not.toBeInTheDocument();
   });
 
   it('shows the pending approval screen instead of the workspace', () => {

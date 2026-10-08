@@ -189,6 +189,9 @@ def trigger_immediate_retry(
     db: Session = Depends(get_db),
 ) -> DunningCaseDetailOut:
     """Forces an immediate retry attempt for an active dunning case."""
+    from backend.app.services import org_lifecycle
+
+    org_lifecycle.assert_billing_collection_allowed(db, ctx.organization_id)  # charges the card
     case = db.scalars(
         select(DunningCase).where(
             DunningCase.id == case_id,

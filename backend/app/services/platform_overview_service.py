@@ -19,6 +19,7 @@ from backend.app.models import Organization, OrganizationStatus
 from backend.app.models.base import utcnow
 from backend.app.models.events import InboxEvent, Job, JobStatus, OutboxEvent, OutboxStatus
 from backend.app.models.platform import PlatformAuditLog, PlatformRole, PlatformStaff
+from backend.app.services import subscription_request_service
 from backend.app.services.scheduler import get_scheduler_heartbeat
 
 RECENT_DAYS = 7
@@ -146,4 +147,5 @@ def dashboard(db: Session, role: PlatformRole = PlatformRole.PLATFORM_ADMINISTRA
         },
         "scheduler": snapshot["scheduler"],
         "recent_activity": recent_activity(db, role),
+        "subscription_requests_pending": subscription_request_service.pending_count(db),
     }

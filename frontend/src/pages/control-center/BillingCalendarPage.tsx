@@ -22,6 +22,7 @@ import {
   Receipt,
   Repeat,
 } from 'lucide-react';
+import { usePageSpec } from '../../appUi/usePageSpec';
 
 /** Parse a YYYY-MM-DD string as a local date (avoids UTC shifting the day). */
 function parseIsoDate(iso: string): Date {
@@ -70,6 +71,7 @@ const AGENDA_PAGE_SIZE = 10;
 
 export function BillingCalendarPage() {
   const navigate = useNavigate();
+  const ui = usePageSpec('billing_calendar');
   const [viewMonth, setViewMonth] = useState<Date>(() => startOfMonth(new Date()));
   const [selectedType, setSelectedType] = useState<'all' | CalendarEventType>('all');
   const [activeEvent, setActiveEvent] = useState<CalendarEvent | null>(null);
@@ -185,23 +187,22 @@ export function BillingCalendarPage() {
     <div className="space-y-6">
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
+        <div {...ui.edit('header')}>
           <div className="flex items-center gap-2 mb-1">
             <span className="text-xs font-semibold uppercase tracking-wider text-brand-600">
-              Control Center
+              {ui.text('header', 'eyebrow')}
             </span>
             <span className="text-slate-300">•</span>
             <Badge variant="primary" size="sm">
-              Schedule & Planning
+              {ui.text('header', 'badge')}
             </Badge>
           </div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
             <CalendarIcon className="w-6 h-6 text-brand-600" />
-            Billing Calendar
+            {ui.text('header', 'title')}
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-            Visualize recurring billing schedules, invoice due dates, subscription renewal cut-offs,
-            trial expirations, and quote expiries.
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
 
@@ -230,16 +231,11 @@ export function BillingCalendarPage() {
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-slate-200/90">
-        {[
-          { key: 'all', label: 'All Events' },
-          { key: 'invoice_due', label: 'Invoices Due' },
-          { key: 'subscription_renewal', label: 'Renewals' },
-          { key: 'trial_ending', label: 'Expiring Trials' },
-          { key: 'quote_expiry', label: 'Expiring Quotes' },
-        ].map((tab) => (
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-slate-200/90" {...ui.edit('tabs')}>
+        {ui.shown('tabs').map((item) => ({ key: item.key, label: item.label })).map((tab) => (
           <button
             key={tab.key}
+            {...ui.edit(`tabs.${tab.key}`)}
             type="button"
             onClick={() => {
               setSelectedType(tab.key as typeof selectedType);
@@ -272,14 +268,11 @@ export function BillingCalendarPage() {
               <Card>
                 <CardContent className="p-4 sm:p-5">
                   {/* Day Headers */}
-                  <div className="grid grid-cols-7 text-center text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-                    <div>Sun</div>
-                    <div>Mon</div>
-                    <div>Tue</div>
-                    <div>Wed</div>
-                    <div>Thu</div>
-                    <div>Fri</div>
-                    <div>Sat</div>
+                  {/* Fixed Sunday-first order (matches the grid offset); labels come from the page spec. */}
+                  <div className="grid grid-cols-7 text-center text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2" {...ui.edit('weekdays')}>
+                    {ui.shown('weekdays').map((day) => (
+                      <div key={day.key} {...ui.edit(`weekdays.${day.key}`)}>{day.label}</div>
+                    ))}
                   </div>
 
                   {/* Month Grid Cells */}
@@ -318,8 +311,8 @@ export function BillingCalendarPage() {
                               {cell.dayNumber}
                             </span>
                             {cell.isToday && (
-                              <span className="text-[9px] font-bold text-brand-600 hidden sm:inline">
-                                Today
+                              <span className="text-[9px] font-bold text-brand-600 hidden sm:inline" {...ui.edit('calendar')}>
+                                {ui.text('calendar', 'today')}
                               </span>
                             )}
                           </div>
@@ -349,19 +342,19 @@ export function BillingCalendarPage() {
             <div className="space-y-4">
               <Card>
                 <CardContent className="p-5 space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3" {...ui.edit('agenda')}>
                     <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-                      Upcoming Agenda ({filteredEvents.length})
+                      {ui.text('agenda', 'title')} ({filteredEvents.length})
                     </h3>
                     <span className="text-[10px] font-medium text-slate-400">
-                      Chronological
+                      {ui.text('agenda', 'caption')}
                     </span>
                   </div>
 
                   <div className="space-y-3 max-h-[640px] overflow-y-auto pr-1">
                     {filteredEvents.length === 0 && (
-                      <p className="text-xs text-slate-500 text-center py-6">
-                        No scheduled events in {selectedMonthLabel}.
+                      <p className="text-xs text-slate-500 text-center py-6" {...ui.edit('agenda')}>
+                        {ui.text('agenda', 'empty', { month: selectedMonthLabel })}
                       </p>
                     )}
                     {agendaEvents.map((ev) => (

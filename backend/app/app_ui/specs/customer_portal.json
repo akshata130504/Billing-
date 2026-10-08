@@ -1,0 +1,110 @@
+{
+  "key": "customer_portal",
+  "title": "Customer Portal",
+  "route": "/customer-portal",
+  "nav_item": "customer_portal",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        { "name": "eyebrow", "label": "Eyebrow", "kind": "label", "default": "Customer Experience" },
+        { "name": "title", "label": "Heading", "kind": "heading", "default": "Customer Portal" },
+        { "name": "subtitle", "label": "Subtitle", "kind": "body", "default": "Control what your customers can see and do when they sign in to view invoices, subscriptions and saved payment methods." }
+      ]
+    },
+    {
+      "id": "identity",
+      "label": "Portal identity section",
+      "fields": [
+        { "name": "title", "label": "Section title", "kind": "heading", "default": "Portal identity" },
+        { "name": "description", "label": "Section description", "kind": "body", "default": "How the portal introduces itself to your customers." },
+        { "name": "name_label", "label": "Portal name field label", "kind": "label", "default": "Portal name" },
+        { "name": "name_help", "label": "Portal name helper text", "kind": "body", "default": "Shown in the portal header and dashboard." },
+        { "name": "slug_label", "label": "URL slug field label", "kind": "label", "default": "URL slug" },
+        { "name": "banner_label", "label": "Banner field label", "kind": "label", "default": "Banner message" },
+        { "name": "banner_help", "label": "Banner helper text", "kind": "body", "default": "Displayed at the top of the customer dashboard. Leave empty to hide the banner." }
+      ]
+    },
+    {
+      "id": "access",
+      "label": "Access & security section",
+      "fields": [
+        { "name": "title", "label": "Section title", "kind": "heading", "default": "Access & security" },
+        { "name": "description", "label": "Section description", "kind": "body", "default": "Who can sign in and what they can share." }
+      ]
+    },
+    {
+      "id": "payments",
+      "label": "Payments & saved cards section",
+      "fields": [
+        { "name": "title", "label": "Section title", "kind": "heading", "default": "Payments & saved cards" },
+        { "name": "description", "label": "Section description", "kind": "body", "default": "These also govern the hosted checkout pages your customers pay through." }
+      ]
+    },
+    {
+      "id": "trials",
+      "label": "Trials section",
+      "fields": [
+        { "name": "title", "label": "Section title", "kind": "heading", "default": "Trials" },
+        { "name": "description", "label": "Section description", "kind": "body", "default": "Self-service trial controls available to customers on trialing subscriptions." },
+        { "name": "max_extensions_label", "label": "Maximum extensions field label", "kind": "label", "default": "Maximum extensions per trial" }
+      ]
+    },
+    {
+      "id": "portal_access",
+      "label": "Portal access section",
+      "fields": [
+        { "name": "title", "label": "Section title", "kind": "heading", "default": "Portal access" },
+        { "name": "description", "label": "Section description", "kind": "body", "default": "How customers get in today." }
+      ]
+    },
+    {
+      "id": "preview",
+      "label": "What customers see section",
+      "fields": [
+        { "name": "title", "label": "Section title", "kind": "heading", "default": "What customers see" },
+        { "name": "description", "label": "Description (saved settings)", "kind": "body", "default": "Read-only preview of portal capabilities." },
+        { "name": "description_dirty", "label": "Description (unsaved changes)", "kind": "body", "default": "Preview reflects your unsaved changes." }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "access_toggles",
+      "label": "Access & security settings",
+      "hide": false,
+      "captions": true,
+      "items": [
+        { "key": "allow_self_signup", "label": "Allow self sign-up", "caption": "Customers can create their own portal login. Their email must match the customer record or one of its contacts." },
+        { "key": "auto_invite_enabled", "label": "Auto-invite new customers", "caption": "Email a portal invitation to new customers (with an email address) as soon as they are created." },
+        { "key": "identity_verification", "label": "Identity verification on public links", "caption": "Ask customers to verify who they are before opening shared invoice or quote links." },
+        { "key": "allow_document_upload", "label": "Allow document upload", "caption": "Customers can attach supporting documents (POs, remittance advice) from the portal." },
+        { "key": "allow_document_forwarding", "label": "Allow document forwarding", "caption": "Customers can forward invoices and statements to other email addresses." }
+      ]
+    },
+    {
+      "id": "payment_toggles",
+      "label": "Payment settings",
+      "reorder": false,
+      "hide": false,
+      "captions": true,
+      "items": [
+        { "key": "prevent_duplicate_payments", "label": "Prevent duplicate payments", "caption": "Block a new hosted checkout for an invoice while another payment attempt on it is still processing." },
+        { "key": "allow_save_payment_methods", "label": "Allow saving payment methods", "caption": "Show the \"save this card\" option during checkout so customers can pay faster next time." },
+        { "key": "save_payment_method_default", "label": "Save payment method by default", "caption": "Pre-tick the \"save this card\" option on hosted checkout pages." },
+        { "key": "prevent_deselecting_save_payment", "label": "Lock the save option", "caption": "Customers cannot untick \"save this card\" — useful for subscriptions that need a card on file." }
+      ]
+    },
+    {
+      "id": "trial_toggles",
+      "label": "Trial settings",
+      "hide": false,
+      "captions": true,
+      "items": [
+        { "key": "trials_allow_customer_extension", "label": "Customers can extend their own trial", "caption": "Exposes the self-service \"extend trial\" action (1–30 days per extension) in the portal." },
+        { "key": "trials_activate_immediately", "label": "Activate immediately on early conversion", "caption": "When a customer converts a trial early, the subscription goes live straight away." }
+      ]
+    }
+  ]
+}

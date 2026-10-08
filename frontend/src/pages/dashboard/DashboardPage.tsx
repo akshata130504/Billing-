@@ -1,4 +1,15 @@
 import { useState } from 'react';
+import type { ReactNode } from 'react';
+import {
+  OVERVIEW_HEADER_DEFAULTS,
+  OVERVIEW_KPI_DEFS,
+  OVERVIEW_MAIN_WIDGET_DEFS,
+  OVERVIEW_SIDE_WIDGET_DEFS,
+  fillTokens,
+  resolveList,
+  visible,
+} from '../../appUi/registry';
+import { usePageUi, useUiEditable } from '../../appUi/UiConfigContext';
 import { useQuery } from '@tanstack/react-query';
 import {
   FileText,
@@ -35,6 +46,8 @@ import { BillingPromoCard } from './widgets/BillingPromoCard';
 import type { DashboardRange, WidgetVisibilityState } from '../../types';
 
 export function DashboardPage() {
+  const ui = usePageUi('overview');
+  const editable = useUiEditable();
   const { showToast } = useToast();
   const { user } = useAuth();
 
@@ -165,6 +178,7 @@ export function DashboardPage() {
 
   const kpiCards = [
     {
+      key: 'total_invoices',
       title: 'Total Invoices',
       value: String(totalInvoices),
       change: `${overdueInvoices} overdue`,
@@ -176,6 +190,7 @@ export function DashboardPage() {
       ),
     },
     {
+      key: 'total_revenue',
       title: 'Total Revenue',
       value: formatMoney(totalRevNum, currency),
       change: revChangePct,
@@ -187,6 +202,7 @@ export function DashboardPage() {
       ),
     },
     {
+      key: 'payments_received',
       title: 'Payments Received',
       value: paymentsReceivedLabel,
       change: paymentsReceivedChange,
@@ -198,6 +214,7 @@ export function DashboardPage() {
       ),
     },
     {
+      key: 'outstanding',
       title: 'Outstanding',
       value: outstandingLabel,
       change: `${outstandingCount} unpaid invoices`,
@@ -209,6 +226,7 @@ export function DashboardPage() {
       ),
     },
     {
+      key: 'mrr',
       title: `MRR (${mrrCurrency})`,
       value: formatMoney(revenue?.mrr ?? 0, mrrCurrency),
       change: mrrChange,
@@ -221,6 +239,7 @@ export function DashboardPage() {
       ),
     },
     {
+      key: 'churn_rate',
       title: 'Churn Rate',
       value: churnRate !== null ? formatPercent(churnRate, 2) : '—',
       change:
@@ -236,20 +255,80 @@ export function DashboardPage() {
     },
   ];
 
+  // Visual-editor configuration (labels, order, visibility) merged over the built-in layout.
+  const kpiLayout = visible(resolveList(OVERVIEW_KPI_DEFS, ui.kpis));
+  const visibleKpis = kpiLayout
+    .map((item) => {
+      const card = kpiCards.find((c) => c.key === item.key);
+      return card ? { ...card, title: fillTokens(item.label, { currency: mrrCurrency }) } : null;
+    })
+    .filter((c): c is (typeof kpiCards)[number] => c !== null);
+  const headerTitle = fillTokens(ui.header?.title ?? OVERVIEW_HEADER_DEFAULTS.title, { first_name: firstName });
+  const headerSubtitle = ui.header?.subtitle ?? OVERVIEW_HEADER_DEFAULTS.subtitle;
+
+  // The user's own "Customize Dashboard" toggles still apply on top of the published layout.
+  const userVisible: Record<string, boolean> = {
+    revenue_overview: visibility.revenueIntelligence,
+    recent_invoices: visibility.recentTransactions,
+    billing_pipeline: visibility.billingPipeline,
+    customer_health: visibility.customerHealth,
+    payment_recovery: visibility.paymentRecovery,
+    action_center: visibility.actionCenter,
+    activity_timeline: visibility.activityTimeline,
+  };
+  const renderWidget = (key: string, title: string): ReactNode => {
+    switch (key) {
+      case 'revenue_overview':
+        return <RevenueOverviewWidget revenue={revenue} currency={currency} title={title} />;
+      case 'recent_invoices':
+        return <RecentInvoicesWidget transactions={recent_transactions} title={title} />;
+      case 'billing_pipeline':
+        return <BillingPipelineWidget pipeline={pipeline} currency={currency} title={title} />;
+      case 'customer_health':
+        return <CustomerHealthWidget health={customer_health} title={title} />;
+      case 'payment_recovery':
+        return <PaymentRecoveryWidget recovery={recovery} currency={currency} title={title} />;
+      case 'payment_status':
+        return <PaymentStatusWidget pipeline={pipeline} metrics={metrics} customerHealth={customer_health} title={title} />;
+      case 'quick_actions':
+        return <QuickActionsCard title={title} />;
+      case 'billing_promo':
+        return <BillingPromoCard title={title} />;
+      case 'action_center':
+        return actionCenter.isPending ? (
+          <LoadingState message="Loading action items..." />
+        ) : actionCenter.isError ? (
+          <ErrorState message={toApiError(actionCenter.error).message} onRetry={() => void actionCenter.refetch()} />
+        ) : (
+          <ActionCenterWidget items={actionCenter.data.items} title={title} />
+        );
+      case 'activity_timeline':
+        return <ActivityTimelineWidget activity={activity} title={title} />;
+      default:
+        return null;
+    }
+  };
+  const renderColumn = (layout: ReturnType<typeof resolveList>) =>
+    visible(layout)
+      .filter((item) => userVisible[item.key] !== false)
+      .map((item) => (
+        <div key={item.key} {...editable(`overview.widget.${item.key}`)}>
+          {renderWidget(item.key, item.label)}
+        </div>
+      ));
+
   return (
     <div className="space-y-6">
       {/* Top Header Controls: Greeting, Date Filter, Customize */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div>
+        <div {...editable('overview.header')}>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
-              Welcome back, {firstName}!
+              {headerTitle}
             </h1>
             <span className="text-xl">👋</span>
           </div>
-          <p className="text-xs text-slate-500 mt-1">
-            Here&apos;s what&apos;s happening with your billing & revenue operations today.
-          </p>
+          <p className="text-xs text-slate-500 mt-1">{headerSubtitle}</p>
         </div>
 
         {/* Action Controls */}
@@ -309,9 +388,10 @@ export function DashboardPage() {
 
       {/* Core Financial KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {kpiCards.map((metric) => (
+        {visibleKpis.map((metric) => (
           <div
-            key={metric.title}
+            key={metric.key}
+            {...editable(`overview.kpi.${metric.key}`)}
             className="bg-white p-5 rounded-2xl border border-[#E7E9F2] shadow-sm flex flex-col justify-between"
           >
             <div className="flex items-center gap-3.5">
@@ -342,60 +422,12 @@ export function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column (8 cols): Revenue Overview dual-bar chart + Recent Invoices table */}
         <div className="lg:col-span-8 space-y-6">
-          {visibility.revenueIntelligence && (
-            <RevenueOverviewWidget revenue={revenue} currency={currency} />
-          )}
-
-          {visibility.recentTransactions && (
-            <RecentInvoicesWidget transactions={recent_transactions} />
-          )}
-
-          {visibility.billingPipeline && (
-            <BillingPipelineWidget pipeline={pipeline} currency={currency} />
-          )}
-
-          {visibility.customerHealth && (
-            <CustomerHealthWidget health={customer_health} />
-          )}
-
-          {visibility.paymentRecovery && (
-            <PaymentRecoveryWidget recovery={recovery} currency={currency} />
-          )}
+          {renderColumn(resolveList(OVERVIEW_MAIN_WIDGET_DEFS, ui.main_widgets))}
         </div>
 
-        {/* Right Column (4 cols): Payment Status Donut + Quick Actions + Billing Promo Banner + Operations */}
+        {/* Right Column (4 cols): Payment Status, Quick Actions, Promo, Action Center, Activity */}
         <div className="lg:col-span-4 space-y-6">
-          {/* Payment Status Donut Chart Card */}
-          <PaymentStatusWidget
-            pipeline={pipeline}
-            metrics={metrics}
-            customerHealth={customer_health}
-          />
-
-          {/* Quick Actions 2x2 Grid Tile Card */}
-          <QuickActionsCard />
-
-          {/* Streamline Your Billing Promo Card */}
-          <BillingPromoCard />
-
-          {/* Action Center Widget */}
-          {visibility.actionCenter && (
-            actionCenter.isPending ? (
-              <LoadingState message="Loading action items..." />
-            ) : actionCenter.isError ? (
-              <ErrorState
-                message={toApiError(actionCenter.error).message}
-                onRetry={() => void actionCenter.refetch()}
-              />
-            ) : (
-              <ActionCenterWidget items={actionCenter.data.items} />
-            )
-          )}
-
-          {/* Activity Timeline Widget */}
-          {visibility.activityTimeline && (
-            <ActivityTimelineWidget activity={activity} />
-          )}
+          {renderColumn(resolveList(OVERVIEW_SIDE_WIDGET_DEFS, ui.side_widgets))}
         </div>
       </div>
 

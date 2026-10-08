@@ -5,6 +5,8 @@ import { formatMoney } from '../../../utils/format';
 import { useToast } from '../../../components/common/Toast';
 
 export interface ActionCenterWidgetProps {
+  /** Card title (configurable in the Super Admin visual editor). */
+  title?: string;
   items: ActionItem[];
 }
 
@@ -25,7 +27,7 @@ const ACTION_LABELS: Record<ActionItem['suggested_action'], string> = {
   review_approval: 'Review Approval',
 };
 
-export function ActionCenterWidget({ items }: ActionCenterWidgetProps) {
+export function ActionCenterWidget({ items, title = 'Action Center' }: ActionCenterWidgetProps) {
   const [filter, setFilter] = useState<'all' | ActionCategory>('all');
   const { showToast } = useToast();
 
@@ -85,7 +87,7 @@ export function ActionCenterWidget({ items }: ActionCenterWidgetProps) {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-            Action Center
+            {title}
           </h3>
           {items.length > 0 && (
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#F9D9E8] text-[#D81B60]">

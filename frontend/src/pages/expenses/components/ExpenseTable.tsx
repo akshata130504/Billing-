@@ -17,6 +17,7 @@ import {
   Briefcase,
   Calendar,
 } from 'lucide-react';
+import { usePageSpec } from '../../../appUi/usePageSpec';
 
 interface ExpenseTableProps {
   expenses: Expense[];
@@ -37,6 +38,7 @@ export function ExpenseTable({
   onAddToInvoice,
   onRecordNew,
 }: ExpenseTableProps) {
+  const ui = usePageSpec('expenses');
   const navigate = useNavigate();
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; right: number; openUp: boolean } | null>(null);
@@ -123,11 +125,11 @@ export function ExpenseTable({
 
   if (expenses.length === 0) {
     return (
-      <div className="bg-white border border-slate-200/80 rounded-xl p-12 text-center shadow-2xs">
+      <div className="bg-white border border-slate-200/80 rounded-xl p-12 text-center shadow-2xs" {...ui.edit('empty')}>
         <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
           <Receipt className="w-6 h-6" />
         </div>
-        <h3 className="text-sm font-semibold text-slate-900">No expenses found</h3>
+        <h3 className="text-sm font-semibold text-slate-900">{ui.text('empty', 'none')}</h3>
         <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
           Try changing your search keywords, filter conditions or record a new business expense.
         </p>
@@ -263,16 +265,16 @@ export function ExpenseTable({
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs border-collapse">
           <thead>
-            <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-semibold text-slate-600 uppercase tracking-wider select-none">
-              <th className="py-2.5 px-3.5">Expense</th>
-              <th className="py-2.5 px-3">Category</th>
-              <th className="py-2.5 px-3">Customer</th>
-              <th className="py-2.5 px-3">Project</th>
-              <th className="py-2.5 px-3">Date</th>
-              <th className="py-2.5 px-3">Billable</th>
-              <th className="py-2.5 px-3 text-right">Amount</th>
-              <th className="py-2.5 px-3 text-center">Status</th>
-              <th className="py-2.5 px-3 text-right">Actions</th>
+            <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-semibold text-slate-600 uppercase tracking-wider select-none" {...ui.edit('columns')}>
+              {ui.shown('columns').map((col) => {
+                const align = col.key === 'amount' || col.key === 'actions' ? 'text-right' : col.key === 'status' ? 'text-center' : '';
+                const pad = col.key === 'expense' ? 'py-2.5 px-3.5' : 'py-2.5 px-3';
+                return (
+                  <th key={col.key} className={`${pad} ${align}`} {...ui.edit(`columns.${col.key}`)}>
+                    {col.label}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -289,198 +291,217 @@ export function ExpenseTable({
                     navigate(`/expenses/${expense.id}`);
                   }}
                 >
-                  {/* Expense Name & ID */}
-                  <td className="py-2.5 px-3.5 min-w-[180px]">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center shrink-0">
-                        <FileText className="w-3.5 h-3.5" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-semibold text-slate-900 group-hover:text-brand-600 transition-colors truncate">
-                            {expense.name}
+                  {ui.shown('columns').map((col) => {
+                    if (col.key === 'expense') {
+                      return (
+                        <td key="expense" className="py-2.5 px-3.5 min-w-[180px]">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center shrink-0">
+                              <FileText className="w-3.5 h-3.5" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-semibold text-slate-900 group-hover:text-brand-600 transition-colors truncate">
+                                  {expense.name}
+                                </span>
+                                {expense.receipt && (
+                                  <span title="Has receipt attachment">
+                                    <Paperclip className="w-3 h-3 text-slate-400 shrink-0" />
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[10px] font-mono text-slate-400 block truncate">
+                                {expense.id}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                      );
+                    }
+                    if (col.key === 'category') {
+                      return (
+                        <td key="category" className="py-2.5 px-3 text-slate-600 whitespace-nowrap">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-700">
+                            {expense.category}
                           </span>
-                          {expense.receipt && (
-                            <span title="Has receipt attachment">
-                              <Paperclip className="w-3 h-3 text-slate-400 shrink-0" />
+                        </td>
+                      );
+                    }
+                    if (col.key === 'customer') {
+                      return (
+                        <td key="customer" className="py-2.5 px-3 text-slate-700 whitespace-nowrap font-medium">
+                          {expense.customer || 'Internal'}
+                        </td>
+                      );
+                    }
+                    if (col.key === 'project') {
+                      return (
+                        <td key="project" className="py-2.5 px-3 text-slate-500 whitespace-nowrap">
+                          {expense.project && expense.project !== '—' ? (
+                            <span className="text-slate-700 font-medium">
+                              {expense.project}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                      );
+                    }
+                    if (col.key === 'date') {
+                      return (
+                        <td key="date" className="py-2.5 px-3 text-slate-600 whitespace-nowrap">
+                          {formatDate(expense.date)}
+                        </td>
+                      );
+                    }
+                    if (col.key === 'billable') {
+                      return (
+                        <td key="billable" className="py-2.5 px-3 whitespace-nowrap">
+                          {expense.billable ? (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                              Billable
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-medium bg-slate-100 text-slate-600">
+                              Non-Billable
                             </span>
                           )}
-                        </div>
-                        <span className="text-[10px] font-mono text-slate-400 block truncate">
-                          {expense.id}
-                        </span>
-                      </div>
-                    </div>
-                  </td>
-
-                  {/* Category */}
-                  <td className="py-2.5 px-3 text-slate-600 whitespace-nowrap">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-700">
-                      {expense.category}
-                    </span>
-                  </td>
-
-                  {/* Customer */}
-                  <td className="py-2.5 px-3 text-slate-700 whitespace-nowrap font-medium">
-                    {expense.customer || 'Internal'}
-                  </td>
-
-                  {/* Project */}
-                  <td className="py-2.5 px-3 text-slate-500 whitespace-nowrap">
-                    {expense.project && expense.project !== '—' ? (
-                      <span className="text-slate-700 font-medium">
-                        {expense.project}
-                      </span>
-                    ) : (
-                      <span className="text-slate-400">—</span>
-                    )}
-                  </td>
-
-                  {/* Date */}
-                  <td className="py-2.5 px-3 text-slate-600 whitespace-nowrap">
-                    {formatDate(expense.date)}
-                  </td>
-
-                  {/* Billable */}
-                  <td className="py-2.5 px-3 whitespace-nowrap">
-                    {expense.billable ? (
-                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-                        Billable
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-medium bg-slate-100 text-slate-600">
-                        Non-Billable
-                      </span>
-                    )}
-                  </td>
-
-                  {/* Amount */}
-                  <td className="py-2.5 px-3 text-right whitespace-nowrap font-bold text-slate-900 font-mono">
-                    {formatINR(expense.amount)}
-                  </td>
-
-                  {/* Status */}
-                  <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                    {getStatusBadge(expense.status)}
-                  </td>
-
-                  {/* Actions */}
-                  <td className="py-2.5 px-3 text-right whitespace-nowrap action-menu-area relative">
-                    <div className="flex items-center justify-end gap-1">
-                      <Link
-                        to={`/expenses/${expense.id}`}
-                        className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-slate-100 rounded-lg transition-colors"
-                        title="View Details"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                      </Link>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onEdit(expense);
-                        }}
-                        className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-                        title="Edit Expense"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-
-                      {/* Dropdown Menu Toggle */}
-                      <div className="relative inline-block text-left">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (isMenuOpen) {
-                              closeMenu();
-                            } else {
-                              // Positioned against the viewport (portal) so the table's
-                              // overflow-hidden/overflow-x-auto wrappers can't clip it.
-                              const rect = e.currentTarget.getBoundingClientRect();
-                              const spaceBelow = window.innerHeight - rect.bottom;
-                              const openUp = spaceBelow < 150 && rect.top > 150;
-                              setMenuPos({
-                                top: openUp ? rect.top - 4 : rect.bottom + 4,
-                                right: Math.max(8, window.innerWidth - rect.right),
-                                openUp,
-                              });
-                              setActiveMenuId(expense.id);
-                            }
-                          }}
-                          className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-                          title="More Actions"
-                        >
-                          <MoreVertical className="w-3.5 h-3.5" />
-                        </button>
-
-                        {/* Dropdown Menu Rendered via Portal (React events still bubble to the
-                            row, so every handler here stops propagation) */}
-                        {isMenuOpen && menuPos && createPortal(
-                          <>
-                            <div
-                              className="fixed inset-0 z-50 bg-transparent"
+                        </td>
+                      );
+                    }
+                    if (col.key === 'amount') {
+                      return (
+                        <td key="amount" className="py-2.5 px-3 text-right whitespace-nowrap font-bold text-slate-900 font-mono">
+                          {formatINR(expense.amount)}
+                        </td>
+                      );
+                    }
+                    if (col.key === 'status') {
+                      return (
+                        <td key="status" className="py-2.5 px-3 text-center whitespace-nowrap">
+                          {getStatusBadge(expense.status)}
+                        </td>
+                      );
+                    }
+                    if (col.key === 'actions') {
+                      return (
+                        <td key="actions" className="py-2.5 px-3 text-right whitespace-nowrap action-menu-area relative">
+                          <div className="flex items-center justify-end gap-1">
+                            <Link
+                              to={`/expenses/${expense.id}`}
+                              className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-slate-100 rounded-lg transition-colors"
+                              title="View Details"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </Link>
+                            <button
+                              type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                closeMenu();
+                                onEdit(expense);
                               }}
-                            />
-                            <div
-                              role="menu"
-                              className="fixed w-44 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-1 text-xs"
-                              style={{
-                                top: menuPos.openUp ? 'auto' : `${menuPos.top}px`,
-                                bottom: menuPos.openUp ? `${window.innerHeight - menuPos.top}px` : 'auto',
-                                right: `${menuPos.right}px`,
-                              }}
-                              onClick={(e) => e.stopPropagation()}
+                              className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                              title="Edit Expense"
                             >
-                              {expense.billable && expense.status !== 'invoiced' && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Dropdown Menu Toggle */}
+                            <div className="relative inline-block text-left">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (isMenuOpen) {
                                     closeMenu();
-                                    onAddToInvoice(expense.id);
-                                  }}
-                                  className="w-full px-3 py-1.5 text-left text-emerald-700 hover:bg-emerald-50 flex items-center gap-2 font-medium"
-                                >
-                                  <Receipt className="w-3.5 h-3.5 text-emerald-600" />
-                                  Add to Invoice
-                                </button>
+                                  } else {
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    const spaceBelow = window.innerHeight - rect.bottom;
+                                    const openUp = spaceBelow < 150 && rect.top > 150;
+                                    setMenuPos({
+                                      top: openUp ? rect.top - 4 : rect.bottom + 4,
+                                      right: Math.max(8, window.innerWidth - rect.right),
+                                      openUp,
+                                    });
+                                    setActiveMenuId(expense.id);
+                                  }
+                                }}
+                                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                                title="More Actions"
+                              >
+                                <MoreVertical className="w-3.5 h-3.5" />
+                              </button>
+
+                              {/* Dropdown Menu Rendered via Portal */}
+                              {isMenuOpen && menuPos && createPortal(
+                                <>
+                                  <div
+                                    className="fixed inset-0 z-50 bg-transparent"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      closeMenu();
+                                    }}
+                                  />
+                                  <div
+                                    role="menu"
+                                    className="fixed w-44 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-1 text-xs"
+                                    style={{
+                                      top: menuPos.openUp ? 'auto' : `${menuPos.top}px`,
+                                      bottom: menuPos.openUp ? `${window.innerHeight - menuPos.top}px` : 'auto',
+                                      right: `${menuPos.right}px`,
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    {expense.billable && expense.status !== 'invoiced' && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          closeMenu();
+                                          onAddToInvoice(expense.id);
+                                        }}
+                                        className="w-full px-3 py-1.5 text-left text-emerald-700 hover:bg-emerald-50 flex items-center gap-2 font-medium"
+                                      >
+                                        <Receipt className="w-3.5 h-3.5 text-emerald-600" />
+                                        Add to Invoice
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        closeMenu();
+                                        onDuplicate(expense.id);
+                                      }}
+                                      className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                                    >
+                                      <Copy className="w-3.5 h-3.5 text-slate-400" />
+                                      Duplicate
+                                    </button>
+                                    <div className="my-1 border-t border-slate-100" />
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        closeMenu();
+                                        onDelete(expense);
+                                      }}
+                                      className="w-full px-3 py-1.5 text-left text-rose-600 hover:bg-rose-50 flex items-center gap-2 font-medium"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                      Delete Expense
+                                    </button>
+                                  </div>
+                                </>,
+                                document.body
                               )}
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  closeMenu();
-                                  onDuplicate(expense.id);
-                                }}
-                                className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                              >
-                                <Copy className="w-3.5 h-3.5 text-slate-400" />
-                                Duplicate
-                              </button>
-                              <div className="my-1 border-t border-slate-100" />
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  closeMenu();
-                                  onDelete(expense);
-                                }}
-                                className="w-full px-3 py-1.5 text-left text-rose-600 hover:bg-rose-50 flex items-center gap-2 font-medium"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                                Delete Expense
-                              </button>
                             </div>
-                          </>,
-                          document.body
-                        )}
-                      </div>
-                    </div>
-                  </td>
+                          </div>
+                        </td>
+                      );
+                    }
+                    return null;
+                  })}
                 </tr>
               );
             })}

@@ -1,9 +1,13 @@
 """Organization lifecycle gate for unattended billing automation (platform phase 1).
 
 The scheduler is the one legitimate cross-tenant actor. It may only start billing work for an
-organization that is ACTIVE and not `jobs_paused`: renewal invoices, trial conversion charges,
-dunning charge retries, scheduled plan changes, overdue marking, billing emails, recurring
-expenses, outbox delivery and automation schedules.
+organization that is ACTIVE, not `jobs_paused` and has a paid subscription (not in its free trial,
+running or ended): renewal invoices, trial conversion charges, dunning charge retries, scheduled
+plan changes, overdue marking, billing emails, recurring expenses, outbox delivery and automation
+schedules. A self-service organization is in its trial phase until a Platform Administrator
+approves its subscription request (organizations.module_access 'trial' -> 'entitled'); during
+that time its users can create billing data, but no money is collected (`billing_collection_allowed`,
+`payment_collection_allowed`). Organizations that predate plans ('unrestricted') are unaffected.
 
 The check is made INSIDE the transaction that performs and commits that work, after any earlier
 commit: `automation_allowed` re-reads the organization row under `SELECT ... FOR NO KEY UPDATE`
@@ -28,6 +32,10 @@ from backend.app.core.exceptions import AppException, NotFoundError
 from backend.app.models import Organization, OrganizationStatus
 
 
+# organizations.module_access while a self-service organization has no approved subscription yet.
+TRIAL_ACCESS = "trial"
+
+
 def _is_postgres(db: Session) -> bool:
     bind = db.get_bind()
     return bind is not None and bind.dialect.name == "postgresql"
@@ -42,13 +50,15 @@ def automation_allowed(db: Session, organization_id: Optional[str]) -> bool:
     """
     if not organization_id:
         return False
-    stmt = select(Organization.status, Organization.jobs_paused).where(Organization.id == organization_id)
+    stmt = select(Organization.status, Organization.jobs_paused, Organization.module_access).where(
+        Organization.id == organization_id
+    )
     if _is_postgres(db):
         stmt = stmt.with_for_update(key_share=True)  # FOR NO KEY UPDATE
     row = db.execute(stmt).first()
     if row is None:
         return False
-    return row.status == OrganizationStatus.ACTIVE and not row.jobs_paused
+    return row.status == OrganizationStatus.ACTIVE and not row.jobs_paused and row.module_access != TRIAL_ACCESS
 
 
 def automation_allowed_org_ids() -> Select:
@@ -61,7 +71,60 @@ def automation_allowed_org_ids() -> Select:
     return select(Organization.id).where(
         Organization.status == OrganizationStatus.ACTIVE,
         Organization.jobs_paused.is_(False),
+        Organization.module_access != TRIAL_ACCESS,
     )
+
+
+# --- real money: only with a paid subscription -----------------------------------------------------
+
+BILLING_NOT_ACTIVE_MESSAGE = (
+    "Payment collection is not active during the free trial. It starts once Rooman approves your "
+    "organization's subscription."
+)
+PAYMENTS_NOT_ACCEPTED_MESSAGE = (
+    "This merchant is not accepting online payments yet. Please contact the merchant to pay."
+)
+
+
+class BillingCollectionNotActiveError(AppException):
+    """A tenant user tried to collect money (charge a card, retry a charge) during the free trial."""
+
+    def __init__(self, message: str = BILLING_NOT_ACTIVE_MESSAGE):
+        super().__init__(message=message, code="BILLING_COLLECTION_NOT_ACTIVE", status_code=status.HTTP_403_FORBIDDEN)
+
+
+def _status_and_access(db: Session, organization_id: Optional[str]):
+    if not organization_id:
+        return None
+    return db.execute(
+        select(Organization.status, Organization.module_access).where(Organization.id == organization_id)
+    ).first()
+
+
+def billing_collection_allowed(db: Session, organization_id: Optional[str]) -> bool:
+    """True when real money may be collected for this organization: ACTIVE with a paid subscription
+    (or one that predates plans). False during the free trial, running or ended."""
+    row = _status_and_access(db, organization_id)
+    return row is not None and row.status == OrganizationStatus.ACTIVE and row.module_access != TRIAL_ACCESS
+
+
+def assert_billing_collection_allowed(db: Session, organization_id: Optional[str]) -> None:
+    if not billing_collection_allowed(db, organization_id):
+        raise BillingCollectionNotActiveError()
+
+
+def payment_collection_allowed(db: Session, organization_id: Optional[str]) -> bool:
+    """Customer-facing payments (pay links, hosted checkout, portal payments): the merchant must
+    accept customer actions AND have a paid subscription. Quote accept/decline is NOT a payment and
+    keeps using `customer_actions_allowed`."""
+    return customer_actions_allowed(db, organization_id) and billing_collection_allowed(db, organization_id)
+
+
+def assert_payment_collection_allowed(db: Session, organization_id: Optional[str]) -> None:
+    if not customer_actions_allowed(db, organization_id):
+        raise OrganizationUnavailableError()
+    if not billing_collection_allowed(db, organization_id):
+        raise OrganizationUnavailableError(PAYMENTS_NOT_ACCEPTED_MESSAGE)
 
 
 class AutomationGuard:

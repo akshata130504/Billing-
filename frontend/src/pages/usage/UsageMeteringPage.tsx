@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Activity,
   ChevronRight,
@@ -19,7 +19,7 @@ import { Button } from '../../components/common/Button';
 import { EmptyState } from '../../components/common/EmptyState';
 import { ErrorState } from '../../components/common/ErrorState';
 import { LoadingState } from '../../components/common/LoadingState';
-import { StatCard } from '../../components/common/StatCard';
+import { StatCard, type StatCardProps } from '../../components/common/StatCard';
 import { useAuth } from '../../hooks/useAuth';
 import { meterService } from '../../services/meterService';
 import type { SubscriptionOut } from '../../types/api';
@@ -37,6 +37,11 @@ import { MeterDetailModal } from './MeterDetailModal';
 import { NewMeterModal } from './NewMeterModal';
 import { RecordUsageModal } from './RecordUsageModal';
 import { AGGREGATION_LABELS, formatQuantity, normaliseApiTimestamp } from './usageUtils';
+import { usePageSpec } from '../../appUi/usePageSpec';
+import type { EditableProps } from '../../appUi/UiConfigContext';
+
+/** Meter-table columns whose header is right-aligned (their cells align themselves). */
+const METER_RIGHT_ALIGNED = new Set(['session_usage', 'actions']);
 
 interface SessionAggregate {
   aggregate: UsageAggregateOut;
@@ -51,6 +56,7 @@ export function UsageMeteringPage() {
   const canManageMeters = hasRole('admin'); // POST /meters requires admin
   const canFinalize = hasRole('finance'); // finalize-usage requires finance
   const canRecord = true; // event ingestion is open to every authenticated member
+  const ui = usePageSpec('usage');
 
   const [meters, setMeters] = useState<UsageMeterOut[]>([]);
   const [loading, setLoading] = useState(true);
@@ -156,18 +162,141 @@ export function UsageMeteringPage() {
 
   const hasFilters = search.trim() !== '' || aggregationFilter !== 'all' || statusFilter !== 'all';
 
+  const columns = ui.shown('columns');
+  const meterCells: Record<string, (m: UsageMeterOut, usage: { count: number; total: number } | undefined) => ReactNode> = {
+    meter: (m) => (
+      <td className="px-5 py-4">
+        <div className="font-semibold text-slate-900 group-hover:text-blue-600 transition-colors">{m.name}</div>
+        {m.description && (
+          <div className="text-xs text-slate-400 mt-0.5 max-w-xs truncate" title={m.description}>
+            {m.description}
+          </div>
+        )}
+      </td>
+    ),
+    code: (m) => (
+      <td className="px-5 py-4">
+        <code className="text-xs font-mono bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">{m.code}</code>
+      </td>
+    ),
+    unit: (m) => (
+      <td className="px-5 py-4 text-slate-700">{m.unit_name}</td>
+    ),
+    aggregation: (m) => (
+      <td className="px-5 py-4">
+        <Badge variant="info" title={AGGREGATION_LABELS[m.aggregation_type].hint}>
+          {AGGREGATION_LABELS[m.aggregation_type].label}
+        </Badge>
+      </td>
+    ),
+    session_usage: (m, usage) => (
+      <td className="px-5 py-4 text-right tabular-nums">
+        {usage ? (
+          <div>
+            <div className="font-medium text-slate-900">
+              {formatQuantity(usage.total)} {m.unit_name}
+            </div>
+            <div className="text-xs text-slate-400">
+              {usage.count} event{usage.count === 1 ? '' : 's'}
+            </div>
+          </div>
+        ) : (
+          <span className="text-slate-400">—</span>
+        )}
+      </td>
+    ),
+    status: (m) => (
+      <td className="px-5 py-4">
+        <Badge variant={m.is_active ? 'success' : 'neutral'} dot>
+          {m.is_active ? 'Active' : 'Inactive'}
+        </Badge>
+      </td>
+    ),
+    created: (m) => (
+      <td className="px-5 py-4 text-slate-500 whitespace-nowrap">{formatDate(normaliseApiTimestamp(m.created_at))}</td>
+    ),
+    actions: (m) => (
+      <td className="px-5 py-4 text-right">
+        <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+          {canRecord && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs"
+              disabled={!m.is_active}
+              onClick={() => openRecord(m.code)}
+            >
+              Record
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-xs flex items-center gap-1"
+            onClick={() => setDetailMeter(m)}
+          >
+            <span>Details</span>
+            <ChevronRight className="w-3 h-3" />
+          </Button>
+        </div>
+      </td>
+    ),
+  };
+  const eventColumns = ui.shown('event_columns');
+  const eventCells: Record<string, (r: RecordedUsageEvent) => ReactNode> = {
+    meter: (r) => (
+      <td className="px-5 py-3">
+        <div className="font-medium text-slate-900">{r.meter_name}</div>
+        <div className="text-xs text-slate-400 font-mono">{r.meter_code}</div>
+      </td>
+    ),
+    customer: (r) => (
+      <td className="px-5 py-3">
+        <div className="text-slate-700">{r.customer_label}</div>
+        {r.subscription_label && <div className="text-xs text-slate-400">{r.subscription_label}</div>}
+      </td>
+    ),
+    quantity: (r) => (
+      <td className="px-5 py-3 text-right tabular-nums font-medium text-slate-900 whitespace-nowrap">
+        {formatQuantity(r.event.quantity)} {r.unit_name}
+      </td>
+    ),
+    timestamp: (r) => (
+      <td className="px-5 py-3 whitespace-nowrap">{formatDateTime(normaliseApiTimestamp(r.event.timestamp))}</td>
+    ),
+    key: (r) => (
+      <td className="px-5 py-3 font-mono text-xs text-slate-500 max-w-[9rem] truncate" title={r.event.idempotency_key}>
+        {r.event.idempotency_key}
+      </td>
+    ),
+    status: (r) => (
+      <td className="px-5 py-3">
+        <div className="flex items-center gap-1.5">
+          <Badge variant={r.replayed ? 'warning' : r.event.status === 'accepted' ? 'success' : 'danger'}>
+            {r.replayed ? 'Duplicate' : humanize(r.event.status)}
+          </Badge>
+          {r.source === 'batch' && (
+            <Badge variant="neutral" size="sm">
+              batch
+            </Badge>
+          )}
+        </div>
+      </td>
+    ),
+  };
+
   return (
     <div className="space-y-6 pb-12">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="min-w-0">
+        <div className="min-w-0" {...ui.edit('header')}>
           <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">
             <Repeat className="w-4 h-4" />
-            Subscriptions
+            {ui.text('header', 'eyebrow')}
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Usage / Metering</h1>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{ui.text('header', 'title')}</h1>
           <p className="text-sm text-slate-500 mt-1 max-w-xl">
-            Define billable meters, ingest usage events idempotently, and rate consumption into subscription billing cycles.
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0 flex-nowrap overflow-x-auto pb-1 sm:pb-0">
@@ -216,28 +345,41 @@ export function UsageMeteringPage() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Meters" value={loading ? '—' : meters.length} icon={<Gauge className="w-4 h-4" />} />
-        <StatCard
-          title="Active Meters"
-          value={loading ? '—' : activeCount}
-          comparisonText={!loading && meters.length ? `${meters.length - activeCount} inactive` : undefined}
-          icon={<Zap className="w-4 h-4" />}
-        />
-        <StatCard
-          title="Events Recorded"
-          value={sessionEventCount}
-          comparisonText={sessionEventCount ? 'this session' : 'none yet this session'}
-          icon={<Activity className="w-4 h-4" />}
-        />
-        <StatCard
-          title="Aggregation Types"
-          value={loading ? '—' : aggregationTypesInUse.length}
-          comparisonText={
-            aggregationTypesInUse.length ? aggregationTypesInUse.map((t) => AGGREGATION_LABELS[t].label).join(' · ') : undefined
-          }
-          icon={<Sigma className="w-4 h-4" />}
-        />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" {...ui.edit('kpis')}>
+        {ui.render('kpis', {
+          meters: (item, edit) => (
+            <UsageKpi edit={edit} title={item.label} value={loading ? '—' : meters.length} icon={<Gauge className="w-4 h-4" />} />
+          ),
+          active: (item, edit) => (
+            <UsageKpi
+              edit={edit}
+              title={item.label}
+              value={loading ? '—' : activeCount}
+              comparisonText={!loading && meters.length ? `${meters.length - activeCount} inactive` : undefined}
+              icon={<Zap className="w-4 h-4" />}
+            />
+          ),
+          events: (item, edit) => (
+            <UsageKpi
+              edit={edit}
+              title={item.label}
+              value={sessionEventCount}
+              comparisonText={sessionEventCount ? 'this session' : 'none yet this session'}
+              icon={<Activity className="w-4 h-4" />}
+            />
+          ),
+          aggregations: (item, edit) => (
+            <UsageKpi
+              edit={edit}
+              title={item.label}
+              value={loading ? '—' : aggregationTypesInUse.length}
+              comparisonText={
+                aggregationTypesInUse.length ? aggregationTypesInUse.map((t) => AGGREGATION_LABELS[t].label).join(' · ') : undefined
+              }
+              icon={<Sigma className="w-4 h-4" />}
+            />
+          ),
+        })}
       </div>
 
       {/* Filters */}
@@ -288,58 +430,59 @@ export function UsageMeteringPage() {
         ) : error ? (
           <ErrorState title="Could not load meters" message={error} onRetry={loadMeters} className="rounded-none border-0" />
         ) : meters.length === 0 ? (
-          <EmptyState
-            className="border-0 rounded-none"
-            icon={<Gauge className="w-8 h-8 text-slate-400" />}
-            title="No meters yet"
-            description={
-              canManageMeters
-                ? 'Create your first meter — for example API requests, storage in GB or active seats — then start recording usage against customers and subscriptions.'
-                : 'No usage meters have been defined for this organisation yet. An admin can create meters; you will then be able to record usage here.'
-            }
-            action={
-              canManageMeters ? (
-                <Button variant="primary" size="sm" onClick={() => setNewMeterOpen(true)} leadingIcon={<Plus className="w-4 h-4" />}>
-                  Create first meter
-                </Button>
-              ) : undefined
-            }
-          />
+          <div {...ui.edit('empty')}>
+            <EmptyState
+              className="border-0 rounded-none"
+              icon={<Gauge className="w-8 h-8 text-slate-400" />}
+              title={ui.text('empty', 'no_meters_title')}
+              description={canManageMeters ? ui.text('empty', 'no_meters_admin') : ui.text('empty', 'no_meters_member')}
+              action={
+                canManageMeters ? (
+                  <Button variant="primary" size="sm" onClick={() => setNewMeterOpen(true)} leadingIcon={<Plus className="w-4 h-4" />}>
+                    Create first meter
+                  </Button>
+                ) : undefined
+              }
+            />
+          </div>
         ) : filteredMeters.length === 0 ? (
-          <EmptyState
-            className="border-0 rounded-none"
-            icon={<Search className="w-8 h-8 text-slate-400" />}
-            title="No meters match"
-            description="Try a different search term or clear the filters."
-            action={
-              hasFilters ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setSearch('');
-                    setAggregationFilter('all');
-                    setStatusFilter('all');
-                  }}
-                >
-                  Clear filters
-                </Button>
-              ) : undefined
-            }
-          />
+          <div {...ui.edit('empty')}>
+            <EmptyState
+              className="border-0 rounded-none"
+              icon={<Search className="w-8 h-8 text-slate-400" />}
+              title={ui.text('empty', 'no_match_title')}
+              description={ui.text('empty', 'no_match')}
+              action={
+                hasFilters ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSearch('');
+                      setAggregationFilter('all');
+                      setStatusFilter('all');
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                ) : undefined
+              }
+            />
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm text-slate-600">
               <thead className="bg-slate-50/80 text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-200">
-                <tr>
-                  <th className="px-5 py-3.5">Meter</th>
-                  <th className="px-5 py-3.5">Code</th>
-                  <th className="px-5 py-3.5">Unit</th>
-                  <th className="px-5 py-3.5">Aggregation</th>
-                  <th className="px-5 py-3.5 text-right">Session Usage</th>
-                  <th className="px-5 py-3.5">Status</th>
-                  <th className="px-5 py-3.5">Created</th>
-                  <th className="px-5 py-3.5 text-right">Actions</th>
+                <tr {...ui.edit('columns')}>
+                  {columns.map((col) => (
+                    <th
+                      key={col.key}
+                      className={`px-5 py-3.5${METER_RIGHT_ALIGNED.has(col.key) ? ' text-right' : ''}`}
+                      {...ui.edit(`columns.${col.key}`)}
+                    >
+                      {col.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -351,67 +494,7 @@ export function UsageMeteringPage() {
                       className="hover:bg-slate-50/70 transition-colors cursor-pointer group"
                       onClick={() => setDetailMeter(m)}
                     >
-                      <td className="px-5 py-4">
-                        <div className="font-semibold text-slate-900 group-hover:text-blue-600 transition-colors">{m.name}</div>
-                        {m.description && (
-                          <div className="text-xs text-slate-400 mt-0.5 max-w-xs truncate" title={m.description}>
-                            {m.description}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-5 py-4">
-                        <code className="text-xs font-mono bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">{m.code}</code>
-                      </td>
-                      <td className="px-5 py-4 text-slate-700">{m.unit_name}</td>
-                      <td className="px-5 py-4">
-                        <Badge variant="info" title={AGGREGATION_LABELS[m.aggregation_type].hint}>
-                          {AGGREGATION_LABELS[m.aggregation_type].label}
-                        </Badge>
-                      </td>
-                      <td className="px-5 py-4 text-right tabular-nums">
-                        {usage ? (
-                          <div>
-                            <div className="font-medium text-slate-900">
-                              {formatQuantity(usage.total)} {m.unit_name}
-                            </div>
-                            <div className="text-xs text-slate-400">
-                              {usage.count} event{usage.count === 1 ? '' : 's'}
-                            </div>
-                          </div>
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
-                      </td>
-                      <td className="px-5 py-4">
-                        <Badge variant={m.is_active ? 'success' : 'neutral'} dot>
-                          {m.is_active ? 'Active' : 'Inactive'}
-                        </Badge>
-                      </td>
-                      <td className="px-5 py-4 text-slate-500 whitespace-nowrap">{formatDate(normaliseApiTimestamp(m.created_at))}</td>
-                      <td className="px-5 py-4 text-right">
-                        <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                          {canRecord && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-xs"
-                              disabled={!m.is_active}
-                              onClick={() => openRecord(m.code)}
-                            >
-                              Record
-                            </Button>
-                          )}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-xs flex items-center gap-1"
-                            onClick={() => setDetailMeter(m)}
-                          >
-                            <span>Details</span>
-                            <ChevronRight className="w-3 h-3" />
-                          </Button>
-                        </div>
-                      </td>
+                      {columns.map((col) => <Fragment key={col.key}>{meterCells[col.key]?.(m, usage)}</Fragment>)}
                     </tr>
                   );
                 })}
@@ -426,10 +509,10 @@ export function UsageMeteringPage() {
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           <div className="xl:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-900">Recorded usage events</h2>
+              <div {...ui.edit('events')}>
+                <h2 className="text-sm font-semibold text-slate-900">{ui.text('events', 'title')}</h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Confirmations for events posted from this page. The API does not list historical events.
+                  {ui.text('events', 'description')}
                 </p>
               </div>
               {sessionEvents.length > 0 && (
@@ -439,67 +522,46 @@ export function UsageMeteringPage() {
               )}
             </div>
             {sessionEvents.length === 0 ? (
-              <EmptyState
-                className="border-0 rounded-none py-10"
-                icon={<Activity className="w-6 h-6 text-slate-400" />}
-                title="No usage recorded yet"
-                description="Use Record usage for a single event or Batch import to load a CSV/JSON file. Each accepted event will be listed here."
-                action={
-                  canRecord && activeCount > 0 ? (
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="sm" onClick={() => setBatchOpen(true)} leadingIcon={<Upload className="w-3.5 h-3.5" />}>
-                        Batch import
-                      </Button>
-                      <Button variant="primary" size="sm" onClick={() => openRecord()} leadingIcon={<PlusCircle className="w-3.5 h-3.5" />}>
-                        Record usage
-                      </Button>
-                    </div>
-                  ) : undefined
-                }
-              />
+              <div {...ui.edit('events')}>
+                <EmptyState
+                  className="border-0 rounded-none py-10"
+                  icon={<Activity className="w-6 h-6 text-slate-400" />}
+                  title={ui.text('events', 'empty_title')}
+                  description={ui.text('events', 'empty')}
+                  action={
+                    canRecord && activeCount > 0 ? (
+                      <div className="flex items-center gap-2">
+                        <Button variant="outline" size="sm" onClick={() => setBatchOpen(true)} leadingIcon={<Upload className="w-3.5 h-3.5" />}>
+                          Batch import
+                        </Button>
+                        <Button variant="primary" size="sm" onClick={() => openRecord()} leadingIcon={<PlusCircle className="w-3.5 h-3.5" />}>
+                          Record usage
+                        </Button>
+                      </div>
+                    ) : undefined
+                  }
+                />
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm text-slate-600">
                   <thead className="bg-slate-50/80 text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-200">
-                    <tr>
-                      <th className="px-5 py-3">Meter</th>
-                      <th className="px-5 py-3">Customer</th>
-                      <th className="px-5 py-3 text-right">Quantity</th>
-                      <th className="px-5 py-3">Timestamp</th>
-                      <th className="px-5 py-3">Key</th>
-                      <th className="px-5 py-3">Status</th>
+                    <tr {...ui.edit('event_columns')}>
+                      {eventColumns.map((col) => (
+                        <th
+                          key={col.key}
+                          className={`px-5 py-3${col.key === 'quantity' ? ' text-right' : ''}`}
+                          {...ui.edit(`event_columns.${col.key}`)}
+                        >
+                          {col.label}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {sessionEvents.map((r) => (
                       <tr key={r.event.id} className="hover:bg-slate-50/70">
-                        <td className="px-5 py-3">
-                          <div className="font-medium text-slate-900">{r.meter_name}</div>
-                          <div className="text-xs text-slate-400 font-mono">{r.meter_code}</div>
-                        </td>
-                        <td className="px-5 py-3">
-                          <div className="text-slate-700">{r.customer_label}</div>
-                          {r.subscription_label && <div className="text-xs text-slate-400">{r.subscription_label}</div>}
-                        </td>
-                        <td className="px-5 py-3 text-right tabular-nums font-medium text-slate-900 whitespace-nowrap">
-                          {formatQuantity(r.event.quantity)} {r.unit_name}
-                        </td>
-                        <td className="px-5 py-3 whitespace-nowrap">{formatDateTime(normaliseApiTimestamp(r.event.timestamp))}</td>
-                        <td className="px-5 py-3 font-mono text-xs text-slate-500 max-w-[9rem] truncate" title={r.event.idempotency_key}>
-                          {r.event.idempotency_key}
-                        </td>
-                        <td className="px-5 py-3">
-                          <div className="flex items-center gap-1.5">
-                            <Badge variant={r.replayed ? 'warning' : r.event.status === 'accepted' ? 'success' : 'danger'}>
-                              {r.replayed ? 'Duplicate' : humanize(r.event.status)}
-                            </Badge>
-                            {r.source === 'batch' && (
-                              <Badge variant="neutral" size="sm">
-                                batch
-                              </Badge>
-                            )}
-                          </div>
-                        </td>
+                        {eventColumns.map((col) => <Fragment key={col.key}>{eventCells[col.key]?.(r)}</Fragment>)}
                       </tr>
                     ))}
                   </tbody>
@@ -510,9 +572,9 @@ export function UsageMeteringPage() {
 
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-900">Finalised cycles</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Rated usage aggregates produced this session.</p>
+              <div {...ui.edit('cycles')}>
+                <h2 className="text-sm font-semibold text-slate-900">{ui.text('cycles', 'title')}</h2>
+                <p className="text-xs text-slate-500 mt-0.5">{ui.text('cycles', 'description')}</p>
               </div>
               {canFinalize && sessionAggregates.length > 0 && (
                 <Button variant="ghost" size="sm" className="text-xs" onClick={() => setFinalizeOpen(true)}>
@@ -521,23 +583,21 @@ export function UsageMeteringPage() {
               )}
             </div>
             {sessionAggregates.length === 0 ? (
-              <EmptyState
-                className="border-0 rounded-none py-10"
-                icon={<Layers className="w-6 h-6 text-slate-400" />}
-                title="Nothing finalised yet"
-                description={
-                  canFinalize
-                    ? 'Finalising a billing cycle aggregates the linked usage, rates it and freezes the cycle so the next invoice picks it up.'
-                    : 'Finance users can finalise a subscription billing cycle to rate its usage. Results will appear here.'
-                }
-                action={
-                  canFinalize ? (
-                    <Button variant="outline" size="sm" onClick={() => setFinalizeOpen(true)} leadingIcon={<Lock className="w-3.5 h-3.5" />}>
-                      Finalize cycle
-                    </Button>
-                  ) : undefined
-                }
-              />
+              <div {...ui.edit('cycles')}>
+                <EmptyState
+                  className="border-0 rounded-none py-10"
+                  icon={<Layers className="w-6 h-6 text-slate-400" />}
+                  title={ui.text('cycles', 'empty_title')}
+                  description={canFinalize ? ui.text('cycles', 'empty_finance') : ui.text('cycles', 'empty_member')}
+                  action={
+                    canFinalize ? (
+                      <Button variant="outline" size="sm" onClick={() => setFinalizeOpen(true)} leadingIcon={<Lock className="w-3.5 h-3.5" />}>
+                        Finalize cycle
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              </div>
             ) : (
               <ul className="divide-y divide-slate-100">
                 {sessionAggregates.map(({ aggregate, subscription_label, currency }) => {
@@ -607,6 +667,15 @@ export function UsageMeteringPage() {
         canRecord={canRecord}
         onRecordUsage={(m) => openRecord(m.code)}
       />
+    </div>
+  );
+}
+
+/** A StatCard the visual-editor preview can select (StatCard itself takes no extra props). */
+function UsageKpi({ edit, ...card }: { edit: EditableProps } & StatCardProps) {
+  return (
+    <div className="flex" {...edit}>
+      <StatCard className="flex-1" {...card} />
     </div>
   );
 }

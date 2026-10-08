@@ -532,7 +532,7 @@ def get_public_checkout_view(db: Session, token: str) -> PublicCheckoutView:
     amount = session.amount
     if session.purpose == CheckoutSessionPurpose.INVOICE_PAYMENT and session.invoice is not None and session.status != CheckoutSessionStatus.SUCCESSFUL:
         amount = session.invoice.amount_due
-    merchant_available = org_lifecycle.customer_actions_allowed(db, session.organization_id)
+    merchant_available = org_lifecycle.payment_collection_allowed(db, session.organization_id)
     if merchant_available and not is_expired and session.status not in (
         CheckoutSessionStatus.EXPIRED,
         CheckoutSessionStatus.SUCCESSFUL,

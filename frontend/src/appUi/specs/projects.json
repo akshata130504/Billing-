@@ -1,0 +1,130 @@
+{
+  "key": "projects",
+  "title": "Projects",
+  "route": "/projects",
+  "nav_item": "projects",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "eyebrow",
+          "label": "Eyebrow",
+          "kind": "label",
+          "default": "OPERATIONS / PROJECTS"
+        },
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Projects"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Manage customer projects, billable time and project-based billing."
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty table messages",
+      "fields": [
+        {
+          "name": "none",
+          "label": "No projects",
+          "kind": "body",
+          "default": "No projects found"
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "Summary cards",
+      "items": [
+        {
+          "key": "total",
+          "label": "Total Projects"
+        },
+        {
+          "key": "active",
+          "label": "Active"
+        },
+        {
+          "key": "completed",
+          "label": "Completed"
+        },
+        {
+          "key": "billed",
+          "label": "Billed to Date"
+        },
+        {
+          "key": "expenses",
+          "label": "Project Expenses"
+        }
+      ]
+    },
+    {
+      "id": "tabs",
+      "label": "Status tabs",
+      "items": [
+        {
+          "key": "all",
+          "label": "All",
+          "required": true
+        },
+        {
+          "key": "active",
+          "label": "Active"
+        },
+        {
+          "key": "inactive",
+          "label": "Inactive"
+        }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Project table columns",
+      "items": [
+        {
+          "key": "project",
+          "label": "Project",
+          "required": true
+        },
+        {
+          "key": "customer",
+          "label": "Customer"
+        },
+        {
+          "key": "billing",
+          "label": "Billing Method"
+        },
+        {
+          "key": "status",
+          "label": "Status"
+        },
+        {
+          "key": "start_date",
+          "label": "Start Date"
+        },
+        {
+          "key": "end_date",
+          "label": "End Date"
+        },
+        {
+          "key": "budget",
+          "label": "Budget"
+        },
+        {
+          "key": "actions",
+          "label": "Actions"
+        }
+      ]
+    }
+  ]
+}

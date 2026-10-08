@@ -1,0 +1,40 @@
+{
+  "pages": ["theme", "navigation", "overview", "customers", "invoices"],
+  "icons": [
+    "Activity", "AlertTriangle", "ArrowLeftRight", "BarChart3", "Bell", "Boxes", "Briefcase", "Building2",
+    "Calculator", "Calendar", "Clock", "Coins", "CreditCard", "ExternalLink", "FileCheck", "FileText",
+    "Folder", "Gauge", "Globe", "History", "Inbox", "LayoutDashboard", "Layers", "LineChart", "Monitor",
+    "Package", "Palette", "Percent", "PieChart", "Receipt", "ReceiptText", "Repeat", "Settings",
+    "ShieldCheck", "Smartphone", "Sparkles", "Star", "Tag", "Target", "Timer", "UploadCloud", "UserCheck",
+    "Users", "Wallet", "Zap"
+  ],
+  "nav_sections": [
+    "workspace", "revenue", "subscriptions", "customer_experience", "operations", "insights", "platforms",
+    "control_center", "system"
+  ],
+  "nav_layout": {
+    "workspace": ["overview", "customers", "catalog"],
+    "revenue": ["quotes", "cpq", "invoices", "credit_notes", "payments", "collections"],
+    "subscriptions": ["plans_pricing", "subscriptions", "trials", "usage", "proration", "dunning"],
+    "customer_experience": ["customer_lifecycle", "customer_portal", "hosted_payment_pages"],
+    "operations": ["expenses", "projects", "timesheets"],
+    "insights": ["revenue_intelligence", "reports", "ai_billing", "activity"],
+    "platforms": ["mobile", "desktop"],
+    "control_center": ["action_center", "approvals", "billing_calendar", "reconciliation", "audit_log", "data_migration"],
+    "system": ["automation", "customization", "integrations", "settings"]
+  },
+  "nav_items": [
+    "overview", "customers", "catalog", "quotes", "cpq", "invoices", "credit_notes", "payments", "collections",
+    "plans_pricing", "subscriptions", "trials", "usage", "proration", "dunning", "customer_lifecycle",
+    "customer_portal", "hosted_payment_pages", "expenses", "projects", "timesheets", "revenue_intelligence",
+    "reports", "ai_billing", "activity", "mobile", "desktop", "action_center", "approvals", "billing_calendar",
+    "reconciliation", "audit_log", "data_migration", "automation", "customization", "integrations", "settings"
+  ],
+  "overview_kpis": ["total_invoices", "total_revenue", "payments_received", "outstanding", "mrr", "churn_rate"],
+  "overview_widgets_main": ["revenue_overview", "recent_invoices", "billing_pipeline", "customer_health", "payment_recovery"],
+  "overview_widgets_side": ["payment_status", "quick_actions", "billing_promo", "action_center", "activity_timeline"],
+  "customers_stats": ["total", "active", "inactive", "matching"],
+  "customers_columns": ["customer_number", "customer", "company", "status", "currency_terms", "created"],
+  "invoices_kpis": ["outstanding", "paid", "overdue", "revenue"],
+  "invoices_columns": ["invoice_number", "customer", "date", "due_date", "total", "paid", "balance", "status", "actions"]
+}

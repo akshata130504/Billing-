@@ -68,6 +68,8 @@ export function formatDate(dateString: string): string {
   }
 }
 
+import { usePageSpec } from '../../../appUi/usePageSpec';
+
 export function ProjectTable({
   projects,
   viewMode,
@@ -76,6 +78,7 @@ export function ProjectTable({
   onMarkCompleted,
   onDeleteRequest,
 }: ProjectTableProps) {
+  const ui = usePageSpec('projects');
   const navigate = useNavigate();
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -272,15 +275,18 @@ export function ProjectTable({
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs">
           <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-semibold text-[10.5px]">
-            <tr>
-              <th className="py-3 px-4">Project</th>
-              <th className="py-3 px-3">Customer</th>
-              <th className="py-3 px-3">Billing Method</th>
-              <th className="py-3 px-3">Status</th>
-              <th className="py-3 px-3">Start Date</th>
-              <th className="py-3 px-3">End Date</th>
-              <th className="py-3 px-3 text-right">Budget</th>
-              <th className="py-3 px-3 text-center w-12">Actions</th>
+            <tr {...ui.edit('columns')}>
+              {ui.shown('columns').map((col) => (
+                <th
+                  key={col.key}
+                  className={`py-3 ${col.key === 'project' ? 'px-4' : 'px-3'} ${
+                    col.key === 'budget' ? 'text-right' : col.key === 'actions' ? 'text-center w-12' : ''
+                  }`}
+                  {...ui.edit(`columns.${col.key}`)}
+                >
+                  {col.label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -290,139 +296,160 @@ export function ProjectTable({
                 onClick={() => navigate(`/projects/${project.id}`)}
                 className="hover:bg-blue-50/40 transition-colors cursor-pointer group select-none"
               >
-                {/* Project Name & Code */}
-                <td className="py-3.5 px-4 min-w-[220px]">
-                  <div className="font-semibold text-slate-900 group-hover:text-brand-600 transition-colors">
-                    {project.name}
-                  </div>
-                  <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                    {project.id}
-                  </div>
-                </td>
-
-                {/* Customer */}
-                <td className="py-3.5 px-3 min-w-[180px]">
-                  <div className="font-medium text-slate-800 truncate">
-                    {project.customer}
-                  </div>
-                </td>
-
-                {/* Billing Method */}
-                <td className="py-3.5 px-3 whitespace-nowrap text-slate-700">
-                  <span className="font-medium">
-                    {getBillingMethodLabel(project.billingMethod)}
-                  </span>
-                </td>
-
-                {/* Status */}
-                <td className="py-3.5 px-3 whitespace-nowrap">
-                  {getStatusBadge(project.status)}
-                </td>
-
-                {/* Start Date */}
-                <td className="py-3.5 px-3 text-slate-600 whitespace-nowrap tabular-nums">
-                  {formatDate(project.startDate)}
-                </td>
-
-                {/* End Date */}
-                <td className="py-3.5 px-3 text-slate-600 whitespace-nowrap tabular-nums">
-                  {formatDate(project.endDate)}
-                </td>
-
-                {/* Budget */}
-                <td className="py-3.5 px-3 text-right font-medium text-slate-900 tabular-nums whitespace-nowrap">
-                  {formatINR(project.budget)}
-                </td>
-
-                {/* Row Actions Menu */}
-                <td
-                  className="py-3.5 px-3 text-center relative"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setActiveMenuId(
-                        activeMenuId === project.id ? null : project.id
-                      )
-                    }
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-                    aria-label="Actions"
-                  >
-                    <MoreVertical className="w-4 h-4" />
-                  </button>
-
-                  {activeMenuId === project.id && (
-                    <div
-                      ref={menuRef}
-                      className="absolute right-3 top-10 w-44 bg-white border border-slate-200 rounded-xl shadow-lg p-1 z-30 animate-in fade-in zoom-in-95 duration-100 text-left"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveMenuId(null);
-                          navigate(`/projects/${project.id}`);
-                        }}
-                        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600 rounded-lg transition-colors cursor-pointer"
+                {ui.shown('columns').map((col) => {
+                  if (col.key === 'project') {
+                    return (
+                      <td key="project" className="py-3.5 px-4 min-w-[220px]">
+                        <div className="font-semibold text-slate-900 group-hover:text-brand-600 transition-colors">
+                          {project.name}
+                        </div>
+                        <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                          {project.id}
+                        </div>
+                      </td>
+                    );
+                  }
+                  if (col.key === 'customer') {
+                    return (
+                      <td key="customer" className="py-3.5 px-3 min-w-[180px]">
+                        <div className="font-medium text-slate-800 truncate">
+                          {project.customer}
+                        </div>
+                      </td>
+                    );
+                  }
+                  if (col.key === 'billing') {
+                    return (
+                      <td key="billing" className="py-3.5 px-3 whitespace-nowrap text-slate-700">
+                        <span className="font-medium">
+                          {getBillingMethodLabel(project.billingMethod)}
+                        </span>
+                      </td>
+                    );
+                  }
+                  if (col.key === 'status') {
+                    return (
+                      <td key="status" className="py-3.5 px-3 whitespace-nowrap">
+                        {getStatusBadge(project.status)}
+                      </td>
+                    );
+                  }
+                  if (col.key === 'start_date') {
+                    return (
+                      <td key="start_date" className="py-3.5 px-3 text-slate-600 whitespace-nowrap tabular-nums">
+                        {formatDate(project.startDate)}
+                      </td>
+                    );
+                  }
+                  if (col.key === 'end_date') {
+                    return (
+                      <td key="end_date" className="py-3.5 px-3 text-slate-600 whitespace-nowrap tabular-nums">
+                        {formatDate(project.endDate)}
+                      </td>
+                    );
+                  }
+                  if (col.key === 'budget') {
+                    return (
+                      <td key="budget" className="py-3.5 px-3 text-right font-medium text-slate-900 tabular-nums whitespace-nowrap">
+                        {formatINR(project.budget)}
+                      </td>
+                    );
+                  }
+                  if (col.key === 'actions') {
+                    return (
+                      <td
+                        key="actions"
+                        className="py-3.5 px-3 text-center relative"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        <Eye className="w-3.5 h-3.5 text-slate-400" />
-                        <span>View Project</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveMenuId(null);
-                          onEdit(project);
-                        }}
-                        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600 rounded-lg transition-colors cursor-pointer"
-                      >
-                        <Edit2 className="w-3.5 h-3.5 text-slate-400" />
-                        <span>Edit Project</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveMenuId(null);
-                          onDuplicate(project.id);
-                        }}
-                        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600 rounded-lg transition-colors cursor-pointer"
-                      >
-                        <Copy className="w-3.5 h-3.5 text-slate-400" />
-                        <span>Duplicate</span>
-                      </button>
-
-                      {project.status !== 'completed' && (
                         <button
                           type="button"
-                          onClick={() => {
-                            setActiveMenuId(null);
-                            onMarkCompleted(project.id);
-                          }}
-                          className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                          onClick={() =>
+                            setActiveMenuId(
+                              activeMenuId === project.id ? null : project.id
+                            )
+                          }
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                          aria-label="Actions"
                         >
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                          <span>Mark Completed</span>
+                          <MoreVertical className="w-4 h-4" />
                         </button>
-                      )}
 
-                      <div className="border-t border-slate-100 my-1" />
+                        {activeMenuId === project.id && (
+                          <div
+                            ref={menuRef}
+                            className="absolute right-3 top-10 w-44 bg-white border border-slate-200 rounded-xl shadow-lg p-1 z-30 animate-in fade-in zoom-in-95 duration-100 text-left"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuId(null);
+                                navigate(`/projects/${project.id}`);
+                              }}
+                              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-slate-400" />
+                              <span>View Project</span>
+                            </button>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveMenuId(null);
-                          onDeleteRequest(project);
-                        }}
-                        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Delete</span>
-                      </button>
-                    </div>
-                  )}
-                </td>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuId(null);
+                                onEdit(project);
+                              }}
+                              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Edit2 className="w-3.5 h-3.5 text-slate-400" />
+                              <span>Edit Project</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuId(null);
+                                onDuplicate(project.id);
+                              }}
+                              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Copy className="w-3.5 h-3.5 text-slate-400" />
+                              <span>Duplicate</span>
+                            </button>
+
+                            {project.status !== 'completed' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveMenuId(null);
+                                  onMarkCompleted(project.id);
+                                }}
+                                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                                <span>Mark Completed</span>
+                              </button>
+                            )}
+
+                            <div className="border-t border-slate-100 my-1" />
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuId(null);
+                                onDeleteRequest(project);
+                              }}
+                              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Delete</span>
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    );
+                  }
+                  return null;
+                })}
               </tr>
             ))}
           </tbody>

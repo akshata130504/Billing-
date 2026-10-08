@@ -24,6 +24,7 @@ import type {
   ReconciliationStatus,
 } from '../../types/api';
 import { ArrowLeftRight, Info, RefreshCw } from 'lucide-react';
+import { usePageSpec } from '../../appUi/usePageSpec';
 
 const PAGE_SIZE = 20;
 
@@ -88,6 +89,7 @@ function useDebouncedValue<T>(value: T, delay = 300): T {
 }
 
 export function ReconciliationPage() {
+  const ui = usePageSpec('reconciliation');
   const { hasRole } = useAuth();
   const canAllocate = hasRole('finance');
 
@@ -126,10 +128,10 @@ export function ReconciliationPage() {
     void paymentsQuery.refetch();
   };
 
-  const columns: Column<PaymentOut>[] = [
-    {
+  const allColumnsMap: Record<string, Column<PaymentOut>> = {
+    payment_number: {
       key: 'payment_number',
-      title: 'Payment',
+      title: 'Payment Ref',
       render: (item) => (
         <div>
           <div className="font-mono font-bold text-slate-700 text-xs">{item.payment_number}</div>
@@ -139,7 +141,7 @@ export function ReconciliationPage() {
         </div>
       ),
     },
-    {
+    customer: {
       key: 'customer',
       title: 'Customer',
       render: (item) => (
@@ -148,17 +150,16 @@ export function ReconciliationPage() {
         </span>
       ),
     },
-    {
-      key: 'method',
-      title: 'Method / Gateway',
+    date: {
+      key: 'date',
+      title: 'Date',
       render: (item) => (
-        <div className="text-xs">
-          <div className="font-semibold text-slate-900">{METHOD_LABELS[item.method] ?? item.method}</div>
-          <div className="text-[10px] text-slate-500">{GATEWAY_LABELS[item.gateway] ?? item.gateway}</div>
-        </div>
+        <span className="text-xs text-slate-600">
+          {item.paid_at ? formatDate(item.paid_at) : '—'}
+        </span>
       ),
     },
-    {
+    amount: {
       key: 'amount',
       title: 'Amount',
       align: 'right',
@@ -167,34 +168,33 @@ export function ReconciliationPage() {
           <div className="font-bold text-slate-900 tabular-nums text-xs">
             {formatMoney(item.amount, item.currency)}
           </div>
-          {parseMoney(item.amount_unallocated) > 0 && (
-            <div className="text-[10px] text-amber-600 font-medium">
-              {formatMoney(item.amount_unallocated, item.currency)} unallocated
-            </div>
+        </div>
+      ),
+    },
+    unallocated: {
+      key: 'unallocated',
+      title: 'Unallocated',
+      align: 'right',
+      render: (item) => (
+        <div className="text-right text-xs">
+          {parseMoney(item.amount_unallocated) > 0 ? (
+            <span className="text-amber-600 font-medium">
+              {formatMoney(item.amount_unallocated, item.currency)}
+            </span>
+          ) : (
+            <span className="text-slate-400">—</span>
           )}
         </div>
       ),
     },
-    {
-      key: 'invoices',
-      title: 'Allocated Invoice(s)',
-      render: (item) =>
-        item.allocations.length === 0 ? (
-          <span className="text-xs text-slate-400 italic">Unallocated</span>
-        ) : (
-          <span className="text-xs text-slate-700">
-            {item.allocations.map((a) => a.invoice_number).join(', ')}
-          </span>
-        ),
-    },
-    {
+    status: {
       key: 'status',
-      title: 'Status',
+      title: 'Recon Status',
       render: (item) => getStatusBadge(item.reconciliation_status),
     },
-    {
-      key: 'action',
-      title: 'Action',
+    actions: {
+      key: 'actions',
+      title: 'Actions',
       align: 'right',
       render: (item) => (
         <Button variant="outline" size="sm" onClick={() => setSelectedPayment(item)}>
@@ -202,29 +202,40 @@ export function ReconciliationPage() {
         </Button>
       ),
     },
-  ];
+  };
+
+  const columns: Column<PaymentOut>[] = ui.shown('columns').map((col) => {
+    const baseCol = allColumnsMap[col.key];
+    if (baseCol) {
+      return { ...baseCol, title: col.label };
+    }
+    return {
+      key: col.key,
+      title: col.label,
+      render: () => null,
+    };
+  });
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1" {...ui.edit('header')}>
             <span className="text-xs font-semibold uppercase tracking-wider text-brand-600">
-              Control Center
+              {ui.text('header', 'eyebrow')}
             </span>
             <span className="text-slate-300">•</span>
             <Badge variant="primary" size="sm">
-              Financial Integrity
+              {ui.text('header', 'badge')}
             </Badge>
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2" {...ui.edit('header')}>
             <ArrowLeftRight className="w-6 h-6 text-brand-600" />
-            Reconciliation Workspace
+            {ui.text('header', 'title')}
           </h1>
-          <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-            Review how recorded payments have been allocated against invoices, and manually allocate
-            any that still need it.
+          <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl" {...ui.edit('header')}>
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
 
@@ -274,46 +285,66 @@ export function ReconciliationPage() {
           onRetry={() => void summaryQuery.refetch()}
         />
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4">
-          <div
-            onClick={() => selectFilter('auto_matched')}
-            className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-emerald-300"
-          >
-            <span className="text-xs text-slate-500 font-medium">Auto-Reconciled</span>
-            <p className="text-xl font-bold text-emerald-600 mt-1">{summary?.auto_matched ?? 0}</p>
-            <span className="text-[10px] text-slate-400">Fully allocated automatically</span>
-          </div>
-          <div
-            onClick={() => selectFilter('matched')}
-            className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-blue-300"
-          >
-            <span className="text-xs text-slate-500 font-medium">Manual Matched</span>
-            <p className="text-xl font-bold text-brand-600 mt-1">{summary?.matched ?? 0}</p>
-            <span className="text-[10px] text-slate-400">Fully allocated manually</span>
-          </div>
-          <div
-            onClick={() => selectFilter('unmatched')}
-            className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-amber-300"
-          >
-            <span className="text-xs text-slate-500 font-medium">Unmatched Records</span>
-            <p className="text-xl font-bold text-amber-600 mt-1">{summary?.unmatched ?? 0}</p>
-            <span className="text-[10px] text-slate-400">No allocation yet</span>
-          </div>
-          <div
-            onClick={() => selectFilter('exception')}
-            className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-rose-300"
-          >
-            <span className="text-xs text-slate-500 font-medium">Discrepancy Exceptions</span>
-            <p className="text-xl font-bold text-rose-600 mt-1">{summary?.exception ?? 0}</p>
-            <span className="text-[10px] text-slate-400">Allocation vs. available mismatch</span>
-          </div>
-          <div className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs">
-            <span className="text-xs text-slate-500 font-medium">Unallocated Amount</span>
-            <p className="text-xl font-bold text-slate-700 mt-1">
-              {formatMoney(summary?.unallocated_amount ?? '0')}
-            </p>
-            <span className="text-[10px] text-slate-400">Across all open payments</span>
-          </div>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4" {...ui.edit('kpis')}>
+          {ui.render('kpis', {
+            auto_matched: (item, edit) => (
+              <div
+                key="auto_matched"
+                onClick={() => selectFilter('auto_matched')}
+                className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-emerald-300"
+                {...edit}
+              >
+                <span className="text-xs text-slate-500 font-medium">{item.label}</span>
+                <p className="text-xl font-bold text-emerald-600 mt-1">{summary?.auto_matched ?? 0}</p>
+                {item.caption && <span className="text-[10px] text-slate-400">{item.caption}</span>}
+              </div>
+            ),
+            matched: (item, edit) => (
+              <div
+                key="matched"
+                onClick={() => selectFilter('matched')}
+                className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-blue-300"
+                {...edit}
+              >
+                <span className="text-xs text-slate-500 font-medium">{item.label}</span>
+                <p className="text-xl font-bold text-brand-600 mt-1">{summary?.matched ?? 0}</p>
+                {item.caption && <span className="text-[10px] text-slate-400">{item.caption}</span>}
+              </div>
+            ),
+            unmatched: (item, edit) => (
+              <div
+                key="unmatched"
+                onClick={() => selectFilter('unmatched')}
+                className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-amber-300"
+                {...edit}
+              >
+                <span className="text-xs text-slate-500 font-medium">{item.label}</span>
+                <p className="text-xl font-bold text-amber-600 mt-1">{summary?.unmatched ?? 0}</p>
+                {item.caption && <span className="text-[10px] text-slate-400">{item.caption}</span>}
+              </div>
+            ),
+            exception: (item, edit) => (
+              <div
+                key="exception"
+                onClick={() => selectFilter('exception')}
+                className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs cursor-pointer hover:border-rose-300"
+                {...edit}
+              >
+                <span className="text-xs text-slate-500 font-medium">{item.label}</span>
+                <p className="text-xl font-bold text-rose-600 mt-1">{summary?.exception ?? 0}</p>
+                {item.caption && <span className="text-[10px] text-slate-400">{item.caption}</span>}
+              </div>
+            ),
+            total: (item, edit) => (
+              <div key="total" className="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs" {...edit}>
+                <span className="text-xs text-slate-500 font-medium">{item.label}</span>
+                <p className="text-xl font-bold text-slate-700 mt-1">
+                  {summary?.total ?? 0}
+                </p>
+                {item.caption && <span className="text-[10px] text-slate-400">{item.caption}</span>}
+              </div>
+            ),
+          })}
         </div>
       )}
 
@@ -358,7 +389,7 @@ export function ReconciliationPage() {
           pageSize={PAGE_SIZE}
           total={paymentsQuery.data?.total}
           onPageChange={setPage}
-          emptyMessage="No payments found"
+          emptyMessage={ui.text('empty', 'none')}
           emptySubtext="Try a different reconciliation status filter."
         />
       )}

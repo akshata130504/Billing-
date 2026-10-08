@@ -23,6 +23,7 @@ import { dashboardSummaryService } from '../../services/dashboardSummaryService'
 import type { OfferingOut, PriceBookOut, OfferingIn, PriceBookIn } from '../../types/catalog_cpq';
 import { OfferingModal } from './components/OfferingModal';
 import { PriceBookModal } from './components/PriceBookModal';
+import { usePageSpec } from '../../appUi/usePageSpec';
 
 const PAGE_SIZE = 25;
 
@@ -73,6 +74,7 @@ const toCounts = (total: number, byType: Record<string, number>): CatalogCounts 
 });
 
 export function CatalogPage() {
+  const ui = usePageSpec('catalog');
   const { showToast } = useToast();
   const { hasRole } = useAuth();
   const canEdit = hasRole('finance');
@@ -277,10 +279,10 @@ export function CatalogPage() {
             <div className="p-2 bg-brand-50 rounded-xl text-brand-600 border border-brand-100">
               <Package className="w-5 h-5" />
             </div>
-            <h1 className="text-xl font-bold text-slate-900">Commercial Product Catalog</h1>
+            <h1 className="text-xl font-bold text-slate-900" {...ui.edit('header')}>{ui.text('header', 'title')}</h1>
           </div>
-          <p className="text-xs text-slate-500 mt-1">
-            Master commercial catalog answering "What does Rooman sell?" — products, services, subscriptions, and bundles.
+          <p className="text-xs text-slate-500 mt-1" {...ui.edit('header')}>
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
 
@@ -310,57 +312,79 @@ export function CatalogPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3.5">
-        <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Active Offerings</p>
-          <p className="text-xl font-bold text-slate-900 mt-1">{activeCount}</p>
-        </div>
-        <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Products</p>
-          <p className="text-xl font-bold text-blue-600 mt-1">{productsCount}</p>
-        </div>
-        <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Services</p>
-          <p className="text-xl font-bold text-indigo-600 mt-1">{servicesCount}</p>
-        </div>
-        <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Recurring Plans</p>
-          <p className="text-xl font-bold text-amber-600 mt-1">{plansCount}</p>
-        </div>
-        <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Curated Bundles</p>
-          <p className="text-xl font-bold text-purple-600 mt-1">{bundlesCount}</p>
-        </div>
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3.5" {...ui.edit('kpis')}>
+        {ui.render('kpis', {
+          active: (item, edit) => (
+            <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs" {...edit}>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{item.label}</p>
+              <p className="text-xl font-bold text-slate-900 mt-1">{activeCount}</p>
+              {item.caption && <p className="text-[10px] text-slate-400 mt-0.5">{item.caption}</p>}
+            </div>
+          ),
+          products: (item, edit) => (
+            <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs" {...edit}>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{item.label}</p>
+              <p className="text-xl font-bold text-blue-600 mt-1">{productsCount}</p>
+              {item.caption && <p className="text-[10px] text-slate-400 mt-0.5">{item.caption}</p>}
+            </div>
+          ),
+          services: (item, edit) => (
+            <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs" {...edit}>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{item.label}</p>
+              <p className="text-xl font-bold text-indigo-600 mt-1">{servicesCount}</p>
+              {item.caption && <p className="text-[10px] text-slate-400 mt-0.5">{item.caption}</p>}
+            </div>
+          ),
+          plans: (item, edit) => (
+            <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs" {...edit}>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{item.label}</p>
+              <p className="text-xl font-bold text-amber-600 mt-1">{plansCount}</p>
+              {item.caption && <p className="text-[10px] text-slate-400 mt-0.5">{item.caption}</p>}
+            </div>
+          ),
+          bundles: (item, edit) => (
+            <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs" {...edit}>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{item.label}</p>
+              <p className="text-xl font-bold text-purple-600 mt-1">{bundlesCount}</p>
+              {item.caption && <p className="text-[10px] text-slate-400 mt-0.5">{item.caption}</p>}
+            </div>
+          ),
+        })}
       </div>
 
       {/* Navigation Tabs & Search */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-b border-slate-200 pb-2">
-        <div className="flex items-center gap-1 overflow-x-auto">
-          {[
-            { id: 'all', label: 'All Offerings', count: tabCounts.all },
-            { id: 'products', label: 'Products', count: tabCounts.product },
-            { id: 'services', label: 'Services', count: tabCounts.service },
-            { id: 'plans', label: 'Plans', count: tabCounts.plan },
-            { id: 'bundles', label: 'Bundles', count: tabCounts.bundle },
-            { id: 'price_books', label: 'Price Books', count: priceBooksTotal },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => changeTab(tab.id as CatalogTab)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors flex items-center gap-1.5 ${
-                activeTab === tab.id
-                  ? 'bg-slate-900 text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-            >
-              {tab.label}
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
-                activeTab === tab.id ? 'bg-slate-800 text-slate-200' : 'bg-slate-200/70 text-slate-600'
-              }`}>
-                {tab.count}
-              </span>
-            </button>
-          ))}
+        <div className="flex items-center gap-1 overflow-x-auto" {...ui.edit('tabs')}>
+          {ui.shown('tabs').map((tab) => {
+            // Counts follow the status filter (active / archived / all), from the server's summary.
+            const countFor: Record<string, number> = {
+              all: tabCounts.all,
+              products: tabCounts.product,
+              services: tabCounts.service,
+              plans: tabCounts.plan,
+              bundles: tabCounts.bundle,
+              price_books: priceBooksTotal,
+            };
+            return (
+              <button
+                key={tab.key}
+                {...ui.edit(`tabs.${tab.key}`)}
+                onClick={() => changeTab(tab.key as CatalogTab)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                  activeTab === tab.key
+                    ? 'bg-slate-900 text-white shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                {tab.label}
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                  activeTab === tab.key ? 'bg-slate-800 text-slate-200' : 'bg-slate-200/70 text-slate-600'
+                }`}>
+                  {countFor[tab.key] ?? 0}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         <div className="flex items-center gap-2">
@@ -484,96 +508,123 @@ export function CatalogPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-600 border-collapse">
             <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              <tr>
-                <th className="px-4 py-3">Offering / SKU</th>
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Pricing Model</th>
-                <th className="px-4 py-3">Catalog Base Price</th>
-                <th className="px-4 py-3">Frequency</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Actions</th>
+              <tr {...ui.edit('columns')}>
+                {ui.shown('columns').map((col) => (
+                  <th key={col.key} className={`px-4 py-3${col.key === 'actions' ? ' text-right' : ''}`} {...ui.edit(`columns.${col.key}`)}>
+                    {col.label}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredOfferings.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400 italic">
+                  <td colSpan={ui.shown('columns').length} className="px-4 py-8 text-center text-slate-400 italic" {...ui.edit('empty')}>
                     {statusFilter === 'active' && !searchQuery.trim()
-                      ? 'No offerings found for this view. Create your first offering to get started.'
+                      ? ui.text('empty', 'none')
                       : 'No offerings match the current filters.'}
                   </td>
                 </tr>
               ) : (
                 filteredOfferings.map((item) => (
                   <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-4 py-3">
-                      <p className="font-semibold text-slate-900">{item.name}</p>
-                      <p className="text-[10px] font-mono text-slate-400">{item.sku}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold capitalize ${
-                        item.type === 'bundle'
-                          ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                          : item.type === 'plan'
-                          ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                          : item.type === 'service'
-                          ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                          : 'bg-blue-50 text-blue-700 border border-blue-200'
-                      }`}>
-                        {item.type}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 capitalize">{item.pricing_model.replace('_', ' ')}</td>
-                    <td className="px-4 py-3 font-semibold text-slate-900">
-                      ₹{item.base_price}
-                      <span className="text-[10px] text-slate-400 font-normal ml-1">/ {item.unit}</span>
-                    </td>
-                    <td className="px-4 py-3 capitalize">{item.billing_frequency.replace('_', ' ')}</td>
-                    <td className="px-4 py-3">
-                      {item.is_active ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Active
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400">
-                          <XCircle className="w-3.5 h-3.5" /> Archived
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {!canEdit && !canArchive && (
-                          <span className="text-[11px] text-slate-400">View only</span>
-                        )}
-                        {canEdit && item.is_active && (
-                        <button
-                          onClick={() => openOfferingModal(item)}
-                          className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-                          title="Edit Offering"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        )}
-                        {canArchive && !item.is_active && (
-                          <button
-                            onClick={() => setOfferingToUnarchive(item)}
-                            className="p-1 rounded text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
-                            title="Unarchive Offering"
-                          >
-                            <ArchiveRestore className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        {canArchive && item.is_active && (
-                          <button
-                            onClick={() => setOfferingToArchive(item)}
-                            className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50"
-                            title="Archive Offering"
-                          >
-                            <Archive className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
+                    {ui.shown('columns').map((col) => {
+                      if (col.key === 'sku') {
+                        return (
+                          <td key="sku" className="px-4 py-3">
+                            <p className="font-semibold text-slate-900">{item.name}</p>
+                            <p className="text-[10px] font-mono text-slate-400">{item.sku}</p>
+                          </td>
+                        );
+                      }
+                      if (col.key === 'type') {
+                        return (
+                          <td key="type" className="px-4 py-3">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold capitalize ${
+                              item.type === 'bundle'
+                                ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                                : item.type === 'plan'
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                : item.type === 'service'
+                                ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                : 'bg-blue-50 text-blue-700 border border-blue-200'
+                            }`}>
+                              {item.type}
+                            </span>
+                          </td>
+                        );
+                      }
+                      if (col.key === 'accounting') {
+                        return (
+                          <td key="accounting" className="px-4 py-3">
+                            <p className="capitalize">{item.category || item.pricing_model.replace('_', ' ')}</p>
+                            <p className="text-[10px] text-slate-400">Tax: {item.tax_rate_pct}%</p>
+                          </td>
+                        );
+                      }
+                      if (col.key === 'pricing') {
+                        return (
+                          <td key="pricing" className="px-4 py-3 font-semibold text-slate-900">
+                            ₹{item.base_price}
+                            <span className="text-[10px] text-slate-400 font-normal ml-1">/ {item.unit}</span>
+                          </td>
+                        );
+                      }
+                      if (col.key === 'status') {
+                        return (
+                          <td key="status" className="px-4 py-3">
+                            {item.is_active ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Active
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400">
+                                <XCircle className="w-3.5 h-3.5" /> Archived
+                              </span>
+                            )}
+                          </td>
+                        );
+                      }
+                      if (col.key === 'actions') {
+                        return (
+                          <td key="actions" className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {!canEdit && !canArchive && (
+                                <span className="text-[11px] text-slate-400">View only</span>
+                              )}
+                              {canEdit && item.is_active && (
+                              <button
+                                onClick={() => openOfferingModal(item)}
+                                className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                                title="Edit Offering"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              )}
+                              {canArchive && !item.is_active && (
+                                <button
+                                  onClick={() => setOfferingToUnarchive(item)}
+                                  className="p-1 rounded text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+                                  title="Unarchive Offering"
+                                >
+                                  <ArchiveRestore className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              {canArchive && item.is_active && (
+                                <button
+                                  onClick={() => setOfferingToArchive(item)}
+                                  className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50"
+                                  title="Archive Offering"
+                                >
+                                  <Archive className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        );
+                      }
+                      return <td key={col.key} className="px-4 py-3" />;
+                    })}
                   </tr>
                 ))
               )}

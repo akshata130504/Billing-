@@ -567,6 +567,8 @@ def customer_portal_convert_trial(
     user: CustomerPortalUser = Depends(get_portal_user_for_write),
     db: Session = Depends(get_db),
 ):
+    # Converting early charges the customer's card: only when the merchant can collect payments.
+    org_lifecycle.assert_payment_collection_allowed(db, user.organization_id)
     sub = db.scalars(
         select(Subscription).where(
             Subscription.id == subscription_id,

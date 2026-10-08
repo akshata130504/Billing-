@@ -4,10 +4,12 @@ import type { ActivityCategory, ActivityItem } from '../../../types';
 import { formatRelative } from '../../../utils/format';
 
 export interface ActivityTimelineWidgetProps {
+  /** Card title (configurable in the Super Admin visual editor). */
+  title?: string;
   activity: ActivityItem[];
 }
 
-export function ActivityTimelineWidget({ activity }: ActivityTimelineWidgetProps) {
+export function ActivityTimelineWidget({ activity, title = 'Recent Activity Timeline' }: ActivityTimelineWidgetProps) {
   const [activeCategory, setActiveCategory] = useState<ActivityCategory>('all');
 
   const filtered = activity.filter(
@@ -48,7 +50,7 @@ export function ActivityTimelineWidget({ activity }: ActivityTimelineWidgetProps
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
           <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-            Recent Activity Timeline
+            {title}
           </h3>
           <p className="text-xs text-slate-400">
             Latest entries from the audit log

@@ -54,7 +54,7 @@ from backend.app.models import (
 from backend.app.models.portal import CustomerPortalSession, CustomerPortalUser
 from backend.app.models.base import utcnow
 from backend.app.models.platform import PlatformAuditLog, PlatformRole, PlatformStaff
-from backend.app.services import platform_audit
+from backend.app.services import org_access, platform_audit
 from backend.app.services.email import frontend_url, send_email
 
 ADMIN = PlatformRole.PLATFORM_ADMINISTRATOR
@@ -97,7 +97,7 @@ TRANSITIONS: Dict[str, Transition] = {
 JOB_ACTIONS = {"pause_jobs": platform_audit.TENANT_JOBS_PAUSED, "resume_jobs": platform_audit.TENANT_JOBS_RESUMED}
 # Platform audit actions that make up an organization's lifecycle history.
 LIFECYCLE_EVENTS = (
-    platform_audit.ORGANIZATION_CREATED_PENDING_APPROVAL,
+    platform_audit.ORGANIZATION_CREATED, platform_audit.ORGANIZATION_CREATED_PENDING_APPROVAL,
     platform_audit.ORGANIZATION_APPROVED, platform_audit.ORGANIZATION_REJECTED,
     platform_audit.ORGANIZATION_SUSPENDED, platform_audit.ORGANIZATION_REACTIVATED,
     platform_audit.ORGANIZATION_DELETION_SCHEDULED, platform_audit.ORGANIZATION_DELETION_CANCELLED,
@@ -105,6 +105,12 @@ LIFECYCLE_EVENTS = (
     platform_audit.TENANT_JOBS_RESUMED, platform_audit.TENANT_SESSIONS_REVOKED,
     platform_audit.TENANT_ADMIN_DEACTIVATED, platform_audit.TENANT_ADMIN_REACTIVATED,
     platform_audit.TENANT_ADMIN_SESSIONS_REVOKED,
+    platform_audit.ORGANIZATION_TRIAL_STARTED, platform_audit.ORGANIZATION_TRIAL_EXPIRED,
+    platform_audit.SUBSCRIPTION_REQUEST_SUBMITTED, platform_audit.SUBSCRIPTION_REQUEST_WITHDRAWN,
+    platform_audit.SUBSCRIPTION_REQUEST_APPROVED, platform_audit.SUBSCRIPTION_REQUEST_REJECTED,
+    platform_audit.ORGANIZATION_ENTITLEMENTS_UPDATED, platform_audit.SUBSCRIPTION_REQUEST_APPROVED_WITH_CHANGES,
+    platform_audit.TENANT_ADMIN_PROVISIONING_INITIATED, platform_audit.TENANT_ADMIN_PROVISIONED,
+    platform_audit.TENANT_ADMIN_INVITATION_SENT, platform_audit.TENANT_ADMIN_ACTIVATED,
 )
 # Document COUNTS shown on the detail page (design section 4: counts, never records or amounts).
 DOCUMENT_COUNTS = (
@@ -162,13 +168,18 @@ def _summary(org: Organization, members: int) -> Dict[str, Any]:
         "id": org.id,
         "name": org.name,
         "slug": org.slug,
-        "status": org.status.value if org.status else OrganizationStatus.ACTIVE.value,
+        # The platform lifecycle status (an approved self-service organization in its trial is ACTIVE;
+        # trial_ends_at / module_access tell the trial apart).
+        "status": (org.status or OrganizationStatus.ACTIVE).value,
         "jobs_paused": bool(org.jobs_paused),
         "member_count": int(members or 0),
         "created_at": org.created_at,
         "updated_at": org.updated_at,
         "status_changed_at": org.status_changed_at,
         "deletion_scheduled_for": org.deletion_scheduled_for,
+        "trial_ends_at": org.trial_ends_at,
+        "seat_limit": org.seat_limit,
+        "module_access": org.module_access or "unrestricted",
     }
 
 
@@ -511,6 +522,12 @@ def change_lifecycle(
         extra["waiting_days"] = settings.PLATFORM_DELETION_WAITING_DAYS
     elif action == "cancel_deletion":
         org.deletion_scheduled_for = None
+    elif action == "approve" and (org.module_access or "") == "trial" and org.trial_started_at is None:
+        # Self-service organization: its free trial starts now, at approval (never at signup).
+        org.trial_started_at = now
+        org.trial_ends_at = now + timedelta(days=settings.ORGANIZATION_TRIAL_DAYS)
+        extra["trial_started_at"] = org.trial_started_at.isoformat()
+        extra["trial_ends_at"] = org.trial_ends_at.isoformat()
     elif action == "reactivate":
         # Keep billing automation paused: nothing that fell due while suspended is replayed
         # until a Platform Administrator resumes it (resume_jobs).
@@ -524,6 +541,14 @@ def change_lifecycle(
         reason=reason, ticket_ref=ticket_ref, details={"from": before, "to": after, **extra},
     )
     org_id, org_name = org.id, org.name
+    if "trial_ends_at" in extra:
+        platform_audit.record(
+            db, action=platform_audit.ORGANIZATION_TRIAL_STARTED, result=platform_audit.SUCCESS, staff=actor.staff,
+            session_id=actor.session_id, ip_address=actor.ip_address, user_agent=actor.user_agent, organization=org,
+            target_type="organization", target_id=org.id,
+            details={"trial_started_at": extra["trial_started_at"], "trial_ends_at": extra["trial_ends_at"],
+                     "trial_days": settings.ORGANIZATION_TRIAL_DAYS},
+        )
     db.commit()
     if action == "approve":
         _notify_owners_approved(db, org_id, org_name)
@@ -832,6 +857,8 @@ def reactivate_tenant_admin(
         raise ConflictError("Target member is not a tenant Admin.")
     if m.status == MembershipStatus.ACTIVE:
         raise ConflictError("Tenant Admin is already active.")
+    from backend.app.services import org_access
+    org_access.ensure_seat_available(db, org, already_counted=m.status == MembershipStatus.INVITED)
 
     m.status = MembershipStatus.ACTIVE
     u = db.get(User, user_id)

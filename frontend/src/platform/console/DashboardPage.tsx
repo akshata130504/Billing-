@@ -35,6 +35,16 @@ export function DashboardPage() {
       {!data && !error && <LoadingState message="Loading dashboard..." />}
       {data && (
         <>
+          {(data.subscription_requests_pending ?? 0) > 0 && (
+            <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <span>
+                {data.subscription_requests_pending} subscription request{data.subscription_requests_pending === 1 ? ' is' : 's are'} waiting for review.
+              </span>
+              <Link to="/subscription-requests" className="font-medium text-amber-900 underline hover:no-underline">
+                Review subscription requests
+              </Link>
+            </div>
+          )}
           {(data.organizations.pending_approval ?? 0) > 0 && (
             <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
               <span>
@@ -45,13 +55,19 @@ export function DashboardPage() {
               </Link>
             </div>
           )}
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-7">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-8">
             <Stat label="Organizations" value={data.organizations.total ?? 0} />
             <Stat
               label="Pending approval"
               value={data.organizations.pending_approval ?? 0}
               tone={data.organizations.pending_approval ? 'warning' : 'default'}
               hint="New sign-ups awaiting a Platform Administrator"
+            />
+            <Stat
+              label="Subscription requests"
+              value={data.subscription_requests_pending ?? 0}
+              tone={data.subscription_requests_pending ? 'warning' : 'default'}
+              hint="Trial organizations waiting for a Platform Administrator"
             />
             <Stat label="Active" value={data.organizations.active ?? 0} tone="success" />
             <Stat label="Suspended" value={data.organizations.suspended ?? 0} tone={data.organizations.suspended ? 'warning' : 'default'} />

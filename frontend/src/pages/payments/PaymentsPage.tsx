@@ -10,8 +10,10 @@ import { ReceiptModal } from './components/ReceiptModal';
 import { useAuth } from '../../hooks/useAuth';
 import { ErrorState } from '../../components/common/ErrorState';
 import { Plus, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { usePageSpec } from '../../appUi/usePageSpec';
 
 export function PaymentsPage() {
+  const ui = usePageSpec('payments');
   const {
     payments,
     customers,
@@ -47,7 +49,7 @@ export function PaymentsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-1">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold text-slate-900 tracking-tight">Payments</h1>
+            <h1 className="text-xl font-bold text-slate-900 tracking-tight" {...ui.edit('header')}>{ui.text('header', 'title')}</h1>
             {!error && (
               <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
                 {total}
@@ -63,8 +65,8 @@ export function PaymentsPage() {
               <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-brand-600' : ''}`} />
             </button>
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Track customer payments, invoice settlements and refunds.
+          <p className="text-xs text-slate-500 mt-0.5" {...ui.edit('header')}>
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
 

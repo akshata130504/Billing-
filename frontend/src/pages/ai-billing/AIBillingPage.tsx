@@ -23,21 +23,24 @@ import { DraftPanel } from './DraftPanel';
 import { WritingPanel } from './WritingPanel';
 import { HistoryPanel } from './HistoryPanel';
 import { MODE_LABELS, REQUEST_STATUS_BADGE, asUtc } from './aiUi';
+import { usePageSpec } from '../../appUi/usePageSpec';
 
 type Tab = 'ask' | 'draft' | 'writing' | 'history';
 
-const TABS: { id: Tab; label: string; hint: string; icon: typeof Sparkles; financeOnly?: boolean }[] = [
-  { id: 'ask', label: 'Ask', hint: 'Grounded answers with sources', icon: MessageSquareText },
-  { id: 'draft', label: 'Draft an action', hint: 'Propose → validate → confirm', icon: FilePlus2, financeOnly: true },
-  { id: 'writing', label: 'Writing assistant', hint: 'Reminders and notes', icon: PenLine },
-  { id: 'history', label: 'History', hint: 'Every request, logged', icon: History },
-];
+/** Tab behaviour; labels and hints come from the page spec (appUi/specs/ai_billing.json). */
+const TABS: Record<Tab, { icon: typeof Sparkles; financeOnly?: boolean }> = {
+  ask: { icon: MessageSquareText },
+  draft: { icon: FilePlus2, financeOnly: true },
+  writing: { icon: PenLine },
+  history: { icon: History },
+};
 
 const TAB_MODE: Record<Exclude<Tab, 'history'>, AIRequestMode> = { ask: 'query', draft: 'draft', writing: 'writing' };
 
 export function AIBillingPage() {
   const { hasRole } = useAuth();
   const canDraft = hasRole('finance');
+  const ui = usePageSpec('ai_billing');
 
   const [tab, setTab] = useState<Tab>('ask');
   const [refreshKey, setRefreshKey] = useState(0);
@@ -75,16 +78,13 @@ export function AIBillingPage() {
     <div className="space-y-6 pb-12">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
+        <div {...ui.edit('header')}>
           <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">
             <Sparkles className="w-4 h-4" />
-            Insights
+            {ui.text('header', 'eyebrow')}
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">AI in Billing</h1>
-          <p className="text-sm text-slate-500 mt-1 max-w-2xl">
-            Ask questions answered from your live invoices and subscriptions, draft credit notes that only post after you confirm,
-            and generate reminder text you can edit. Every request is logged and cites its sources.
-          </p>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{ui.text('header', 'title')}</h1>
+          <p className="text-sm text-slate-500 mt-1 max-w-2xl">{ui.text('header', 'subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={bump} leadingIcon={<RefreshCw className="w-4 h-4" />}>
@@ -94,18 +94,37 @@ export function AIBillingPage() {
       </div>
 
       {/* KPI cards — derived from the tenant's AI activity log */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Requests logged" value={recentLoading ? '…' : counts.total} icon={<History className="w-4 h-4" />} />
-        <StatCard title="Questions answered" value={recentLoading ? '…' : counts.query} icon={<MessageSquareText className="w-4 h-4" />} />
-        <StatCard title="Action drafts" value={recentLoading ? '…' : counts.draft} icon={<FilePlus2 className="w-4 h-4" />} />
-        <StatCard title="Texts generated" value={recentLoading ? '…' : counts.writing} icon={<PenLine className="w-4 h-4" />} />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" {...ui.edit('kpis')}>
+        {ui.render('kpis', {
+          requests: (item, edit) => (
+            <div {...edit} className="flex">
+              <StatCard className="flex-1" title={item.label} value={recentLoading ? '…' : counts.total} icon={<History className="w-4 h-4" />} />
+            </div>
+          ),
+          questions: (item, edit) => (
+            <div {...edit} className="flex">
+              <StatCard className="flex-1" title={item.label} value={recentLoading ? '…' : counts.query} icon={<MessageSquareText className="w-4 h-4" />} />
+            </div>
+          ),
+          drafts: (item, edit) => (
+            <div {...edit} className="flex">
+              <StatCard className="flex-1" title={item.label} value={recentLoading ? '…' : counts.draft} icon={<FilePlus2 className="w-4 h-4" />} />
+            </div>
+          ),
+          texts: (item, edit) => (
+            <div {...edit} className="flex">
+              <StatCard className="flex-1" title={item.label} value={recentLoading ? '…' : counts.writing} icon={<PenLine className="w-4 h-4" />} />
+            </div>
+          ),
+        })}
       </div>
 
       {/* Three-panel shell: rail · workspace */}
       <div className="grid lg:grid-cols-12 gap-6 items-start">
         <aside className="lg:col-span-3 space-y-4 lg:sticky lg:top-6">
-          <nav className="bg-white rounded-xl border border-slate-200 shadow-sm p-2 space-y-1">
-            {TABS.map((t) => {
+          <nav className="bg-white rounded-xl border border-slate-200 shadow-sm p-2 space-y-1" {...ui.edit('tabs')}>
+            {ui.shown('tabs').map((item) => {
+              const t = { id: item.key as Tab, label: item.label, hint: item.caption, ...TABS[item.key as Tab] };
               const Icon = t.icon;
               const active = tab === t.id;
               const locked = t.financeOnly && !canDraft;
@@ -113,6 +132,7 @@ export function AIBillingPage() {
               return (
                 <button
                   key={t.id}
+                  {...ui.edit(`tabs.${t.id}`)}
                   type="button"
                   onClick={() => setTab(t.id)}
                   className={cn(
@@ -146,7 +166,7 @@ export function AIBillingPage() {
           </nav>
 
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">How it works</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400" {...ui.edit('rail')}>{ui.text('rail', 'how_it_works')}</div>
             <ul className="space-y-2.5 text-xs text-slate-600 leading-relaxed">
               <li className="flex gap-2">
                 <Database className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
@@ -172,16 +192,16 @@ export function AIBillingPage() {
           </div>
 
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
-            <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Recent activity</span>
+            <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between" {...ui.edit('rail')}>
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{ui.text('rail', 'activity')}</span>
               <button type="button" onClick={() => setTab('history')} className="text-[11px] font-medium text-brand-600 hover:text-brand-700">
-                View all
+                {ui.text('rail', 'view_all')}
               </button>
             </div>
             {recentLoading ? (
               <div className="px-4 py-6 text-xs text-slate-400 text-center">Loading…</div>
             ) : recent.length === 0 ? (
-              <div className="px-4 py-6 text-xs text-slate-400 text-center">Nothing logged yet.</div>
+              <div className="px-4 py-6 text-xs text-slate-400 text-center">{ui.text('rail', 'activity_empty')}</div>
             ) : (
               <ul className="divide-y divide-slate-100">
                 {recent.slice(0, 5).map((r) => (

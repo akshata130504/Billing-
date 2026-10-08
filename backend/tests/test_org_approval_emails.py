@@ -1,9 +1,9 @@
-"""Owner notification emails around organization approval:
+"""Owner notification emails around organization approval.
 
-- a "pending approval" email right after a verified signup commits, and
-- an "approved" email (with a plain /login link) after a Platform Administrator approves.
-
-Both are best-effort: a failed email never undoes the signup or the approval.
+Self-service signup no longer waits for approval: a verified signup creates an ACTIVE organization
+in its free trial and sends no "pending approval" email. Organizations that are still
+PENDING_APPROVAL (created before that change) get an "approved" email (a plain /login link) when a
+Platform Administrator approves them; the email is best-effort and never undoes the approval.
 """
 import re
 import uuid
@@ -103,86 +103,23 @@ def _admin(db):
     return admin
 
 
-# --- pending-registration email ------------------------------------------------------------------------
+# --- signup: straight into the trial -----------------------------------------------------------------
 
 
-def test_signup_sends_one_pending_approval_email_to_the_owner(client, db):
+def test_signup_goes_straight_into_the_trial_without_a_pending_email(client, db):
     email, org_name = _new_signup(client)
     outbox = Outbox()
-    r, token = _signup(client, email, org_name, outbox)
-    assert r.status_code == 201, r.text
-
-    pending = outbox.by_subject(PENDING_SUBJECT)
-    assert len(pending) == 1
-    msg = pending[0]
-    assert msg["to"] == email
-    assert "pending approval" in msg["text"].lower()
-    assert "don't need to keep the browser page open" in msg["text"]
-    assert "notify you by email once your organization has been approved" in msg["text"]
-    assert "don't need to keep the browser page open" in msg["html"]
-    # Dynamic values are HTML-escaped.
-    assert "Pat &lt;Owner&gt;" in msg["html"]
-    assert "Pat <Owner>" not in msg["html"]
-
-
-def test_pending_email_contains_no_secrets(client, db):
-    email, org_name = _new_signup(client)
-    outbox = Outbox()
-    r, token = _signup(client, email, org_name, outbox)
-    assert r.status_code == 201, r.text
-    body = r.json()
-
-    msg = outbox.by_subject(PENDING_SUBJECT)[0]
-    content = msg["text"] + msg["html"]
-    for secret in (PASSWORD, OTP, token, body["access_token"], body["refresh_token"]):
-        assert secret and secret not in content
-    assert "http" not in content  # no links at all in the pending notice
-
-
-def test_signup_succeeds_when_the_pending_email_returns_false(client, db):
-    email, org_name = _new_signup(client)
-    r, _ = _signup(client, email, org_name, Outbox(result=False))
-    assert r.status_code == 201, r.text
-    assert r.json()["me"]["organization"]["status"] == "pending_approval"
-
-
-def test_signup_succeeds_when_the_pending_email_raises(client, db):
-    email, org_name = _new_signup(client)
-
-    class SelectiveFailure(Outbox):
-        # The OTP email must work for signup to get this far; only the pending notice fails.
-        def __call__(self, to, subject, text_body, html_body=None, **kwargs):
-            if subject == PENDING_SUBJECT:
-                self.sent.append({"to": to, "subject": subject, "text": text_body, "html": html_body or ""})
-                raise EmailDeliveryError("unreachable", "ConnectionRefusedError")
-            return super().__call__(to, subject, text_body, html_body, **kwargs)
-
-    outbox = SelectiveFailure()
     r, _ = _signup(client, email, org_name, outbox)
     assert r.status_code == 201, r.text
-    assert len(outbox.by_subject(PENDING_SUBJECT)) == 1
+    assert r.json()["me"]["organization"]["status"] == "active"
+    assert r.json()["me"]["access"]["status"] == "trial"
+    assert outbox.by_subject(PENDING_SUBJECT) == []
 
     db.expire_all()
     org = db.scalars(select(Organization).where(Organization.name == org_name)).one()
-    assert org.status == OrganizationStatus.PENDING_APPROVAL
+    assert org.status == OrganizationStatus.ACTIVE and org.module_access == "trial" and org.trial_ends_at is not None
     user = db.scalars(select(User).where(User.email == email)).one()
     assert db.scalars(select(Membership).where(Membership.user_id == user.id, Membership.role == MemberRole.OWNER)).one()
-
-
-def test_signup_succeeds_when_the_pending_email_raises_a_generic_error(client, db):
-    email, org_name = _new_signup(client)
-
-    class Boom(Outbox):
-        def __call__(self, to, subject, text_body, html_body=None, **kwargs):
-            if subject == PENDING_SUBJECT:
-                raise RuntimeError("boom")
-            return super().__call__(to, subject, text_body, html_body, **kwargs)
-
-    r, _ = _signup(client, email, org_name, Boom())
-    assert r.status_code == 201, r.text
-    db.expire_all()
-    org = db.scalars(select(Organization).where(Organization.name == org_name)).one()
-    assert org.status == OrganizationStatus.PENDING_APPROVAL
 
 
 # --- approval email -----------------------------------------------------------------------------------

@@ -89,6 +89,8 @@ const PortalPaymentsPage = lazyNamed(() => import('../pages/portal-customer/Port
 const PortalSubscriptionsPage = lazyNamed(() => import('../pages/portal-customer/PortalSubscriptionsPage'), 'PortalSubscriptionsPage');
 const PortalProfilePage = lazyNamed(() => import('../pages/portal-customer/PortalProfilePage'), 'PortalProfilePage');
 const PortalActivationPage = lazyNamed(() => import('../pages/portal-customer/PortalActivationPage'), 'PortalActivationPage');
+const SubscriptionRequestPage = lazyNamed(() => import('../pages/subscription-access/SubscriptionRequestPage'), 'SubscriptionRequestPage');
+const TrialExpiredScreen = lazyNamed(() => import('../pages/subscription-access/SubscriptionRequestPage'), 'TrialExpiredScreen');
 
 // ---------------------------------------------------------------------------
 // Guards
@@ -101,9 +103,13 @@ const PortalActivationPage = lazyNamed(() => import('../pages/portal-customer/Po
  * - pending_approval / rejected / deleted: a status screen only.
  * - suspended: Owner and Admin keep read-only access under a banner; Finance and Viewer get a screen.
  * - pending_deletion: the Owner keeps read-only access under a banner; everyone else gets a screen.
+ * - trial: everything, under a banner counting down to trial_ends_at.
+ * - trial_expired: the subscription request screen only (the API allows nothing else).
+ * The status is the server's effective one (/auth/me `access.status`), so a trial that ended
+ * since the last scheduler run already shows as ended.
  */
 export function ProtectedRoute({ children }: { children?: ReactNode }) {
-  const { isAuthenticated, isLoading, organization, logout, refreshMe, hasRole } = useAuth();
+  const { isAuthenticated, isLoading, organization, access, logout, refreshMe, hasRole } = useAuth();
   const location = useLocation();
 
   if (isLoading) {
@@ -126,7 +132,16 @@ export function ProtectedRoute({ children }: { children?: ReactNode }) {
   const content = children ? <>{children}</> : <Outlet />;
   const onLogout = () => void logout();
 
-  switch (organization?.status) {
+  if (!organization) return content;
+  switch (access?.status ?? organization.status) {
+    case 'trial_expired':
+      return (
+        <Suspense fallback={<PageLoader fullScreen />}>
+          <TrialExpiredScreen organizationName={organization.name} onLogout={onLogout} />
+        </Suspense>
+      );
+    case 'trial':
+      return content; // AppLayout shows the trial banner
     case 'pending_approval':
       return <OrgPendingApprovalScreen organization={organization} onRefresh={() => void refreshMe()} onLogout={onLogout} />;
     case 'rejected':
@@ -532,6 +547,7 @@ export function AppRoutes() {
               <Route path="ai-billing" element={<AIBillingPage />} />
               <Route path="automation" element={<AutomationPage />} />
               <Route path="customization" element={<CustomizationPage />} />
+              <Route path="subscription" element={<SubscriptionRequestPage />} />
               <Route path="integrations" element={<Navigate to="/settings?tab=integrations" replace />} />
               <Route path="platforms/mobile" element={<MobilePlatformPage />} />
               <Route path="platforms/desktop" element={<DesktopPlatformPage />} />

@@ -232,19 +232,48 @@ class OrganizationNotActiveError(ForbiddenError):
         self.code = code
 
 
-def _check_org_active(ctx: CurrentContext, method: str) -> None:
+# Reachable while a trial has ended: what the organization needs to see its state and ask for a
+# subscription (everything else answers ORGANIZATION_TRIAL_EXPIRED). /api/v1-relative prefixes.
+TRIAL_EXPIRED_ALLOWED = ("/subscription-requests", "/ui-config", "/organization")
+
+
+def _api_path(request: Request) -> str:
+    route = request.scope.get("route")
+    path = getattr(route, "path", None) or request.url.path
+    prefix = settings.API_V1_STR
+    return path[len(prefix):] if path.startswith(prefix) else path
+
+
+def _path_allowed(path: str, prefixes) -> bool:
+    return any(path == p or path.startswith(p + "/") for p in prefixes)
+
+
+def _check_org_active(ctx: CurrentContext, method: str, path: str = "", db: Optional[Session] = None) -> None:
     """Organization lifecycle gate for tenant users (docs/platform-administration-design.md §8).
 
     - pending_approval / rejected: no business endpoints (self-service /auth/* still works).
     - suspended: Owner and Admin read-only; Finance and Viewer refused; every write refused.
     - pending_deletion: Owner read-only (data export); everyone else refused.
     - deleted: refused.
+    - trial: every module (the trial's ending is computed from trial_ends_at on each request).
+    - trial_expired: only TRIAL_EXPIRED_ALLOWED (status, subscription request).
+    Then, for an organization whose access is 'entitled', a path belonging to a product module the
+    organization is not entitled to answers FEATURE_NOT_ENTITLED (services/org_access.py).
     """
+    from backend.app.services import org_access
+
     org = ctx.organization
     if org is None:
         return
-    st = org.status.value if hasattr(org.status, "value") else str(org.status)
+    st = org_access.effective_status(org).value
     is_read = method.upper() in _READ_METHODS
+    if st == OrganizationStatus.TRIAL_EXPIRED.value:
+        if _path_allowed(path, TRIAL_EXPIRED_ALLOWED):
+            return
+        raise OrganizationNotActiveError(
+            "Your free trial has ended. Choose your modules and request a subscription to continue.",
+            "ORGANIZATION_TRIAL_EXPIRED",
+        )
     if st == OrganizationStatus.PENDING_APPROVAL.value:
         raise OrganizationNotActiveError("Your organization is pending approval from Rooman.", "ORGANIZATION_PENDING_APPROVAL")
     if st == OrganizationStatus.REJECTED.value:
@@ -266,15 +295,26 @@ def _check_org_active(ctx: CurrentContext, method: str) -> None:
         raise OrganizationNotActiveError("This organization is scheduled for deletion.", "ORGANIZATION_PENDING_DELETION")
     if st == OrganizationStatus.DELETED.value:
         raise OrganizationNotActiveError("This organization is not active.", "ORGANIZATION_DELETED")
+    if db is not None and not org_access.is_unrestricted(org):
+        from backend.app.core.entitlements import module_for_path
+
+        module = module_for_path(path)
+        if module is not None and module not in org_access.entitled_modules(db, org):
+            raise OrganizationNotActiveError(
+                "Your subscription does not include this module. Ask Rooman to add it to your plan.",
+                "FEATURE_NOT_ENTITLED",
+            )
 
 
 def require_tenant_user(minimum: MemberRole) -> Callable[..., CurrentContext]:
     """Like require_role, but NEVER satisfied by a platform grant (e.g. deciding on grants)."""
 
-    def dependency(request: Request, ctx: CurrentContext = Depends(get_current_context)) -> CurrentContext:
+    def dependency(
+        request: Request, ctx: CurrentContext = Depends(get_current_context), db: Session = Depends(get_db)
+    ) -> CurrentContext:
         if ctx.grant is not None or ctx.user is None:
             raise ForbiddenError("This action can only be performed by a member of this organization.")
-        _check_org_active(ctx, request.method)
+        _check_org_active(ctx, request.method, _api_path(request), db)
         if not ctx.has_role(minimum):
             raise ForbiddenError(f"This action requires the {minimum.value} role or higher.")
         from backend.app.core.tenant_context import set_tenant_context
@@ -287,9 +327,11 @@ def require_tenant_user(minimum: MemberRole) -> Callable[..., CurrentContext]:
 def require_role(minimum: MemberRole) -> Callable[..., CurrentContext]:
     """Dependency factory: `ctx: CurrentContext = Depends(require_role(MemberRole.FINANCE))`."""
 
-    def dependency(request: Request, ctx: CurrentContext = Depends(get_current_context)) -> CurrentContext:
+    def dependency(
+        request: Request, ctx: CurrentContext = Depends(get_current_context), db: Session = Depends(get_db)
+    ) -> CurrentContext:
         if ctx.grant is None:
-            _check_org_active(ctx, request.method)
+            _check_org_active(ctx, request.method, _api_path(request), db)
         if not ctx.has_role(minimum):
             raise ForbiddenError(f"This action requires the {minimum.value} role or higher.")
         from backend.app.core.tenant_context import set_tenant_context

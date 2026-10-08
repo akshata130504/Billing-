@@ -1,0 +1,68 @@
+{
+  "key": "quotes",
+  "title": "Quotes",
+  "route": "/quotes",
+  "nav_item": "quotes",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        { "name": "title", "label": "Heading", "kind": "heading", "default": "Quotes & Proposals" },
+        { "name": "badge", "label": "Badge", "kind": "label", "default": "Revenue Lifecycle" },
+        { "name": "subtitle", "label": "Subtitle", "kind": "body", "default": "Create, price, discount-gate, send, track customer acceptance, and automatically convert quotes to invoices." }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty table messages",
+      "fields": [
+        { "name": "none", "label": "No quotes (can create)", "kind": "body", "default": "No quotes found. Click \"New Quote\" to create your first quote." },
+        { "name": "none_read_only", "label": "No quotes (read-only member)", "kind": "body", "default": "No quotes found." },
+        { "name": "filtered", "label": "No matches for the filters", "kind": "body", "default": "No quotes match these filters." }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "KPI cards",
+      "captions": true,
+      "items": [
+        { "key": "total", "label": "Total Quotes", "caption": "All propositions" },
+        { "key": "draft", "label": "Draft", "caption": "In composition" },
+        { "key": "pending_approval", "label": "Pending Approval", "caption": "Above discount threshold" },
+        { "key": "sent", "label": "Sent / Viewed", "caption": "With customer" },
+        { "key": "accepted", "label": "Accepted / Invoiced", "caption": "Incl. partially invoiced" },
+        { "key": "total_value", "label": "Total Value", "caption": "All matching quotes, per currency" }
+      ]
+    },
+    {
+      "id": "tabs",
+      "label": "Status tabs",
+      "items": [
+        { "key": "all", "label": "All", "required": true },
+        { "key": "draft", "label": "Draft" },
+        { "key": "pending_approval", "label": "Pending Approval" },
+        { "key": "approved", "label": "Approved" },
+        { "key": "sent", "label": "Sent" },
+        { "key": "accepted", "label": "Accepted" },
+        { "key": "invoiced", "label": "Invoiced" },
+        { "key": "declined", "label": "Declined" }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Table columns",
+      "items": [
+        { "key": "quote_number", "label": "Quote #", "required": true },
+        { "key": "customer", "label": "Customer" },
+        { "key": "issue_date", "label": "Quote Date" },
+        { "key": "expiry_date", "label": "Expiry Date" },
+        { "key": "amount", "label": "Amount" },
+        { "key": "status", "label": "Status" },
+        { "key": "actions", "label": "Actions" }
+      ]
+    }
+  ]
+}

@@ -24,7 +24,10 @@ import { queryKeys } from '../../hooks/queries';
 import { formatDate, formatMoney, formatRelative, parseMoney } from '../../utils/format';
 import { AGING_BUCKET_LABELS, ACTIVITY_TYPE_LABELS, COLLECTION_STATUS_LABELS, COLLECTION_STATUS_VARIANTS } from './collectionsUi';
 
+import { usePageSpec } from '../../appUi/usePageSpec';
+
 export function CollectionsDashboardPage() {
+  const ui = usePageSpec('collections');
   const dashboardQuery = useQuery({
     queryKey: queryKeys.collections.dashboard(),
     queryFn: collectionsService.dashboard,
@@ -50,50 +53,82 @@ export function CollectionsDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        eyebrow="Revenue"
-        title="Collections"
-        subtitle="Track outstanding balances, follow up on overdue invoices, and monitor collection performance across every customer."
-      />
+      <div {...ui.edit('header')}>
+        <PageHeader
+          eyebrow={ui.text('header', 'eyebrow')}
+          title={ui.text('header', 'title')}
+          subtitle={ui.text('header', 'subtitle')}
+        />
+      </div>
 
       {/* KPI tiles */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-        <StatCard
-          title="Total Outstanding"
-          value={formatMoney(kpis.total_outstanding)}
-          icon={<Wallet className="w-4 h-4" />}
-        />
-        <StatCard
-          title="Overdue Amount"
-          value={formatMoney(kpis.overdue_amount)}
-          icon={<Clock3 className="w-4 h-4" />}
-        />
-        <StatCard
-          title="Current (Not Due)"
-          value={formatMoney(kpis.current_due)}
-          icon={<ReceiptText className="w-4 h-4" />}
-        />
-        <StatCard
-          title="Due in 7 Days"
-          value={formatMoney(kpis.due_in_7_days)}
-          icon={<CalendarClock className="w-4 h-4" />}
-        />
-        <StatCard
-          title="Due in 30 Days"
-          value={formatMoney(kpis.due_in_30_days)}
-          icon={<CalendarClock className="w-4 h-4" />}
-        />
-        <StatCard
-          title="Collection Rate"
-          value={kpis.collection_rate === null ? 'N/A' : `${Number(kpis.collection_rate).toFixed(1)}%`}
-          comparisonText={kpis.collection_rate === null ? 'Nothing invoiced in the last 30 days' : 'Last 30 days'}
-          icon={<TrendingUp className="w-4 h-4" />}
-        />
-        <StatCard
-          title="Overdue Invoices"
-          value={kpis.overdue_invoice_count}
-          icon={<ListChecks className="w-4 h-4" />}
-        />
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4" {...ui.edit('kpis')}>
+        {ui.render('kpis', {
+          outstanding: (item, edit) => (
+            <div key="outstanding" {...edit}>
+              <StatCard
+                title={item.label}
+                value={formatMoney(kpis.total_outstanding)}
+                icon={<Wallet className="w-4 h-4" />}
+              />
+            </div>
+          ),
+          overdue: (item, edit) => (
+            <div key="overdue" {...edit}>
+              <StatCard
+                title={item.label}
+                value={formatMoney(kpis.overdue_amount)}
+                icon={<Clock3 className="w-4 h-4" />}
+              />
+            </div>
+          ),
+          current: (item, edit) => (
+            <div key="current" {...edit}>
+              <StatCard
+                title={item.label}
+                value={formatMoney(kpis.current_due)}
+                icon={<ReceiptText className="w-4 h-4" />}
+              />
+            </div>
+          ),
+          due_7d: (item, edit) => (
+            <div key="due_7d" {...edit}>
+              <StatCard
+                title={item.label}
+                value={formatMoney(kpis.due_in_7_days)}
+                icon={<CalendarClock className="w-4 h-4" />}
+              />
+            </div>
+          ),
+          due_30d: (item, edit) => (
+            <div key="due_30d" {...edit}>
+              <StatCard
+                title={item.label}
+                value={formatMoney(kpis.due_in_30_days)}
+                icon={<CalendarClock className="w-4 h-4" />}
+              />
+            </div>
+          ),
+          rate: (item, edit) => (
+            <div key="rate" {...edit}>
+              <StatCard
+                title={item.label}
+                value={kpis.collection_rate === null ? 'N/A' : `${Number(kpis.collection_rate).toFixed(1)}%`}
+                comparisonText={kpis.collection_rate === null ? 'Nothing invoiced in the last 30 days' : 'Last 30 days'}
+                icon={<TrendingUp className="w-4 h-4" />}
+              />
+            </div>
+          ),
+          invoice_count: (item, edit) => (
+            <div key="invoice_count" {...edit}>
+              <StatCard
+                title={item.label}
+                value={kpis.overdue_invoice_count}
+                icon={<ListChecks className="w-4 h-4" />}
+              />
+            </div>
+          ),
+        })}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

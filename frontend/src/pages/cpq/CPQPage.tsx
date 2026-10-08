@@ -27,10 +27,12 @@ import { dashboardSummaryService } from '../../services/dashboardSummaryService'
 import { customerService } from '../../services/customerService';
 import type { CPQDealOut, OfferingOut, PriceBookOut, PriceSimulationResponse } from '../../types/catalog_cpq';
 import type { CustomerOut } from '../../types/api';
+import { usePageSpec } from '../../appUi/usePageSpec';
 
 const PAGE_SIZE = 20;
 
 export function CPQPage() {
+  const ui = usePageSpec('cpq');
   const navigate = useNavigate();
   const { showToast } = useToast();
   const { hasRole, user } = useAuth();
@@ -263,10 +265,10 @@ export function CPQPage() {
             <div className="p-2 bg-emerald-50 rounded-xl text-emerald-600 border border-emerald-100">
               <Calculator className="w-5 h-5" />
             </div>
-            <h1 className="text-xl font-bold text-slate-900">CPQ Deal Builder</h1>
+            <h1 className="text-xl font-bold text-slate-900" {...ui.edit('header')}>{ui.text('header', 'title')}</h1>
           </div>
-          <p className="text-xs text-slate-500 mt-1">
-            "What should we sell to THIS customer, at WHAT price, under WHICH rules?" — Guided enterprise configuration and transparent pricing.
+          <p className="text-xs text-slate-500 mt-1" {...ui.edit('header')}>
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
 
@@ -289,29 +291,37 @@ export function CPQPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-        <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Total Deals Built</p>
-          <p className="text-xl font-bold text-slate-900 mt-1">{dealCounts.total}</p>
-        </div>
-        <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Pending Approval</p>
-          <p className="text-xl font-bold text-amber-600 mt-1">
-            {dealCounts.pending}
-          </p>
-        </div>
-        <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Approved Deals</p>
-          <p className="text-xl font-bold text-emerald-600 mt-1">
-            {dealCounts.approved}
-          </p>
-        </div>
-        <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Converted to Quotes</p>
-          <p className="text-xl font-bold text-brand-600 mt-1">
-            {dealCounts.converted}
-          </p>
-        </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5" {...ui.edit('kpis')}>
+        {ui.render('kpis', {
+          total: (item, edit) => (
+            <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs" {...edit}>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{item.label}</p>
+              <p className="text-xl font-bold text-slate-900 mt-1">{dealCounts.total}</p>
+              {item.caption && <p className="text-[10px] text-slate-400 mt-0.5">{item.caption}</p>}
+            </div>
+          ),
+          pending: (item, edit) => (
+            <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs" {...edit}>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{item.label}</p>
+              <p className="text-xl font-bold text-amber-600 mt-1">{dealCounts.pending}</p>
+              {item.caption && <p className="text-[10px] text-slate-400 mt-0.5">{item.caption}</p>}
+            </div>
+          ),
+          approved: (item, edit) => (
+            <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs" {...edit}>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{item.label}</p>
+              <p className="text-xl font-bold text-emerald-600 mt-1">{dealCounts.approved}</p>
+              {item.caption && <p className="text-[10px] text-slate-400 mt-0.5">{item.caption}</p>}
+            </div>
+          ),
+          converted: (item, edit) => (
+            <div className="p-4 bg-white rounded-xl border border-slate-200/80 shadow-2xs" {...edit}>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{item.label}</p>
+              <p className="text-xl font-bold text-brand-600 mt-1">{dealCounts.converted}</p>
+              {item.caption && <p className="text-[10px] text-slate-400 mt-0.5">{item.caption}</p>}
+            </div>
+          ),
+        })}
       </div>
 
       {/* Deals List */}
@@ -326,94 +336,116 @@ export function CPQPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-600 border-collapse">
             <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              <tr>
-                <th className="px-4 py-3">Deal Number & Title</th>
-                <th className="px-4 py-3">Customer</th>
-                <th className="px-4 py-3">Price Book</th>
-                <th className="px-4 py-3">Net Total</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Actions</th>
+              <tr {...ui.edit('columns')}>
+                {ui.shown('columns').map((col) => (
+                  <th key={col.key} className={`px-4 py-3${col.key === 'actions' ? ' text-right' : ''}`} {...ui.edit(`columns.${col.key}`)}>
+                    {col.label}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {deals.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-slate-400 italic">
-                    No CPQ deals created yet. Click "Start New Deal" to launch the guided deal builder.
+                  <td colSpan={ui.shown('columns').length} className="px-4 py-10 text-center text-slate-400 italic" {...ui.edit('empty')}>
+                    {ui.text('empty', 'none')}
                   </td>
                 </tr>
               ) : (
                 deals.map((deal) => (
                   <tr key={deal.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-4 py-3">
-                      <p className="font-semibold text-slate-900">{deal.title}</p>
-                      <p className="text-[10px] font-mono text-slate-400">{deal.deal_number}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-slate-800">{deal.customer_name}</p>
-                      <p className="text-[10px] text-slate-400">{deal.customer_number}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      {deal.price_book_name ? (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700">
-                          {deal.price_book_name}
-                        </span>
-                      ) : (
-                        <span className="text-slate-400">Standard Catalog</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 font-semibold text-slate-900">
-                      ₹{deal.total}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
-                        deal.status === 'converted'
-                          ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                          : deal.status === 'approved'
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          : deal.status === 'pending_approval'
-                          ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                          : 'bg-slate-100 text-slate-700 border border-slate-200'
-                      }`}>
-                        {deal.status.replace('_', ' ')}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      {(() => {
+                    {ui.shown('columns').map((col) => {
+                      if (col.key === 'deal') {
+                        return (
+                          <td key="deal" className="px-4 py-3">
+                            <p className="font-semibold text-slate-900">{deal.title}</p>
+                            <p className="text-[10px] font-mono text-slate-400">{deal.deal_number}</p>
+                          </td>
+                        );
+                      }
+                      if (col.key === 'customer') {
+                        return (
+                          <td key="customer" className="px-4 py-3">
+                            <p className="font-medium text-slate-800">{deal.customer_name}</p>
+                            <p className="text-[10px] text-slate-400">{deal.customer_number}</p>
+                          </td>
+                        );
+                      }
+                      if (col.key === 'price_book') {
+                        return (
+                          <td key="price_book" className="px-4 py-3">
+                            {deal.price_book_name ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700">
+                                {deal.price_book_name}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">Standard Catalog</span>
+                            )}
+                          </td>
+                        );
+                      }
+                      if (col.key === 'total') {
+                        return (
+                          <td key="total" className="px-4 py-3 font-semibold text-slate-900">
+                            ₹{deal.total}
+                          </td>
+                        );
+                      }
+                      if (col.key === 'status') {
+                        return (
+                          <td key="status" className="px-4 py-3">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                              deal.status === 'converted'
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                : deal.status === 'approved'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : deal.status === 'pending_approval'
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                : 'bg-slate-100 text-slate-700 border border-slate-200'
+                            }`}>
+                              {deal.status.replace('_', ' ')}
+                            </span>
+                          </td>
+                        );
+                      }
+                      if (col.key === 'actions') {
                         const actions = cpqDealActions(deal, { userId: user?.id, canEdit, canApprove });
                         return (
-                      <div className="flex items-center justify-end gap-2">
-                        {actions.showApprove && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleApproveDeal(deal.id)}
-                            className="text-emerald-600 border-emerald-200 hover:bg-emerald-50"
-                          >
-                            Approve
-                          </Button>
-                        )}
-                        {actions.showConvert && (
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            onClick={() => handleConvertToQuote(deal.id)}
-                            className="flex items-center gap-1"
-                          >
-                            <FileText className="w-3.5 h-3.5" /> Convert to Quote
-                          </Button>
-                        )}
-                        {actions.note === 'Quote Generated' ? (
-                          <span className="text-[11px] font-semibold text-blue-600 flex items-center gap-1">
-                            <CheckCircle2 className="w-3.5 h-3.5" /> Quote Generated
-                          </span>
-                        ) : actions.note ? (
-                          <span className="text-[11px] text-slate-400">{actions.note}</span>
-                        ) : null}
-                      </div>
+                          <td key="actions" className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              {actions.showApprove && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleApproveDeal(deal.id)}
+                                  className="text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                                >
+                                  Approve
+                                </Button>
+                              )}
+                              {actions.showConvert && (
+                                <Button
+                                  variant="primary"
+                                  size="sm"
+                                  onClick={() => handleConvertToQuote(deal.id)}
+                                  className="flex items-center gap-1"
+                                >
+                                  <FileText className="w-3.5 h-3.5" /> Convert to Quote
+                                </Button>
+                              )}
+                              {actions.note === 'Quote Generated' ? (
+                                <span className="text-[11px] font-semibold text-blue-600 flex items-center gap-1">
+                                  <CheckCircle2 className="w-3.5 h-3.5" /> Quote Generated
+                                </span>
+                              ) : actions.note ? (
+                                <span className="text-[11px] text-slate-400">{actions.note}</span>
+                              ) : null}
+                            </div>
+                          </td>
                         );
-                      })()}
-                    </td>
+                      }
+                      return null;
+                    })}
                   </tr>
                 ))
               )}

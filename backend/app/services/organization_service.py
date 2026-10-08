@@ -23,7 +23,7 @@ from backend.app.core.security import generate_opaque_token, hash_token, invite_
 from backend.app.models import Membership, MemberRole, MembershipStatus, Organization, User, utcnow
 from backend.app.schemas.common_refs import user_ref
 from backend.app.schemas.organization import TeamMember, TeamMemberInvited, normalize_email
-from backend.app.services import audit
+from backend.app.services import audit, org_access
 from backend.app.services.auth_service import revoke_refresh_tokens
 from backend.app.services.email import frontend_url, send_email
 
@@ -302,6 +302,11 @@ def invite_member(
         if membership is not None and membership.role == MemberRole.OWNER and ctx.role != MemberRole.OWNER:
             raise ForbiddenError("Only an owner can re-invite an owner.")
         reinvited = membership is not None
+
+    # Seat limit (subscription): an invitation holds a seat until it is accepted or revoked.
+    org_access.ensure_seat_available(
+        db, ctx.organization, already_counted=membership is not None and membership.status == MembershipStatus.INVITED
+    )
 
     raw = generate_opaque_token()
     previous_status = membership.status.value if membership else None

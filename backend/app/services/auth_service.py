@@ -63,6 +63,7 @@ from backend.app.models import (
     utcnow,
 )
 from backend.app.models.identity import LoginThrottle
+from backend.app.models.subscription_access import ModuleAccess
 from backend.app.schemas.auth import (
     MeResponse,
     MembershipOut,
@@ -71,7 +72,8 @@ from backend.app.schemas.auth import (
     UserOut,
 )
 from backend.app.schemas.organization import OrganizationOut, normalize_email
-from backend.app.services import audit
+from backend.app.schemas.subscription_access import OrganizationAccess
+from backend.app.services import audit, org_access
 from backend.app.services.email import EmailDeliveryError, frontend_url, send_email
 
 # Failed credential checks allowed per (email, client IP) - or per account for TOTP codes -
@@ -335,6 +337,7 @@ def build_me(db: Session, ctx: CurrentContext) -> MeResponse:
         organizations=[
             OrganizationSummary(id=org.id, name=org.name, slug=org.slug, role=mem.role) for mem, org in rows
         ],
+        access=OrganizationAccess(**org_access.access_summary(db, ctx.organization)),
     )
 
 
@@ -389,53 +392,6 @@ def _send_signup_verification_email(email: str, full_name: str, otp: str) -> boo
       <strong>Security notice:</strong> Never share this code with anyone. Rooman Billing team members will never ask for your verification code.
     </div>
     <p style="font-size: 13px; color: #64748b;">If you didn't create an account with Rooman Billing, you can safely ignore this email.</p>
-    <div class="footer">
-      &copy; Rooman Billing. All rights reserved.
-    </div>
-  </div>
-</body>
-</html>"""
-    return send_email(to=email, subject=subject, text_body=text_body, html_body=html_body)
-
-
-def _send_registration_pending_email(email: str, full_name: str, organization_name: str) -> bool:
-    """Tell a freshly registered owner that the organization awaits approval. Contains no secrets."""
-    subject = "Your Rooman Billing organization is pending approval"
-    text_body = (
-        f"Hello {full_name},\n\n"
-        "Thanks for registering with Rooman Billing.\n"
-        f"Your organization \"{organization_name}\" has been successfully registered and is currently "
-        "pending approval from the Rooman team.\n\n"
-        "You don't need to keep the browser page open. We'll notify you by email once your "
-        "organization has been approved.\n\n"
-        "Thanks for your patience.\n\n"
-        "— Rooman Billing"
-    )
-    html_body = f"""<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b; }}
-    .card {{ max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }}
-    .header {{ text-align: center; margin-bottom: 24px; }}
-    .title {{ font-size: 20px; font-weight: 700; color: #0f172a; margin: 0 0 8px 0; }}
-    .subtitle {{ font-size: 14px; color: #64748b; margin: 0; }}
-    .note {{ font-size: 13px; color: #475569; background: #f8fafc; border-left: 4px solid #6366f1; padding: 12px 16px; border-radius: 4px; margin: 24px 0; }}
-    .footer {{ font-size: 12px; color: #94a3b8; text-align: center; margin-top: 32px; border-top: 1px solid #f1f5f9; padding-top: 16px; }}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="header">
-      <h1 class="title">Your organization is pending approval</h1>
-      <p class="subtitle">Thanks for registering with Rooman Billing, {html.escape(full_name)}!</p>
-    </div>
-    <p>Your organization <strong>{html.escape(organization_name)}</strong> has been successfully registered and is currently pending approval from the Rooman team.</p>
-    <div class="note">
-      You don't need to keep the browser page open. We'll notify you by email once your organization has been approved.
-    </div>
-    <p style="font-size: 13px; color: #64748b;">Thanks for your patience.</p>
     <div class="footer">
       &copy; Rooman Billing. All rights reserved.
     </div>
@@ -816,10 +772,16 @@ def _create_verified_signup(
     db.delete(pending)
     db.flush()
 
+    # Self-service signup: the organization is ACTIVE at once and its free trial starts now (no
+    # approval). After the trial a subscription request, decided by a Platform Administrator, sets
+    # its modules and seats (subscription_request_service); the platform can suspend it any time.
     organization = Organization(
         name=org_name,
         slug=unique_slug(db, org_name),
-        status=OrganizationStatus.PENDING_APPROVAL,
+        status=OrganizationStatus.ACTIVE,
+        module_access=ModuleAccess.TRIAL.value,
+        trial_started_at=now,
+        trial_ends_at=now + timedelta(days=settings.ORGANIZATION_TRIAL_DAYS),
     )
     db.add(organization)
     db.flush()
@@ -878,7 +840,7 @@ def _create_verified_signup(
     from backend.app.services import platform_audit
     platform_audit.record(
         db,
-        action=platform_audit.ORGANIZATION_CREATED_PENDING_APPROVAL,
+        action=platform_audit.ORGANIZATION_CREATED,
         result=platform_audit.SUCCESS,
         staff=None,
         session_id=None,
@@ -894,14 +856,22 @@ def _create_verified_signup(
             "status": organization.status.value,
         },
     )
-    organization_id, organization_name, owner_email, owner_name = organization.id, organization.name, user.email, user.full_name
+    platform_audit.record(
+        db,
+        action=platform_audit.ORGANIZATION_TRIAL_STARTED,
+        result=platform_audit.SUCCESS,
+        ip_address=ip,
+        user_agent=user_agent,
+        organization=organization,
+        target_type="organization",
+        target_id=organization.id,
+        details={
+            "trial_started_at": organization.trial_started_at.isoformat(),
+            "trial_ends_at": organization.trial_ends_at.isoformat(),
+            "trial_days": settings.ORGANIZATION_TRIAL_DAYS,
+        },
+    )
     _commit(db, "An account with this email or organization already exists.")
-    # Best-effort and strictly after the commit: the registration stands whatever happens to the email.
-    try:
-        if not _send_registration_pending_email(owner_email, owner_name, organization_name):
-            logger.warning("Pending-approval email for organization %s was not sent (SMTP disabled)", organization_id)
-    except Exception as exc:  # noqa: BLE001 - never fail a committed signup over a notification
-        logger.error("Pending-approval email to %s for organization %s failed: %s", owner_email, organization_id, exc)
     return tokens, ctx
 
 
@@ -1489,6 +1459,11 @@ def accept_invitation(
                 )
             _check_totp_code(db, user, totp_code or "", ip, user_agent)
 
+    # The invitation already holds a seat; this refuses only if the limit was lowered since.
+    org_access.ensure_seat_available(db, organization, already_counted=True)
+    from backend.app.services import tenant_admin_provisioning
+
+    provisioned_by_platform = tenant_admin_provisioning.was_provisioned(db, membership.id)
     membership.status = MembershipStatus.ACTIVE
     membership.accepted_at = now
     membership.deactivated_at = None
@@ -1510,5 +1485,13 @@ def accept_invitation(
         before={"status": MembershipStatus.INVITED.value},
         after={"status": MembershipStatus.ACTIVE.value, "role": membership.role.value, "user_id": user.id},
     )
+    if provisioned_by_platform:
+        from backend.app.services import platform_audit
+
+        platform_audit.record(
+            db, action=platform_audit.TENANT_ADMIN_ACTIVATED, result=platform_audit.SUCCESS,
+            ip_address=ip, user_agent=user_agent, organization=organization, target_type="membership",
+            target_id=membership.id, details={"user_id": user.id, "admin_email": user.email, "role": membership.role.value},
+        )
     _commit(db)
     return tokens

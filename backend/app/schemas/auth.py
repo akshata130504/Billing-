@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validat
 
 from backend.app.models import MemberRole, MembershipStatus
 from backend.app.schemas.organization import EmailAddress, OrganizationOut, UTCDateTime
+from backend.app.schemas.subscription_access import OrganizationAccess
 from backend.app.schemas.validators import validate_phone_number, validate_sensible_name
 
 
@@ -165,6 +166,7 @@ class MeResponse(BaseModel):
     organization: OrganizationOut
     membership: MembershipOut
     organizations: List[OrganizationSummary] = Field(description="Every organization the user is an active member of")
+    access: Optional[OrganizationAccess] = Field(default=None, description="Trial state, modules and seats (API-enforced)")
 
 
 class SignupResponse(AuthTokens):

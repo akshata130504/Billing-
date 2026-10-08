@@ -24,6 +24,8 @@ vi.mock('../consoleApi', async () => {
       dashboard: vi.fn(), health: vi.fn(), organizations: vi.fn(), organization: vi.fn(),
       organizationActivity: vi.fn(), lifecycle: vi.fn(), staff: vi.fn(), staffMember: vi.fn(), jobs: vi.fn(),
       staffAction: vi.fn(), audit: vi.fn(), tenantAdmins: vi.fn(),
+      entitlements: vi.fn(), updateEntitlements: vi.fn(), subscriptionRequests: vi.fn(), subscriptionRequest: vi.fn(),
+      approveSubscriptionRequest: vi.fn(), rejectSubscriptionRequest: vi.fn(), provisionTenantAdmin: vi.fn(),
     },
   };
 });
@@ -96,6 +98,7 @@ beforeEach(() => {
   api.dashboard.mockResolvedValue(DASHBOARD);
   api.organizationActivity.mockResolvedValue({ ...EMPTY_PAGE, page_size: 20 });
   api.tenantAdmins.mockResolvedValue([]);
+  api.entitlements.mockResolvedValue({ organization_id: 'org-1', module_access: 'unrestricted', modules: [], seat_limit: null, seats_used: 4 });
 });
 
 describe('navigation and roles', () => {
@@ -159,6 +162,14 @@ describe('dashboard', () => {
       'href', '/organizations?status=pending_approval',
     );
     expect(within(screen.getByRole('main')).getByText('Pending approval').closest('div')).toHaveTextContent('2');
+  });
+
+  it('highlights subscription requests waiting for review', async () => {
+    api.dashboard.mockResolvedValue({ ...DASHBOARD, subscription_requests_pending: 3 });
+    renderAt('/');
+    expect(await screen.findByText('3 subscription requests are waiting for review.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Review subscription requests' })).toHaveAttribute('href', '/subscription-requests');
+    expect(within(screen.getByRole('main')).getByText('Subscription requests').closest('div')).toHaveTextContent('3');
   });
 
   it('shows no approval callout when nothing is pending', async () => {
@@ -529,5 +540,94 @@ describe('phase 3 completion', () => {
     await waitFor(() => expect(api.audit).toHaveBeenLastCalledWith(expect.objectContaining({
       q: 'SUP-1234', target_type: 'organization', since: new Date('2026-09-01T00:00').toISOString(),
     })));
+  });
+});
+
+
+const REQUEST = {
+  id: 'req-1', organization_id: 'org-9', organization_name: 'Trial Co', organization_slug: 'trial-co',
+  organization_status: 'trial_expired' as const, trial_ends_at: '2026-10-04T00:00:00Z', status: 'submitted' as const,
+  modules: ['quotes'], seats: 5, billing_cycle: 'annual' as const, notes: 'Need CPQ', created_at: '2026-10-05T00:00:00Z',
+  reviewed_at: null, decision_reason: null, approved_modules: null, approved_seats: null, approved_billing_cycle: null,
+  requested_by_email: 'owner@trial.test', requested_by_name: 'Tia Owner', seats_used: 2,
+};
+
+describe('subscription requests', () => {
+  beforeEach(() => {
+    api.subscriptionRequests.mockResolvedValue({ items: [REQUEST], total: 1, page: 1, page_size: 25 });
+  });
+
+  it('support can read the queue but cannot review', async () => {
+    renderAt('/subscription-requests', 'platform_support');
+    expect(await screen.findByText('Trial Co')).toBeInTheDocument();
+    expect(screen.getByText(/Only a Platform Administrator can approve or reject/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Review' })).not.toBeInTheDocument();
+  });
+
+  it('administrator approves with modified seats, reason and step-up', async () => {
+    api.approveSubscriptionRequest
+      .mockRejectedValueOnce(new PlatformApiError('Confirm your password.', 403, 'STEP_UP_REQUIRED'))
+      .mockResolvedValueOnce({ ...REQUEST, status: 'approved' });
+    auth.stepUp.mockResolvedValue({});
+    renderAt('/subscription-requests');
+    fireEvent.click(await screen.findByRole('button', { name: 'Review' }));
+    fireEvent.change(screen.getByLabelText('User seats'), { target: { value: '8' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Approve with changes' }));
+    fireEvent.change(await screen.findByLabelText(/Reason/), { target: { value: 'Approved after the sales call' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    const stepUpForm = await screen.findByRole('form', { name: 'Confirm with your password' });
+    fireEvent.change(within(stepUpForm).getByLabelText(/^Password/), { target: { value: 'secret-pass' } });
+    fireEvent.submit(stepUpForm);
+    await waitFor(() => expect(api.approveSubscriptionRequest).toHaveBeenCalledTimes(2));
+    expect(api.approveSubscriptionRequest).toHaveBeenLastCalledWith('req-1', {
+      modules: ['quotes'], seats: 8, billing_cycle: 'annual', reason: 'Approved after the sales call',
+    });
+    await waitFor(() => expect(api.subscriptionRequests).toHaveBeenCalledTimes(2));
+  });
+});
+
+
+describe('create admin after approval', () => {
+  const APPROVED = { ...REQUEST, status: 'approved' as const, approved_modules: ['quotes'], approved_seats: 5,
+    approved_billing_cycle: 'annual' as const, organization_status: 'active' as const };
+
+  beforeEach(() => {
+    api.subscriptionRequests.mockResolvedValue({ items: [APPROVED], total: 1, page: 1, page_size: 25 });
+  });
+
+  it('support sees approved requests but no Create Admin', async () => {
+    renderAt('/subscription-requests', 'platform_support');
+    expect(await screen.findByText('Trial Co')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create Admin' })).not.toBeInTheDocument();
+  });
+
+  it('administrator creates the tenant Admin with fixed organization and role, after password step-up', async () => {
+    api.provisionTenantAdmin
+      .mockRejectedValueOnce(new PlatformApiError('Confirm your password.', 403, 'STEP_UP_REQUIRED'))
+      .mockResolvedValueOnce({
+        organization_id: 'org-9', organization_name: 'Trial Co', user_id: 'u-1', membership_id: 'm-1',
+        full_name: 'Acme Admin', email: 'admin@acme.test', role: 'admin', status: 'invited',
+        invite_expires_at: '2026-10-10T00:00:00Z', email_delivered: true,
+      });
+    auth.stepUp.mockResolvedValue({});
+    renderAt('/subscription-requests');
+    fireEvent.click(await screen.findByRole('button', { name: 'Create Admin' }));
+    const form = await screen.findByRole('form', { name: 'Create Admin' });
+    expect(within(form).getByLabelText(/^Organization/)).toHaveValue('Trial Co');
+    expect(within(form).getByLabelText(/^Organization/)).toBeDisabled();
+    expect(within(form).getByLabelText(/^Role/)).toHaveValue('Admin');
+    expect(within(form).getByLabelText(/^Role/)).toBeDisabled();
+    expect(within(form).queryByLabelText(/password/i)).not.toBeInTheDocument();
+    fireEvent.change(within(form).getByLabelText(/^Admin name/), { target: { value: 'Acme Admin' } });
+    fireEvent.change(within(form).getByLabelText(/^Admin email/), { target: { value: 'admin@acme.test' } });
+    fireEvent.submit(form);
+    const stepUpForm = await screen.findByRole('form', { name: 'Confirm with your password' });
+    fireEvent.change(within(stepUpForm).getByLabelText(/^Password/), { target: { value: 'secret-pass' } });
+    fireEvent.submit(stepUpForm);
+    expect(await screen.findByText('Admin created for Trial Co')).toBeInTheDocument();
+    expect(screen.getByText(/The invitation email was sent/)).toBeInTheDocument();
+    expect(api.provisionTenantAdmin).toHaveBeenLastCalledWith('org-9', { full_name: 'Acme Admin', email: 'admin@acme.test' });
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(await screen.findByText('Admin invited: admin@acme.test (invitation sent)')).toBeInTheDocument();
   });
 });

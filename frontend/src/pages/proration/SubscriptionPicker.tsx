@@ -1,3 +1,4 @@
+import { Fragment, type ReactNode } from 'react';
 import { Search, Repeat } from 'lucide-react';
 import type { SubscriptionOut } from '../../types/api';
 import { Badge } from '../../components/common/Badge';
@@ -8,6 +9,10 @@ import { ErrorState } from '../../components/common/ErrorState';
 import { cn } from '../../utils/cn';
 import { formatMoney, formatDate, humanize, statusVariant } from '../../utils/format';
 import { formatQuantity, intervalLabel } from './prorationLabels';
+import { usePageSpec } from '../../appUi/usePageSpec';
+
+/** Columns whose header is right-aligned (their cells align themselves). */
+const RIGHT_ALIGNED = new Set(['quantity', 'recurring', 'action']);
 
 interface SubscriptionPickerProps {
   subscriptions: SubscriptionOut[];
@@ -36,18 +41,81 @@ export function SubscriptionPicker({
   canCreate,
   onCreateNew,
 }: SubscriptionPickerProps) {
+  const ui = usePageSpec('proration');
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSearchSubmit();
   };
 
+  const columns = ui.shown('columns');
+  const pickerCells: Record<string, (sub: SubscriptionOut, isSelected: boolean) => ReactNode> = {
+    subscription: (sub, isSelected) => (
+      <td className="py-3 px-4">
+        <div className={cn('font-semibold', isSelected ? 'text-brand-700' : 'text-slate-900')}>
+          {sub.subscription_number}
+        </div>
+        <div className="text-[11px] text-slate-400 mt-0.5">Started {formatDate(sub.start_date)}</div>
+      </td>
+    ),
+    customer: (sub) => (
+      <td className="py-3 px-4">
+        <div className="font-medium text-slate-800">{sub.customer.display_name}</div>
+        <div className="text-[11px] text-slate-400 mt-0.5">{sub.customer.customer_number}</div>
+      </td>
+    ),
+    plan: (sub) => (
+      <td className="py-3 px-4">
+        <div className="font-medium text-slate-800">{sub.plan.name}</div>
+        <div className="text-[11px] text-slate-400 mt-0.5">
+          {formatMoney(sub.plan.unit_amount, sub.plan.currency)} / {intervalLabel(sub.plan.billing_interval, sub.plan.interval_count)}
+        </div>
+      </td>
+    ),
+    quantity: (sub) => (
+      <td className="py-3 px-4 text-right tabular-nums">{formatQuantity(sub.quantity)}</td>
+    ),
+    period: (sub) => (
+      <td className="py-3 px-4 whitespace-nowrap">
+        {formatDate(sub.current_period_start)} <span className="text-slate-400">→</span>{' '}
+        {formatDate(sub.current_period_end)}
+      </td>
+    ),
+    recurring: (sub) => (
+      <td className="py-3 px-4 text-right tabular-nums font-medium text-slate-900">
+        {formatMoney(sub.subtotal ?? sub.mrr, sub.currency ?? sub.plan.currency)}
+      </td>
+    ),
+    status: (sub) => (
+      <td className="py-3 px-4">
+        <Badge variant={statusVariant(sub.status)} size="sm" dot>
+          {humanize(sub.status)}
+        </Badge>
+      </td>
+    ),
+    action: (sub, isSelected) => (
+      <td className="py-3 px-4 text-right">
+        <Button
+          size="sm"
+          variant={isSelected ? 'primary' : 'outline'}
+          className="text-xs py-1 px-3 h-7 font-medium whitespace-nowrap"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect(sub);
+          }}
+        >
+          Change Plan
+        </Button>
+      </td>
+    ),
+  };
+
   return (
     <div className="bg-white rounded-xl border border-slate-200/90 shadow-card overflow-hidden">
       <div className="px-5 py-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold text-slate-900 tracking-tight">Choose a subscription</h2>
+        <div {...ui.edit('picker')}>
+          <h2 className="text-sm font-semibold text-slate-900 tracking-tight">{ui.text('picker', 'title')}</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Only active and trialing subscriptions can be changed mid-cycle.
+            {ui.text('picker', 'description')}
           </p>
         </div>
         <form onSubmit={handleSubmit} className="flex items-center gap-2 shrink-0">
@@ -74,15 +142,11 @@ export function SubscriptionPicker({
           <ErrorState title="Could not load subscriptions" message={error} onRetry={onRetry} />
         </div>
       ) : subscriptions.length === 0 ? (
-        <div className="p-4">
+        <div className="p-4" {...ui.edit('picker')}>
           <EmptyState
             icon={<Repeat className="w-6 h-6 stroke-1" />}
-            title={searchQuery ? 'No matching subscriptions' : 'No eligible subscriptions'}
-            description={
-              searchQuery
-                ? 'No active or trialing subscriptions match your search. Try a different number, customer or plan.'
-                : 'Proration applies to active or trialing subscriptions. Create and activate a subscription to plan a mid-cycle change.'
-            }
+            title={searchQuery ? ui.text('picker', 'no_match_title') : ui.text('picker', 'empty_title')}
+            description={searchQuery ? ui.text('picker', 'no_match') : ui.text('picker', 'empty')}
             action={
               canCreate && !searchQuery ? (
                 <Button variant="primary" size="sm" onClick={onCreateNew}>
@@ -96,15 +160,12 @@ export function SubscriptionPicker({
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="bg-slate-50/80 text-slate-600 font-semibold border-b border-slate-200 uppercase tracking-wider text-[11px]">
-                <th className="py-3 px-4">Subscription</th>
-                <th className="py-3 px-4">Customer</th>
-                <th className="py-3 px-4">Plan</th>
-                <th className="py-3 px-4 text-right">Qty</th>
-                <th className="py-3 px-4">Current period</th>
-                <th className="py-3 px-4 text-right">Recurring</th>
-                <th className="py-3 px-4">Status</th>
-                <th className="py-3 px-4 text-right">Action</th>
+              <tr className="bg-slate-50/80 text-slate-600 font-semibold border-b border-slate-200 uppercase tracking-wider text-[11px]" {...ui.edit('columns')}>
+                {columns.map((col) => (
+                  <th key={col.key} className={`py-3 px-4${RIGHT_ALIGNED.has(col.key) ? ' text-right' : ''}`} {...ui.edit(`columns.${col.key}`)}>
+                    {col.label}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -120,48 +181,7 @@ export function SubscriptionPicker({
                     )}
                     aria-selected={isSelected}
                   >
-                    <td className="py-3 px-4">
-                      <div className={cn('font-semibold', isSelected ? 'text-brand-700' : 'text-slate-900')}>
-                        {sub.subscription_number}
-                      </div>
-                      <div className="text-[11px] text-slate-400 mt-0.5">Started {formatDate(sub.start_date)}</div>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="font-medium text-slate-800">{sub.customer.display_name}</div>
-                      <div className="text-[11px] text-slate-400 mt-0.5">{sub.customer.customer_number}</div>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="font-medium text-slate-800">{sub.plan.name}</div>
-                      <div className="text-[11px] text-slate-400 mt-0.5">
-                        {formatMoney(sub.plan.unit_amount, sub.plan.currency)} / {intervalLabel(sub.plan.billing_interval, sub.plan.interval_count)}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 text-right tabular-nums">{formatQuantity(sub.quantity)}</td>
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      {formatDate(sub.current_period_start)} <span className="text-slate-400">→</span>{' '}
-                      {formatDate(sub.current_period_end)}
-                    </td>
-                    <td className="py-3 px-4 text-right tabular-nums font-medium text-slate-900">
-                      {formatMoney(sub.subtotal ?? sub.mrr, sub.currency ?? sub.plan.currency)}
-                    </td>
-                    <td className="py-3 px-4">
-                      <Badge variant={statusVariant(sub.status)} size="sm" dot>
-                        {humanize(sub.status)}
-                      </Badge>
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <Button
-                        size="sm"
-                        variant={isSelected ? 'primary' : 'outline'}
-                        className="text-xs py-1 px-3 h-7 font-medium whitespace-nowrap"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelect(sub);
-                        }}
-                      >
-                        Change Plan
-                      </Button>
-                    </td>
+                    {columns.map((col) => <Fragment key={col.key}>{pickerCells[col.key]?.(sub, isSelected)}</Fragment>)}
                   </tr>
                 );
               })}

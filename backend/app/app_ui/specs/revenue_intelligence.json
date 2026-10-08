@@ -1,0 +1,135 @@
+{
+  "key": "revenue_intelligence",
+  "title": "Revenue Intelligence",
+  "route": "/revenue-intelligence",
+  "nav_item": "revenue_intelligence",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        { "name": "eyebrow", "label": "Eyebrow", "kind": "label", "default": "Insights" },
+        { "name": "title", "label": "Heading", "kind": "heading", "default": "Revenue Intelligence" },
+        { "name": "subtitle", "label": "Subtitle", "kind": "body", "default": "An executive view of recurring revenue, collections and receivables health — with plain-English observations drawn from your live numbers." }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Page empty states",
+      "fields": [
+        { "name": "custom_title", "label": "Custom range incomplete title", "kind": "heading", "default": "Choose a custom date range" },
+        { "name": "custom_description", "label": "Custom range incomplete description", "kind": "body", "default": "Select both a start and end date above to load revenue intelligence for that window." },
+        { "name": "no_activity_title", "label": "No billing activity title", "kind": "heading", "default": "No billing activity for {range}", "hint": "{range} is replaced with the selected date range." },
+        { "name": "no_activity_description", "label": "No billing activity description", "kind": "body", "default": "No invoices, payments or subscriptions fall in this range yet. The charts below will fill in as soon as billing starts — try a wider range to see history." }
+      ]
+    },
+    {
+      "id": "revenue_trend",
+      "label": "Revenue Over Time section",
+      "fields": [
+        { "name": "title", "label": "Section title", "kind": "heading", "default": "Revenue Over Time" },
+        { "name": "description", "label": "Section description", "kind": "body", "default": "Recognised revenue per {unit} for {range}.", "hint": "{unit} is day or month; {range} is the selected date range." }
+      ]
+    },
+    {
+      "id": "insights",
+      "label": "Insights section",
+      "fields": [
+        { "name": "title", "label": "Section title", "kind": "heading", "default": "Insights" },
+        { "name": "description", "label": "Section description", "kind": "body", "default": "Observations derived from the figures on this page." },
+        { "name": "empty_title", "label": "No observations title", "kind": "heading", "default": "No observations yet" },
+        { "name": "empty_description", "label": "No observations description", "kind": "body", "default": "Insights are generated from your invoicing, collections and subscription figures as soon as there is data to read." }
+      ]
+    },
+    {
+      "id": "invoiced_vs_collected",
+      "label": "Invoiced vs Collected section",
+      "fields": [
+        { "name": "title", "label": "Section title", "kind": "heading", "default": "Invoiced vs Collected" },
+        { "name": "description", "label": "Section description", "kind": "body", "default": "How much was billed in each period against how much cash actually came in." }
+      ]
+    },
+    {
+      "id": "revenue_by_plan",
+      "label": "Revenue by Plan section",
+      "fields": [
+        { "name": "title", "label": "Section title", "kind": "heading", "default": "Revenue by Plan" }
+      ]
+    },
+    {
+      "id": "revenue_by_product",
+      "label": "Revenue by Product section",
+      "fields": [
+        { "name": "title", "label": "Section title", "kind": "heading", "default": "Revenue by Product" }
+      ]
+    },
+    {
+      "id": "aging",
+      "label": "Receivables Aging section",
+      "fields": [
+        { "name": "title", "label": "Section title", "kind": "heading", "default": "Receivables Aging" },
+        { "name": "description", "label": "Section description", "kind": "body", "default": "Open balances by how long they have been due." }
+      ]
+    },
+    {
+      "id": "top_customers",
+      "label": "Top Customers section",
+      "fields": [
+        { "name": "title", "label": "Section title", "kind": "heading", "default": "Top Customers" },
+        { "name": "description", "label": "Section description", "kind": "body", "default": "Ranked by recognised revenue in the range; outstanding balances are current, not range-bound." }
+      ]
+    },
+    {
+      "id": "subscription_mix",
+      "label": "Subscription Mix section",
+      "fields": [
+        { "name": "title", "label": "Section title", "kind": "heading", "default": "Subscription Mix" },
+        { "name": "description", "label": "Section description", "kind": "body", "default": "Recurring revenue and where your subscriptions stand today." }
+      ]
+    },
+    {
+      "id": "cash_summary",
+      "label": "Cash Summary section",
+      "fields": [
+        { "name": "title", "label": "Section title", "kind": "heading", "default": "Cash Summary" },
+        { "name": "description", "label": "Section description", "kind": "body", "default": "Payments, refunds and customer coverage for {range}.", "hint": "{range} is replaced with the selected date range." },
+        { "name": "gross_payments", "label": "Gross payments row", "kind": "label", "default": "Gross payments" },
+        { "name": "refunds", "label": "Refunds row", "kind": "label", "default": "Refunds" },
+        { "name": "net_collected", "label": "Net collected row", "kind": "label", "default": "Net collected" },
+        { "name": "top_method", "label": "Top payment method row", "kind": "label", "default": "Top payment method" },
+        { "name": "total_customers", "label": "Total customers row", "kind": "label", "default": "Total customers" },
+        { "name": "active_customers", "label": "Active in range row", "kind": "label", "default": "Active in range" },
+        { "name": "active_customers_hint", "label": "Active in range hint", "kind": "label", "default": "Customers with billing activity" },
+        { "name": "with_balance", "label": "Carrying a balance row", "kind": "label", "default": "Carrying a balance" },
+        { "name": "average_invoice", "label": "Average invoice value row", "kind": "label", "default": "Average invoice value" }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "KPI stat cards",
+      "items": [
+        { "key": "mrr", "label": "MRR" },
+        { "key": "arr", "label": "ARR" },
+        { "key": "net_revenue", "label": "Net Revenue" },
+        { "key": "collection_rate", "label": "Collection Rate" },
+        { "key": "outstanding", "label": "Outstanding" },
+        { "key": "overdue", "label": "Overdue" },
+        { "key": "avg_days", "label": "Avg Days to Payment" },
+        { "key": "total_invoiced", "label": "Total Invoiced" }
+      ]
+    },
+    {
+      "id": "customer_columns",
+      "label": "Top Customers table columns",
+      "items": [
+        { "key": "rank", "label": "#" },
+        { "key": "customer", "label": "Customer", "required": true },
+        { "key": "revenue", "label": "Revenue" },
+        { "key": "share", "label": "Share" },
+        { "key": "outstanding", "label": "Outstanding" }
+      ]
+    }
+  ]
+}

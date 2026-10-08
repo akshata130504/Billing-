@@ -1,0 +1,93 @@
+{
+  "key": "cpq",
+  "title": "CPQ Deals",
+  "route": "/cpq",
+  "nav_item": "cpq",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Configure, Price, Quote (CPQ)"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Interactive deal structuring engine with multi-currency pricing books, volume tiers, bundle automation, and margin guardrails."
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty table messages",
+      "fields": [
+        {
+          "name": "none",
+          "label": "No deals",
+          "kind": "body",
+          "default": "No CPQ deals created yet. Click Start New Deal to launch the guided deal builder."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "KPI cards",
+      "items": [
+        {
+          "key": "total",
+          "label": "Total Deals"
+        },
+        {
+          "key": "pending",
+          "label": "Pending Approval"
+        },
+        {
+          "key": "approved",
+          "label": "Approved Deals"
+        },
+        {
+          "key": "converted",
+          "label": "Converted to Quotes"
+        }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Deals table columns",
+      "items": [
+        {
+          "key": "deal",
+          "label": "Deal Number & Title",
+          "required": true
+        },
+        {
+          "key": "customer",
+          "label": "Customer"
+        },
+        {
+          "key": "price_book",
+          "label": "Price Book"
+        },
+        {
+          "key": "total",
+          "label": "Net Total"
+        },
+        {
+          "key": "status",
+          "label": "Status"
+        },
+        {
+          "key": "actions",
+          "label": "Actions"
+        }
+      ]
+    }
+  ]
+}

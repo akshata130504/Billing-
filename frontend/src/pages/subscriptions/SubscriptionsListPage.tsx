@@ -34,8 +34,10 @@ import { Modal } from '../../components/common/Modal';
 import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { formatMoney, formatDate, humanize, statusVariant } from '../../utils/format';
+import { usePageSpec } from '../../appUi/usePageSpec';
 
 export function SubscriptionsListPage() {
+  const ui = usePageSpec('subscriptions');
   const navigate = useNavigate();
   const { showToast } = useToast();
   const { hasRole } = useAuth();
@@ -225,27 +227,19 @@ export function SubscriptionsListPage() {
     }
   };
 
-  const tabs = [
-    { id: 'all', label: 'All Subscriptions', count: summary?.total_subscriptions },
-    { id: 'active', label: 'Active', count: summary?.active_count },
-    { id: 'trialing', label: 'Trialing', count: summary?.trialing_count },
-    { id: 'paused', label: 'Paused', count: summary?.paused_count },
-    { id: 'past_due', label: 'Past Due', count: summary?.past_due_count },
-    { id: 'cancelled', label: 'Cancelled', count: summary?.cancelled_count },
-    { id: 'draft', label: 'Draft', count: summary?.draft_count },
-  ];
+
 
   return (
     <div className="space-y-6 pb-12">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5">
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5" {...ui.edit('header')}>
             <Repeat className="w-7 h-7 text-brand-600" />
-            Subscriptions
+            {ui.text('header', 'title')}
           </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Manage recurring customer subscriptions, billing intervals, and commercial contracts.
+          <p className="text-sm text-slate-500 mt-1" {...ui.edit('header')}>
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -280,45 +274,74 @@ export function SubscriptionsListPage() {
       </div>
 
       {/* KPI Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title="Monthly Recurring (MRR)"
-          value={formatMoney(summary?.total_mrr ?? 0)}
-          icon={<DollarSign className="w-5 h-5 text-brand-600" />}
-          comparisonText="Active recurring base"
-        />
-        <StatCard
-          title="Annual Recurring (ARR)"
-          value={formatMoney(summary?.total_arr ?? 0)}
-          icon={<TrendingUp className="w-5 h-5 text-emerald-600" />}
-          comparisonText="Normalized annualized run-rate"
-        />
-        <StatCard
-          title="Active Subscriptions"
-          value={summary?.active_count ?? 0}
-          icon={<ShieldCheck className="w-5 h-5 text-emerald-600" />}
-          comparisonText={`${summary?.auto_renew_enabled_count ?? 0} with auto-renewal`}
-        />
-        <StatCard
-          title="Active Trials"
-          value={summary?.trialing_count ?? 0}
-          icon={<Clock className="w-5 h-5 text-sky-600" />}
-          comparisonText={`${summary?.trial_expiring_soon_count ?? 0} ending this week`}
-        />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" {...ui.edit('kpis')}>
+        {ui.render('kpis', {
+          mrr: (item, edit) => (
+            <div {...edit}>
+              <StatCard
+                title={item.label}
+                value={formatMoney(summary?.total_mrr ?? 0)}
+                icon={<DollarSign className="w-5 h-5 text-brand-600" />}
+                comparisonText={item.caption ?? 'Active recurring base'}
+              />
+            </div>
+          ),
+          arr: (item, edit) => (
+            <div {...edit}>
+              <StatCard
+                title={item.label}
+                value={formatMoney(summary?.total_arr ?? 0)}
+                icon={<TrendingUp className="w-5 h-5 text-emerald-600" />}
+                comparisonText={item.caption ?? 'Normalized annualized run-rate'}
+              />
+            </div>
+          ),
+          active: (item, edit) => (
+            <div {...edit}>
+              <StatCard
+                title={item.label}
+                value={summary?.active_count ?? 0}
+                icon={<ShieldCheck className="w-5 h-5 text-emerald-600" />}
+                comparisonText={item.caption ?? `${summary?.auto_renew_enabled_count ?? 0} with auto-renewal`}
+              />
+            </div>
+          ),
+          churn: (item, edit) => (
+            <div {...edit}>
+              <StatCard
+                title={item.label}
+                value={(summary?.paused_count ?? 0) + (summary?.past_due_count ?? 0) || (summary?.trialing_count ?? 0)}
+                icon={<Clock className="w-5 h-5 text-sky-600" />}
+                comparisonText={item.caption ?? 'Paused or past due'}
+              />
+            </div>
+          ),
+        })}
       </div>
 
       {/* Filter Tabs & Search Bar */}
       <div className="bg-white rounded-xl border border-slate-200/90 shadow-sm p-4 space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           {/* Tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
-            {tabs.map((tab) => {
-              const isActive = activeTab === tab.id;
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none" {...ui.edit('tabs')}>
+            {ui.shown('tabs').map((tab) => {
+              const tabCounts: Record<string, number | undefined> = {
+                all: summary?.total_subscriptions,
+                active: summary?.active_count,
+                trialing: summary?.trialing_count,
+                paused: summary?.paused_count,
+                past_due: summary?.past_due_count,
+                cancelled: summary?.cancelled_count,
+                draft: summary?.draft_count,
+              };
+              const count = tabCounts[tab.key];
+              const isActive = activeTab === tab.key;
               return (
                 <button
-                  key={tab.id}
+                  key={tab.key}
+                  {...ui.edit(`tabs.${tab.key}`)}
                   onClick={() => {
-                    setActiveTab(tab.id);
+                    setActiveTab(tab.key);
                     setPage(1);
                   }}
                   className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
@@ -328,13 +351,13 @@ export function SubscriptionsListPage() {
                   }`}
                 >
                   <span>{tab.label}</span>
-                  {tab.count !== undefined && tab.count > 0 && (
+                  {count !== undefined && count > 0 && (
                     <span
                       className={`text-[11px] px-1.5 py-0.2 rounded-full font-bold ${
                         isActive ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600'
                       }`}
                     >
-                      {tab.count}
+                      {count}
                     </span>
                   )}
                 </button>
@@ -401,14 +424,12 @@ export function SubscriptionsListPage() {
           <div className="overflow-x-auto rounded-lg border border-slate-200/80">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="bg-slate-50/80 text-slate-600 font-semibold border-b border-slate-200 uppercase tracking-wider text-[11px]">
-                  <th className="py-3 px-4">Subscription</th>
-                  <th className="py-3 px-4">Customer</th>
-                  <th className="py-3 px-4">Plan & Terms</th>
-                  <th className="py-3 px-4">Billing Schedule</th>
-                  <th className="py-3 px-4 text-right">Amount / Period</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
+                <tr className="bg-slate-50/80 text-slate-600 font-semibold border-b border-slate-200 uppercase tracking-wider text-[11px]" {...ui.edit('columns')}>
+                  {ui.shown('columns').map((col) => (
+                    <th key={col.key} className={`py-3 px-4${col.key === 'mrr' || col.key === 'actions' ? ' text-right' : ''}`} {...ui.edit(`columns.${col.key}`)}>
+                      {col.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700 font-normal">

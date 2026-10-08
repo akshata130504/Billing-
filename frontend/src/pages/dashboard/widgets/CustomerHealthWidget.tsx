@@ -3,6 +3,8 @@ import type { DashboardCustomerHealth } from '../../../types';
 import { formatNumber } from '../../../utils/format';
 
 export interface CustomerHealthWidgetProps {
+  /** Card title (configurable in the Super Admin visual editor). */
+  title?: string;
   health: DashboardCustomerHealth;
 }
 
@@ -17,7 +19,7 @@ const BUCKETS: { key: HealthKey; label: string; dot: string; bg: string; text: s
   { key: 'cancelled_this_period', label: 'Cancelled', dot: 'bg-slate-400', bg: 'bg-slate-50/70 border-slate-200/80', text: 'text-slate-700', bar: 'bg-slate-400' },
 ];
 
-export function CustomerHealthWidget({ health }: CustomerHealthWidgetProps) {
+export function CustomerHealthWidget({ health, title = 'Customer Health' }: CustomerHealthWidgetProps) {
   const total = BUCKETS.reduce((sum, b) => sum + health[b.key], 0);
   const pct = (count: number) => (total > 0 ? Math.round((count / total) * 100) : 0);
 
@@ -28,7 +30,7 @@ export function CustomerHealthWidget({ health }: CustomerHealthWidgetProps) {
         <div className="flex items-center gap-2">
           <HeartPulse className="w-4 h-4 text-emerald-600" />
           <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-            Customer Health
+            {title}
           </h3>
         </div>
         <span className="text-xs text-slate-400">

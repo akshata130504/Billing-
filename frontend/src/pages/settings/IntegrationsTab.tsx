@@ -28,6 +28,7 @@ import {
 } from '../../services/integrationsService';
 import { toApiError } from '../../services/apiClient';
 import { cn } from '../../utils/cn';
+import { usePageSpec } from '../../appUi/usePageSpec';
 
 function formatTestedAt(isoString?: string | null): string {
   if (!isoString) return 'Not tested recently';
@@ -817,6 +818,7 @@ function ComingSoonCard({
 
 export function IntegrationsTab() {
   const queryClient = useQueryClient();
+  const ui = usePageSpec('integrations');
 
   const { data, isPending, isError, error, refetch } = useQuery<AllIntegrationsStatus>({
     queryKey: ['settings', 'integrations'],
@@ -872,124 +874,138 @@ export function IntegrationsTab() {
 
   return (
     <div className="space-y-6">
+      <div className="border-b border-slate-200 pb-4" {...ui.edit('header')}>
+        <h2 className="text-base font-semibold text-slate-900">
+          {ui.text('header', 'title')}
+        </h2>
+        <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+          {ui.text('header', 'subtitle')}
+        </p>
+      </div>
+
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600 leading-relaxed">
         Configure live external integrations for payments, email delivery, and event webhooks. Sensitive credentials
         are encrypted at rest and never exposed to the client.
       </div>
 
-      {/* Payments */}
-      <div className="space-y-3">
-        <CategoryHeading>Payments</CategoryHeading>
-        <ActiveIntegrationCard
-          icon={<CreditCard className="w-5 h-5" />}
-          iconClass="bg-blue-50 text-brand-600 border-blue-100"
-          name="Razorpay"
-          description="Accept online credit card, debit card, UPI, and netbanking payments directly on invoice checkout pages."
-          connected={razorpay.is_connected}
-          lastTestedAt={razorpay.last_tested_at}
-          detail={
-            razorpay.is_connected ? (
-              <div className="flex items-center gap-2 flex-wrap">
-                <span>
-                  Key ID:{' '}
-                  <code className="font-mono bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 text-slate-800">
-                    {razorpay.masked_key_id}
-                  </code>
-                </span>
-                <span className="text-slate-400">&bull;</span>
-                <span className="capitalize">{razorpay.mode} mode</span>
-                {razorpay.has_webhook_secret && (
-                  <>
-                    <span className="text-slate-400">&bull;</span>
-                    <span>Webhook verified</span>
-                  </>
-                )}
-              </div>
-            ) : (
-              'The "Pay online" option is hidden on invoice payment pages until configured.'
-            )
-          }
-          onConfigure={() => setActiveModal('razorpay')}
-          onDisconnect={() => setConfirmDisconnect('razorpay')}
-          isDisconnecting={disconnectRazorpayMutation.isPending}
-        />
-      </div>
-
-      {/* Email */}
-      <div className="space-y-3">
-        <CategoryHeading>Email</CategoryHeading>
-        <ActiveIntegrationCard
-          icon={<Mail className="w-5 h-5" />}
-          iconClass="bg-amber-50 text-amber-600 border-amber-100"
-          name="Email (SMTP)"
-          description="Sends invoices, payment receipts, quote approval links, team invitations, and password resets."
-          connected={smtp.is_connected}
-          lastTestedAt={smtp.last_tested_at}
-          detail={
-            smtp.is_connected ? (
-              <div className="flex items-center gap-2 flex-wrap">
-                <span>
-                  Host:{' '}
-                  <code className="font-mono bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 text-slate-800">
-                    {smtp.host}:{smtp.port}
-                  </code>
-                </span>
-                <span className="text-slate-400">&bull;</span>
-                <span>From: {smtp.from_email}</span>
-                <span className="text-slate-400">&bull;</span>
-                <span>{smtp.use_ssl ? 'SSL' : smtp.use_tls ? 'STARTTLS' : 'Plain'}</span>
-              </div>
-            ) : (
-              'Emails are disabled. Team invitation and password-reset links will be surfaced in the UI instead.'
-            )
-          }
-          onConfigure={() => setActiveModal('smtp')}
-          onDisconnect={() => setConfirmDisconnect('smtp')}
-          isDisconnecting={disconnectSMTPMutation.isPending}
-        />
-      </div>
-
-      {/* Outbound Webhooks */}
-      <div className="space-y-3">
-        <CategoryHeading>Webhooks / API</CategoryHeading>
-        <ActiveIntegrationCard
-          icon={<Webhook className="w-5 h-5" />}
-          iconClass="bg-purple-50 text-purple-600 border-purple-100"
-          name="Outbound Webhooks"
-          description="Notify external billing, CRM, or accounting systems via signed HTTP POST requests on billing events."
-          connected={webhook.is_connected}
-          lastTestedAt={webhook.last_tested_at}
-          detail={
-            webhook.is_connected ? (
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="truncate max-w-sm">
-                    URL:{' '}
-                    <code className="font-mono bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 text-slate-800">
-                      {webhook.url}
-                    </code>
-                  </span>
-                  {webhook.has_signing_secret && (
-                    <>
+      <div className="space-y-6" {...ui.edit('cards')}>
+        {ui.render('cards', {
+          razorpay: (item, edit) => (
+            <div key={item.key} className="space-y-3" {...edit}>
+              <CategoryHeading>Payments</CategoryHeading>
+              <ActiveIntegrationCard
+                icon={<CreditCard className="w-5 h-5" />}
+                iconClass="bg-blue-50 text-brand-600 border-blue-100"
+                name={item.label}
+                description={item.caption || 'Accept online credit card, debit card, UPI, and netbanking payments directly on invoice checkout pages.'}
+                connected={razorpay.is_connected}
+                lastTestedAt={razorpay.last_tested_at}
+                detail={
+                  razorpay.is_connected ? (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span>
+                        Key ID:{' '}
+                        <code className="font-mono bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 text-slate-800">
+                          {razorpay.masked_key_id}
+                        </code>
+                      </span>
                       <span className="text-slate-400">&bull;</span>
-                      <span>HMAC signed</span>
-                    </>
-                  )}
-                </div>
-                {webhook.events && webhook.events.length > 0 && (
-                  <div className="text-[11px] text-slate-500">
-                    Subscribed: {webhook.events.join(', ')}
-                  </div>
-                )}
-              </div>
-            ) : (
-              'No outbound webhook endpoint connected.'
-            )
-          }
-          onConfigure={() => setActiveModal('webhook')}
-          onDisconnect={() => setConfirmDisconnect('webhook')}
-          isDisconnecting={disconnectWebhookMutation.isPending}
-        />
+                      <span className="capitalize">{razorpay.mode} mode</span>
+                      {razorpay.has_webhook_secret && (
+                        <>
+                          <span className="text-slate-400">&bull;</span>
+                          <span>Webhook verified</span>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    'The "Pay online" option is hidden on invoice payment pages until configured.'
+                  )
+                }
+                onConfigure={() => setActiveModal('razorpay')}
+                onDisconnect={() => setConfirmDisconnect('razorpay')}
+                isDisconnecting={disconnectRazorpayMutation.isPending}
+              />
+            </div>
+          ),
+          smtp: (item, edit) => (
+            <div key={item.key} className="space-y-3" {...edit}>
+              <CategoryHeading>Email</CategoryHeading>
+              <ActiveIntegrationCard
+                icon={<Mail className="w-5 h-5" />}
+                iconClass="bg-amber-50 text-amber-600 border-amber-100"
+                name={item.label}
+                description={item.caption || 'Sends invoices, payment receipts, quote approval links, team invitations, and password resets.'}
+                connected={smtp.is_connected}
+                lastTestedAt={smtp.last_tested_at}
+                detail={
+                  smtp.is_connected ? (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span>
+                        Host:{' '}
+                        <code className="font-mono bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 text-slate-800">
+                          {smtp.host}:{smtp.port}
+                        </code>
+                      </span>
+                      <span className="text-slate-400">&bull;</span>
+                      <span>From: {smtp.from_email}</span>
+                      <span className="text-slate-400">&bull;</span>
+                      <span>{smtp.use_ssl ? 'SSL' : smtp.use_tls ? 'STARTTLS' : 'Plain'}</span>
+                    </div>
+                  ) : (
+                    'Emails are disabled. Team invitation and password-reset links will be surfaced in the UI instead.'
+                  )
+                }
+                onConfigure={() => setActiveModal('smtp')}
+                onDisconnect={() => setConfirmDisconnect('smtp')}
+                isDisconnecting={disconnectSMTPMutation.isPending}
+              />
+            </div>
+          ),
+          webhook: (item, edit) => (
+            <div key={item.key} className="space-y-3" {...edit}>
+              <CategoryHeading>Webhooks / API</CategoryHeading>
+              <ActiveIntegrationCard
+                icon={<Webhook className="w-5 h-5" />}
+                iconClass="bg-purple-50 text-purple-600 border-purple-100"
+                name={item.label}
+                description={item.caption || 'Notify external billing, CRM, or accounting systems via signed HTTP POST requests on billing events.'}
+                connected={webhook.is_connected}
+                lastTestedAt={webhook.last_tested_at}
+                detail={
+                  webhook.is_connected ? (
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="truncate max-w-sm">
+                          URL:{' '}
+                          <code className="font-mono bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 text-slate-800">
+                            {webhook.url}
+                          </code>
+                        </span>
+                        {webhook.has_signing_secret && (
+                          <>
+                            <span className="text-slate-400">&bull;</span>
+                            <span>HMAC signed</span>
+                          </>
+                        )}
+                      </div>
+                      {webhook.events && webhook.events.length > 0 && (
+                        <div className="text-[11px] text-slate-500">
+                          Subscribed: {webhook.events.join(', ')}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    'No outbound webhook endpoint connected.'
+                  )
+                }
+                onConfigure={() => setActiveModal('webhook')}
+                onDisconnect={() => setConfirmDisconnect('webhook')}
+                isDisconnecting={disconnectWebhookMutation.isPending}
+              />
+            </div>
+          ),
+        })}
       </div>
 
       {/* Accounting */}
