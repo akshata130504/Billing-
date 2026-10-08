@@ -231,6 +231,10 @@ function OrgPendingApprovalScreen({
           Thank you for registering <span className="font-semibold text-slate-800">{organization.name}</span>.
           Our platform team is reviewing your details. Normal billing and workspace operations will be unlocked as soon as your account is approved.
         </p>
+        <p className="mt-2 text-sm text-slate-600">
+          You don&apos;t need to keep this page open. We&apos;ll email you once your organization has been approved,
+          and you can then sign in with the password you created.
+        </p>
         <div className="mt-6 flex flex-col gap-2">
           <Button variant="primary" onClick={onRefresh}>
             Check Approval Status

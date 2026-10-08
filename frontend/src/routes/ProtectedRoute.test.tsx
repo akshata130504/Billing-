@@ -12,6 +12,7 @@ let auth: {
   organizations: { id: string; name: string; slug: string; role: string }[];
 };
 const switchOrganization = vi.fn();
+const refreshMe = vi.fn();
 
 vi.mock('../hooks/useAuth', () => ({
   useAuth: () => ({
@@ -20,7 +21,7 @@ vi.mock('../hooks/useAuth', () => ({
     organization: { id: 'org-1', name: 'Acme Pvt Ltd', slug: 'acme', status: auth.status, status_reason: auth.reason ?? null },
     organizations: auth.organizations,
     logout: vi.fn(),
-    refreshMe: vi.fn(),
+    refreshMe,
     switchOrganization,
     hasRole: (min: Role) => RANK[auth.role] >= RANK[min],
   }),
@@ -44,6 +45,7 @@ describe('ProtectedRoute organization lifecycle', () => {
   beforeEach(() => {
     auth = { role: 'owner', status: 'active', organizations: [] };
     switchOrganization.mockReset();
+    refreshMe.mockReset();
   });
 
   it('renders the workspace for an active organization', () => {
@@ -57,6 +59,20 @@ describe('ProtectedRoute organization lifecycle', () => {
     renderGuard();
     expect(screen.getByText(/pending approval from Rooman/i)).toBeInTheDocument();
     expect(screen.queryByText('Workspace content')).not.toBeInTheDocument();
+  });
+
+  it('tells a pending organization it can close the page and will be emailed', () => {
+    auth.status = 'pending_approval';
+    renderGuard();
+    expect(screen.getByText(/don't need to keep this page open/i)).toBeInTheDocument();
+    expect(screen.getByText(/email you once your organization has been approved/i)).toBeInTheDocument();
+  });
+
+  it('keeps Check Approval Status as a manual refresh fallback', () => {
+    auth.status = 'pending_approval';
+    renderGuard();
+    screen.getByRole('button', { name: 'Check Approval Status' }).click();
+    expect(refreshMe).toHaveBeenCalledTimes(1);
   });
 
   it('shows the rejection reason', () => {

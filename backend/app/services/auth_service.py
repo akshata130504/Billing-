@@ -398,6 +398,53 @@ def _send_signup_verification_email(email: str, full_name: str, otp: str) -> boo
     return send_email(to=email, subject=subject, text_body=text_body, html_body=html_body)
 
 
+def _send_registration_pending_email(email: str, full_name: str, organization_name: str) -> bool:
+    """Tell a freshly registered owner that the organization awaits approval. Contains no secrets."""
+    subject = "Your Rooman Billing organization is pending approval"
+    text_body = (
+        f"Hello {full_name},\n\n"
+        "Thanks for registering with Rooman Billing.\n"
+        f"Your organization \"{organization_name}\" has been successfully registered and is currently "
+        "pending approval from the Rooman team.\n\n"
+        "You don't need to keep the browser page open. We'll notify you by email once your "
+        "organization has been approved.\n\n"
+        "Thanks for your patience.\n\n"
+        "— Rooman Billing"
+    )
+    html_body = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b; }}
+    .card {{ max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }}
+    .header {{ text-align: center; margin-bottom: 24px; }}
+    .title {{ font-size: 20px; font-weight: 700; color: #0f172a; margin: 0 0 8px 0; }}
+    .subtitle {{ font-size: 14px; color: #64748b; margin: 0; }}
+    .note {{ font-size: 13px; color: #475569; background: #f8fafc; border-left: 4px solid #6366f1; padding: 12px 16px; border-radius: 4px; margin: 24px 0; }}
+    .footer {{ font-size: 12px; color: #94a3b8; text-align: center; margin-top: 32px; border-top: 1px solid #f1f5f9; padding-top: 16px; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <h1 class="title">Your organization is pending approval</h1>
+      <p class="subtitle">Thanks for registering with Rooman Billing, {html.escape(full_name)}!</p>
+    </div>
+    <p>Your organization <strong>{html.escape(organization_name)}</strong> has been successfully registered and is currently pending approval from the Rooman team.</p>
+    <div class="note">
+      You don't need to keep the browser page open. We'll notify you by email once your organization has been approved.
+    </div>
+    <p style="font-size: 13px; color: #64748b;">Thanks for your patience.</p>
+    <div class="footer">
+      &copy; Rooman Billing. All rights reserved.
+    </div>
+  </div>
+</body>
+</html>"""
+    return send_email(to=email, subject=subject, text_body=text_body, html_body=html_body)
+
+
 def _ensure_email_claimable(db: Session, email: str) -> Optional[User]:
     """Reject emails that belong to a real account.
 
@@ -847,7 +894,14 @@ def _create_verified_signup(
             "status": organization.status.value,
         },
     )
+    organization_id, organization_name, owner_email, owner_name = organization.id, organization.name, user.email, user.full_name
     _commit(db, "An account with this email or organization already exists.")
+    # Best-effort and strictly after the commit: the registration stands whatever happens to the email.
+    try:
+        if not _send_registration_pending_email(owner_email, owner_name, organization_name):
+            logger.warning("Pending-approval email for organization %s was not sent (SMTP disabled)", organization_id)
+    except Exception as exc:  # noqa: BLE001 - never fail a committed signup over a notification
+        logger.error("Pending-approval email to %s for organization %s failed: %s", owner_email, organization_id, exc)
     return tokens, ctx
 
 

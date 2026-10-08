@@ -22,6 +22,7 @@ paused organization. Every change, and every refused attempt, writes a platform 
 """
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
@@ -32,6 +33,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
 from backend.app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
+from backend.app.core.logging import logger
 from backend.app.core.tenant_context import tenant_context
 from backend.app.models import (
     CreditNote,
@@ -53,6 +55,7 @@ from backend.app.models.portal import CustomerPortalSession, CustomerPortalUser
 from backend.app.models.base import utcnow
 from backend.app.models.platform import PlatformAuditLog, PlatformRole, PlatformStaff
 from backend.app.services import platform_audit
+from backend.app.services.email import frontend_url, send_email
 
 ADMIN = PlatformRole.PLATFORM_ADMINISTRATOR
 OPS = PlatformRole.PLATFORM_OPERATIONS
@@ -520,8 +523,87 @@ def change_lifecycle(
         session_id=actor.session_id, ip_address=actor.ip_address, user_agent=actor.user_agent, organization=org,
         reason=reason, ticket_ref=ticket_ref, details={"from": before, "to": after, **extra},
     )
+    org_id, org_name = org.id, org.name
     db.commit()
+    if action == "approve":
+        _notify_owners_approved(db, org_id, org_name)
     return LifecycleResult(organization=_summary(org, _active_members(db, org.id)), changed={"from": before, "to": after, **extra})
+
+
+def _approval_email(owner_name: str, organization_name: str, login_url: str) -> Tuple[str, str, str]:
+    """(subject, text, html) for the approval notice. Only a plain sign-in link: no credentials or tokens."""
+    subject = "Your Rooman Billing organization has been approved"
+    text_body = (
+        f"Hello {owner_name},\n\n"
+        f"Good news! Your organization \"{organization_name}\" has been approved and you can now access Rooman Billing.\n\n"
+        "Use the password you created during registration to sign in:\n\n"
+        f"{login_url}\n\n"
+        "— Rooman Billing"
+    )
+    html_body = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b; }}
+    .card {{ max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }}
+    .header {{ text-align: center; margin-bottom: 24px; }}
+    .title {{ font-size: 20px; font-weight: 700; color: #0f172a; margin: 0 0 8px 0; }}
+    .subtitle {{ font-size: 14px; color: #64748b; margin: 0; }}
+    .cta {{ text-align: center; margin: 32px 0; }}
+    .button {{ display: inline-block; background: #4f46e5; color: #ffffff !important; text-decoration: none; font-weight: 600; padding: 12px 28px; border-radius: 8px; }}
+    .footer {{ font-size: 12px; color: #94a3b8; text-align: center; margin-top: 32px; border-top: 1px solid #f1f5f9; padding-top: 16px; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <h1 class="title">Your organization has been approved</h1>
+      <p class="subtitle">Good news, {html.escape(owner_name)}!</p>
+    </div>
+    <p><strong>{html.escape(organization_name)}</strong> has been approved and you can now access Rooman Billing.</p>
+    <p>Use the password you created during registration to sign in.</p>
+    <div class="cta">
+      <a class="button" href="{html.escape(login_url, quote=True)}">Sign in to Rooman Billing</a>
+    </div>
+    <div class="footer">
+      &copy; Rooman Billing. All rights reserved.
+    </div>
+  </div>
+</body>
+</html>"""
+    return subject, text_body, html_body
+
+
+def _notify_owners_approved(db: Session, organization_id: str, organization_name: str) -> None:
+    """Email the organization's active owner(s) after an approval has committed.
+
+    Best-effort by design: the approval is already durable, so nothing here may raise or undo it.
+    """
+    try:
+        owners = db.execute(
+            select(User.full_name, User.email)
+            .join(Membership, Membership.user_id == User.id)
+            .where(
+                Membership.organization_id == organization_id,
+                Membership.status == MembershipStatus.ACTIVE,
+                Membership.role == MemberRole.OWNER,
+            )
+            .order_by(User.email)
+        ).all()
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Could not look up owners to notify of approval of organization %s: %s", organization_id, exc)
+        return
+    login_url = frontend_url("login")
+    for full_name, email in owners:
+        if not email:
+            continue
+        try:
+            subject, text_body, html_body = _approval_email(full_name or email, organization_name, login_url)
+            if not send_email(to=email, subject=subject, text_body=text_body, html_body=html_body):
+                logger.warning("Approval email for organization %s was not sent to %s (SMTP disabled)", organization_id, email)
+        except Exception as exc:  # noqa: BLE001 - smtplib / OSError / anything: approval stands
+            logger.error("Approval email to %s for organization %s failed: %s", email, organization_id, exc)
 
 
 def set_jobs_paused(
