@@ -191,9 +191,13 @@ def catalog_summary(db: Session, organization, *, search: Optional[str] = None) 
         like = f"%{search.strip()}%"
         stmt = stmt.where(or_(Offering.name.ilike(like), Offering.sku.ilike(like)))
     by_type = {t.value: 0 for t in OfferingType}
+    active_by_type = {t.value: 0 for t in OfferingType}
+    inactive_by_type = {t.value: 0 for t in OfferingType}
     active = inactive = 0
     for otype, is_active, count in db.execute(stmt.group_by(Offering.type, Offering.is_active)).all():
         by_type[_key(otype)] = by_type.get(_key(otype), 0) + int(count)
+        bucket = active_by_type if is_active else inactive_by_type
+        bucket[_key(otype)] = bucket.get(_key(otype), 0) + int(count)
         if is_active:
             active += int(count)
         else:
@@ -208,7 +212,14 @@ def catalog_summary(db: Session, organization, *, search: Optional[str] = None) 
         pb_by_status[_key(status)] = pb_by_status.get(_key(status), 0) + int(count)
 
     return {
-        "offerings": {"total": active + inactive, "active": active, "inactive": inactive, "by_type": by_type},
+        "offerings": {
+            "total": active + inactive,
+            "active": active,
+            "inactive": inactive,
+            "by_type": by_type,
+            "active_by_type": active_by_type,
+            "inactive_by_type": inactive_by_type,
+        },
         "price_books": {"total": sum(pb_by_status.values()), "by_status": pb_by_status},
     }
 

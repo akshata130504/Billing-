@@ -207,6 +207,25 @@ export interface SignupVerificationRequest {
   organization_name: string;
   full_name: string;
   email: string;
+  /** Not needed to request the code: the password is chosen after the email is verified. */
+  password?: string;
+}
+
+export interface SignupConfirmEmailRequest {
+  email: string;
+  otp: string;
+}
+
+export interface SignupConfirmEmailResponse {
+  verification_token: string;
+  expires_in_seconds: number;
+}
+
+export interface SignupCompleteRequest {
+  email: string;
+  verification_token: string;
+  organization_name: string;
+  full_name: string;
   password: string;
 }
 

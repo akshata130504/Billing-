@@ -1,11 +1,13 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { InvoiceFormPage } from './InvoiceFormPage';
 import { planPricingService } from '../../services/planPricingService';
 import { catalogCpqService } from '../../services/catalogCpqService';
 import { invoiceService } from '../../services/invoiceService';
+
+const { showToast } = vi.hoisted(() => ({ showToast: vi.fn() }));
 
 vi.mock('../../services/planPricingService', () => ({
   planPricingService: {
@@ -17,6 +19,7 @@ vi.mock('../../services/planPricingService', () => ({
 vi.mock('../../services/catalogCpqService', () => ({
   catalogCpqService: {
     listOfferings: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+    getOffering: vi.fn(),
   },
 }));
 
@@ -46,7 +49,7 @@ vi.mock('../../services/invoiceService', () => ({
 }));
 
 vi.mock('../../components/common/Toast', () => ({
-  useToast: () => ({ showToast: vi.fn() }),
+  useToast: () => ({ showToast }),
 }));
 
 const mockedPricing = vi.mocked(planPricingService);
@@ -430,5 +433,204 @@ describe('<InvoiceFormPage /> line item selection switching', () => {
       late.resolve(priceResponse(999));
     });
     expect(rateInput().value).toBe('100');
+  });
+});
+
+// --- Archived offerings ------------------------------------------------------------------------------
+
+describe('<InvoiceFormPage /> archived offerings', () => {
+  const ACTIVE_CAT = {
+    id: 'c1',
+    name: 'Product C1',
+    description: 'Product C1 description',
+    sku: 'C1',
+    type: 'product',
+    base_price: '200.00',
+    tax_rate_pct: '18.00',
+    pricing_model: 'per_unit',
+    pricing_tiers: null,
+    is_active: true,
+  };
+  const ACTIVE_CAT_2 = { ...ACTIVE_CAT, id: 'c2', name: 'Product C2', description: 'Product C2 description', sku: 'C2' };
+  const ARCHIVED = { ...ACTIVE_CAT, id: 'off-archived', name: 'Old Product', description: 'Old Product description', sku: 'OLD', is_active: false };
+
+  const storedInvoice = () => ({
+    id: 'inv1',
+    invoice_number: 'INV-1',
+    customer_id: 'cust-1',
+    issue_date: '2026-10-01',
+    due_date: '2026-10-31',
+    items: [
+      { id: 'line-archived', offering_id: 'off-archived', description: 'Old Product', quantity: '2', unit_price: '300.00', tax_rate_pct: '18', pricing_model: 'tiered' },
+      { id: 'line-active', offering_id: 'c1', description: 'Product C1', quantity: '1', unit_price: '200.00', tax_rate_pct: '18' },
+    ],
+  });
+
+  function renderRoute(path: string) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route path="/invoices/new" element={<InvoiceFormPage />} />
+            <Route path="/invoices/:id/edit" element={<InvoiceFormPage />} />
+            <Route path="*" element={<div>elsewhere</div>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  const lineSelects = () =>
+    screen
+      .getAllByRole('combobox')
+      .filter((el) => el.tagName === 'SELECT' && (el as HTMLSelectElement).options[0]?.text.startsWith('-- Choose')) as HTMLSelectElement[];
+  const quantityInputs = () => Array.from(document.querySelectorAll('input[type="number"][min="1"]')) as HTMLInputElement[];
+  type SavedLine = { id?: string; offering_id?: string; quantity?: number };
+  const savedLines = (mock: unknown, payloadArg = 1): SavedLine[] =>
+    (mock as { mock: { calls: Array<Array<{ items: SavedLine[] }>> } }).mock.calls[0][payloadArg].items;
+  const saveDraft = async () => {
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save as Draft'));
+    });
+  };
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockedPricing.getPlans.mockResolvedValue({ items: [plan('p1', 'flat', 100)], total: 1 } as any);
+    vi.mocked(catalogCpqService.listOfferings).mockResolvedValue({ items: [ACTIVE_CAT, ACTIVE_CAT_2], total: 2 } as any);
+    vi.mocked(catalogCpqService.getOffering).mockResolvedValue(ARCHIVED as any);
+    vi.mocked(invoiceService.getInvoice).mockResolvedValue(storedInvoice() as any);
+    vi.mocked(invoiceService.updateInvoice).mockResolvedValue({ id: 'inv1' } as any);
+    vi.mocked(invoiceService.createInvoice).mockResolvedValue({ id: 'inv2' } as any);
+    mockedPricing.calculatePrice.mockResolvedValue(priceResponse(100, 'flat') as any);
+  });
+
+  it('requests only active offerings for the pickers', async () => {
+    renderRoute('/invoices/new');
+    await waitFor(() => expect(lineSelects().length).toBe(1));
+    expect(mockedPricing.getPlans).toHaveBeenCalledWith(expect.objectContaining({ is_active: true }));
+    expect(catalogCpqService.listOfferings).toHaveBeenCalledWith(expect.objectContaining({ is_active: true }));
+    const options = within(lineSelects()[0]).getAllByRole('option').map((o) => o.textContent);
+    expect(options.some((t) => t?.includes('Product C1'))).toBe(true);
+    expect(options.some((t) => t?.includes('Old Product'))).toBe(false);
+  });
+
+  it('keeps an archived line of an existing invoice visible as a disabled "(Archived)" option', async () => {
+    renderRoute('/invoices/inv1/edit');
+    await waitFor(() => expect(lineSelects().length).toBe(2));
+    expect(catalogCpqService.getOffering).toHaveBeenCalledWith('off-archived');
+    const archivedSelect = lineSelects()[0];
+    expect(archivedSelect.value).toBe('offering:off-archived');
+    const option = within(archivedSelect).getByRole('option', { name: /Old Product.*\(Archived\)/ }) as HTMLOptionElement;
+    expect(option.disabled).toBe(true);
+    // It is not offered to the other line, nor to a newly added one.
+    expect(within(lineSelects()[1]).queryByText(/Old Product/)).toBeNull();
+    fireEvent.click(screen.getByText('Add Line Item'));
+    await waitFor(() => expect(lineSelects().length).toBe(3));
+    expect(within(lineSelects()[2]).queryByText(/Old Product/)).toBeNull();
+  });
+
+  it('does not silently replace an archived line with a custom item', async () => {
+    renderRoute('/invoices/inv1/edit');
+    await waitFor(() => expect(lineSelects().length).toBe(2));
+    expect((screen.getAllByPlaceholderText(/Item Name/)[0] as HTMLInputElement).value).toBe('Old Product');
+    expect(lineSelects()[0].value).not.toBe('');
+  });
+
+  it('sends the stored id of retained lines when updating', async () => {
+    renderRoute('/invoices/inv1/edit');
+    await waitFor(() => expect(lineSelects().length).toBe(2));
+    await saveDraft();
+    await waitFor(() => expect(invoiceService.updateInvoice).toHaveBeenCalled());
+    expect(vi.mocked(invoiceService.updateInvoice).mock.calls[0][0]).toBe('inv1');
+    const lines = savedLines(invoiceService.updateInvoice);
+    expect(lines[0]).toEqual(expect.objectContaining({ id: 'line-archived', offering_id: 'off-archived' }));
+    expect(lines[1]).toEqual(expect.objectContaining({ id: 'line-active', offering_id: 'c1' }));
+  });
+
+  it('keeps the id and the stored rate when only the quantity of an archived line is edited', async () => {
+    renderRoute('/invoices/inv1/edit');
+    await waitFor(() => expect(lineSelects().length).toBe(2));
+    fireEvent.change(quantityInputs()[0], { target: { value: '5' } });
+    await waitFor(() => expect(quantityInputs()[0].value).toBe('5'));
+    // The stored line is "tiered": without the guard this would ask the pricing engine again.
+    expect(mockedPricing.calculatePrice).not.toHaveBeenCalled();
+    await saveDraft();
+    await waitFor(() => expect(invoiceService.updateInvoice).toHaveBeenCalled());
+    expect(savedLines(invoiceService.updateInvoice)[0]).toEqual(
+      expect.objectContaining({ id: 'line-archived', offering_id: 'off-archived', quantity: 5, unit_price: 300 })
+    );
+  });
+
+  it('does not send an id for a newly added line', async () => {
+    renderRoute('/invoices/inv1/edit');
+    await waitFor(() => expect(lineSelects().length).toBe(2));
+    fireEvent.click(screen.getByText('Add Line Item'));
+    await waitFor(() => expect(lineSelects().length).toBe(3));
+    fireEvent.change(screen.getAllByPlaceholderText(/Item Name/)[2], { target: { value: 'Custom thing' } });
+    await saveDraft();
+    await waitFor(() => expect(invoiceService.updateInvoice).toHaveBeenCalled());
+    const lines = savedLines(invoiceService.updateInvoice);
+    expect(lines).toHaveLength(3);
+    expect(lines[2].id).toBeUndefined();
+  });
+
+  it('never sends line ids when creating an invoice', async () => {
+    renderRoute('/invoices/new');
+    await waitFor(() => expect(lineSelects().length).toBe(1));
+    await act(async () => {
+      fireEvent.change(lineSelects()[0], { target: { value: 'offering:c1' } });
+    });
+    fireEvent.click(screen.getByText('pick-customer'));
+    await saveDraft();
+    await waitFor(() => expect(invoiceService.createInvoice).toHaveBeenCalled());
+    const lines = savedLines(invoiceService.createInvoice, 0);
+    expect(lines[0].offering_id).toBe('c1');
+    expect(lines[0].id).toBeUndefined();
+    expect(invoiceService.updateInvoice).not.toHaveBeenCalled();
+  });
+
+  it('clears the line id when an existing line is switched to another offering', async () => {
+    renderRoute('/invoices/inv1/edit');
+    await waitFor(() => expect(lineSelects().length).toBe(2));
+    await act(async () => {
+      fireEvent.change(lineSelects()[1], { target: { value: 'offering:c2' } });
+    });
+    await waitFor(() => expect(lineSelects()[1].value).toBe('offering:c2'));
+    await saveDraft();
+    await waitFor(() => expect(invoiceService.updateInvoice).toHaveBeenCalled());
+    const lines = savedLines(invoiceService.updateInvoice);
+    expect(lines[0].id).toBe('line-archived');
+    expect(lines[1]).toEqual(expect.objectContaining({ offering_id: 'c2' }));
+    expect(lines[1].id).toBeUndefined();
+  });
+
+  it('shows the pricing 422 as an error and does not keep the offering as a normal priced line', async () => {
+    mockedPricing.calculatePrice.mockRejectedValue({
+      code: 'VALIDATION_ERROR',
+      message: "Offering 'Plan p1' is archived and cannot be priced.",
+      status: 422,
+    });
+    renderRoute('/invoices/new');
+    await waitFor(() => expect(lineSelects().length).toBe(1));
+    await act(async () => {
+      fireEvent.change(lineSelects()[0], { target: { value: 'plan:p1' } });
+    });
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith('error', expect.any(String), expect.stringContaining('archived'))
+    );
+    expect(lineSelects()[0].value).toBe('');
+  });
+
+  it('still only warns when pricing is merely unavailable (unchanged behaviour)', async () => {
+    mockedPricing.calculatePrice.mockRejectedValue(new Error('network down'));
+    renderRoute('/invoices/new');
+    await waitFor(() => expect(lineSelects().length).toBe(1));
+    await act(async () => {
+      fireEvent.change(lineSelects()[0], { target: { value: 'plan:p1' } });
+    });
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('warning', 'Could not calculate price', expect.any(String)));
+    expect(lineSelects()[0].value).toBe('plan:p1');
   });
 });

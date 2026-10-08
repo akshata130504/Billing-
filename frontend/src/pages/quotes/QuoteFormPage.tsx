@@ -46,7 +46,12 @@ export function QuoteFormPage() {
   const isEditing = Boolean(id);
   const { showToast } = useToast();
 
+  // Active offerings only: the picker for new lines.
   const [offerings, setOfferings] = useState<OfferingOut[]>([]);
+  // Offerings of an existing quote's lines that have been archived since: shown (disabled) so the
+  // line stays readable, never selectable for new lines.
+  const [archivedLineOfferings, setArchivedLineOfferings] = useState<OfferingOut[]>([]);
+  const archivedIds = useMemo(() => new Set(archivedLineOfferings.map((o) => o.id)), [archivedLineOfferings]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -151,7 +156,7 @@ export function QuoteFormPage() {
     async function loadData() {
       setIsLoading(true);
       try {
-        const offRes = await catalogCpqService.listOfferings({ page_size: 100 });
+        const offRes = await catalogCpqService.listOfferings({ is_active: true, page_size: 100 });
         setOfferings(offRes.items);
 
         if (isEditing && id) {
@@ -170,6 +175,7 @@ export function QuoteFormPage() {
           setTerms(initialTerms);
           setItems(
             q.items.map((it) => ({
+              id: it.id,
               offering_id: it.offering_id,
               product_id: it.product_id,
               plan_id: it.plan_id,
@@ -180,6 +186,19 @@ export function QuoteFormPage() {
               pricing_explanation: it.pricing_explanation,
             }))
           );
+
+          // A line may reference an offering that has been archived since the quote was made. It is
+          // not in the active list, so look it up and keep it (read-only) for display.
+          const activeIds = new Set(offRes.items.map((o) => o.id));
+          const lineOfferingIds = Array.from(
+            new Set(q.items.map((it) => it.offering_id).filter((oid): oid is string => Boolean(oid) && !activeIds.has(oid as string)))
+          );
+          if (lineOfferingIds.length > 0) {
+            const found = await Promise.all(
+              lineOfferingIds.map((oid) => catalogCpqService.getOffering(oid).catch(() => null))
+            );
+            setArchivedLineOfferings(found.filter((o): o is OfferingOut => Boolean(o) && o!.is_active === false));
+          }
         } else if (location.state?.prefilledItem) {
           // Pre-filled from Pricing Simulator
           const pref = location.state.prefilledItem;
@@ -241,6 +260,8 @@ export function QuoteFormPage() {
       const updated = [...items];
       updated[index] = {
         ...updated[index],
+        // A different offering is a new use, not the stored line: it must not keep the line's id.
+        id: undefined,
         offering_id: off.id,
         name: off.name,
         sku: off.sku,
@@ -251,10 +272,18 @@ export function QuoteFormPage() {
         pricing_explanation: JSON.stringify(sim.explanation),
       };
       setItems(updated);
-    } catch {
+    } catch (err) {
+      const apiError = toApiError(err);
+      if (apiError.status === 422) {
+        // The offering cannot be priced (e.g. it was archived since the list loaded): say so
+        // instead of silently adding it at its base price.
+        showToast('error', 'This offering cannot be used', apiError.message);
+        return;
+      }
       const updated = [...items];
       updated[index] = {
         ...updated[index],
+        id: undefined,
         offering_id: off.id,
         name: off.name,
         sku: off.sku,
@@ -271,7 +300,9 @@ export function QuoteFormPage() {
     const item = items[index];
     const newQty = Math.max(1, qty);
 
-    if (item.offering_id) {
+    // A retained archived line keeps its stored price: archived offerings cannot be priced, and
+    // only its quantity is editable.
+    if (item.offering_id && !archivedIds.has(item.offering_id)) {
       try {
         const sim = await planPricingService.simulatePricing({
           offering_id: item.offering_id,
@@ -434,6 +465,8 @@ export function QuoteFormPage() {
         notes: notes.trim() || undefined,
         terms: terms.trim() || undefined,
         items: items.map((it) => ({
+          // Only lines kept from the stored quote carry an id; new lines never do.
+          id: isEditing ? it.id || undefined : undefined,
           offering_id: it.offering_id || undefined,
           product_id: it.product_id || undefined,
           plan_id: it.plan_id || undefined,
@@ -677,6 +710,13 @@ export function QuoteFormPage() {
                             {o.name} ({o.sku}) - {o.pricing_model.toUpperCase()}
                           </option>
                         ))}
+                        {archivedLineOfferings
+                          .filter((o) => o.id === item.offering_id)
+                          .map((o) => (
+                            <option key={o.id} value={o.id} disabled>
+                              {o.name} ({o.sku}) - {o.pricing_model.toUpperCase()} (Archived)
+                            </option>
+                          ))}
                       </select>
                       {item.pricing_model && (
                         <span className="text-[10px] font-semibold text-purple-600 block mt-1 capitalize">

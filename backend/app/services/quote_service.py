@@ -7,7 +7,7 @@ import html as html_lib
 import re
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from sqlalchemy import Select, or_, select, update
 from sqlalchemy.orm import Session, object_session, selectinload
@@ -175,15 +175,57 @@ def list_quotes(
 from backend.app.models.catalog_cpq import Offering
 
 
-def _validate_refs(db: Session, organization_id: str, items: Sequence[LineItemIn]) -> None:
+def _archived_line_problems(
+    items: Sequence[LineItemIn], archived_ids: set, retained_lines: Mapping[str, Optional[str]]
+) -> Dict[str, str]:
+    """Lines that use an archived offering without being an existing line of THIS quote that the
+    client is keeping. ``retained_lines`` maps each stored line id of the quote to its offering id.
+
+    A line is retained only when it names a stored line of this quote, that stored line has the
+    same offering, and no earlier posted line already claimed it. Everything else (no id, an id
+    of another quote, an id of another offering, a second claim of one id) is a NEW use of the
+    archived offering. A removed-and-re-added line carries no id, so it is rejected too."""
+    problems: Dict[str, str] = {}
+    claimed: set = set()
+    for line in items:
+        offering_id = line.offering_id
+        if offering_id not in archived_ids:
+            continue
+        line_id = getattr(line, "id", None)
+        if not line_id:
+            reason = "archived offering cannot be added to a quote line"
+        elif line_id not in retained_lines:
+            reason = "line id does not belong to this quote"
+        elif retained_lines[line_id] != offering_id:
+            reason = "line id belongs to a different offering"
+        elif line_id in claimed:
+            reason = "line id is already used by another line"
+        else:
+            claimed.add(line_id)
+            continue
+        problems.setdefault(f"items.offering_id.{offering_id}", reason)
+    return problems
+
+
+def _validate_refs(
+    db: Session,
+    organization_id: str,
+    items: Sequence[LineItemIn],
+    retained_lines: Optional[Mapping[str, Optional[str]]] = None,
+) -> None:
     offering_ids = {i.offering_id for i in items if i.offering_id}
     product_ids = {i.product_id for i in items if i.product_id}
     plan_ids = {i.plan_id for i in items if i.plan_id}
     fields: Dict[str, str] = {}
+    archived_ids: set = set()
     if offering_ids:
-        found_off = set(
-            db.scalars(select(Offering.id).where(Offering.organization_id == organization_id, Offering.id.in_(offering_ids)))
-        )
+        rows = db.execute(
+            select(Offering.id, Offering.is_active).where(
+                Offering.organization_id == organization_id, Offering.id.in_(offering_ids)
+            )
+        ).all()
+        found_off = {row[0] for row in rows}
+        archived_ids = {row[0] for row in rows if not row[1]}
         for oid in offering_ids - found_off:
             fields[f"items.offering_id.{oid}"] = "unknown offering"
     # quote_items.product_id / plan_id are foreign keys to products / plans, so only a legacy
@@ -221,6 +263,14 @@ def _validate_refs(db: Session, organization_id: str, items: Sequence[LineItemIn
                 "a catalog offering must be sent as offering_id."
             )
         raise ValidationAppError(message, {"fields": fields})
+    if archived_ids:
+        problems = _archived_line_problems(items, archived_ids, retained_lines or {})
+        if problems:
+            raise ValidationAppError(
+                "An archived offering cannot be used on a new quote line; it can only stay on a line "
+                "that is already on this quote.",
+                {"fields": problems},
+            )
 
 
 def _offering_ids(db: Session, organization_id: str, ids) -> set:
@@ -407,7 +457,10 @@ def update_quote(db: Session, ctx: CurrentContext, quote_id: str, data: QuoteUpd
     discount = changes["discount_pct"] if changes.get("discount_pct") is not None else quote.discount_pct
     quote_supply = gst.resolve_supply(ctx.organization, quote.customer)
     if data.items is not None:
-        _validate_refs(db, ctx.organization_id, data.items)
+        # Read the stored lines BEFORE _apply_totals rebuilds them (and re-issues their ids): they
+        # are the only lines of this quote that may keep an archived offering.
+        retained_lines = {line.id: line.offering_id for line in quote.items}
+        _validate_refs(db, ctx.organization_id, data.items, retained_lines)
         totals = compute_quote_totals(data.items, discount, supply=quote_supply)
         _apply_totals(quote, totals, quote_supply)
     elif "discount_pct" in changes and changes["discount_pct"] is not None:

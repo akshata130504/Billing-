@@ -35,7 +35,9 @@ from backend.app.core.security import (
     constant_time_equals,
     create_access_token,
     create_mfa_token,
+    create_signup_verification_token,
     decode_mfa_token,
+    decode_signup_verification_token,
     decrypt_secret,
     encrypt_secret,
     generate_opaque_token,
@@ -87,6 +89,8 @@ NOT_A_MEMBER = "You are not an active member of any organization."
 OTP_EXPIRY_MINUTES = 10
 OTP_MAX_ATTEMPTS = 5
 OTP_RESEND_COOLDOWN_SECONDS = 60
+# How long a verified mailbox may take to choose a password and finish creating the organization.
+SIGNUP_COMPLETION_MINUTES = 15
 
 
 # --- helpers -------------------------------------------------------------------------
@@ -445,6 +449,12 @@ def _raise_email_delivery_failure(db: Session, email: str, exc: Exception, actio
     )
 
 
+def _pending_password_hash(password: Optional[str]) -> str:
+    """Hash stored on a pending signup. Without a password yet it is the hash of a random secret
+    nobody knows, so nothing can ever match it; the real password is set by /signup/complete."""
+    return hash_password(password if password is not None else generate_opaque_token())
+
+
 def request_signup_verification(
     db: Session,
     data: SignupVerificationRequest,
@@ -453,7 +463,11 @@ def request_signup_verification(
 ) -> Tuple[str, int, int]:
     email = normalize_email(data.email)
     _ensure_email_claimable(db, email)
-    _password_problem(data.password)
+    # The sign-up page now asks for the password only after the email is verified, so the code
+    # can be requested without one. A password, when sent, must still meet the policy.
+    password_supplied = data.password is not None
+    if password_supplied:
+        _password_problem(data.password)
 
     org_name = data.organization_name.strip()
     if not org_name:
@@ -478,11 +492,18 @@ def request_signup_verification(
 
     pending_expires = aware(pending.expires_at) if pending is not None else None
     live_pending = pending is not None and pending_expires is not None and pending_expires > now
-    if live_pending and not verify_password(data.password, pending.hashed_password):
-        # A live request exists that was started with a different password - possibly by someone
-        # else racing the real owner of this mailbox. Never overwrite its details: just send a
-        # fresh code to the mailbox. verify-otp requires the original password, so whoever
-        # submitted this request cannot complete someone else's signup with their own password.
+    password_matches = bool(
+        data.password is not None
+        and pending is not None
+        and live_pending
+        and verify_password(data.password, pending.hashed_password)
+    )
+    if pending is not None and live_pending and not password_matches:
+        # A live request exists that was not proven to be this requester's own (no password, or a
+        # different one) - possibly someone racing the real owner of this mailbox. Never overwrite
+        # its details: just send a fresh code to the mailbox. The code only ever reaches the
+        # mailbox owner, and /signup/complete takes the organization details from whoever proves
+        # that; the legacy verify-otp still requires the original password.
         pending.otp_hash = otp_hash
         pending.expires_at = expires_at
         pending.attempts = 0
@@ -494,7 +515,7 @@ def request_signup_verification(
             email=email,
             organization_name=org_name,
             full_name=data.full_name.strip(),
-            hashed_password=hash_password(data.password),
+            hashed_password=_pending_password_hash(data.password),
             otp_hash=otp_hash,
             expires_at=expires_at,
             attempts=0,
@@ -507,7 +528,7 @@ def request_signup_verification(
         display_name = data.full_name.strip()
         pending.organization_name = org_name
         pending.full_name = display_name
-        pending.hashed_password = hash_password(data.password)
+        pending.hashed_password = _pending_password_hash(data.password)
         pending.otp_hash = otp_hash
         pending.expires_at = expires_at
         pending.attempts = 0
@@ -578,15 +599,9 @@ def resend_signup_otp(db: Session, email: str) -> Tuple[str, int, int]:
     return email, OTP_EXPIRY_MINUTES * 60, OTP_RESEND_COOLDOWN_SECONDS
 
 
-def verify_signup_otp(
-    db: Session,
-    email: str,
-    otp: str,
-    password: str,
-    ip: Optional[str] = None,
-    user_agent: Optional[str] = None,
-) -> Tuple[TokenBundle, ActorContext]:
-    email = normalize_email(email)
+def _pending_for_otp(db: Session, email: str, now: datetime) -> PendingSignup:
+    """The live pending signup for `email`; a missing, expired or attempt-locked one is rejected
+    (and removed when it can never be used again)."""
     pending = db.scalars(select(PendingSignup).where(PendingSignup.email == email)).first()
     if pending is None:
         raise ValidationAppError(
@@ -594,7 +609,6 @@ def verify_signup_otp(
             {"fields": {"otp": "not_found"}},
         )
 
-    now = utcnow()
     expires_at = aware(pending.expires_at)
     if expires_at is None or expires_at <= now:
         db.delete(pending)
@@ -611,6 +625,107 @@ def verify_signup_otp(
             "Maximum verification attempts exceeded. Please request a new code.",
             {"fields": {"otp": "locked"}, "attempts_remaining": 0},
         )
+    return pending
+
+
+def _reject_wrong_otp(db: Session, pending: PendingSignup) -> None:
+    """Count a wrong code; the fifth one invalidates the pending signup. Always raises."""
+    pending.attempts += 1
+    remaining = OTP_MAX_ATTEMPTS - pending.attempts
+    if remaining <= 0:
+        db.delete(pending)
+        _commit(db)
+        raise ValidationAppError(
+            "Maximum verification attempts exceeded. This code has been invalidated. Please request a new code.",
+            {"fields": {"otp": "locked"}, "attempts_remaining": 0},
+        )
+    _commit(db)
+    raise ValidationAppError(
+        f"Invalid verification code. {remaining} attempt(s) remaining.",
+        {"fields": {"otp": "invalid"}, "attempts_remaining": remaining},
+    )
+
+
+def confirm_signup_email(db: Session, email: str, otp: str) -> Tuple[str, int]:
+    """Check the emailed code without creating anything. Returns (verification token, seconds).
+
+    Same expiry, attempt limit and hashing as the legacy verify-otp. On success the code is spent
+    (replaced by a random hash, so it can never be entered again) and the pending signup is kept
+    for SIGNUP_COMPLETION_MINUTES so the verified owner can choose a password and finish.
+    """
+    email = normalize_email(email)
+    now = utcnow()
+    pending = _pending_for_otp(db, email, now)
+
+    if not constant_time_equals(pending.otp_hash, hash_otp(email, otp)):
+        _reject_wrong_otp(db, pending)
+
+    existing = get_user_by_email(db, email)
+    if existing is not None and existing.hashed_password is not None:
+        db.delete(pending)
+        _commit(db)
+        raise ConflictError("An account with this email already exists.", {"fields": {"email": "already registered"}})
+
+    completion_expires = now + timedelta(minutes=SIGNUP_COMPLETION_MINUTES)
+    pending.otp_hash = hash_otp(email, generate_opaque_token())
+    pending.attempts = 0
+    pending.expires_at = completion_expires
+    _commit(db)
+    token = create_signup_verification_token(pending.id, email, completion_expires)
+    return token, SIGNUP_COMPLETION_MINUTES * 60
+
+
+def complete_signup(
+    db: Session,
+    email: str,
+    verification_token: str,
+    organization_name: str,
+    full_name: str,
+    password: str,
+    ip: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Tuple[TokenBundle, ActorContext]:
+    """Create the organization once the mailbox is verified and a policy-compliant password chosen."""
+    email = normalize_email(email)
+    invalid = ValidationAppError(
+        "Your email verification has expired or is invalid. Please verify your email again.",
+        {"fields": {"verification_token": "invalid"}},
+    )
+    try:
+        claims = decode_signup_verification_token(verification_token)
+    except jwt.PyJWTError:
+        raise invalid from None
+    if claims.get("email") != email:
+        raise invalid
+
+    now = utcnow()
+    pending = db.scalars(select(PendingSignup).where(PendingSignup.id == claims["sub"])).first()
+    expires_at = aware(pending.expires_at) if pending is not None else None
+    if pending is None or pending.email != email or expires_at is None or expires_at <= now:
+        raise invalid
+
+    _password_problem(password)
+    org_name = organization_name.strip()
+    name = full_name.strip()
+    if not org_name:
+        raise ValidationAppError("Organization name cannot be empty.", {"fields": {"organization_name": "required"}})
+    if not name:
+        raise ValidationAppError("Full name cannot be empty.", {"fields": {"full_name": "required"}})
+
+    return _create_verified_signup(db, pending, email, org_name, name, hash_password(password), now, ip, user_agent)
+
+
+def verify_signup_otp(
+    db: Session,
+    email: str,
+    otp: str,
+    password: str,
+    ip: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Tuple[TokenBundle, ActorContext]:
+    email = normalize_email(email)
+    now = utcnow()
+    pending = _pending_for_otp(db, email, now)
 
     expected_hash = hash_otp(email, otp)
     otp_ok = constant_time_equals(pending.otp_hash, expected_hash)
@@ -628,31 +743,30 @@ def verify_signup_otp(
             {"fields": {"password": "mismatch"}, "attempts_remaining": remaining},
         )
     if not otp_ok:
-        pending.attempts += 1
-        remaining = OTP_MAX_ATTEMPTS - pending.attempts
-        if remaining <= 0:
-            db.delete(pending)
-            _commit(db)
-            raise ValidationAppError(
-                "Maximum verification attempts exceeded. This code has been invalidated. Please request a new code.",
-                {"fields": {"otp": "locked"}, "attempts_remaining": 0},
-            )
-        _commit(db)
-        raise ValidationAppError(
-            f"Invalid verification code. {remaining} attempt(s) remaining.",
-            {"fields": {"otp": "invalid"}, "attempts_remaining": remaining},
-        )
+        _reject_wrong_otp(db, pending)
 
-    # Valid OTP verified!
+    return _create_verified_signup(
+        db, pending, email, pending.organization_name, pending.full_name, pending.hashed_password, now, ip, user_agent
+    )
+
+
+def _create_verified_signup(
+    db: Session,
+    pending: PendingSignup,
+    email: str,
+    org_name: str,
+    full_name: str,
+    hashed_password: str,
+    now: datetime,
+    ip: Optional[str],
+    user_agent: Optional[str],
+) -> Tuple[TokenBundle, ActorContext]:
+    """Turn a pending signup whose mailbox has been verified into the organization and its owner."""
     existing = get_user_by_email(db, email)
     if existing is not None and existing.hashed_password is not None:
         db.delete(pending)
         _commit(db)
         raise ConflictError("An account with this email already exists.", {"fields": {"email": "already registered"}})
-
-    org_name = pending.organization_name
-    full_name = pending.full_name
-    hashed_password = pending.hashed_password
 
     # Remove pending record so OTP can never be reused
     db.delete(pending)

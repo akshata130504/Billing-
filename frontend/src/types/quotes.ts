@@ -63,6 +63,8 @@ export interface QuoteItemOut {
 }
 
 export interface QuoteItemIn {
+  /** Stored id of an existing line of this quote that is being kept; never set on new lines. */
+  id?: string;
   offering_id?: string;
   product_id?: string;
   plan_id?: string;

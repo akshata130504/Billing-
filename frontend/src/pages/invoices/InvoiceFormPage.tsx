@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Plus,
@@ -39,8 +39,13 @@ export const InvoiceFormPage: React.FC = () => {
   const [showSendConfirm, setShowSendConfirm] = useState(false);
 
   // Reference data
+  // Active offerings only: the pickers for new lines.
   const [plans, setPlans] = useState<PlanPricingItem[]>([]);
   const [catalogItems, setCatalogItems] = useState<any[]>([]);
+  // Offerings of an existing invoice's lines that have been archived since: shown (disabled) so the
+  // line stays readable, never selectable for new lines.
+  const [archivedLineOfferings, setArchivedLineOfferings] = useState<any[]>([]);
+  const archivedIds = useMemo(() => new Set(archivedLineOfferings.map((o) => o.id)), [archivedLineOfferings]);
 
   // Quick Create Customer Modal State
   const [showCustomerModal, setShowCustomerModal] = useState(false);
@@ -98,8 +103,8 @@ export const InvoiceFormPage: React.FC = () => {
     try {
       setLoading(true);
       const [planRes, catRes] = await Promise.all([
-        planPricingService.getPlans({ page_size: 100 }),
-        catalogCpqService.listOfferings({ page_size: 100 }),
+        planPricingService.getPlans({ is_active: true, page_size: 100 }),
+        catalogCpqService.listOfferings({ is_active: true, page_size: 100 }),
       ]);
       setPlans(planRes.items || []);
       setCatalogItems(catRes.items || []);
@@ -120,6 +125,7 @@ export const InvoiceFormPage: React.FC = () => {
         if (inv.items && inv.items.length > 0) {
           setItems(
             inv.items.map((it: any) => ({
+              id: it.id,
               plan_id: it.plan_id,
               offering_id: it.offering_id,
               name: it.description?.split(' - ')[0] || it.name || 'Line Item',
@@ -132,6 +138,27 @@ export const InvoiceFormPage: React.FC = () => {
               pricing_explanation: it.pricing_explanation || '',
             }))
           );
+
+          // A line may reference an offering that has been archived since the invoice was made. It
+          // is not in the active lists, so look it up and keep it (read-only) for display.
+          const activeIds = new Set([...(planRes.items || []), ...(catRes.items || [])].map((o: any) => o.id));
+          const lineOfferingIds: string[] = Array.from(
+            new Set<string>(
+              inv.items
+                .map((it: any) => it.offering_id as string | undefined)
+                .filter((oid: string | undefined): oid is string => Boolean(oid) && !activeIds.has(oid as string))
+            )
+          );
+          if (lineOfferingIds.length > 0) {
+            const found = await Promise.all(
+              lineOfferingIds.map((oid) =>
+                Promise.resolve()
+                  .then(() => catalogCpqService.getOffering(oid))
+                  .catch(() => null)
+              )
+            );
+            setArchivedLineOfferings(found.filter((o: any) => o && o.is_active === false));
+          }
         }
       }
     } catch (err) {
@@ -192,7 +219,23 @@ export const InvoiceFormPage: React.FC = () => {
         return next;
       });
     } catch (err) {
-      showToast('warning', 'Could not calculate price', toApiError(err).message);
+      const apiError = toApiError(err);
+      if (apiError.status === 422) {
+        // The offering cannot be priced (e.g. it was archived since the list loaded): say so, and
+        // do not leave a NEW selection looking like a normal priced offering. A line that is
+        // already on the invoice (it has an id) is never replaced.
+        showToast('error', 'This offering cannot be used', apiError.message);
+        setItems((prev) => {
+          const row = prev[index];
+          if (!row || row.id) return prev;
+          if ((selectionTokens.current[index] ?? 0) !== token || (row.offering_id || row.plan_id) !== pid) return prev;
+          const next = [...prev];
+          next[index] = { ...row, offering_id: undefined, plan_id: undefined };
+          return next;
+        });
+        return;
+      }
+      showToast('warning', 'Could not calculate price', apiError.message);
     }
   };
 
@@ -212,7 +255,9 @@ export const InvoiceFormPage: React.FC = () => {
     });
 
     const pid = current.offering_id || current.plan_id;
-    if (field === 'quantity' && pid) {
+    // A retained archived line keeps its stored rate: archived offerings cannot be priced, and
+    // only its quantity (and other plain fields) are editable.
+    if (field === 'quantity' && pid && !archivedIds.has(pid)) {
       // Only recalculate for dynamic pricing models where rate varies by volume/tier.
       // Backend models are lowercase ('flat', 'per_unit', 'tiered', ...), older
       // rows may carry 'FLAT' — compare case-insensitively.
@@ -305,6 +350,7 @@ export const InvoiceFormPage: React.FC = () => {
     if (!id) return '';
     if (plans.some((p) => p.id === id)) return `plan:${id}`;
     if (catalogItems.some((c) => c.id === id)) return `offering:${id}`;
+    if (archivedIds.has(id)) return `offering:${id}`;
     return '';
   };
 
@@ -436,6 +482,8 @@ export const InvoiceFormPage: React.FC = () => {
             ? (it.description.trim().startsWith(it.name.trim()) ? it.description.trim() : `${it.name.trim()} - ${it.description.trim()}`)
             : (it.name.trim() || `Item ${idx + 1}`);
           return {
+            // Only lines kept from the stored invoice carry an id; new lines never do.
+            id: isEdit ? it.id || undefined : undefined,
             offering_id: it.offering_id || undefined,
             plan_id: it.plan_id || undefined,
             description: lineDesc,
@@ -652,6 +700,13 @@ export const InvoiceFormPage: React.FC = () => {
                           ))}
                         </optgroup>
                       )}
+                      {archivedLineOfferings
+                        .filter((o) => o.id === item.offering_id)
+                        .map((o) => (
+                          <option key={`a-${o.id}`} value={`offering:${o.id}`} disabled>
+                            {o.type ? o.type.toUpperCase() : 'PRODUCT'}: {o.name} (₹{Number(o.base_price || 0).toLocaleString()}) (Archived)
+                          </option>
+                        ))}
                     </select>
 
                     <input

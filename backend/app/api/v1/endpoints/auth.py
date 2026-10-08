@@ -23,6 +23,9 @@ from backend.app.schemas.auth import (
     ResendOtpRequest,
     ResetPasswordRequest,
     SessionOut,
+    SignupCompleteRequest,
+    SignupConfirmEmailRequest,
+    SignupConfirmEmailResponse,
     SignupResponse,
     SignupVerificationRequest,
     SignupVerificationResponse,
@@ -84,6 +87,47 @@ def resend_signup_otp(
         expires_in_seconds=expires_in,
         resend_cooldown_seconds=cooldown,
     )
+
+
+@router.post(
+    "/signup/confirm-email",
+    response_model=SignupConfirmEmailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Verify the emailed OTP and return a token for /signup/complete (creates nothing yet)",
+)
+@limiter.limit(auth_rate_limit)
+def confirm_signup_email(
+    request: Request,
+    payload: SignupConfirmEmailRequest,
+    db: Session = Depends(get_db),
+) -> SignupConfirmEmailResponse:
+    token, expires_in = auth_service.confirm_signup_email(db, payload.email, payload.otp)
+    return SignupConfirmEmailResponse(verification_token=token, expires_in_seconds=expires_in)
+
+
+@router.post(
+    "/signup/complete",
+    response_model=SignupResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create the organization for a verified email, with the chosen password",
+)
+@limiter.limit(auth_rate_limit)
+def complete_signup(
+    request: Request,
+    payload: SignupCompleteRequest,
+    db: Session = Depends(get_db),
+) -> SignupResponse:
+    tokens, ctx = auth_service.complete_signup(
+        db,
+        payload.email,
+        payload.verification_token,
+        payload.organization_name,
+        payload.full_name,
+        payload.password,
+        ip=client_ip(request),
+        user_agent=_ua(request),
+    )
+    return SignupResponse(**tokens.as_dict(), me=auth_service.build_me(db, ctx))
 
 
 @router.post(

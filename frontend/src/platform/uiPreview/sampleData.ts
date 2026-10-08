@@ -463,6 +463,8 @@ export const sampleCatalogSummary: CatalogSummary = {
     active: sampleOfferings.filter((o) => o.is_active).length,
     inactive: sampleOfferings.filter((o) => !o.is_active).length,
     by_type: Object.fromEntries(['product', 'service', 'plan', 'bundle'].map((t) => [t, sampleOfferings.filter((o) => o.type === t).length])),
+    active_by_type: Object.fromEntries(['product', 'service', 'plan', 'bundle'].map((t) => [t, sampleOfferings.filter((o) => o.type === t && o.is_active).length])),
+    inactive_by_type: Object.fromEntries(['product', 'service', 'plan', 'bundle'].map((t) => [t, sampleOfferings.filter((o) => o.type === t && !o.is_active).length])),
   },
   price_books: {
     total: samplePriceBooks.length,

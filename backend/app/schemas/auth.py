@@ -190,6 +190,28 @@ class SignupVerificationRequest(BaseModel):
     organization_name: str = Field(min_length=1, max_length=200)
     full_name: str = Field(min_length=1, max_length=200)
     email: EmailAddress
+    # Optional: the sign-up page asks for the password only after the email is verified. When
+    # present (older clients) the pending signup is bound to it, as before.
+    password: Optional[str] = Field(default=None, min_length=1, max_length=256)
+
+
+class SignupConfirmEmailRequest(BaseModel):
+    email: EmailAddress
+    otp: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+class SignupConfirmEmailResponse(BaseModel):
+    """Proof that the mailbox was verified; redeemed by /signup/complete together with a password."""
+
+    verification_token: str
+    expires_in_seconds: int
+
+
+class SignupCompleteRequest(BaseModel):
+    email: EmailAddress
+    verification_token: str = Field(min_length=1, max_length=2048)
+    organization_name: str = Field(min_length=1, max_length=200)
+    full_name: str = Field(min_length=1, max_length=200)
     password: str = Field(min_length=1, max_length=256)
 
 

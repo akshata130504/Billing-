@@ -36,9 +36,17 @@ export function SignupPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
 
+  // The password is chosen only after the email is verified, so these start untouched: the
+  // requirement checklist is live from the first keystroke, the red message waits for a blur
+  // or a submit attempt and then follows the value as it changes.
+  const [passwordTouched, setPasswordTouched] = useState(false);
+  const [confirmTouched, setConfirmTouched] = useState(false);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+
   // OTP verification state inline beside/below email
   const [otpSent, setOtpSent] = useState(false);
   const [isEmailVerified, setIsEmailVerified] = useState(false);
+  const [verificationToken, setVerificationToken] = useState<string | null>(null);
   const [otp, setOtp] = useState<string[]>(['', '', '', '', '', '']);
   const [verifying, setVerifying] = useState(false);
   const [otpError, setOtpError] = useState<string | null>(null);
@@ -67,7 +75,22 @@ export function SignupPage() {
   if (isLoading) return <LoadingState message="Checking your session..." />;
   if (isAuthenticated) return <Navigate to="/dashboard" replace />;
 
-  const validateForm = (): boolean => {
+  const passwordValid = passwordMeetsPolicy(password);
+  const passwordError =
+    errors.password ??
+    ((passwordTouched || submitAttempted) && !passwordValid ? 'Password does not meet the requirements below.' : undefined);
+  const confirmError =
+    errors.confirm ?? ((confirmTouched || submitAttempted) && confirm !== password ? 'Passwords do not match.' : undefined);
+
+  const clearFieldError = (field: string) =>
+    setErrors((prev) => {
+      if (!(field in prev)) return prev;
+      const { [field]: _removed, ...rest } = prev;
+      return rest;
+    });
+
+  /** Organization details and email: all that is needed to send the code. The password is not. */
+  const validateDetails = (): boolean => {
     const clientErrors: Record<string, string> = {};
     if (!organizationName.trim()) {
       clientErrors.organization_name = 'Organization name is required.';
@@ -80,12 +103,6 @@ export function SignupPage() {
     } else if (!email.includes('@') || !email.includes('.')) {
       clientErrors.email = 'Please enter a valid work email address.';
     }
-    if (!passwordMeetsPolicy(password)) {
-      clientErrors.password = 'Password does not meet the requirements below.';
-    }
-    if (confirm !== password) {
-      clientErrors.confirm = 'Passwords do not match.';
-    }
 
     setErrors(clientErrors);
     return Object.keys(clientErrors).length === 0;
@@ -93,7 +110,7 @@ export function SignupPage() {
 
   const handleRequestVerification = async () => {
     setFormError(null);
-    if (!validateForm()) return;
+    if (!validateDetails()) return;
 
     setSubmitting(true);
     try {
@@ -101,7 +118,6 @@ export function SignupPage() {
         organization_name: organizationName.trim(),
         full_name: fullName.trim(),
         email: email.trim(),
-        password,
       });
       setOtpSent(true);
       setCooldown(res.resend_cooldown_seconds || 60);
@@ -131,7 +147,11 @@ export function SignupPage() {
   };
 
   const handleOtpKeyDown = (index: number, e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Backspace') {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (isOtpComplete && !verifying) void handleVerifyOtp();
+      else setOtpError('Please enter the 6-digit verification code sent to your email.');
+    } else if (e.key === 'Backspace') {
       if (!otp[index] && index > 0) {
         const newOtp = [...otp];
         newOtp[index - 1] = '';
@@ -178,17 +198,12 @@ export function SignupPage() {
     setVerifying(true);
     setOtpError(null);
     try {
-      // The password entered above must accompany the code (it has to match the one the code
-      // was requested with), so nobody else's pending signup can be completed with this code.
-      const response = await authService.verifySignupOtp({
-        email: email.trim(),
-        otp: otpCode,
-        password,
-      });
+      // Verifying the code creates nothing: it returns a short-lived proof that the mailbox is
+      // theirs, redeemed together with the chosen password when the organization is created.
+      const response = await authService.confirmSignupEmail({ email: email.trim(), otp: otpCode });
+      setVerificationToken(response.verification_token);
       setIsEmailVerified(true);
-      await applyTokens(response);
-      showToast('success', 'Email verified', `${response.me.organization.name} is ready.`);
-      navigate('/dashboard', { replace: true });
+      showToast('success', 'Email verified', 'Choose a password to finish creating your organization.');
     } catch (err) {
       const apiError = toApiError(err);
       setOtpError(apiError.message);
@@ -215,24 +230,57 @@ export function SignupPage() {
     }
   };
 
+  const handleCompleteSignup = async () => {
+    setSubmitAttempted(true);
+    // Same rules as the backend; the form is only a convenience, /signup/complete enforces them.
+    if (!validateDetails() || !passwordValid || confirm !== password || !verificationToken) return;
+
+    setSubmitting(true);
+    try {
+      const response = await authService.completeSignup({
+        email: email.trim(),
+        verification_token: verificationToken,
+        organization_name: organizationName.trim(),
+        full_name: fullName.trim(),
+        password,
+      });
+      await applyTokens(response);
+      showToast('success', 'Organization created', `${response.me.organization.name} is ready.`);
+      navigate('/dashboard', { replace: true });
+    } catch (err) {
+      const apiError = toApiError(err);
+      const fields = fieldErrors(err);
+      if (fields.verification_token) {
+        // The verification lapsed (or was already used): the mailbox has to be verified again.
+        setIsEmailVerified(false);
+        setVerificationToken(null);
+        setOtpSent(false);
+        setOtp(['', '', '', '', '', '']);
+        setFormError(apiError.message);
+      } else {
+        setErrors(fields);
+        if (Object.keys(fields).length === 0) setFormError(apiError.message);
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setErrors({});
     setFormError(null);
 
-    if (!isEmailVerified) {
-      if (!otpSent) {
-        await handleRequestVerification();
-        return;
-      }
-      if (isOtpComplete) {
-        await handleVerifyOtp();
-        return;
-      }
-      setOtpError('Please enter the 6-digit verification code sent to your email.');
-      otpInputsRef.current[0]?.focus();
-      return;
-    }
+    // Nothing is created until the email is verified; before that the button is disabled and
+    // Enter in the email / code fields drives the verification steps instead.
+    if (!isEmailVerified) return;
+    await handleCompleteSignup();
+  };
+
+  const handleEmailKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    if (!submitting && cooldown <= 0) void handleRequestVerification();
   };
 
   return (
@@ -295,6 +343,7 @@ export function SignupPage() {
               autoComplete="email"
               disabled={isEmailVerified || submitting}
               value={email}
+              onKeyDown={handleEmailKeyDown}
               onChange={(e) => {
                 setEmail(e.target.value);
                 if (otpSent) {
@@ -415,30 +464,42 @@ export function SignupPage() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input
-            label="Password"
-            type="password"
-            required
-            autoComplete="new-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            error={errors.password}
-            leadingIcon={<Lock className="w-4 h-4" />}
-          />
-          <Input
-            label="Confirm password"
-            type="password"
-            required
-            autoComplete="new-password"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            error={errors.confirm}
-            leadingIcon={<Lock className="w-4 h-4" />}
-          />
-        </div>
-        <PasswordRules password={password} />
-        <Button type="submit" className="w-full" isLoading={submitting || verifying}>
+        {isEmailVerified && (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Input
+                label="Password"
+                type="password"
+                required
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  clearFieldError('password');
+                }}
+                onBlur={() => setPasswordTouched(true)}
+                error={passwordError}
+                leadingIcon={<Lock className="w-4 h-4" />}
+              />
+              <Input
+                label="Confirm password"
+                type="password"
+                required
+                autoComplete="new-password"
+                value={confirm}
+                onChange={(e) => {
+                  setConfirm(e.target.value);
+                  clearFieldError('confirm');
+                }}
+                onBlur={() => setConfirmTouched(true)}
+                error={confirmError}
+                leadingIcon={<Lock className="w-4 h-4" />}
+              />
+            </div>
+            <PasswordRules password={password} />
+          </>
+        )}
+        <Button type="submit" className="w-full" isLoading={submitting || verifying} disabled={!isEmailVerified}>
           Create organization
         </Button>
       </form>

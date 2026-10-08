@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from backend.app.api.deps import CurrentContext, get_db, require_viewer
+from backend.app.core.exceptions import ValidationAppError
 from backend.app.models.catalog_cpq import Offering, PriceBook, PriceBookEntry
 from backend.app.models.catalog import Plan as LegacyPlan, Product
 from backend.app.services.pricing_engine import calculate_line_item_pricing, round_money
@@ -52,7 +53,7 @@ def calculate_pricing(
     tax_amount = Decimal("0")
     calculated_items = []
 
-    for item in body.items:
+    for index, item in enumerate(body.items):
         offering = None
         if item.offering_id:
             offering = db.scalar(
@@ -113,12 +114,17 @@ def calculate_pricing(
             )
 
         eff_discount = item.discount_pct if item.discount_pct > 0 else body.deal_discount_pct
-        calc = calculate_line_item_pricing(
-            offering=offering,
-            quantity=item.quantity,
-            price_book_entry=pb_entry,
-            line_discount_pct=eff_discount,
-        )
+        try:
+            calc = calculate_line_item_pricing(
+                offering=offering,
+                quantity=item.quantity,
+                price_book_entry=pb_entry,
+                line_discount_pct=eff_discount,
+            )
+        except ValueError as exc:
+            # The engine refuses to price an archived offering (and a negative quantity); that is a
+            # client error, not a server fault.
+            raise ValidationAppError(str(exc), {"fields": {f"items[{index}].offering_id": str(exc)}}) from exc
 
         subtotal += calc["subtotal"]
         total_discount += calc["discount_amount"]
@@ -215,12 +221,17 @@ def simulate_pricing(
             )
         )
 
-    calc = calculate_line_item_pricing(
-        offering=offering,
-        quantity=body.quantity,
-        price_book_entry=pb_entry,
-        line_discount_pct=body.discount_pct,
-    )
+    try:
+        calc = calculate_line_item_pricing(
+            offering=offering,
+            quantity=body.quantity,
+            price_book_entry=pb_entry,
+            line_discount_pct=body.discount_pct,
+        )
+    except ValueError as exc:
+        # The engine refuses to price an archived offering (and a negative quantity); that is a
+        # client error, not a server fault.
+        raise ValidationAppError(str(exc), {"fields": {"offering_id": str(exc)}}) from exc
 
     return {
         "offering_id": offering.id,

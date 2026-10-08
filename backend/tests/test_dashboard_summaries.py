@@ -156,7 +156,14 @@ def test_catalog_and_deals_summaries(client, tenant, db):
     assert c["offerings"] == {
         "total": 5, "active": 4, "inactive": 1,
         "by_type": {**c["offerings"]["by_type"], "product": 2, "service": 1, "plan": 1, "bundle": 1},
+        "active_by_type": c["offerings"]["active_by_type"],
+        "inactive_by_type": c["offerings"]["inactive_by_type"],
     }
+    # Per-type split by status always adds back up to the combined per-type counts.
+    for t, n in c["offerings"]["by_type"].items():
+        assert c["offerings"]["active_by_type"][t] + c["offerings"]["inactive_by_type"][t] == n
+    assert sum(c["offerings"]["active_by_type"].values()) == 4
+    assert sum(c["offerings"]["inactive_by_type"].values()) == 1
     assert c["price_books"]["total"] == 1 and c["price_books"]["by_status"]["active"] == 1
     assert client.get(CATALOG, params={"search": "widget"}, headers=h).json()["offerings"]["total"] == 1
 
