@@ -23,7 +23,7 @@ import type {
   PaymentOut,
 } from '../../types/api';
 import type { Invoice, InvoiceKPIs, InvoiceStatus } from '../../types/invoices';
-import type { FinancialSummary } from '../../services/dashboardSummaryService';
+import type { CatalogSummary, DealsSummary, FinancialSummary, QuotesSummary } from '../../services/dashboardSummaryService';
 import type { UiConfigBundle } from '../../appUi/UiConfigContext';
 import type {
   NotificationPreferencesResponse,
@@ -456,13 +456,18 @@ export const samplePriceBooks: any[] = [
   },
 ];
 
-export const sampleCatalogSummary = {
-  all: sampleOfferings.length,
-  active: sampleOfferings.filter((o) => o.is_active).length,
-  product: sampleOfferings.filter((o) => o.type === 'product').length,
-  service: sampleOfferings.filter((o) => o.type === 'service').length,
-  plan: sampleOfferings.filter((o) => o.type === 'plan').length,
-  bundle: sampleOfferings.filter((o) => o.type === 'bundle').length,
+// Same shape as GET /dashboard/catalog-summary (dashboardSummaryService.CatalogSummary).
+export const sampleCatalogSummary: CatalogSummary = {
+  offerings: {
+    total: sampleOfferings.length,
+    active: sampleOfferings.filter((o) => o.is_active).length,
+    inactive: sampleOfferings.filter((o) => !o.is_active).length,
+    by_type: Object.fromEntries(['product', 'service', 'plan', 'bundle'].map((t) => [t, sampleOfferings.filter((o) => o.type === t).length])),
+  },
+  price_books: {
+    total: samplePriceBooks.length,
+    by_status: samplePriceBooks.reduce<Record<string, number>>((acc, pb) => ({ ...acc, [pb.status ?? 'active']: (acc[pb.status ?? 'active'] ?? 0) + 1 }), {}),
+  },
 };
 
 export const sampleDeals: any[] = [
@@ -478,15 +483,17 @@ export const sampleDeals: any[] = [
   },
 ];
 
-export const sampleDealsSummary = {
-  total: sampleDeals.length,
-  draft: 0,
-  configured: 1,
-  pending_approval: 0,
-  approved: 1,
-  rejected: 0,
-  converted: 0,
-  total_value: '234000.00',
+// Same shape as GET /dashboard/deals-summary (dashboardSummaryService.DealsSummary).
+export const sampleDealsSummary: DealsSummary = {
+  total_count: sampleDeals.length,
+  by_status: sampleDeals.reduce<Record<string, number>>((acc, d) => ({ ...acc, [d.status]: (acc[d.status] ?? 0) + 1 }), {}),
+  groups: {
+    pending: sampleDeals.filter((d) => d.status === 'pending_approval').length,
+    approved: sampleDeals.filter((d) => d.status === 'approved' || d.status === 'configured').length,
+    converted: sampleDeals.filter((d) => d.status === 'converted').length,
+  },
+  value_by_currency: [{ currency: 'INR', count: sampleDeals.length, total: '234000.00' }],
+  base_currency: 'INR',
 };
 
 export const sampleQuotes: any[] = [
@@ -510,15 +517,13 @@ export const sampleQuotes: any[] = [
   },
 ];
 
-export const sampleQuotesSummary = {
-  total: sampleQuotes.length,
-  draft: 0,
-  pending_approval: 1,
-  sent: 1,
-  accepted: 1,
-  total_value: '247800.00',
+// Same shape as GET /dashboard/quotes-summary (dashboardSummaryService.QuotesSummary).
+export const sampleQuotesSummary: QuotesSummary = {
+  total_count: 3,
   by_status: { draft: 0, pending_approval: 1, sent: 1, accepted: 1, converted: 0, declined: 0, expired: 0 },
-  value_by_currency: [{ currency: 'INR', total: '247800.00' }],
+  groups: { draft: 0, pending_approval: 1, sent: 1, accepted: 1 },
+  value_by_currency: [{ currency: 'INR', count: 3, total: '247800.00', open_total: '154200.00' }],
+  base_currency: 'INR',
 };
 
 export const sampleSubscriptions: any[] = [
