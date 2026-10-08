@@ -35,7 +35,7 @@ MIN_PARTIAL_PAYMENT = Decimal("1.00")
 
 
 def _razorpay_public_config(db: Session, organization_id: str) -> Dict[str, Any]:
-    if not org_lifecycle.customer_actions_allowed(db, organization_id):
+    if not org_lifecycle.payment_collection_allowed(db, organization_id):
         return {"enabled": False, "key_id": None, "unavailable_reason": org_lifecycle.CUSTOMER_UNAVAILABLE_MESSAGE}
     creds = razorpay_gateway.credentials_for(db, organization_id)
     enabled = razorpay_gateway.is_configured(creds)
@@ -131,7 +131,7 @@ def public_invoice_pdf(request: Request, token: str, db: Session = Depends(get_d
 @limiter.limit(public_action_rate_limit)
 def create_razorpay_order(request: Request, token: str, body: RazorpayOrderIn, db: Session = Depends(get_db)):
     invoice = invoice_service.get_invoice_by_token(db, token)
-    org_lifecycle.assert_customer_actions_allowed(db, invoice.organization_id)
+    org_lifecycle.assert_payment_collection_allowed(db, invoice.organization_id)
     creds = razorpay_gateway.credentials_for(db, invoice.organization_id)
     if not razorpay_gateway.is_configured(creds):
         raise GatewayNotConfiguredError("razorpay")

@@ -1,10 +1,12 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useContext, useState, useEffect, useMemo, useRef } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { uiIcon } from '../../appUi/icons';
 import { NAV_SECTION_DEFS, resolveList, visible, type NavigationConfig } from '../../appUi/registry';
 import { usePageUi, useUiEditable } from '../../appUi/UiConfigContext';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../../utils/cn';
+import { AuthContext } from '../../hooks/useAuth';
+import { navAllowed } from '../../entitlements';
 import { RoomanLogo } from '../common/RoomanLogo';
 import {
   LayoutDashboard,
@@ -270,7 +272,16 @@ export function Sidebar({
 }: SidebarProps) {
   const location = useLocation();
   const navigationConfig = usePageUi('navigation');
-  const sections = useMemo(() => resolveNavigation(navigationConfig), [navigationConfig]);
+  // Visual-editor configuration first, then the organization's plan: an item outside the plan is
+  // never shown, whatever the editor says (the editor cannot grant a module; the API enforces it).
+  const access = useContext(AuthContext)?.access;
+  const sections = useMemo(
+    () =>
+      resolveNavigation(navigationConfig)
+        .map((section) => ({ ...section, items: section.items.filter((item) => navAllowed(access, item.key)) }))
+        .filter((section) => section.items.length > 0),
+    [navigationConfig, access]
+  );
   const editable = useUiEditable();
 
   // Initialize expanded sections from sessionStorage (defaulting to WORKSPACE)

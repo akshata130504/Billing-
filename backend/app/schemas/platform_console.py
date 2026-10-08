@@ -10,9 +10,10 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from backend.app.schemas.organization import UTCDateTime
+from backend.app.schemas.organization import EmailAddress, UTCDateTime
+from backend.app.schemas.validators import validate_sensible_name
 
-OrgStatus = Literal["pending_approval", "active", "rejected", "suspended", "pending_deletion", "deleted"]
+OrgStatus = Literal["trial", "trial_expired", "pending_approval", "active", "rejected", "suspended", "pending_deletion", "deleted"]
 PlatformRoleName = Literal["platform_administrator", "platform_operations", "platform_support"]
 
 
@@ -30,6 +31,9 @@ class OrganizationSummaryOut(BaseModel):
     updated_at: Optional[UTCDateTime] = None
     status_changed_at: Optional[UTCDateTime] = None
     deletion_scheduled_for: Optional[UTCDateTime] = None
+    trial_ends_at: Optional[UTCDateTime] = None
+    seat_limit: Optional[int] = None
+    module_access: str = "unrestricted"
 
 
 class OrganizationPageOut(BaseModel):
@@ -299,6 +303,7 @@ class DashboardOut(BaseModel):
     health: HealthSummaryOut
     scheduler: SchedulerStatusOut
     recent_activity: List[AuditEntryOut]
+    subscription_requests_pending: int = 0
 
 
 class JobsOut(BaseModel):
@@ -310,3 +315,33 @@ class JobsOut(BaseModel):
     outbox: Dict[str, int]
     webhooks_received_24h: int
     organizations_not_running: int
+
+
+class ProvisionAdminRequest(BaseModel):
+    """A Platform Administrator provisions an organization's tenant Admin. The organization comes from
+    the URL and the role is always Admin: neither can be chosen in the body (unknown fields refused)."""
+
+    model_config = {"extra": "forbid"}
+
+    full_name: str = Field(min_length=1, max_length=200)
+    email: EmailAddress
+
+    @field_validator("full_name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        return validate_sensible_name(v, "Admin name")
+
+
+class ProvisionedAdminOut(BaseModel):
+    """The provisioned Admin and the invitation state. Never a password or invitation token."""
+
+    organization_id: str
+    organization_name: str
+    user_id: str
+    membership_id: str
+    full_name: str
+    email: str
+    role: Literal["admin"]
+    status: Literal["invited"]
+    invite_expires_at: Optional[UTCDateTime] = None
+    email_delivered: bool

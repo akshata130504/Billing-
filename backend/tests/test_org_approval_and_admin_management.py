@@ -54,8 +54,8 @@ def _token(user: User, org: Organization, mem: Membership) -> str:
     return create_access_token(user.id, org.id, mem.role.value)
 
 
-def test_signup_creates_pending_approval_org(client, db):
-    """New signups create an organization with status=PENDING_APPROVAL and record audit."""
+def test_signup_creates_active_trial_org(client, db):
+    """Signup needs no Super Admin approval: the organization is ACTIVE and its trial starts at once."""
     email = f"owner-{uuid.uuid4().hex[:6]}@example.com"
     org_name = f"Startup {uuid.uuid4().hex[:6]}"
     captured_otp = "123456"
@@ -79,16 +79,29 @@ def test_signup_creates_pending_approval_org(client, db):
         )
         assert r2.status_code == 201, r2.text
         data = r2.json()
-        assert data["me"]["organization"]["status"] == "pending_approval"
+        assert data["me"]["organization"]["status"] == "active"
+        assert data["me"]["access"]["status"] == "trial"
+        # Signed in straight into the trial: business endpoints work with the returned token.
+        token = data["access_token"]
+        assert client.get(f"{API}/customers", headers={"Authorization": f"Bearer {token}"}).status_code == 200
 
     org = db.scalars(select(Organization).where(Organization.name == org_name)).first()
     assert org is not None
-    assert org.status == OrganizationStatus.PENDING_APPROVAL
+    assert org.status == OrganizationStatus.ACTIVE
+    assert org.module_access == "trial"
+    started = org.trial_started_at if org.trial_started_at.tzinfo else org.trial_started_at.replace(tzinfo=timezone.utc)
+    ends = org.trial_ends_at if org.trial_ends_at.tzinfo else org.trial_ends_at.replace(tzinfo=timezone.utc)
+    assert (ends - started).total_seconds() == 3 * 86400
+    owner = db.scalars(select(Membership).where(Membership.organization_id == org.id)).one()
+    assert owner.role == MemberRole.OWNER and owner.status == MembershipStatus.ACTIVE
+    trial_row = db.scalars(select(PlatformAuditLog).where(
+        PlatformAuditLog.action == platform_audit.ORGANIZATION_TRIAL_STARTED, PlatformAuditLog.organization_id == org.id)).first()
+    assert trial_row is not None and trial_row.details["trial_days"] == 3
 
     # Check audit log
     audit_row = db.scalars(
         select(PlatformAuditLog).where(
-            PlatformAuditLog.action == platform_audit.ORGANIZATION_CREATED_PENDING_APPROVAL,
+            PlatformAuditLog.action == platform_audit.ORGANIZATION_CREATED,
             PlatformAuditLog.organization_id == org.id,
         )
     ).first()

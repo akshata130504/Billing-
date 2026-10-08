@@ -141,6 +141,8 @@ class Settings(BaseSettings):
     # Waiting period between scheduling an organization's deletion and the earliest (future,
     # separately approved) purge; cancellable by a Platform Administrator meanwhile.
     PLATFORM_DELETION_WAITING_DAYS: int = 30
+    # Self-service signup: length of the free trial before a subscription request must be approved.
+    ORGANIZATION_TRIAL_DAYS: int = 3
     PASSWORD_MIN_LENGTH: int = 10
     # Requests per minute allowed on credential endpoints (login, signup, reset), per client IP.
     AUTH_RATE_LIMIT: str = "10/minute"

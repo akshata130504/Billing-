@@ -8,6 +8,7 @@ import { RoomiChatbot } from '../chat/RoomiChatbot';
 import { ErrorBoundary } from '../common/ErrorBoundary';
 import { PageLoader } from '../common/PageLoader';
 import { PlatformAccessBanner } from './PlatformAccessBanner';
+import { EntitlementGuard, TrialBanner } from './Entitlements';
 import { UiConfigProvider } from '../../appUi/UiConfigContext';
 
 export function AppLayout() {
@@ -55,6 +56,7 @@ export function AppLayout() {
             onOpenSearch={() => setSearchOpen(true)}
           />
           <PlatformAccessBanner />
+          <TrialBanner />
 
           {/* Scrollable Page Body */}
           <main
@@ -66,7 +68,9 @@ export function AppLayout() {
               {/* Reset on navigation so one crashed page doesn't break the rest of the app. */}
               <ErrorBoundary resetKey={pathname}>
                 <Suspense fallback={<PageLoader />}>
-                  <Outlet />
+                  <EntitlementGuard>
+                    <Outlet />
+                  </EntitlementGuard>
                 </Suspense>
               </ErrorBoundary>
             </div>

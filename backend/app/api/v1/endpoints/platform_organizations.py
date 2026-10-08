@@ -13,6 +13,7 @@ Metadata only (services/platform_org_service.py). Authorization is enforced here
     POST /{id}/jobs/pause           Administrator             reason, step-up
     POST /{id}/jobs/resume          Administrator             reason, step-up
     POST /{id}/revoke-sessions      Administrator, Operations reason, step-up (tenant + portal sessions)
+    POST /{id}/admins               Administrator             provision the tenant Admin (invitation), step-up
 
 There is no hard delete, no tenant data endpoint, and nothing here runs billing jobs.
 """
@@ -40,6 +41,8 @@ from backend.app.schemas.platform_console import (
     OrganizationDetailOut,
     OrganizationPageOut,
     OrganizationSummaryOut,
+    ProvisionAdminRequest,
+    ProvisionedAdminOut,
     ReasonRequest,
     TenantAdminActionResult,
     TenantAdminOut,
@@ -197,6 +200,20 @@ def reject(
 ):
     result = svc.change_lifecycle(db, organization_id, "reject", _actor(ctx), reason=body.reason, ticket_ref=body.ticket_ref)
     return LifecycleResultOut(organization=OrganizationSummaryOut(**result.organization), changed=result.changed)
+
+
+@router.post("/{organization_id}/admins", response_model=ProvisionedAdminOut, status_code=201,
+             summary="Provision the organization's tenant Admin (invitation; never a platform account)")
+def provision_admin(
+    organization_id: str,
+    body: ProvisionAdminRequest,
+    ctx: PlatformContext = Depends(require_platform_roles_with_step_up(ADMINISTRATOR_ONLY)),
+    db: Session = Depends(get_db),
+):
+    from backend.app.services import tenant_admin_provisioning
+
+    return ProvisionedAdminOut(**tenant_admin_provisioning.provision_admin(
+        db, organization_id, _actor(ctx), full_name=body.full_name, email=body.email))
 
 
 @router.get("/{organization_id}/admins", response_model=list[TenantAdminOut], summary="List tenant Owner and Admin accounts")

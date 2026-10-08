@@ -5,7 +5,7 @@
  */
 import { PlatformRole, consoleRequest } from './platformApi';
 
-export type OrgStatus = 'pending_approval' | 'active' | 'rejected' | 'suspended' | 'pending_deletion' | 'deleted';
+export type OrgStatus = 'trial' | 'trial_expired' | 'pending_approval' | 'active' | 'rejected' | 'suspended' | 'pending_deletion' | 'deleted';
 export type LifecycleAction =
   | 'approve' | 'reject' | 'suspend' | 'reactivate' | 'schedule_deletion' | 'cancel_deletion' | 'pause_jobs' | 'resume_jobs' | 'revoke_sessions';
 
@@ -20,6 +20,9 @@ export interface OrganizationSummary {
   updated_at: string | null;
   status_changed_at: string | null;
   deletion_scheduled_for: string | null;
+  trial_ends_at?: string | null;
+  seat_limit?: number | null;
+  module_access?: 'unrestricted' | 'entitled';
 }
 
 export interface Page<T> {
@@ -155,6 +158,7 @@ export interface Dashboard {
   health: { api: string; database: string; migrations: string; scheduler: string | null };
   scheduler: SchedulerStatus;
   recent_activity: AuditEntry[];
+  subscription_requests_pending?: number;
 }
 
 export interface Jobs {
@@ -187,6 +191,63 @@ export interface AuditQuery {
   until?: string;
   page?: number;
   page_size?: number;
+}
+
+export type BillingCycle = 'monthly' | 'quarterly' | 'annual';
+export type SubscriptionRequestStatus = 'submitted' | 'approved' | 'rejected' | 'withdrawn';
+
+/** A trial organization's subscription request, as the console sees it (no financial data). */
+export interface PlatformSubscriptionRequest {
+  id: string;
+  organization_id: string;
+  organization_name: string;
+  organization_slug: string;
+  organization_status: OrgStatus;
+  trial_ends_at: string | null;
+  status: SubscriptionRequestStatus;
+  modules: string[];
+  seats: number;
+  billing_cycle: BillingCycle;
+  notes: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+  decision_reason: string | null;
+  approved_modules: string[] | null;
+  approved_seats: number | null;
+  approved_billing_cycle: BillingCycle | null;
+  requested_by_email: string | null;
+  requested_by_name: string | null;
+  seats_used: number;
+}
+
+export interface ApproveBody {
+  modules?: string[];
+  seats?: number;
+  billing_cycle?: BillingCycle;
+  reason?: string;
+}
+
+export interface OrganizationEntitlements {
+  organization_id: string;
+  module_access: 'unrestricted' | 'trial' | 'entitled';
+  trial_ends_at?: string | null;
+  modules: string[];
+  seat_limit: number | null;
+  seats_used: number;
+}
+
+/** A provisioned tenant Admin (never a password or invitation link). */
+export interface ProvisionedAdmin {
+  organization_id: string;
+  organization_name: string;
+  user_id: string;
+  membership_id: string;
+  full_name: string;
+  email: string;
+  role: 'admin';
+  status: 'invited';
+  invite_expires_at: string | null;
+  email_delivered: boolean;
 }
 
 export interface ReasonBody {
@@ -243,9 +304,27 @@ export const consoleApi = {
   staffAction: (staffId: string, action: 'deactivate' | 'activate' | 'revoke-sessions', body: ReasonBody) =>
     consoleRequest<StaffSummary & { sessions_revoked?: number | null }>('POST', `/staff/${id(staffId)}/${action}`, body),
   audit: (params: AuditQuery = {}) => consoleRequest<Page<AuditEntry>>('GET', `/audit${query(params)}`),
+  subscriptionRequests: (status: SubscriptionRequestStatus | 'all' = 'submitted', page = 1) =>
+    consoleRequest<Omit<Page<PlatformSubscriptionRequest>, 'total_pages'>>(
+      'GET', `/subscription-requests${query({ status, page, page_size: 25 })}`
+    ),
+  subscriptionRequest: (requestId: string) =>
+    consoleRequest<PlatformSubscriptionRequest>('GET', `/subscription-requests/${id(requestId)}`),
+  approveSubscriptionRequest: (requestId: string, body: ApproveBody) =>
+    consoleRequest<PlatformSubscriptionRequest>('POST', `/subscription-requests/${id(requestId)}/approve`, body),
+  rejectSubscriptionRequest: (requestId: string, body: { reason: string }) =>
+    consoleRequest<PlatformSubscriptionRequest>('POST', `/subscription-requests/${id(requestId)}/reject`, body),
+  provisionTenantAdmin: (orgId: string, body: { full_name: string; email: string }) =>
+    consoleRequest<ProvisionedAdmin>('POST', `/organizations/${id(orgId)}/admins`, body),
+  entitlements: (orgId: string) =>
+    consoleRequest<OrganizationEntitlements>('GET', `/subscription-requests/organizations/${id(orgId)}/entitlements`),
+  updateEntitlements: (orgId: string, body: { modules: string[]; seat_limit: number | null; reason: string }) =>
+    consoleRequest<OrganizationEntitlements>('POST', `/subscription-requests/organizations/${id(orgId)}/entitlements`, body),
 };
 
 export const STATUS_LABELS: Record<OrgStatus, string> = {
+  trial: 'Trial',
+  trial_expired: 'Trial ended',
   pending_approval: 'Pending Approval',
   active: 'Active',
   rejected: 'Rejected',

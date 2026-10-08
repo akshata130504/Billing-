@@ -20,6 +20,8 @@ import {
 } from '../consoleApi';
 import { PlatformApiError } from '../platformApi';
 import { ActionDialog } from './ActionDialog';
+import { EntitlementsPanel } from './EntitlementsPanel';
+import { ProvisionAdminDialog } from './ProvisionAdminDialog';
 import { GrantRequestDialog } from './AccessGrantsPage';
 import { ADMIN, useConsole } from './ConsoleContext';
 import { Field, Section, StatusBadge, formatDate, formatDateTime, humanizeAction } from './ui';
@@ -93,6 +95,7 @@ export function OrganizationDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [action, setAction] = useState<LifecycleAction | null>(null);
   const [admins, setAdmins] = useState<TenantAdmin[] | null>(null);
+  const [provisioning, setProvisioning] = useState(false);
   const [adminAction, setAdminAction] = useState<{
     action: 'deactivate' | 'reactivate' | 'revoke_sessions';
     admin: TenantAdmin;
@@ -240,7 +243,17 @@ export function OrganizationDetailPage() {
             <Section
               title="Tenant Administrators"
               description="Admin accounts for this tenant. Owner accounts are protected and cannot be deactivated or downgraded."
+              actions={org.status === 'active' && org.module_access === 'entitled'
+                ? <Button size="sm" onClick={() => setProvisioning(true)}>Create Admin</Button>
+                : undefined}
             >
+              <ProvisionAdminDialog
+                isOpen={provisioning}
+                organizationId={org.id}
+                organizationName={org.name}
+                onClose={() => setProvisioning(false)}
+                onProvisioned={() => void loadAdmins()}
+              />
               {!admins ? (
                 <LoadingState message="Loading tenant administrators..." />
               ) : admins.length === 0 ? (
@@ -379,6 +392,7 @@ export function OrganizationDetailPage() {
         </div>
 
         <div className="space-y-6">
+          <EntitlementsPanel organizationId={org.id} status={org.status} />
           <Section title="Members" description="Counts only.">
             <dl className="grid grid-cols-3 gap-3">
               <Field label="Active">{org.members.active}</Field>

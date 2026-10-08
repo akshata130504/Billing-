@@ -44,7 +44,7 @@ from backend.app.schemas.trials import (
     TrialReportPlanStat,
     TrialReportsOut,
 )
-from backend.app.services import audit, payment_service, razorpay_gateway, timezones
+from backend.app.services import audit, org_lifecycle, payment_service, razorpay_gateway, timezones
 from backend.app.services.gateways.registry import get_gateway_adapter
 from backend.app.services.notification_service import dispatch_notification
 from backend.app.services.numbering import next_number
@@ -289,6 +289,10 @@ def convert_trial_to_live(
             )
         ).first()
 
+    # No real charge while the organization itself is in its free trial (no approved subscription):
+    # the conversion and its invoice are created, the invoice simply stays unpaid.
+    if pm and invoice and invoice.amount_due > 0 and not org_lifecycle.billing_collection_allowed(db, subscription.organization_id):
+        pm = None
     if pm and invoice and invoice.amount_due > 0:
         adapter = get_gateway_adapter(pm.gateway)
         gateway_result = adapter.charge(

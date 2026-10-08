@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity,
   Building2,
+  ClipboardCheck,
   Globe,
   KeyRound,
   LayoutDashboard,
@@ -33,6 +34,7 @@ interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/organizations', label: 'Organizations', icon: Building2 },
+  { to: '/subscription-requests', label: 'Subscription requests', icon: ClipboardCheck },
   { to: '/staff', label: 'Platform staff', icon: Users, roles: [ADMIN] },
   { to: '/audit', label: 'Audit log', icon: ScrollText, roles: [ADMIN] },
   { to: '/website', label: 'Website', icon: Globe, roles: [ADMIN] },

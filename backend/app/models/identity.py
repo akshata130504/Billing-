@@ -45,6 +45,13 @@ class MembershipStatus(str, enum.Enum):
 class OrganizationStatus(str, enum.Enum):
     """Platform lifecycle of a tenant. Only ACTIVE organizations run billing automation."""
 
+    # Effective trial states, computed by services/org_access.py for an ACTIVE organization whose
+    # module_access is 'trial' (the trial is a phase of an active organization, not a stored status;
+    # these values stay valid for rows written before that change).
+    TRIAL = "trial"
+    TRIAL_EXPIRED = "trial_expired"
+    # Self-service signup: waits here until a Platform Administrator approves (-> ACTIVE, trial starts)
+    # or rejects (-> REJECTED) the organization.
     PENDING_APPROVAL = "pending_approval"
     ACTIVE = "active"
     REJECTED = "rejected"
@@ -121,6 +128,16 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status_reason = Column(String(500), nullable=True)
     # PENDING_DELETION only: the earliest time the (future, separately approved) purge may run.
     deletion_scheduled_for = Column(DateTime(timezone=True), nullable=True)
+    # Trial (UTC): set when a Platform Administrator approves a self-service organization. Expiry is
+    # decided by the backend from trial_ends_at on every request (services/org_access.py).
+    trial_started_at = Column(DateTime(timezone=True), nullable=True)
+    trial_ends_at = Column(DateTime(timezone=True), nullable=True)
+    # Active + invited members allowed. NULL = no limit (organizations that predate subscriptions).
+    seat_limit = Column(Integer, nullable=True)
+    # 'unrestricted' (every module; organizations that predate entitlements), 'trial' (self-service
+    # signup: free trial after approval, then a subscription request) or 'entitled' (base modules +
+    # organization_entitlements). See models/subscription_access.py.
+    module_access = Column(String(20), nullable=False, default="unrestricted", server_default="unrestricted")
 
     memberships = relationship("Membership", back_populates="organization", cascade="all, delete-orphan")
 

@@ -203,6 +203,19 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
 
     counts: Dict[str, int] = {"renewals": 0, "trials_converted": 0, "marked_overdue": 0, "reminders_sent": 0}
     ended = errors = 0
+
+    # Organization free trials that have ended: record trial -> trial_expired (access already ended
+    # at trial_ends_at; services/org_access.py). Platform metadata only, no billing work.
+    try:
+        from backend.app.services.org_access import expire_due_trials
+
+        counts["org_trials_expired"] = expire_due_trials(db)
+        db.commit()
+    except Exception as exc:
+        errors += 1
+        logger.exception("Scheduler: recording expired organization trials failed")
+        db.rollback()
+        _step_failed("org_trial_expiry", exc)
     # Work not started because the organization is not ACTIVE or has jobs_paused
     # (services/org_lifecycle.py). The check runs inside each work item's own transaction.
     skipped_inactive = 0

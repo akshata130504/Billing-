@@ -3,7 +3,9 @@ import { Badge } from '../../components/common/Badge';
 import { STATUS_LABELS, type OrgStatus } from '../consoleApi';
 import { ROLE_LABELS, type PlatformRole } from '../platformApi';
 
-const STATUS_VARIANTS: Record<OrgStatus, 'success' | 'warning' | 'danger' | 'neutral'> = {
+const STATUS_VARIANTS: Record<OrgStatus, 'success' | 'warning' | 'danger' | 'neutral' | 'info'> = {
+  trial: 'info',
+  trial_expired: 'warning',
   pending_approval: 'warning',
   active: 'success',
   rejected: 'danger',
