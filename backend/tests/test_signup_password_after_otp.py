@@ -162,9 +162,11 @@ def test_token_cannot_be_replayed_after_the_account_exists(client, db):
     with patch("backend.app.services.auth_service.send_email", side_effect=mailbox):
         token = _verified_token(client, email, mailbox)
     assert _complete(client, email, token).status_code == 201
-    again = _complete(client, email, token, password="An0therPassw0rd!", org="Other Org")
+    # A name no other test uses: organizations from earlier tests stay in the shared database.
+    replay_org = unique("Replay Org")
+    again = _complete(client, email, token, password="An0therPassw0rd!", org=replay_org)
     assert again.status_code == 422
-    assert db.scalars(select(Organization).where(Organization.name == "Other Org")).first() is None
+    assert db.scalars(select(Organization).where(Organization.name == replay_org)).first() is None
 
 
 def test_expired_verification_is_rejected(client, db):
