@@ -179,11 +179,26 @@ export interface MeOrganizationSummary {
   role: string;
 }
 
+/** What the organization may use right now. The API enforces it; the SPA only mirrors it. */
+export interface OrganizationAccess {
+  /** Effective status: a trial past trial_ends_at is 'trial_expired' even before the scheduler records it. */
+  status: string;
+  trial_started_at: string | null;
+  trial_ends_at: string | null;
+  module_access: 'unrestricted' | 'trial' | 'entitled';
+  modules: string[];
+  /** Sidebar keys (appUi/keys.json) the organization may open. */
+  nav_items: string[];
+  seat_limit: number | null;
+  seats_used: number;
+}
+
 export interface MeResponse {
   user: MeUser;
   organization: OrganizationOut;
   membership: MeMembership;
   organizations: MeOrganizationSummary[];
+  access?: OrganizationAccess | null;
 }
 
 export type SignupResponse = AuthTokens & { me: MeResponse };

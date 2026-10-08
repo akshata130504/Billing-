@@ -42,6 +42,7 @@ import {
   statusVariant,
 } from '../../utils/format';
 import { AGING_BUCKET_LABELS, PAYMENT_METHOD_LABELS, PRICING_MODEL_LABELS, formatReportPeriod } from './reportsUi';
+import { usePageSpec } from '../../appUi/usePageSpec';
 import type {
   CustomerAmount,
   CustomerAnalyticsOut,
@@ -63,6 +64,16 @@ import type {
 // ---------------------------------------------------------------------------
 
 type ReportTab = 'overview' | 'revenue' | 'receivables' | 'invoices' | 'payments' | 'customers' | 'products';
+
+const TAB_ICONS: Record<string, typeof BarChart3> = {
+  overview: BarChart3,
+  revenue: TrendingUp,
+  receivables: Wallet,
+  invoices: ReceiptText,
+  payments: CreditCard,
+  customers: Users,
+  products: Package,
+};
 
 const TABS: { key: ReportTab; label: string; icon: typeof BarChart3 }[] = [
   { key: 'overview', label: 'Overview', icon: BarChart3 },
@@ -306,21 +317,61 @@ function InvoicedVsCollectedChart({ data }: { data: RevenueAnalyticsOut['invoice
 // ---------------------------------------------------------------------------
 
 function OverviewTab({ data }: { data: ReportKPIs }) {
+  const ui = usePageSpec('reports');
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-      <StatCard title="Total Revenue" value={formatMoney(data.total_revenue)} icon={<TrendingUp className="w-4 h-4" />} />
-      <StatCard title="Net Revenue" value={formatMoney(data.net_revenue)} icon={<Banknote className="w-4 h-4" />} />
-      <StatCard title="Total Invoiced" value={formatMoney(data.total_invoiced)} icon={<ReceiptText className="w-4 h-4" />} />
-      <StatCard title="Total Collected" value={formatMoney(data.total_collected)} icon={<CreditCard className="w-4 h-4" />} />
-      <StatCard title="Outstanding Receivables" value={formatMoney(data.outstanding_receivables)} icon={<Wallet className="w-4 h-4" />} />
-      <StatCard title="Overdue Receivables" value={formatMoney(data.overdue_receivables)} icon={<AlertTriangle className="w-4 h-4" />} />
-      <StatCard
-        title="Collection Rate"
-        value={formatPercent(data.collection_rate)}
-        comparisonText={data.collection_rate === null ? 'Nothing invoiced in this range' : undefined}
-        icon={<Percent className="w-4 h-4" />}
-      />
-      <StatCard title="Average Invoice Value" value={formatMoney(data.average_invoice_value)} icon={<Calculator className="w-4 h-4" />} />
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4" {...ui.edit('overview_kpis')}>
+      {ui.render('overview_kpis', {
+        total_revenue: (item, edit) => (
+          <div key="total_revenue" {...edit}>
+            <StatCard title={item.label} value={formatMoney(data.total_revenue)} icon={<TrendingUp className="w-4 h-4" />} />
+          </div>
+        ),
+        net_revenue: (item, edit) => (
+          <div key="net_revenue" {...edit}>
+            <StatCard title={item.label} value={formatMoney(data.net_revenue)} icon={<Banknote className="w-4 h-4" />} />
+          </div>
+        ),
+        total_invoiced: (item, edit) => (
+          <div key="total_invoiced" {...edit}>
+            <StatCard title={item.label} value={formatMoney(data.total_invoiced)} icon={<ReceiptText className="w-4 h-4" />} />
+          </div>
+        ),
+        total_collected: (item, edit) => (
+          <div key="total_collected" {...edit}>
+            <StatCard title={item.label} value={formatMoney(data.total_collected)} icon={<CreditCard className="w-4 h-4" />} />
+          </div>
+        ),
+        outstanding: (item, edit) => (
+          <div key="outstanding" {...edit}>
+            <StatCard title={item.label} value={formatMoney(data.outstanding_receivables)} icon={<Wallet className="w-4 h-4" />} />
+          </div>
+        ),
+        overdue: (item, edit) => (
+          <div key="overdue" {...edit}>
+            <StatCard title={item.label} value={formatMoney(data.overdue_receivables)} icon={<AlertTriangle className="w-4 h-4" />} />
+          </div>
+        ),
+        collection_rate: (item, edit) => (
+          <div key="collection_rate" {...edit}>
+            <StatCard
+              title={item.label}
+              value={formatPercent(data.collection_rate)}
+              comparisonText={data.collection_rate === null ? 'Nothing invoiced in this range' : undefined}
+              icon={<Percent className="w-4 h-4" />}
+            />
+          </div>
+        ),
+        avg_invoice: (item, edit) => (
+          <div key="avg_invoice" {...edit}>
+            <StatCard
+              title={item.label}
+              value={formatMoney(data.average_invoice_value)}
+              comparisonText={data.average_invoice_value === null ? 'Nothing invoiced in this range' : undefined}
+              icon={<Calculator className="w-4 h-4" />}
+            />
+          </div>
+        ),
+      })}
     </div>
   );
 }
@@ -719,6 +770,7 @@ function ProductsTab({ data }: { data: ProductAnalyticsOut }) {
 // ---------------------------------------------------------------------------
 
 export function ReportsPage() {
+  const ui = usePageSpec('reports');
   const [searchParams, setSearchParams] = useSearchParams();
   const { showToast } = useToast();
   const [exportingSection, setExportingSection] = useState<ReportExportSection | null>(null);
@@ -807,11 +859,13 @@ export function ReportsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        eyebrow="Insights"
-        title="Reports & Analytics"
-        subtitle="Revenue, receivables, invoicing, payments, customer and product performance across your organization."
-      />
+      <div {...ui.edit('header')}>
+        <PageHeader
+          eyebrow={ui.text('header', 'eyebrow')}
+          title={ui.text('header', 'title')}
+          subtitle={ui.text('header', 'subtitle')}
+        />
+      </div>
 
       {/* Date range picker */}
       <Card>
@@ -840,21 +894,22 @@ export function ReportsPage() {
       </Card>
 
       {/* Tabs */}
-      <nav aria-label="Report sections" className="flex items-center gap-1 overflow-x-auto pb-1 border-b border-slate-200">
-        {TABS.map((t) => {
-          const Icon = t.icon;
+      <nav aria-label="Report sections" className="flex items-center gap-1 overflow-x-auto pb-1 border-b border-slate-200" {...ui.edit('tabs')}>
+        {ui.shown('tabs').map((t) => {
+          const Icon = TAB_ICONS[t.key] || BarChart3;
           const active = t.key === tab;
           return (
             <button
               key={t.key}
               type="button"
-              onClick={() => selectTab(t.key)}
+              onClick={() => selectTab(t.key as ReportTab)}
               aria-current={active ? 'page' : undefined}
               className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 -mb-px transition-colors cursor-pointer ${
                 active
                   ? 'border-brand-600 text-brand-700 font-semibold'
                   : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
               }`}
+              {...ui.edit(`tabs.${t.key}`)}
             >
               <Icon className={`w-3.5 h-3.5 ${active ? 'text-brand-600' : 'text-slate-400'}`} />
               {t.label}

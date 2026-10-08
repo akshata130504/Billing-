@@ -1,0 +1,140 @@
+{
+  "key": "billing_calendar",
+  "title": "Billing Calendar",
+  "route": "/control-center/calendar",
+  "nav_item": "billing_calendar",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "eyebrow",
+          "label": "Eyebrow",
+          "kind": "label",
+          "default": "Control Center"
+        },
+        {
+          "name": "badge",
+          "label": "Badge",
+          "kind": "label",
+          "default": "Schedule & Planning"
+        },
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Billing Calendar"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Visualize recurring billing schedules, invoice due dates, subscription renewal cut-offs, trial expirations, and quote expiries."
+        }
+      ]
+    },
+    {
+      "id": "calendar",
+      "label": "Month grid",
+      "fields": [
+        {
+          "name": "today",
+          "label": "Today marker",
+          "kind": "label",
+          "default": "Today"
+        }
+      ]
+    },
+    {
+      "id": "agenda",
+      "label": "Agenda panel",
+      "fields": [
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Upcoming Agenda"
+        },
+        {
+          "name": "caption",
+          "label": "Caption",
+          "kind": "label",
+          "default": "Chronological"
+        },
+        {
+          "name": "empty",
+          "label": "No events message",
+          "kind": "body",
+          "default": "No scheduled events in {month}.",
+          "hint": "{month} is the month shown, e.g. October 2026."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "tabs",
+      "label": "Event type tabs",
+      "items": [
+        {
+          "key": "all",
+          "label": "All Events",
+          "required": true
+        },
+        {
+          "key": "invoice_due",
+          "label": "Invoices Due"
+        },
+        {
+          "key": "subscription_renewal",
+          "label": "Renewals"
+        },
+        {
+          "key": "trial_ending",
+          "label": "Expiring Trials"
+        },
+        {
+          "key": "quote_expiry",
+          "label": "Expiring Quotes"
+        }
+      ]
+    },
+    {
+      "id": "weekdays",
+      "label": "Weekday headings",
+      "reorder": false,
+      "hide": false,
+      "items": [
+        {
+          "key": "sun",
+          "label": "Sun"
+        },
+        {
+          "key": "mon",
+          "label": "Mon"
+        },
+        {
+          "key": "tue",
+          "label": "Tue"
+        },
+        {
+          "key": "wed",
+          "label": "Wed"
+        },
+        {
+          "key": "thu",
+          "label": "Thu"
+        },
+        {
+          "key": "fri",
+          "label": "Fri"
+        },
+        {
+          "key": "sat",
+          "label": "Sat"
+        }
+      ]
+    }
+  ]
+}

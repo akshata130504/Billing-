@@ -1,0 +1,87 @@
+{
+  "key": "customization",
+  "title": "Templates & Customization",
+  "route": "/customization",
+  "nav_item": "customization",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "eyebrow",
+          "label": "Eyebrow",
+          "kind": "label",
+          "default": "System"
+        },
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Customization"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Tailor how documents look, how records are numbered, how reports are sliced, and where your data is sent."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "Summary cards",
+      "items": [
+        {
+          "key": "templates",
+          "label": "Templates"
+        },
+        {
+          "key": "tags",
+          "label": "Reporting tags"
+        },
+        {
+          "key": "series",
+          "label": "Number series"
+        },
+        {
+          "key": "tabs",
+          "label": "Web tabs"
+        },
+        {
+          "key": "deliveries",
+          "label": "Failed webhooks"
+        }
+      ]
+    },
+    {
+      "id": "tabs",
+      "label": "Customization tabs",
+      "items": [
+        {
+          "key": "templates",
+          "label": "Document templates",
+          "required": true
+        },
+        {
+          "key": "tags",
+          "label": "Reporting tags"
+        },
+        {
+          "key": "number-series",
+          "label": "Number series"
+        },
+        {
+          "key": "web-tabs",
+          "label": "Web tabs"
+        },
+        {
+          "key": "webhooks",
+          "label": "Webhook deliveries"
+        }
+      ]
+    }
+  ]
+}

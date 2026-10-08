@@ -25,6 +25,7 @@ import {
   Eye,
   XCircle,
 } from 'lucide-react';
+import { usePageSpec } from '../../appUi/usePageSpec';
 
 const TYPE_LABELS: Record<ApprovalType, string> = {
   quote_discount: 'Quote Discount',
@@ -92,6 +93,7 @@ export function ApprovalCenterPage() {
   const queryClient = useQueryClient();
   const { hasRole } = useAuth();
   const canDecide = hasRole('admin');
+  const ui = usePageSpec('approvals');
 
   const [statusFilter, setStatusFilter] = useState<'all' | ApprovalStatus>('pending');
   const [selectedApproval, setSelectedApproval] = useState<ApprovalOut | null>(null);
@@ -160,50 +162,52 @@ export function ApprovalCenterPage() {
     <div className="space-y-6">
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
+        <div {...ui.edit('header')}>
           <div className="flex items-center gap-2 mb-1">
             <span className="text-xs font-semibold uppercase tracking-wider text-brand-600">
-              Control Center
+              {ui.text('header', 'eyebrow')}
             </span>
             <span className="text-slate-300">•</span>
             <Badge variant="primary" size="sm">
-              Governance & Compliance
+              {ui.text('header', 'badge')}
             </Badge>
           </div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
             <FileCheck className="w-6 h-6 text-brand-600" />
-            Approval Center
+            {ui.text('header', 'title')}
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-            Authorize quote discounts, invoice discounts, refunds, and invoice voids requiring manager sign-off.
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-800 text-xs font-bold">
+          <span
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-800 text-xs font-bold"
+            {...ui.edit('header')}
+          >
             <Clock className="w-3.5 h-3.5 text-amber-600" />
-            {pendingCount} Pending Decisions
+            {ui.text('header', 'pending', { count: String(pendingCount) })}
           </span>
         </div>
       </div>
 
       {!canDecide && (
-        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex items-start gap-2.5 text-xs text-slate-600">
+        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex items-start gap-2.5 text-xs text-slate-600" {...ui.edit('notice')}>
           <ShieldAlert className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
-          <span>Only Admins and Owners can approve or reject requests. You can still review request details.</span>
+          <span>{ui.text('notice', 'read_only')}</span>
         </div>
       )}
 
       {/* Filter Tabs */}
-      <div className="flex items-center gap-1.5 border-b border-slate-200/90 pb-2">
-        {[
-          { key: 'pending', label: `Pending Review (${pendingCount})` },
-          { key: 'approved', label: 'Approved' },
-          { key: 'rejected', label: 'Rejected' },
-          { key: 'all', label: 'All Requests' },
-        ].map((tab) => (
+      <div className="flex items-center gap-1.5 border-b border-slate-200/90 pb-2" {...ui.edit('tabs')}>
+        {ui.shown('tabs').map((item) => ({
+          key: item.key,
+          label: item.key === 'pending' ? `${item.label} (${pendingCount})` : item.label,
+        })).map((tab) => (
           <button
             key={tab.key}
+            {...ui.edit(`tabs.${tab.key}`)}
             type="button"
             onClick={() => setStatusFilter(tab.key as typeof statusFilter)}
             className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
@@ -225,16 +229,18 @@ export function ApprovalCenterPage() {
       ) : (
         <div className="space-y-3">
           {approvals.length === 0 ? (
-            <Card>
+            <Card {...ui.edit('empty')}>
               <CardContent className="py-12 text-center">
                 <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mx-auto mb-3">
                   <CheckCircle2 className="w-6 h-6" />
                 </div>
                 <h3 className="text-sm font-bold text-slate-900">
-                  {statusFilter === 'all' ? 'No approval requests' : `No ${statusFilter} approvals`}
+                  {statusFilter === 'all'
+                    ? ui.text('empty', 'title_all')
+                    : ui.text('empty', 'title_status', { status: statusFilter })}
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">
-                  There are no approval requests matching this criteria.
+                  {ui.text('empty', 'description')}
                 </p>
               </CardContent>
             </Card>

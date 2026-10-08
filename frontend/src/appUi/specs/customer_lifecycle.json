@@ -1,0 +1,54 @@
+{
+  "key": "customer_lifecycle",
+  "title": "Customer Lifecycle",
+  "route": "/customer-lifecycle",
+  "nav_item": "customer_lifecycle",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        { "name": "eyebrow", "label": "Eyebrow", "kind": "label", "default": "Customer Experience" },
+        { "name": "title", "label": "Heading", "kind": "heading", "default": "Customer Lifecycle" },
+        { "name": "subtitle", "label": "Subtitle", "kind": "body", "default": "Track customer relationship stages, revenue health, and operational engagement in one unified place." }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty state",
+      "fields": [
+        { "name": "title", "label": "Title", "kind": "heading", "default": "No customer lifecycles found" },
+        { "name": "description", "label": "Description", "kind": "body", "default": "No customers match your current filter criteria." }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "KPI cards",
+      "items": [
+        { "key": "total", "label": "Total Customers" },
+        { "key": "onboarding", "label": "Onboarding" },
+        { "key": "active", "label": "Active Accounts" },
+        { "key": "renewal_due", "label": "Renewals Due" },
+        { "key": "at_risk", "label": "At-Risk Accounts" },
+        { "key": "expansion", "label": "Expansion Deals" }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Table columns",
+      "items": [
+        { "key": "customer", "label": "Customer", "required": true },
+        { "key": "stage", "label": "Lifecycle Stage" },
+        { "key": "health", "label": "Health Score" },
+        { "key": "revenue", "label": "Total Revenue" },
+        { "key": "amount_due", "label": "Amount Due" },
+        { "key": "active_subs", "label": "Active Subs" },
+        { "key": "hours", "label": "Logged Hours" },
+        { "key": "next_action", "label": "Next Action" },
+        { "key": "actions", "label": "Actions" }
+      ]
+    }
+  ]
+}

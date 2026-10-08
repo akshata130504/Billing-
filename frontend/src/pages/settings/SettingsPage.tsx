@@ -30,6 +30,7 @@ import { PreferencesTab } from './PreferencesTab';
 import { NotificationsTab } from './NotificationsTab';
 import { HelpTab } from './HelpTab';
 import { PlatformAccessTab } from './PlatformAccessTab';
+import { usePageSpec } from '../../appUi/usePageSpec';
 
 export type SettingsTab =
   | 'profile'
@@ -44,49 +45,20 @@ export type SettingsTab =
   | 'platform-access'
   | 'help';
 
-interface NavItem {
-  key: SettingsTab;
-  label: string;
-  icon: typeof User;
-}
-
-interface NavGroup {
-  title: string;
-  items: NavItem[];
-}
-
-const NAV_GROUPS: NavGroup[] = [
-  {
-    title: 'General',
-    items: [
-      { key: 'profile', label: 'My Profile', icon: User },
-      { key: 'preferences', label: 'Account Preferences', icon: Sliders },
-      { key: 'notifications', label: 'Notifications', icon: Bell },
-    ],
-  },
-  {
-    title: 'Organization',
-    items: [
-      { key: 'organization', label: 'Organization', icon: Building2 },
-      { key: 'users', label: 'Users & Roles', icon: Users },
-      { key: 'billing', label: 'Billing & numbering', icon: Receipt },
-      { key: 'integrations', label: 'Integrations', icon: Boxes },
-    ],
-  },
-  {
-    title: 'Security',
-    items: [
-      { key: 'security', label: 'Security', icon: ShieldCheck },
-      { key: 'platform-access', label: 'Platform access', icon: ShieldAlert },
-    ],
-  },
-  {
-    title: 'Support',
-    items: [
-      { key: 'help', label: 'Help & Documentation', icon: HelpCircle },
-    ],
-  },
-];
+const NAV_ICONS: Record<string, typeof User> = {
+  profile: User,
+  preferences: Sliders,
+  notifications: Bell,
+  organization: Building2,
+  users: Users,
+  team: Users,
+  billing: Receipt,
+  integrations: Boxes,
+  security: ShieldCheck,
+  'platform-access': ShieldAlert,
+  platform_access: ShieldAlert,
+  help: HelpCircle,
+};
 
 const ALL_TABS: SettingsTab[] = [
   'profile',
@@ -111,6 +83,7 @@ function normalizeTab(val: string | null | undefined): SettingsTab {
 }
 
 export function SettingsPage() {
+  const ui = usePageSpec('settings');
   const navigate = useNavigate();
   const params = useParams<{ section?: string; tab?: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -149,10 +122,12 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Settings & Workspace Preferences"
-        subtitle="Manage your profile, security, notification rules, organization profile, team members and system settings."
-      />
+      <div {...ui.edit('header')}>
+        <PageHeader
+          title={ui.text('header', 'title')}
+          subtitle={ui.text('header', 'subtitle')}
+        />
+      </div>
 
       <div className="flex flex-col lg:flex-row gap-6 items-start">
         {/* Left Settings Navigation */}
@@ -160,43 +135,98 @@ export function SettingsPage() {
           aria-label="Settings navigation"
           className="w-full lg:w-64 shrink-0 bg-white rounded-xl border border-slate-200/80 p-3 space-y-4 shadow-2xs"
         >
-          {NAV_GROUPS.map((group) => (
-            <div key={group.title} className="space-y-1">
-              <p className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                {group.title}
-              </p>
-              <div className="space-y-0.5">
-                {group.items.map((item) => {
-                  const Icon = item.icon;
-                  const isActive =
-                    activeTab === item.key ||
-                    (item.key === 'users' && activeTab === 'team');
-                  return (
-                    <button
-                      key={item.key}
-                      type="button"
-                      onClick={() => selectTab(item.key)}
-                      aria-current={isActive ? 'page' : undefined}
-                      className={cn(
-                        'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors text-left cursor-pointer',
-                        isActive
-                          ? 'bg-brand-50 text-brand-700 font-semibold shadow-2xs'
-                          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                      )}
-                    >
-                      <Icon
-                        className={cn(
-                          'w-4 h-4 shrink-0',
-                          isActive ? 'text-brand-600' : 'text-slate-400'
-                        )}
-                      />
-                      <span className="truncate">{item.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
+          {/* General */}
+          <div className="space-y-1" {...ui.edit('general_tabs')}>
+            <p className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              General
+            </p>
+            <div className="space-y-0.5">
+              {ui.shown('general_tabs').map((item) => {
+                const Icon = NAV_ICONS[item.key] || User;
+                const isActive = activeTab === item.key;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => selectTab(item.key as SettingsTab)}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={cn(
+                      'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors text-left cursor-pointer',
+                      isActive
+                        ? 'bg-brand-50 text-brand-700 font-semibold shadow-2xs'
+                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                    )}
+                    {...ui.edit(`general_tabs.${item.key}`)}
+                  >
+                    <Icon className={cn('w-4 h-4 shrink-0', isActive ? 'text-brand-600' : 'text-slate-400')} />
+                    <span className="truncate">{item.label}</span>
+                  </button>
+                );
+              })}
             </div>
-          ))}
+          </div>
+
+          {/* Organization */}
+          <div className="space-y-1" {...ui.edit('org_tabs')}>
+            <p className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Organization
+            </p>
+            <div className="space-y-0.5">
+              {ui.shown('org_tabs').map((item) => {
+                const Icon = NAV_ICONS[item.key] || Building2;
+                const isActive = activeTab === item.key || (item.key === 'users' && activeTab === 'team');
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => selectTab(item.key as SettingsTab)}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={cn(
+                      'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors text-left cursor-pointer',
+                      isActive
+                        ? 'bg-brand-50 text-brand-700 font-semibold shadow-2xs'
+                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                    )}
+                    {...ui.edit(`org_tabs.${item.key}`)}
+                  >
+                    <Icon className={cn('w-4 h-4 shrink-0', isActive ? 'text-brand-600' : 'text-slate-400')} />
+                    <span className="truncate">{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Security & Support */}
+          <div className="space-y-1" {...ui.edit('security_tabs')}>
+            <p className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Security & Support
+            </p>
+            <div className="space-y-0.5">
+              {ui.shown('security_tabs').map((item) => {
+                const Icon = NAV_ICONS[item.key] || ShieldCheck;
+                const isActive = activeTab === item.key;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => selectTab(item.key as SettingsTab)}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={cn(
+                      'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors text-left cursor-pointer',
+                      isActive
+                        ? 'bg-brand-50 text-brand-700 font-semibold shadow-2xs'
+                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                    )}
+                    {...ui.edit(`security_tabs.${item.key}`)}
+                  >
+                    <Icon className={cn('w-4 h-4 shrink-0', isActive ? 'text-brand-600' : 'text-slate-400')} />
+                    <span className="truncate">{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </nav>
 
         {/* Right Content Area */}

@@ -106,6 +106,32 @@ def test_nginx_serves_the_console_at_superadmin_with_the_strict_headers():
     assert "razorpay" not in headers and "fonts.g" not in headers
 
 
+def test_visual_editor_preview_frame_is_same_origin_only():
+    """The console may embed exactly one page of its own origin (the visual editor preview); the
+    preview may be framed only by that origin and frames nothing itself."""
+    conf = _read("frontend/docker/nginx.conf")
+    block = _nginx_location(conf, "= /superadmin/ui-preview")
+    assert "platform-preview-security-headers.conf" in block and "no-store" in block
+    assert "try_files /superadmin.html =404;" in block
+    preview = _read("frontend/docker/platform-preview-security-headers.conf")
+    assert "frame-ancestors 'self';" in preview and "frame-src 'none';" in preview
+    assert 'X-Frame-Options "SAMEORIGIN"' in preview and "script-src 'self';" in preview
+    assert "razorpay" not in preview and "https:" not in preview.split("Content-Security-Policy", 1)[1]
+    # the preview answers every request from sample data: the browser refuses any network request
+    assert "connect-src 'none';" in preview and "form-action 'none';" in preview
+    for snippet in (preview, _read("frontend/docker/platform-security-headers.conf")):
+        for line in snippet.splitlines():  # only comments and well-formed `add_header ... always;`
+            assert not line.strip() or line.startswith("#") or (
+                line.startswith("add_header ") and line.endswith(" always;")), line
+    console =_read("frontend/docker/platform-security-headers.conf")
+    assert "frame-ancestors 'none';" in console and "frame-src 'self';" in console
+    assert 'X-Frame-Options "DENY"' in console
+    dockerfile = _read("frontend/Dockerfile")
+    assert "platform-preview-security-headers.conf /etc/nginx/snippets/platform-preview-security-headers.conf" in dockerfile
+    # no other location uses the framable header set
+    assert conf.count("platform-preview-security-headers.conf") == 1
+
+
 def test_deploy_workflow_builds_both_images_from_the_same_sha():
     wf = _read(".github/workflows/deploy.yml")
     for image in ("API_IMAGE", "WEB_IMAGE"):

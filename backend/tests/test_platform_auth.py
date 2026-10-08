@@ -718,6 +718,14 @@ def test_platform_routes_expose_no_tenant_data(client, db):
     console_paths |= {grants, f"{grants}/emergency", f"{grants}/{{grant_id}}", f"{grants}/{{grant_id}}/cancel",
                       f"{grants}/{{grant_id}}/revoke", f"{grants}/{{grant_id}}/enter",
                       f"{grants}/{{grant_id}}/emergency-approve", f"{grants}/{{grant_id}}/review"}
+    app_ui = f"{console}/app-ui/pages"
+    app_page = f"{app_ui}/{{key}}"
+    console_paths |= {app_ui, app_page, f"{app_page}/draft", f"{app_page}/draft/discard", f"{app_page}/compare",
+                      f"{app_page}/publish", f"{app_page}/versions", f"{app_page}/versions/{{version}}",
+                      f"{app_page}/versions/{{version}}/rollback", f"{app_page}/versions/{{version}}/restore"}
+    subs = f"{console}/subscription-requests"
+    console_paths |= {subs, f"{subs}/{{request_id}}", f"{subs}/{{request_id}}/approve", f"{subs}/{{request_id}}/reject",
+                      f"{subs}/organizations/{{organization_id}}/entitlements"}
     assert platform_paths == auth_paths | console_paths
 
 

@@ -45,6 +45,7 @@ import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { formatDateTime, formatMoney, formatRelative, humanize } from '../../utils/format';
 import { cn } from '../../utils/cn';
+import { usePageSpec } from '../../appUi/usePageSpec';
 
 // ---------------------------------------------------------------------------
 // Constants & helpers
@@ -143,6 +144,7 @@ export function HostedPaymentPagesPage() {
   const { showToast } = useToast();
   const { hasRole } = useAuth();
   const canWrite = hasRole('finance');
+  const ui = usePageSpec('hosted_payment_pages');
 
   const [tab, setTab] = useState<Tab>('sessions');
 
@@ -263,7 +265,7 @@ export function HostedPaymentPagesPage() {
 
   // --- Table -----------------------------------------------------------------
 
-  const columns: Column<CheckoutSession>[] = [
+  const allColumns: Column<CheckoutSession>[] = [
     {
       key: 'ref',
       title: 'Reference',
@@ -361,6 +363,17 @@ export function HostedPaymentPagesPage() {
       },
     },
   ];
+  // Visual-editor configuration: column order, labels and visibility (spec keys = column keys).
+  const columns: Column<CheckoutSession>[] = ui
+    .shown('columns')
+    .map((item) => {
+      const column = allColumns.find((c) => c.key === item.key);
+      return column ? { ...column, title: item.label } : null;
+    })
+    .filter((c): c is Column<CheckoutSession> => c !== null);
+
+  const tabIcons: Record<Tab, typeof Link2> = { sessions: Link2, templates: LayoutTemplate };
+  const tabCounts: Record<Tab, number> = { sessions: totalSessions, templates: templates.length };
 
   // ---------------------------------------------------------------------------
 
@@ -368,16 +381,13 @@ export function HostedPaymentPagesPage() {
     <div className="space-y-6 pb-12">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
+        <div {...ui.edit('header')}>
           <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">
             <HeartHandshake className="w-4 h-4" />
-            Customer Experience
+            {ui.text('header', 'eyebrow')}
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Hosted Payment Pages</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Generate secure, expiring checkout links for invoices, subscriptions and card capture — branded with
-            your own templates.
-          </p>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{ui.text('header', 'title')}</h1>
+          <p className="text-sm text-slate-500 mt-1">{ui.text('header', 'subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -402,27 +412,42 @@ export function HostedPaymentPagesPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Total sessions" value={totalSessions} icon={<Link2 className="w-4 h-4" />} />
-        <StatCard title="Awaiting payment" value={awaiting} icon={<Clock className="w-4 h-4" />} />
-        <StatCard title="Successful" value={successful} icon={<CheckCircle2 className="w-4 h-4" />} />
-        <StatCard title="Failed / expired" value={closed} icon={<XCircle className="w-4 h-4" />} />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" {...ui.edit('kpis')}>
+        {ui.render('kpis', {
+          total: (item, edit) => (
+            <div {...edit} className="flex">
+              <StatCard className="flex-1" title={item.label} value={totalSessions} icon={<Link2 className="w-4 h-4" />} />
+            </div>
+          ),
+          awaiting: (item, edit) => (
+            <div {...edit} className="flex">
+              <StatCard className="flex-1" title={item.label} value={awaiting} icon={<Clock className="w-4 h-4" />} />
+            </div>
+          ),
+          successful: (item, edit) => (
+            <div {...edit} className="flex">
+              <StatCard className="flex-1" title={item.label} value={successful} icon={<CheckCircle2 className="w-4 h-4" />} />
+            </div>
+          ),
+          closed: (item, edit) => (
+            <div {...edit} className="flex">
+              <StatCard className="flex-1" title={item.label} value={closed} icon={<XCircle className="w-4 h-4" />} />
+            </div>
+          ),
+        })}
       </div>
 
       {/* Tabs + filters */}
       <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-        <nav className="flex items-center gap-1" aria-label="Sections">
-          {(
-            [
-              { key: 'sessions', label: 'Sessions', icon: Link2, count: totalSessions },
-              { key: 'templates', label: 'Templates', icon: LayoutTemplate, count: templates.length },
-            ] as { key: Tab; label: string; icon: typeof Link2; count: number }[]
-          ).map((t) => {
+        <nav className="flex items-center gap-1" aria-label="Sections" {...ui.edit('tabs')}>
+          {ui.shown('tabs').map((item) => {
+            const t = { key: item.key as Tab, label: item.label, icon: tabIcons[item.key as Tab], count: tabCounts[item.key as Tab] };
             const Icon = t.icon;
             const active = tab === t.key;
             return (
               <button
                 key={t.key}
+                {...ui.edit(`tabs.${t.key}`)}
                 type="button"
                 onClick={() => setTab(t.key)}
                 aria-current={active ? 'page' : undefined}
@@ -466,8 +491,8 @@ export function HostedPaymentPagesPage() {
         ) : !sessionsLoading && sessions.length === 0 && statusFilter === 'all' ? (
           <EmptyState
             icon={<Link2 className="w-6 h-6 stroke-1" />}
-            title="No checkout sessions yet"
-            description="Create a hosted checkout link to let a customer pay an invoice, start a subscription or save a card without signing in."
+            title={ui.text('empty', 'sessions_title')}
+            description={ui.text('empty', 'sessions_description')}
             action={
               canWrite ? (
                 <Button variant="primary" size="sm" onClick={() => setSessionModalOpen(true)} leadingIcon={<Plus className="w-4 h-4" />}>
@@ -477,18 +502,20 @@ export function HostedPaymentPagesPage() {
             }
           />
         ) : (
+          <div {...ui.edit('columns')}>
           <DataTable<CheckoutSession>
             columns={columns}
             data={sessions}
             keyExtractor={(s) => s.id}
             isLoading={sessionsLoading}
             emptyMessage={`No ${statusFilter === 'all' ? '' : humanize(statusFilter).toLowerCase() + ' '}sessions`}
-            emptySubtext="Try a different status filter."
+            emptySubtext={ui.text('empty', 'filtered_hint')}
             page={page}
             pageSize={PAGE_SIZE}
             total={total}
             onPageChange={setPage}
           />
+          </div>
         ))}
 
       {/* Templates tab */}
@@ -502,8 +529,8 @@ export function HostedPaymentPagesPage() {
         ) : templates.length === 0 ? (
           <EmptyState
             icon={<LayoutTemplate className="w-6 h-6 stroke-1" />}
-            title="No checkout templates"
-            description="Templates control the colours, logo, button text and redirect of your hosted pages. A “Standard Checkout” default is created automatically the first time a session is generated without one."
+            title={ui.text('empty', 'templates_title')}
+            description={ui.text('empty', 'templates_description')}
             action={
               canWrite ? (
                 <Button variant="primary" size="sm" onClick={() => setTemplateModalOpen(true)} leadingIcon={<Plus className="w-4 h-4" />}>

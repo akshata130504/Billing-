@@ -10,11 +10,12 @@ import {
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { authService } from '../services/authService';
-import { LOGOUT_EVENT, tokenStorage } from '../services/apiClient';
+import { ACCESS_CHANGED_EVENT, LOGOUT_EVENT, tokenStorage } from '../services/apiClient';
 import type {
   LoginRequest,
   MeMembership,
   MeOrganizationSummary,
+  OrganizationAccess,
   MeResponse,
   MeUser,
   MemberRole,
@@ -43,6 +44,8 @@ export interface AuthContextValue {
   organization: OrganizationOut | null;
   membership: MeMembership | null;
   organizations: MeOrganizationSummary[];
+  /** Trial state, modules and seats (absent in previews and older test doubles: no restriction). */
+  access?: OrganizationAccess | null;
   isAuthenticated: boolean;
   /** True while the initial GET /auth/me (or an org switch) is in flight. */
   isLoading: boolean;
@@ -57,7 +60,7 @@ export interface AuthContextValue {
   hasRole: (min: MemberRole) => boolean;
 }
 
-const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+export const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
@@ -171,6 +174,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return loadMe();
   }, [loadMe]);
 
+  // The API refused a request because access changed (e.g. the trial just ended): reload /auth/me.
+  useEffect(() => {
+    let pending = false;
+    const onAccessChanged = () => {
+      if (pending || !tokenStorage.hasSession()) return;
+      pending = true;
+      void loadMe()
+        .catch(() => undefined)
+        .finally(() => {
+          pending = false;
+        });
+    };
+    window.addEventListener(ACCESS_CHANGED_EVENT, onAccessChanged);
+    return () => window.removeEventListener(ACCESS_CHANGED_EVENT, onAccessChanged);
+  }, [loadMe]);
+
   const hasRole = useCallback(
     (min: MemberRole) => roleAtLeast(me?.membership.role, min),
     [me]
@@ -182,6 +201,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       organization: me?.organization ?? null,
       membership: me?.membership ?? null,
       organizations: me?.organizations ?? [],
+      access: me?.access ?? null,
       isAuthenticated: me !== null,
       isLoading,
       login,

@@ -61,6 +61,7 @@ from backend.app.models import (
     utcnow,
 )
 from backend.app.models.identity import LoginThrottle
+from backend.app.models.subscription_access import ModuleAccess
 from backend.app.schemas.auth import (
     MeResponse,
     MembershipOut,
@@ -69,7 +70,8 @@ from backend.app.schemas.auth import (
     UserOut,
 )
 from backend.app.schemas.organization import OrganizationOut, normalize_email
-from backend.app.services import audit
+from backend.app.schemas.subscription_access import OrganizationAccess
+from backend.app.services import audit, org_access
 from backend.app.services.email import EmailDeliveryError, frontend_url, send_email
 
 # Failed credential checks allowed per (email, client IP) - or per account for TOTP codes -
@@ -331,6 +333,7 @@ def build_me(db: Session, ctx: CurrentContext) -> MeResponse:
         organizations=[
             OrganizationSummary(id=org.id, name=org.name, slug=org.slug, role=mem.role) for mem, org in rows
         ],
+        access=OrganizationAccess(**org_access.access_summary(db, ctx.organization)),
     )
 
 
@@ -655,10 +658,16 @@ def verify_signup_otp(
     db.delete(pending)
     db.flush()
 
+    # Self-service signup: the organization is ACTIVE at once and its free trial starts now (no
+    # approval). After the trial a subscription request, decided by a Platform Administrator, sets
+    # its modules and seats (subscription_request_service); the platform can suspend it any time.
     organization = Organization(
         name=org_name,
         slug=unique_slug(db, org_name),
-        status=OrganizationStatus.PENDING_APPROVAL,
+        status=OrganizationStatus.ACTIVE,
+        module_access=ModuleAccess.TRIAL.value,
+        trial_started_at=now,
+        trial_ends_at=now + timedelta(days=settings.ORGANIZATION_TRIAL_DAYS),
     )
     db.add(organization)
     db.flush()
@@ -717,7 +726,7 @@ def verify_signup_otp(
     from backend.app.services import platform_audit
     platform_audit.record(
         db,
-        action=platform_audit.ORGANIZATION_CREATED_PENDING_APPROVAL,
+        action=platform_audit.ORGANIZATION_CREATED,
         result=platform_audit.SUCCESS,
         staff=None,
         session_id=None,
@@ -731,6 +740,21 @@ def verify_signup_otp(
             "owner_name": user.full_name,
             "organization_name": organization.name,
             "status": organization.status.value,
+        },
+    )
+    platform_audit.record(
+        db,
+        action=platform_audit.ORGANIZATION_TRIAL_STARTED,
+        result=platform_audit.SUCCESS,
+        ip_address=ip,
+        user_agent=user_agent,
+        organization=organization,
+        target_type="organization",
+        target_id=organization.id,
+        details={
+            "trial_started_at": organization.trial_started_at.isoformat(),
+            "trial_ends_at": organization.trial_ends_at.isoformat(),
+            "trial_days": settings.ORGANIZATION_TRIAL_DAYS,
         },
     )
     _commit(db, "An account with this email or organization already exists.")
@@ -1321,6 +1345,11 @@ def accept_invitation(
                 )
             _check_totp_code(db, user, totp_code or "", ip, user_agent)
 
+    # The invitation already holds a seat; this refuses only if the limit was lowered since.
+    org_access.ensure_seat_available(db, organization, already_counted=True)
+    from backend.app.services import tenant_admin_provisioning
+
+    provisioned_by_platform = tenant_admin_provisioning.was_provisioned(db, membership.id)
     membership.status = MembershipStatus.ACTIVE
     membership.accepted_at = now
     membership.deactivated_at = None
@@ -1342,5 +1371,13 @@ def accept_invitation(
         before={"status": MembershipStatus.INVITED.value},
         after={"status": MembershipStatus.ACTIVE.value, "role": membership.role.value, "user_id": user.id},
     )
+    if provisioned_by_platform:
+        from backend.app.services import platform_audit
+
+        platform_audit.record(
+            db, action=platform_audit.TENANT_ADMIN_ACTIVATED, result=platform_audit.SUCCESS,
+            ip_address=ip, user_agent=user_agent, organization=organization, target_type="membership",
+            target_id=membership.id, details={"user_id": user.id, "admin_email": user.email, "role": membership.role.value},
+        )
     _commit(db)
     return tokens

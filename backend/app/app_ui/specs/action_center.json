@@ -1,0 +1,133 @@
+{
+  "key": "action_center",
+  "title": "Action Center",
+  "route": "/control-center/action-center",
+  "nav_item": "action_center",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "eyebrow",
+          "label": "Eyebrow",
+          "kind": "label",
+          "default": "Control Center"
+        },
+        {
+          "name": "badge",
+          "label": "Badge",
+          "kind": "label",
+          "default": "Operator Cockpit"
+        },
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Action Center"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Triage urgent operational exceptions requiring immediate billing admin intervention, payment retries, and customer follow-ups."
+        }
+      ]
+    },
+    {
+      "id": "items",
+      "label": "Action items",
+      "fields": [
+        {
+          "name": "impact",
+          "label": "Amount caption",
+          "kind": "label",
+          "default": "Impact Value"
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty list message",
+      "fields": [
+        {
+          "name": "title",
+          "label": "Title",
+          "kind": "heading",
+          "default": "All Clear! No Pending Urgent Items"
+        },
+        {
+          "name": "description",
+          "label": "Description",
+          "kind": "body",
+          "default": "No items match the selected filter. Any high-urgency exceptions will immediately surface in this cockpit."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "Metric cards",
+      "captions": true,
+      "items": [
+        {
+          "key": "overdue",
+          "label": "Overdue Invoices",
+          "caption": "Requires reminder notice"
+        },
+        {
+          "key": "failed_payment",
+          "label": "Failed Payments",
+          "caption": "Payment gateway retry"
+        },
+        {
+          "key": "expiring_trial",
+          "label": "Expiring Trials",
+          "caption": "Ready for paid upgrade"
+        },
+        {
+          "key": "pending_quote",
+          "label": "Pending Quotes",
+          "caption": "Awaiting customer e-sign"
+        },
+        {
+          "key": "pending_approval",
+          "label": "Pending Approvals",
+          "caption": "Awaiting sign-off"
+        }
+      ]
+    },
+    {
+      "id": "tabs",
+      "label": "Category tabs",
+      "items": [
+        {
+          "key": "all",
+          "label": "All Attention",
+          "required": true
+        },
+        {
+          "key": "overdue",
+          "label": "Overdue Invoices"
+        },
+        {
+          "key": "failed_payment",
+          "label": "Failed Payments"
+        },
+        {
+          "key": "expiring_trial",
+          "label": "Expiring Trials"
+        },
+        {
+          "key": "pending_quote",
+          "label": "Pending Quotes"
+        },
+        {
+          "key": "pending_approval",
+          "label": "Pending Approvals"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,107 @@
+{
+  "key": "reports",
+  "title": "Reports",
+  "route": "/reports",
+  "nav_item": "reports",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "eyebrow",
+          "label": "Eyebrow",
+          "kind": "label",
+          "default": "Insights"
+        },
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Reports & Analytics"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Revenue, receivables, invoicing, payments, customer and product performance across your organization."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "tabs",
+      "label": "Report category tabs",
+      "items": [
+        {
+          "key": "overview",
+          "label": "Overview",
+          "required": true
+        },
+        {
+          "key": "revenue",
+          "label": "Revenue"
+        },
+        {
+          "key": "receivables",
+          "label": "Receivables"
+        },
+        {
+          "key": "invoices",
+          "label": "Invoices"
+        },
+        {
+          "key": "payments",
+          "label": "Payments"
+        },
+        {
+          "key": "customers",
+          "label": "Customers"
+        },
+        {
+          "key": "products",
+          "label": "Products"
+        }
+      ]
+    },
+    {
+      "id": "overview_kpis",
+      "label": "Overview KPI cards",
+      "items": [
+        {
+          "key": "total_revenue",
+          "label": "Total Revenue"
+        },
+        {
+          "key": "net_revenue",
+          "label": "Net Revenue"
+        },
+        {
+          "key": "total_invoiced",
+          "label": "Total Invoiced"
+        },
+        {
+          "key": "total_collected",
+          "label": "Total Collected"
+        },
+        {
+          "key": "outstanding",
+          "label": "Outstanding Receivables"
+        },
+        {
+          "key": "overdue",
+          "label": "Overdue Receivables"
+        },
+        {
+          "key": "collection_rate",
+          "label": "Collection Rate"
+        },
+        {
+          "key": "avg_invoice",
+          "label": "Average Invoice Value"
+        }
+      ]
+    }
+  ]
+}

@@ -43,6 +43,7 @@ import { cn } from '../../utils/cn';
 import { RuleEditorModal } from './RuleEditorModal';
 import { RuleTestModal } from './RuleTestModal';
 import { ScheduleEditorModal } from './ScheduleEditorModal';
+import { usePageSpec } from '../../appUi/usePageSpec';
 import {
   ACTION_TYPE_LABELS,
   FREQUENCY_LABELS,
@@ -57,12 +58,6 @@ import {
 } from './constants';
 
 type Tab = 'rules' | 'schedules' | 'logs';
-
-const TABS: { key: Tab; label: string }[] = [
-  { key: 'rules', label: 'Rules' },
-  { key: 'schedules', label: 'Schedules' },
-  { key: 'logs', label: 'Logs' },
-];
 
 const FILTER_SELECT_CLS =
   'px-3 py-2 text-xs font-medium bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500';
@@ -158,6 +153,7 @@ function summarizeDetails(details: Record<string, unknown> | null): string {
 // ---------------------------------------------------------------------------
 
 export function AutomationPage() {
+  const ui = usePageSpec('automation');
   const { showToast } = useToast();
   const { hasRole } = useAuth();
   const canManage = hasRole('admin');
@@ -426,18 +422,20 @@ export function AutomationPage() {
   const renderRulesTable = () => {
     if (rules.length === 0) {
       return (
-        <EmptyState
-          icon={<Zap className="w-8 h-8 text-slate-400" />}
-          title="No automation rules yet"
-          description="Rules react to billing events — overdue invoices, failed payments, status changes — and run alerts, webhooks or field updates automatically."
-          action={
-            canManage ? (
-              <Button variant="primary" size="sm" onClick={() => setRuleModal({ open: true, rule: null })} leadingIcon={<Plus className="w-4 h-4" />}>
-                Create your first rule
-              </Button>
-            ) : undefined
-          }
-        />
+        <div {...ui.edit('empty')}>
+          <EmptyState
+            icon={<Zap className="w-8 h-8 text-slate-400" />}
+            title={ui.text('empty', 'none')}
+            description="Rules react to billing events — overdue invoices, failed payments, status changes — and run alerts, webhooks or field updates automatically."
+            action={
+              canManage ? (
+                <Button variant="primary" size="sm" onClick={() => setRuleModal({ open: true, rule: null })} leadingIcon={<Plus className="w-4 h-4" />}>
+                  Create your first rule
+                </Button>
+              ) : undefined
+            }
+          />
+        </div>
       );
     }
     if (filteredRules.length === 0) {
@@ -465,14 +463,16 @@ export function AutomationPage() {
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm text-slate-600">
           <thead className="bg-slate-50/80 text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-200">
-            <tr>
-              <th className="px-5 py-3.5">Rule</th>
-              <th className="px-5 py-3.5">Trigger</th>
-              <th className="px-5 py-3.5">Conditions</th>
-              <th className="px-5 py-3.5">Actions</th>
-              <th className="px-5 py-3.5">Enabled</th>
-              <th className="px-5 py-3.5">Last run</th>
-              <th className="px-5 py-3.5 text-right">Manage</th>
+            <tr {...ui.edit('columns')}>
+              {ui.shown('columns').map((col) => (
+                <th
+                  key={col.key}
+                  className={`px-5 py-3.5 ${col.key === 'manage' ? 'text-right' : ''}`}
+                  {...ui.edit(`columns.${col.key}`)}
+                >
+                  {col.label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -481,94 +481,125 @@ export function AutomationPage() {
               const lastRun = lastRunByName.get(rule.name);
               return (
                 <tr key={rule.id} className="hover:bg-slate-50/70 transition-colors">
-                  <td className="px-5 py-4 max-w-xs">
-                    <div className="font-semibold text-slate-900 truncate">{rule.name}</div>
-                    {rule.description && <div className="text-xs text-slate-400 mt-0.5 truncate">{rule.description}</div>}
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="flex flex-col gap-1">
-                      <Badge variant="info" size="sm">
-                        {humanize(rule.module)}
-                      </Badge>
-                      <span className="text-xs text-slate-600">{TRIGGER_EVENT_LABELS[rule.trigger_event] ?? humanize(rule.trigger_event)}</span>
-                    </div>
-                  </td>
-                  <td className="px-5 py-4 max-w-xs">
-                    {conditions.length === 0 ? (
-                      <span className="text-xs italic text-slate-400">Any event</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-1">
-                        {conditions.slice(0, 2).map((c) => (
-                          <code key={c} className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-700">
-                            {c}
-                          </code>
-                        ))}
-                        {conditions.length > 2 && (
-                          <span className="text-[11px] text-slate-400">+{conditions.length - 2} more</span>
-                        )}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-5 py-4">
-                    <ActionsSummary actions={rule.actions} />
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="flex items-center gap-2">
-                      <ToggleSwitch
-                        checked={rule.is_active}
-                        disabled={!canManage}
-                        busy={busyId === rule.id}
-                        onChange={(next) => handleToggleRule(rule, next)}
-                        label={`Toggle rule ${rule.name}`}
-                      />
-                      <span className={cn('text-xs font-medium', rule.is_active ? 'text-emerald-700' : 'text-slate-400')}>
-                        {rule.is_active ? 'On' : 'Off'}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-5 py-4 text-xs whitespace-nowrap">
-                    {lastRun ? (
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-slate-700" title={formatDateTime(asUtc(lastRun.occurred_at))}>
-                          {formatRelative(asUtc(lastRun.occurred_at))}
-                        </span>
-                        <Badge variant={LOG_STATUS_VARIANT[lastRun.status]} size="sm">
-                          {LOG_STATUS_LABELS[lastRun.status]}
-                        </Badge>
-                      </div>
-                    ) : (
-                      <span className="italic text-slate-400">Never</span>
-                    )}
-                  </td>
-                  <td className="px-5 py-4 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      {canManage && (
-                        <>
-                          <Button variant="ghost" size="sm" className="text-xs" onClick={() => setTestRule(rule)} leadingIcon={<FlaskConical className="w-3.5 h-3.5" />}>
-                            Test
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-xs"
-                            onClick={() => setRuleModal({ open: true, rule })}
-                            leadingIcon={<Pencil className="w-3.5 h-3.5" />}
-                          >
-                            Edit
-                          </Button>
-                          <button
-                            type="button"
-                            onClick={() => setDeleteTarget({ kind: 'rule', item: rule })}
-                            className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
-                            aria-label={`Delete rule ${rule.name}`}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </>
-                      )}
-                      {!canManage && <span className="text-xs text-slate-400">View only</span>}
-                    </div>
-                  </td>
+                  {ui.shown('columns').map((col) => {
+                    if (col.key === 'rule') {
+                      return (
+                        <td key="rule" className="px-5 py-4 max-w-xs">
+                          <div className="font-semibold text-slate-900 truncate">{rule.name}</div>
+                          {rule.description && <div className="text-xs text-slate-400 mt-0.5 truncate">{rule.description}</div>}
+                        </td>
+                      );
+                    }
+                    if (col.key === 'trigger') {
+                      return (
+                        <td key="trigger" className="px-5 py-4">
+                          <div className="flex flex-col gap-1">
+                            <Badge variant="info" size="sm">
+                              {humanize(rule.module)}
+                            </Badge>
+                            <span className="text-xs text-slate-600">{TRIGGER_EVENT_LABELS[rule.trigger_event] ?? humanize(rule.trigger_event)}</span>
+                          </div>
+                        </td>
+                      );
+                    }
+                    if (col.key === 'conditions') {
+                      return (
+                        <td key="conditions" className="px-5 py-4 max-w-xs">
+                          {conditions.length === 0 ? (
+                            <span className="text-xs italic text-slate-400">Any event</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {conditions.slice(0, 2).map((c) => (
+                                <code key={c} className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-700">
+                                  {c}
+                                </code>
+                              ))}
+                              {conditions.length > 2 && (
+                                <span className="text-[11px] text-slate-400">+{conditions.length - 2} more</span>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      );
+                    }
+                    if (col.key === 'actions') {
+                      return (
+                        <td key="actions" className="px-5 py-4">
+                          <ActionsSummary actions={rule.actions} />
+                        </td>
+                      );
+                    }
+                    if (col.key === 'enabled') {
+                      return (
+                        <td key="enabled" className="px-5 py-4">
+                          <div className="flex items-center gap-2">
+                            <ToggleSwitch
+                              checked={rule.is_active}
+                              disabled={!canManage}
+                              busy={busyId === rule.id}
+                              onChange={(next) => handleToggleRule(rule, next)}
+                              label={`Toggle rule ${rule.name}`}
+                            />
+                            <span className={cn('text-xs font-medium', rule.is_active ? 'text-emerald-700' : 'text-slate-400')}>
+                              {rule.is_active ? 'On' : 'Off'}
+                            </span>
+                          </div>
+                        </td>
+                      );
+                    }
+                    if (col.key === 'last_run') {
+                      return (
+                        <td key="last_run" className="px-5 py-4 text-xs whitespace-nowrap">
+                          {lastRun ? (
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-slate-700" title={formatDateTime(asUtc(lastRun.occurred_at))}>
+                                {formatRelative(asUtc(lastRun.occurred_at))}
+                              </span>
+                              <Badge variant={LOG_STATUS_VARIANT[lastRun.status]} size="sm">
+                                {LOG_STATUS_LABELS[lastRun.status]}
+                              </Badge>
+                            </div>
+                          ) : (
+                            <span className="italic text-slate-400">Never</span>
+                          )}
+                        </td>
+                      );
+                    }
+                    if (col.key === 'manage') {
+                      return (
+                        <td key="manage" className="px-5 py-4 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {canManage && (
+                              <>
+                                <Button variant="ghost" size="sm" className="text-xs" onClick={() => setTestRule(rule)} leadingIcon={<FlaskConical className="w-3.5 h-3.5" />}>
+                                  Test
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-xs"
+                                  onClick={() => setRuleModal({ open: true, rule })}
+                                  leadingIcon={<Pencil className="w-3.5 h-3.5" />}
+                                >
+                                  Edit
+                                </Button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeleteTarget({ kind: 'rule', item: rule })}
+                                  className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                                  aria-label={`Delete rule ${rule.name}`}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                            {!canManage && <span className="text-xs text-slate-400">View only</span>}
+                          </div>
+                        </td>
+                      );
+                    }
+                    return null;
+                  })}
                 </tr>
               );
             })}
@@ -901,15 +932,17 @@ export function AutomationPage() {
   return (
     <div className="space-y-6 pb-12">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4" {...ui.edit('header')}>
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">
             <Workflow className="w-4 h-4" />
-            System
+            {ui.text('header', 'eyebrow')}
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Automation</h1>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+            {ui.text('header', 'title')}
+          </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Event-driven rules, recurring schedules and a full execution log for everything the platform runs on your behalf.
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -931,49 +964,68 @@ export function AutomationPage() {
       ) : (
         <>
           {/* Stats */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard
-              title="Active Rules"
-              value={stats.activeRules}
-              comparisonText={`${rules.length} total`}
-              icon={<Zap className="w-4 h-4" />}
-            />
-            <StatCard
-              title="Active Schedules"
-              value={stats.activeSchedules}
-              comparisonText={`${schedules.length} total`}
-              icon={<CalendarClock className="w-4 h-4" />}
-            />
-            <StatCard
-              title="Runs Today"
-              value={stats.runsToday}
-              comparisonText={`${allLogs.length} in recent history`}
-              icon={<Activity className="w-4 h-4" />}
-            />
-            <StatCard
-              title="Success / Failed Today"
-              value={`${stats.successToday} / ${stats.failedToday}`}
-              change={stats.failedToday > 0 ? `${stats.failedToday} failed` : stats.runsToday > 0 ? 'All succeeded' : undefined}
-              isPositive={stats.failedToday === 0}
-              icon={stats.failedToday > 0 ? <XCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
-            />
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" {...ui.edit('kpis')}>
+            {ui.render('kpis', {
+              active_rules: (item, edit) => (
+                <div key="active_rules" {...edit}>
+                  <StatCard
+                    title={item.label}
+                    value={stats.activeRules}
+                    comparisonText={`${rules.length} total`}
+                    icon={<Zap className="w-4 h-4" />}
+                  />
+                </div>
+              ),
+              active_schedules: (item, edit) => (
+                <div key="active_schedules" {...edit}>
+                  <StatCard
+                    title={item.label}
+                    value={stats.activeSchedules}
+                    comparisonText={`${schedules.length} total`}
+                    icon={<CalendarClock className="w-4 h-4" />}
+                  />
+                </div>
+              ),
+              runs_today: (item, edit) => (
+                <div key="runs_today" {...edit}>
+                  <StatCard
+                    title={item.label}
+                    value={stats.runsToday}
+                    comparisonText={`${allLogs.length} in recent history`}
+                    icon={<Activity className="w-4 h-4" />}
+                  />
+                </div>
+              ),
+              success_rate: (item, edit) => (
+                <div key="success_rate" {...edit}>
+                  <StatCard
+                    title={item.label}
+                    value={`${stats.successToday} / ${stats.failedToday}`}
+                    change={stats.failedToday > 0 ? `${stats.failedToday} failed` : stats.runsToday > 0 ? 'All succeeded' : undefined}
+                    isPositive={stats.failedToday === 0}
+                    icon={stats.failedToday > 0 ? <XCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
+                  />
+                </div>
+              ),
+            })}
           </div>
 
           {/* Tabs & filters */}
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200 w-fit">
-                {TABS.map((tab) => {
+              <div className="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200 w-fit" {...ui.edit('tabs')}>
+                {ui.shown('tabs').map((tab) => {
                   const count = tab.key === 'rules' ? rules.length : tab.key === 'schedules' ? schedules.length : allLogs.length;
                   return (
                     <button
                       key={tab.key}
                       type="button"
-                      onClick={() => setActiveTab(tab.key)}
+                      onClick={() => setActiveTab(tab.key as Tab)}
                       className={cn(
                         'px-3 py-1.5 text-xs font-semibold rounded-md transition-colors inline-flex items-center gap-1.5',
                         activeTab === tab.key ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                       )}
+                      {...ui.edit(`tabs.${tab.key}`)}
                     >
                       {tab.label}
                       <span

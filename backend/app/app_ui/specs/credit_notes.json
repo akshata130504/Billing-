@@ -1,0 +1,108 @@
+{
+  "key": "credit_notes",
+  "title": "Credit Notes",
+  "route": "/credit-notes",
+  "nav_item": "credit_notes",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "eyebrow",
+          "label": "Eyebrow",
+          "kind": "label",
+          "default": "Revenue"
+        },
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Credit Notes"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Credits issued to customers, their remaining balance, and where they were applied."
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty table messages",
+      "fields": [
+        {
+          "name": "none",
+          "label": "No credit notes",
+          "kind": "body",
+          "default": "No credit notes found."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "Summary cards",
+      "captions": true,
+      "items": [
+        {
+          "key": "issued",
+          "label": "Issued Total",
+          "caption": "All credits issued"
+        },
+        {
+          "key": "applied",
+          "label": "Applied to Invoices",
+          "caption": "Settled against balances"
+        },
+        {
+          "key": "balance",
+          "label": "Remaining Balance",
+          "caption": "Available to apply or refund"
+        },
+        {
+          "key": "voided",
+          "label": "Voided",
+          "caption": "Cancelled credit notes"
+        }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Credit note table columns",
+      "items": [
+        {
+          "key": "credit_note_number",
+          "label": "Credit Note #",
+          "required": true
+        },
+        {
+          "key": "customer",
+          "label": "Customer"
+        },
+        {
+          "key": "date",
+          "label": "Date"
+        },
+        {
+          "key": "total",
+          "label": "Total"
+        },
+        {
+          "key": "remaining",
+          "label": "Remaining"
+        },
+        {
+          "key": "status",
+          "label": "Status"
+        },
+        {
+          "key": "actions",
+          "label": "Actions"
+        }
+      ]
+    }
+  ]
+}

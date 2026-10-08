@@ -18,6 +18,10 @@ const REFRESH_TOKEN_KEY = 'rooman.refresh_token';
 
 /** Dispatched on `window` when the session can no longer be recovered. */
 export const LOGOUT_EVENT = 'rooman:logout';
+/** Fired when the API refuses a request because the organization's access changed (trial ended,
+ * module not in the plan...): the app reloads /auth/me so the lifecycle screens update. */
+export const ACCESS_CHANGED_EVENT = 'rooman:access-changed';
+const ACCESS_CODES = new Set(['ORGANIZATION_TRIAL_EXPIRED', 'FEATURE_NOT_ENTITLED']);
 
 // ---------------------------------------------------------------------------
 // Token storage
@@ -267,6 +271,14 @@ apiClient.interceptors.response.use(
     if (status === 401 && !isAuthRoute(config?.url) && tokenStorage.hasSession()) {
       // Already retried, or no refresh token available: the session is gone.
       forceLogout();
+    }
+
+    if (status === 403 && ACCESS_CODES.has(error.response?.data?.error?.code ?? '')) {
+      try {
+        window.dispatchEvent(new CustomEvent(ACCESS_CHANGED_EVENT));
+      } catch {
+        // no window (SSR/test)
+      }
     }
 
     return Promise.reject(toApiError(error));

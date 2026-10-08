@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { Fragment, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Clock,
@@ -22,7 +22,7 @@ import type {
 } from '../../types/api';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
-import { StatCard } from '../../components/common/StatCard';
+import { StatCard, type StatCardProps } from '../../components/common/StatCard';
 import { LoadingState } from '../../components/common/LoadingState';
 import { EmptyState } from '../../components/common/EmptyState';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
@@ -30,12 +30,19 @@ import { Modal } from '../../components/common/Modal';
 import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { formatMoney, formatDate } from '../../utils/format';
+import { usePageSpec } from '../../appUi/usePageSpec';
+import { fillTokens } from '../../appUi/registry';
+import type { EditableProps } from '../../appUi/UiConfigContext';
+
+/** Columns whose header is right-aligned (their cells align themselves). */
+const RIGHT_ALIGNED = new Set(['mrr', 'actions']);
 
 export function TrialsPage() {
   const navigate = useNavigate();
   const { showToast } = useToast();
   const { hasRole } = useAuth();
   const canWrite = hasRole('finance');
+  const ui = usePageSpec('trials');
 
   const [trials, setTrials] = useState<SubscriptionOut[]>([]);
   const [summary, setSummary] = useState<SubscriptionSummaryOut | null>(null);
@@ -210,24 +217,136 @@ export function TrialsPage() {
     return diff;
   };
 
+  const columns = ui.shown('columns');
+  const trialCells: Record<string, (sub: SubscriptionOut, daysLeft: number, isExpiringSoon: boolean) => ReactNode> = {
+    subscription: (sub) => (
+      <td className="py-3.5 px-4 font-semibold text-slate-900 group-hover:text-brand-600">
+        {sub.subscription_number}
+        <div className="text-[11px] text-slate-400 font-normal mt-0.5">
+          Started {formatDate(sub.trial_start || sub.start_date)}
+        </div>
+      </td>
+    ),
+    customer: (sub) => (
+      <td className="py-3.5 px-4">
+        <div className="font-medium text-slate-900">{sub.customer?.display_name || '—'}</div>
+        <div className="text-[11px] text-slate-400">{sub.customer?.email || sub.customer?.customer_number || '—'}</div>
+      </td>
+    ),
+    plan: (sub) => (
+      <td className="py-3.5 px-4">
+        <div className="font-medium text-slate-900">{sub.plan?.name}</div>
+        <div className="text-[11px] text-slate-500 capitalize">
+          {sub.quantity} units · {sub.plan?.billing_interval}
+        </div>
+      </td>
+    ),
+    window: (sub) => (
+      <td className="py-3.5 px-4">
+        <div className="text-slate-800">
+          {formatDate(sub.trial_start || sub.start_date)} → {formatDate(sub.trial_end)}
+        </div>
+      </td>
+    ),
+    timeline: (_sub, daysLeft, isExpiringSoon) => (
+      <td className="py-3.5 px-4">
+        {daysLeft > 0 ? (
+          <Badge variant={isExpiringSoon ? 'warning' : 'info'} dot size="sm">
+            {daysLeft} {daysLeft === 1 ? 'day' : 'days'} left
+          </Badge>
+        ) : (
+          <Badge variant="danger" dot size="sm">
+            Expired
+          </Badge>
+        )}
+      </td>
+    ),
+    mrr: (sub) => (
+      <td className="py-3.5 px-4 text-right font-semibold text-slate-900 tabular-nums">
+        {formatMoney(sub.mrr, sub.currency || 'INR')}
+      </td>
+    ),
+    actions: (sub) => (
+      <td className="py-3.5 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-end gap-1.5">
+          {canWrite && (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setSelectedTrial(sub);
+                setConvertModalOpen(true);
+              }}
+              leadingIcon={<CheckCircle2 className="w-3.5 h-3.5" />}
+              className="text-[11px] py-1 px-2.5 h-7 bg-emerald-600 hover:bg-emerald-700"
+            >
+              Convert
+            </Button>
+          )}
+          {canWrite && (
+            <button
+              onClick={() => {
+                setSelectedTrial(sub);
+                setExtendDays('7');
+                setExtendModalOpen(true);
+              }}
+              className="p-1 text-slate-400 hover:text-sky-600 rounded transition-colors"
+              title="Extend Trial"
+            >
+              <CalendarPlus className="w-4 h-4" />
+            </button>
+          )}
+          {canWrite && (
+            <button
+              onClick={() => openFallback(sub)}
+              className="p-1 text-slate-400 hover:text-amber-600 rounded transition-colors"
+              title="Move to Fallback Plan"
+            >
+              <LifeBuoy className="w-4 h-4" />
+            </button>
+          )}
+          <button
+            onClick={() => navigate(`/subscriptions/${sub.id}`)}
+            className="p-1 text-slate-400 hover:text-brand-600 rounded transition-colors"
+            title="View Subscription"
+          >
+            <Eye className="w-4 h-4" />
+          </button>
+          {canWrite && (
+            <button
+              onClick={() => {
+                setSelectedTrial(sub);
+                setCancelModalOpen(true);
+              }}
+              className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors"
+              title="Cancel Trial"
+            >
+              <XCircle className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </td>
+    ),
+  };
+
   return (
     <div className="space-y-6 pb-16">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-        <div>
+        <div {...ui.edit('header')}>
           <button
             onClick={() => navigate('/subscriptions')}
             className="inline-flex items-center text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors mb-2"
           >
             <ArrowLeft className="w-3.5 h-3.5 mr-1" />
-            Back to Subscriptions
+            {ui.text('header', 'back_link')}
           </button>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5">
             <Clock className="w-6 h-6 text-sky-600" />
-            Trial Center & Pipeline
+            {ui.text('header', 'title')}
           </h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Monitor active trial periods, track expiration timelines, and convert prospects into recurring revenue.
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
 
@@ -242,33 +361,44 @@ export function TrialsPage() {
       </div>
 
       {/* KPI Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard
-          title="Active Trials"
-          value={summary?.trialing_count ?? 0}
-          icon={<Clock className="w-5 h-5 text-sky-600" />}
-          comparisonText="Potential customer pipeline"
-        />
-        <StatCard
-          title="Expiring Within 7 Days"
-          value={summary?.trial_expiring_soon_count ?? 0}
-          icon={<AlertTriangle className="w-5 h-5 text-amber-600" />}
-          comparisonText="High-priority conversion window"
-        />
-        <StatCard
-          title="Total Subscriptions Base"
-          value={summary?.total_subscriptions ?? 0}
-          icon={<DollarSign className="w-5 h-5 text-brand-600" />}
-          comparisonText={`${summary?.active_count ?? 0} currently paid & active`}
-        />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4" {...ui.edit('kpis')}>
+        {ui.render('kpis', {
+          active: (item, edit) => (
+            <TrialKpi
+              edit={edit}
+              title={item.label}
+              value={summary?.trialing_count ?? 0}
+              icon={<Clock className="w-5 h-5 text-sky-600" />}
+              comparisonText={item.caption}
+            />
+          ),
+          expiring: (item, edit) => (
+            <TrialKpi
+              edit={edit}
+              title={item.label}
+              value={summary?.trial_expiring_soon_count ?? 0}
+              icon={<AlertTriangle className="w-5 h-5 text-amber-600" />}
+              comparisonText={item.caption}
+            />
+          ),
+          total_base: (item, edit) => (
+            <TrialKpi
+              edit={edit}
+              title={item.label}
+              value={summary?.total_subscriptions ?? 0}
+              icon={<DollarSign className="w-5 h-5 text-brand-600" />}
+              comparisonText={fillTokens(item.caption ?? '', { active: String(summary?.active_count ?? 0) })}
+            />
+          ),
+        })}
       </div>
 
       {/* Trials Table Container */}
       <div className="bg-white rounded-xl border border-slate-200/90 shadow-sm p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <h2 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2">
+          <h2 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2" {...ui.edit('section')}>
             <Clock className="w-4 h-4 text-sky-600" />
-            Active Trial Accounts
+            {ui.text('section', 'title')}
           </h2>
 
           <div className="relative">
@@ -288,25 +418,23 @@ export function TrialsPage() {
             <LoadingState message="Loading active trials..." />
           </div>
         ) : trials.length === 0 ? (
-          <div className="py-12">
+          <div className="py-12" {...ui.edit('empty')}>
             <EmptyState
               icon={<Clock className="w-10 h-10 text-slate-400" />}
-              title="No active trials"
-              description="There are currently no customers in an active trial evaluation period."
+              title={ui.text('empty', 'title')}
+              description={ui.text('empty', 'description')}
             />
           </div>
         ) : (
           <div className="overflow-x-auto rounded-lg border border-slate-200/80">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200 uppercase tracking-wider text-[11px]">
-                  <th className="py-3 px-4">Trial / Subscription</th>
-                  <th className="py-3 px-4">Customer</th>
-                  <th className="py-3 px-4">Plan & Terms</th>
-                  <th className="py-3 px-4">Trial Window</th>
-                  <th className="py-3 px-4">Timeline</th>
-                  <th className="py-3 px-4 text-right">Potential MRR</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
+                <tr className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200 uppercase tracking-wider text-[11px]" {...ui.edit('columns')}>
+                  {columns.map((col) => (
+                    <th key={col.key} className={`py-3 px-4${RIGHT_ALIGNED.has(col.key) ? ' text-right' : ''}`} {...ui.edit(`columns.${col.key}`)}>
+                      {col.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -320,106 +448,7 @@ export function TrialsPage() {
                       className="hover:bg-slate-50/60 transition-colors cursor-pointer group"
                       onClick={() => navigate(`/subscriptions/${sub.id}`)}
                     >
-                      <td className="py-3.5 px-4 font-semibold text-slate-900 group-hover:text-brand-600">
-                        {sub.subscription_number}
-                        <div className="text-[11px] text-slate-400 font-normal mt-0.5">
-                          Started {formatDate(sub.trial_start || sub.start_date)}
-                        </div>
-                      </td>
-
-                      <td className="py-3.5 px-4">
-                        <div className="font-medium text-slate-900">{sub.customer?.display_name || '—'}</div>
-                        <div className="text-[11px] text-slate-400">{sub.customer?.email || sub.customer?.customer_number || '—'}</div>
-                      </td>
-
-                      <td className="py-3.5 px-4">
-                        <div className="font-medium text-slate-900">{sub.plan?.name}</div>
-                        <div className="text-[11px] text-slate-500 capitalize">
-                          {sub.quantity} units · {sub.plan?.billing_interval}
-                        </div>
-                      </td>
-
-                      <td className="py-3.5 px-4">
-                        <div className="text-slate-800">
-                          {formatDate(sub.trial_start || sub.start_date)} → {formatDate(sub.trial_end)}
-                        </div>
-                      </td>
-
-                      <td className="py-3.5 px-4">
-                        {daysLeft > 0 ? (
-                          <Badge variant={isExpiringSoon ? 'warning' : 'info'} dot size="sm">
-                            {daysLeft} {daysLeft === 1 ? 'day' : 'days'} left
-                          </Badge>
-                        ) : (
-                          <Badge variant="danger" dot size="sm">
-                            Expired
-                          </Badge>
-                        )}
-                      </td>
-
-                      <td className="py-3.5 px-4 text-right font-semibold text-slate-900 tabular-nums">
-                        {formatMoney(sub.mrr, sub.currency || 'INR')}
-                      </td>
-
-                      <td className="py-3.5 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-1.5">
-                          {canWrite && (
-                            <Button
-                              variant="primary"
-                              size="sm"
-                              onClick={() => {
-                                setSelectedTrial(sub);
-                                setConvertModalOpen(true);
-                              }}
-                              leadingIcon={<CheckCircle2 className="w-3.5 h-3.5" />}
-                              className="text-[11px] py-1 px-2.5 h-7 bg-emerald-600 hover:bg-emerald-700"
-                            >
-                              Convert
-                            </Button>
-                          )}
-                          {canWrite && (
-                            <button
-                              onClick={() => {
-                                setSelectedTrial(sub);
-                                setExtendDays('7');
-                                setExtendModalOpen(true);
-                              }}
-                              className="p-1 text-slate-400 hover:text-sky-600 rounded transition-colors"
-                              title="Extend Trial"
-                            >
-                              <CalendarPlus className="w-4 h-4" />
-                            </button>
-                          )}
-                          {canWrite && (
-                            <button
-                              onClick={() => openFallback(sub)}
-                              className="p-1 text-slate-400 hover:text-amber-600 rounded transition-colors"
-                              title="Move to Fallback Plan"
-                            >
-                              <LifeBuoy className="w-4 h-4" />
-                            </button>
-                          )}
-                          <button
-                            onClick={() => navigate(`/subscriptions/${sub.id}`)}
-                            className="p-1 text-slate-400 hover:text-brand-600 rounded transition-colors"
-                            title="View Subscription"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          {canWrite && (
-                            <button
-                              onClick={() => {
-                                setSelectedTrial(sub);
-                                setCancelModalOpen(true);
-                              }}
-                              className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors"
-                              title="Cancel Trial"
-                            >
-                              <XCircle className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
+                      {columns.map((col) => <Fragment key={col.key}>{trialCells[col.key]?.(sub, daysLeft, isExpiringSoon)}</Fragment>)}
                     </tr>
                   );
                 })}
@@ -611,3 +640,12 @@ export function TrialsPage() {
 }
 
 export default TrialsPage;
+
+/** A StatCard the visual-editor preview can select (StatCard itself takes no extra props). */
+function TrialKpi({ edit, ...card }: { edit: EditableProps } & StatCardProps) {
+  return (
+    <div className="flex" {...edit}>
+      <StatCard className="flex-1" {...card} />
+    </div>
+  );
+}

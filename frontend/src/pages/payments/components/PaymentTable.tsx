@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { formatMoney } from '../../../utils/format';
 import { LoadingState } from '../../../components/common/LoadingState';
+import { usePageSpec } from '../../../appUi/usePageSpec';
 
 interface PaymentTableProps {
   payments: Payment[];
@@ -32,6 +33,7 @@ export function PaymentTable({
   onViewReceipt,
   onRecordNew,
 }: PaymentTableProps) {
+  const ui = usePageSpec('payments');
   const navigate = useNavigate();
   const { hasRole } = useAuth();
   const isAdminOrOwner = hasRole('admin');
@@ -113,14 +115,11 @@ export function PaymentTable({
 
   if (payments.length === 0) {
     return (
-      <div className="bg-white border border-slate-200/80 rounded-xl p-12 text-center shadow-2xs">
+      <div className="bg-white border border-slate-200/80 rounded-xl p-12 text-center shadow-2xs" {...ui.edit('empty')}>
         <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
           <CreditCard className="w-6 h-6" />
         </div>
-        <h3 className="text-sm font-semibold text-slate-900">No payments recorded yet</h3>
-        <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
-          Record your first customer payment to start tracking collections, settlements and receipts.
-        </p>
+        <h3 className="text-sm font-semibold text-slate-900">{ui.text('empty', 'none')}</h3>
         <div className="mt-4">
           <button
             type="button"
@@ -140,17 +139,16 @@ export function PaymentTable({
       <div className="overflow-x-auto">
         <table className="w-full min-w-[860px] text-left text-xs border-collapse">
           <thead>
-            <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-semibold text-slate-600 uppercase tracking-wider select-none">
-              <th className="py-2.5 px-3.5">Payment #</th>
-              <th className="py-2.5 px-3">Customer</th>
-              <th className="py-2.5 px-3">Invoice(s)</th>
-              <th className="py-2.5 px-3">Payment Date</th>
-              <th className="py-2.5 px-3">Method</th>
-              <th className="py-2.5 px-3 text-right">Amount</th>
-              <th className="py-2.5 px-3 text-right">Applied</th>
-              <th className="py-2.5 px-3 text-right">Unapplied</th>
-              <th className="py-2.5 px-3 text-center">Status</th>
-              <th className="py-2.5 px-3 text-right">Actions</th>
+            <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-semibold text-slate-600 uppercase tracking-wider select-none" {...ui.edit('columns')}>
+              {ui.shown('columns').map((col) => (
+                <th
+                  key={col.key}
+                  className={`py-2.5 px-3${col.key === 'amount' || col.key === 'actions' ? ' text-right' : col.key === 'status' ? ' text-center' : ''}`}
+                  {...ui.edit(`columns.${col.key}`)}
+                >
+                  {col.label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -172,191 +170,195 @@ export function PaymentTable({
                     navigate(`/payments/${payment.backendId ?? payment.id}`);
                   }}
                 >
-                  {/* Payment # */}
-                  <td className="py-2.5 px-3.5 min-w-[160px]">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center shrink-0">
-                        <CreditCard className="w-3.5 h-3.5" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-semibold text-slate-900 group-hover:text-brand-600 transition-colors truncate">
-                            {payment.id}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={(e) => handleCopyPaymentId(e, payment.id)}
-                            className="text-slate-400 hover:text-slate-600 action-menu-area"
-                            title="Copy Payment ID"
-                          >
-                            {copiedId === payment.id ? (
-                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                            ) : (
-                              <Copy className="w-3 h-3" />
-                            )}
-                          </button>
-                        </div>
-                        <span className="text-[10px] font-mono text-slate-400 block truncate">
-                          Ref: {payment.referenceNumber}
-                        </span>
-                      </div>
-                    </div>
-                  </td>
+                  {ui.shown('columns').map((col) => {
+                    if (col.key === 'reference') {
+                      return (
+                        <td key="reference" className="py-2.5 px-3.5 min-w-[160px]">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center shrink-0">
+                              <CreditCard className="w-3.5 h-3.5" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-semibold text-slate-900 group-hover:text-brand-600 transition-colors truncate">
+                                  {payment.id}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleCopyPaymentId(e, payment.id)}
+                                  className="text-slate-400 hover:text-slate-600 action-menu-area"
+                                  title="Copy Payment ID"
+                                >
+                                  {copiedId === payment.id ? (
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
+                                </button>
+                              </div>
+                              <span className="text-[10px] font-mono text-slate-400 block truncate">
+                                Ref: {payment.referenceNumber}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                      );
+                    }
+                    if (col.key === 'customer') {
+                      return (
+                        <td key="customer" className="py-2.5 px-3 text-slate-800 whitespace-nowrap font-medium min-w-[170px]">
+                          <div className="flex items-center gap-1.5">
+                            <Building className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="truncate">{payment.customerName}</span>
+                          </div>
+                        </td>
+                      );
+                    }
+                    if (col.key === 'invoice') {
+                      return (
+                        <td key="invoice" className="py-2.5 px-3 whitespace-nowrap min-w-[150px]">
+                          {isAdvance ? (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-semibold bg-blue-50 text-blue-700 border border-blue-100">
+                              Customer Advance
+                            </span>
+                          ) : hasAllocations ? (
+                            <div className="flex items-center gap-1 text-slate-700">
+                              <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span className="font-mono text-xs">
+                                {payment.allocations.length === 1
+                                  ? payment.allocations[0].invoiceNumber
+                                  : `${payment.allocations[0].invoiceNumber} +${payment.allocations.length - 1} more`}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                      );
+                    }
+                    if (col.key === 'date') {
+                      return (
+                        <td key="date" className="py-2.5 px-3 text-slate-600 whitespace-nowrap">
+                          {formatDate(payment.paymentDate)}
+                        </td>
+                      );
+                    }
+                    if (col.key === 'method') {
+                      return (
+                        <td key="method" className="py-2.5 px-3 whitespace-nowrap">
+                          {getMethodBadge(payment.paymentMethod)}
+                        </td>
+                      );
+                    }
+                    if (col.key === 'amount') {
+                      return (
+                        <td key="amount" className="py-2.5 px-3 text-right whitespace-nowrap font-bold text-slate-900 font-mono">
+                          {formatMoney(payment.amount)}
+                        </td>
+                      );
+                    }
+                    if (col.key === 'status') {
+                      return (
+                        <td key="status" className="py-2.5 px-3 text-center whitespace-nowrap">
+                          {getStatusBadge(payment.status)}
+                        </td>
+                      );
+                    }
+                    if (col.key === 'actions') {
+                      return (
+                        <td key="actions" className="py-2.5 px-3 text-right whitespace-nowrap action-menu-area relative">
+                          <div className="flex items-center justify-end gap-1">
+                            <Link
+                              to={`/payments/${payment.backendId ?? payment.id}`}
+                              className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-slate-100 rounded-lg transition-colors"
+                              title="View Payment Details"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </Link>
 
-                  {/* Customer */}
-                  <td className="py-2.5 px-3 text-slate-800 whitespace-nowrap font-medium min-w-[170px]">
-                    <div className="flex items-center gap-1.5">
-                      <Building className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <span className="truncate">{payment.customerName}</span>
-                    </div>
-                  </td>
-
-                  {/* Invoices */}
-                  <td className="py-2.5 px-3 whitespace-nowrap min-w-[150px]">
-                    {isAdvance ? (
-                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-semibold bg-blue-50 text-blue-700 border border-blue-100">
-                        Customer Advance
-                      </span>
-                    ) : hasAllocations ? (
-                      <div className="flex items-center gap-1 text-slate-700">
-                        <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span className="font-mono text-xs">
-                          {payment.allocations.length === 1
-                            ? payment.allocations[0].invoiceNumber
-                            : `${payment.allocations[0].invoiceNumber} +${payment.allocations.length - 1} more`}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-slate-400">—</span>
-                    )}
-                  </td>
-
-                  {/* Payment Date */}
-                  <td className="py-2.5 px-3 text-slate-600 whitespace-nowrap">
-                    {formatDate(payment.paymentDate)}
-                  </td>
-
-                  {/* Method */}
-                  <td className="py-2.5 px-3 whitespace-nowrap">
-                    {getMethodBadge(payment.paymentMethod)}
-                  </td>
-
-                  {/* Amount */}
-                  <td className="py-2.5 px-3 text-right whitespace-nowrap font-bold text-slate-900 font-mono">
-                    {formatMoney(payment.amount)}
-                  </td>
-
-                  {/* Applied Amount */}
-                  <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono text-emerald-700 font-medium">
-                    {formatMoney(payment.appliedAmount)}
-                  </td>
-
-                  {/* Unapplied Amount */}
-                  <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono">
-                    {payment.unappliedAmount > 0 ? (
-                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-semibold bg-blue-50 text-blue-700 border border-blue-100">
-                        {formatMoney(payment.unappliedAmount)} (Credit)
-                      </span>
-                    ) : (
-                      <span className="text-slate-400">₹0</span>
-                    )}
-                  </td>
-
-                  {/* Status */}
-                  <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                    {getStatusBadge(payment.status)}
-                  </td>
-
-                  {/* Actions */}
-                  <td className="py-2.5 px-3 text-right whitespace-nowrap action-menu-area relative">
-                    <div className="flex items-center justify-end gap-1">
-                      <Link
-                        to={`/payments/${payment.backendId ?? payment.id}`}
-                        className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-slate-100 rounded-lg transition-colors"
-                        title="View Payment Details"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                      </Link>
-
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onViewReceipt(payment);
-                        }}
-                        className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-slate-100 rounded-lg transition-colors"
-                        title="View Receipt"
-                      >
-                        <Receipt className="w-3.5 h-3.5" />
-                      </button>
-
-                      {/* Dropdown Menu Toggle */}
-                      <div className="relative inline-block text-left">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveMenuId(isMenuOpen ? null : payment.id);
-                          }}
-                          className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-                          title="More Actions"
-                        >
-                          <MoreVertical className="w-3.5 h-3.5" />
-                        </button>
-
-                        {/* Dropdown Menu */}
-                        {isMenuOpen && (
-                          <>
-                            <div
-                              className="fixed inset-0 z-20"
+                            <button
+                              type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setActiveMenuId(null);
+                                onViewReceipt(payment);
                               }}
-                            />
-                            <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1 text-xs">
-                              <Link
-                                to={`/payments/${payment.backendId ?? payment.id}`}
-                                className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                              >
-                                <Eye className="w-3.5 h-3.5 text-slate-400" />
-                                View Details
-                              </Link>
+                              className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-slate-100 rounded-lg transition-colors"
+                              title="View Receipt"
+                            >
+                              <Receipt className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Dropdown Menu Toggle */}
+                            <div className="relative inline-block text-left">
                               <button
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setActiveMenuId(null);
-                                  onViewReceipt(payment);
+                                  setActiveMenuId(isMenuOpen ? null : payment.id);
                                 }}
-                                className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                                title="More Actions"
                               >
-                                <Receipt className="w-3.5 h-3.5 text-slate-400" />
-                                Receipt
+                                <MoreVertical className="w-3.5 h-3.5" />
                               </button>
-                              {canRefund && (
+
+                              {/* Dropdown Menu */}
+                              {isMenuOpen && (
                                 <>
-                                  <div className="my-1 border-t border-slate-100" />
-                                  <button
-                                    type="button"
+                                  <div
+                                    className="fixed inset-0 z-20"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setActiveMenuId(null);
-                                      onRefund(payment);
                                     }}
-                                    className="w-full px-3 py-1.5 text-left text-rose-600 hover:bg-rose-50 flex items-center gap-2 font-medium"
-                                  >
-                                    <RotateCcw className="w-3.5 h-3.5" />
-                                    Issue Refund
-                                  </button>
+                                  />
+                                  <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1 text-xs">
+                                    <Link
+                                      to={`/payments/${payment.backendId ?? payment.id}`}
+                                      className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                                    >
+                                      <Eye className="w-3.5 h-3.5 text-slate-400" />
+                                      View Details
+                                    </Link>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setActiveMenuId(null);
+                                        onViewReceipt(payment);
+                                      }}
+                                      className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                                    >
+                                      <Receipt className="w-3.5 h-3.5 text-slate-400" />
+                                      Receipt
+                                    </button>
+                                    {canRefund && (
+                                      <>
+                                        <div className="my-1 border-t border-slate-100" />
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setActiveMenuId(null);
+                                            onRefund(payment);
+                                          }}
+                                          className="w-full px-3 py-1.5 text-left text-rose-600 hover:bg-rose-50 flex items-center gap-2 font-medium"
+                                        >
+                                          <RotateCcw className="w-3.5 h-3.5" />
+                                          Issue Refund
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
                                 </>
                               )}
                             </div>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </td>
+                          </div>
+                        </td>
+                      );
+                    }
+                    return null;
+                  })}
                 </tr>
               );
             })}

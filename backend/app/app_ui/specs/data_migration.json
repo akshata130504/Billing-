@@ -1,0 +1,64 @@
+{
+  "key": "data_migration",
+  "title": "Data Migration",
+  "route": "/control-center/migration",
+  "nav_item": "data_migration",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        { "name": "eyebrow", "label": "Eyebrow", "kind": "label", "default": "Control Center" },
+        { "name": "badge", "label": "Badge", "kind": "label", "default": "Self-Service Import" },
+        { "name": "title", "label": "Heading", "kind": "heading", "default": "Data Migration & Onboarding" },
+        { "name": "subtitle", "label": "Subtitle", "kind": "body", "default": "Import customers, products and plans via validated CSV templates. Every import is validated in a dry run first, so nothing is written until you confirm." }
+      ]
+    },
+    {
+      "id": "upload",
+      "label": "Upload step",
+      "fields": [
+        { "name": "select_title", "label": "Data model section title", "kind": "label", "default": "1. Select Target Data Model" },
+        { "name": "drop_title", "label": "Drop zone heading", "kind": "heading", "default": "Drop your CSV file here, or browse" },
+        { "name": "choose_file", "label": "Drop zone button text", "kind": "label", "default": "Click to choose a file" },
+        { "name": "required_columns", "label": "Required columns caption", "kind": "label", "default": "Required columns for {entity}:", "hint": "{entity} is replaced by the selected data model." },
+        { "name": "optional_columns", "label": "Optional columns caption", "kind": "label", "default": "Optional columns:" }
+      ]
+    },
+    {
+      "id": "history",
+      "label": "Recent imports",
+      "fields": [
+        { "name": "title", "label": "Section title", "kind": "label", "default": "Recent Imports" },
+        { "name": "empty", "label": "No imports message", "kind": "body", "default": "No imports have been run yet." }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "entities",
+      "label": "Target data models",
+      "reorder": false,
+      "hide": false,
+      "captions": true,
+      "items": [
+        { "key": "customers", "label": "Customers", "caption": "Import your customer directory — GSTIN/PAN, billing addresses, currency and payment terms." },
+        { "key": "products", "label": "Products", "caption": "Import products and SKUs — HSN/SAC codes, units of measure and default tax rates." },
+        { "key": "plans", "label": "Plans", "caption": "Import recurring billing plans. Each row links to an existing product by SKU, so import Products before Plans." }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Recent imports columns",
+      "items": [
+        { "key": "entity", "label": "Entity", "required": true },
+        { "key": "file", "label": "File" },
+        { "key": "status", "label": "Status" },
+        { "key": "imported", "label": "Imported" },
+        { "key": "failed", "label": "Failed" },
+        { "key": "total", "label": "Total" },
+        { "key": "when", "label": "When" }
+      ]
+    }
+  ]
+}

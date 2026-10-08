@@ -1,0 +1,50 @@
+{
+  "key": "integrations",
+  "title": "Integrations",
+  "route": "/settings?tab=integrations",
+  "nav_item": "integrations",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Payment Gateways & Communications"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Connect third-party services for payment processing, transactional email delivery, and real-time webhook notifications."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "cards",
+      "label": "Integration cards",
+      "captions": true,
+      "items": [
+        {
+          "key": "razorpay",
+          "label": "Razorpay Payment Gateway",
+          "caption": "Accept UPI, cards, netbanking and mandate subscriptions"
+        },
+        {
+          "key": "smtp",
+          "label": "Custom SMTP Email Server",
+          "caption": "Deliver invoices, receipts and notifications using your domain"
+        },
+        {
+          "key": "webhook",
+          "label": "Outbound Webhooks",
+          "caption": "Dispatch real-time billing events to your endpoints"
+        }
+      ]
+    }
+  ]
+}

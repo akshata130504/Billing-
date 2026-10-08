@@ -1,0 +1,131 @@
+{
+  "key": "dunning",
+  "title": "Dunning",
+  "route": "/dunning",
+  "nav_item": "dunning",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Dunning & Recovery"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Automated retry orchestration, smart payment recovery, and expiring-card mitigation."
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty table messages",
+      "fields": [
+        {
+          "name": "none",
+          "label": "No cases",
+          "kind": "body",
+          "default": "No dunning cases match this filter."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "KPI cards",
+      "captions": true,
+      "items": [
+        {
+          "key": "active_cases",
+          "label": "Active Cases",
+          "caption": "Total open cases"
+        },
+        {
+          "key": "at_risk",
+          "label": "Amount at Risk",
+          "caption": "Across open cases"
+        },
+        {
+          "key": "recovered",
+          "label": "Recovered",
+          "caption": "Total amount recovered"
+        },
+        {
+          "key": "recovery_rate",
+          "label": "Recovery Rate",
+          "caption": "Recovered divided by closed cases"
+        },
+        {
+          "key": "paused",
+          "label": "Paused",
+          "caption": "Awaiting manual resume"
+        },
+        {
+          "key": "exhausted",
+          "label": "Exhausted",
+          "caption": "Stopped or failed"
+        }
+      ]
+    },
+    {
+      "id": "tabs",
+      "label": "Tabs",
+      "items": [
+        {
+          "key": "cases",
+          "label": "Cases",
+          "required": true
+        },
+        {
+          "key": "policies",
+          "label": "Policies"
+        },
+        {
+          "key": "cards",
+          "label": "Expiring Cards"
+        }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Cases table columns",
+      "items": [
+        {
+          "key": "case",
+          "label": "Case ID",
+          "required": true
+        },
+        {
+          "key": "customer",
+          "label": "Customer"
+        },
+        {
+          "key": "invoice",
+          "label": "Invoice & Amount"
+        },
+        {
+          "key": "status",
+          "label": "Status"
+        },
+        {
+          "key": "retries",
+          "label": "Attempts"
+        },
+        {
+          "key": "next_attempt",
+          "label": "Next Action"
+        },
+        {
+          "key": "actions",
+          "label": "Actions"
+        }
+      ]
+    }
+  ]
+}

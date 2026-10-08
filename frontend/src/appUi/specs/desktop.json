@@ -1,0 +1,189 @@
+{
+  "key": "desktop",
+  "title": "Desktop",
+  "route": "/platforms/desktop",
+  "nav_item": "desktop",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "eyebrow",
+          "label": "Eyebrow",
+          "kind": "label",
+          "default": "Platforms"
+        },
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Desktop"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Windows and macOS shells: registered devices, trust status, and how the thin desktop client signs in against this API."
+        }
+      ]
+    },
+    {
+      "id": "filters",
+      "label": "Filters",
+      "fields": [
+        {
+          "name": "search_placeholder",
+          "label": "Search box placeholder",
+          "kind": "label",
+          "default": "Search device name, identifier, app version..."
+        },
+        {
+          "name": "all_platforms",
+          "label": "Platform filter: all option",
+          "kind": "label",
+          "default": "All platforms"
+        },
+        {
+          "name": "all_statuses",
+          "label": "Status filter: all option",
+          "kind": "label",
+          "default": "All statuses"
+        }
+      ]
+    },
+    {
+      "id": "devices",
+      "label": "Devices section",
+      "fields": [
+        {
+          "name": "title",
+          "label": "Section title",
+          "kind": "label",
+          "default": "Registered devices"
+        },
+        {
+          "name": "count",
+          "label": "Count line",
+          "kind": "label",
+          "default": "{shown} of {total} · your devices in this organization",
+          "hint": "{shown} and {total} are replaced by the device counts."
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty states",
+      "fields": [
+        {
+          "name": "title",
+          "label": "No devices: title",
+          "kind": "heading",
+          "default": "No desktop devices registered"
+        },
+        {
+          "name": "description",
+          "label": "No devices: description",
+          "kind": "body",
+          "default": "Devices appear here once a {platforms} client signs in through the native exchange, or you can register one manually.",
+          "hint": "{platforms} is replaced by the supported platforms (e.g. Windows or macOS)."
+        },
+        {
+          "name": "filtered_title",
+          "label": "No matches: title",
+          "kind": "heading",
+          "default": "No devices match these filters"
+        },
+        {
+          "name": "filtered_description",
+          "label": "No matches: description",
+          "kind": "body",
+          "default": "Try a different platform, status or search term."
+        }
+      ]
+    },
+    {
+      "id": "connection",
+      "label": "Connection & sign-in cards",
+      "fields": [
+        {
+          "name": "title",
+          "label": "Connection card title",
+          "kind": "label",
+          "default": "Connection details"
+        },
+        {
+          "name": "sign_in_title",
+          "label": "Sign-in card title",
+          "kind": "label",
+          "default": "Sign in on desktop"
+        },
+        {
+          "name": "sign_in_description",
+          "label": "Sign-in card description",
+          "kind": "body",
+          "default": "There are no installers published yet. The desktop shell is a thin client that talks to this API using the same native exchange as mobile."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "stats",
+      "label": "Stat cards",
+      "captions": true,
+      "items": [
+        {
+          "key": "registered",
+          "label": "Registered devices",
+          "caption": "{platforms}"
+        },
+        {
+          "key": "active",
+          "label": "Active (30 days)",
+          "caption": "Trusted devices seen in the last 30 days"
+        },
+        {
+          "key": "revoked",
+          "label": "Revoked",
+          "caption": "Records kept for audit; identifiers cannot be re-used"
+        }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Devices table columns",
+      "items": [
+        {
+          "key": "device",
+          "label": "Device",
+          "required": true
+        },
+        {
+          "key": "platform",
+          "label": "Platform"
+        },
+        {
+          "key": "app_version",
+          "label": "App version"
+        },
+        {
+          "key": "last_seen",
+          "label": "Last seen"
+        },
+        {
+          "key": "registered",
+          "label": "Registered"
+        },
+        {
+          "key": "status",
+          "label": "Status"
+        },
+        {
+          "key": "actions",
+          "label": "Actions"
+        }
+      ]
+    }
+  ]
+}

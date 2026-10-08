@@ -16,6 +16,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -292,3 +293,80 @@ def test_real_api_as_runtime_role_isolates_tenants(two_tenants):
             proc.wait(timeout=15)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+def _trial_org_with_request(db, label: str):
+    """A trial organization with an Owner and one submitted subscription request (as the system)."""
+    from backend.app.models import Membership, MemberRole, MembershipStatus, Organization, OrganizationStatus, User
+    from backend.app.models.base import utcnow
+    from backend.app.models.subscription_access import SubscriptionRequest
+
+    suffix = uuid.uuid4().hex[:8]
+    org = Organization(name=f"RLS trial {label} {suffix}", slug=f"rls-trial-{label}-{suffix}", status=OrganizationStatus.ACTIVE,
+                       trial_started_at=utcnow(), trial_ends_at=utcnow(), module_access="trial")
+    db.add(org)
+    db.flush()
+    user = User(email=f"rls-trial-{label}-{suffix}@example.com", full_name="Trial Owner", hashed_password="x")
+    db.add(user)
+    db.flush()
+    db.add(Membership(organization_id=org.id, user_id=user.id, role=MemberRole.OWNER, status=MembershipStatus.ACTIVE))
+    req = SubscriptionRequest(organization_id=org.id, modules=["quotes"], seats=3, billing_cycle="annual",
+                              requested_by_user_id=user.id)
+    db.add(req)
+    db.commit()
+    return org.id, req.id
+
+
+def test_rls_isolates_subscription_requests_and_entitlements(lp_engine):
+    """The trial/subscription tables are tenant tables under the runtime role too."""
+    from sqlalchemy import text
+    from sqlalchemy.orm import Session
+
+    from backend.app.core.tenant_context import system_context, tenant_context
+
+    with system_context(), Session(lp_engine) as db:
+        org_a, req_a = _trial_org_with_request(db, "a")
+        org_b, req_b = _trial_org_with_request(db, "b")
+    with Session(lp_engine) as db:
+        with tenant_context(org_a):
+            ids = {r[0] for r in db.execute(text("SELECT id FROM subscription_requests"))}
+            assert req_a in ids and req_b not in ids
+            # Writing another organization's row is refused by the policy's WITH CHECK.
+            with pytest.raises(Exception):
+                db.execute(text(
+                    "INSERT INTO organization_entitlements (id, organization_id, module_key, source, created_at, updated_at) "
+                    "VALUES (:i, :o, 'reports', 'platform', now(), now())"), {"i": str(uuid.uuid4()), "o": org_b})
+                db.flush()
+        db.rollback()
+
+
+def test_approval_works_as_runtime_role(lp_engine):
+    """Regression: approving read the request back after commit outside the tenant context, which
+    row level security hides from the runtime role (500 after a committed approval)."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from backend.app.core.security import hash_password
+    from backend.app.core.tenant_context import system_context, tenant_context
+    from backend.app.models import Organization, OrganizationStatus
+    from backend.app.models.platform import PlatformRole, PlatformStaff
+    from backend.app.models.subscription_access import OrganizationEntitlement
+    from backend.app.services import subscription_request_service as svc
+    from backend.app.services.platform_org_service import Actor
+
+    with system_context(), Session(lp_engine) as db:
+        org_id, req_id = _trial_org_with_request(db, "approve")
+        staff = PlatformStaff(email=f"rls-admin-{uuid.uuid4().hex[:8]}@rooman.test", full_name="RLS Admin",
+                              hashed_password=hash_password(PASSWORD), role=PlatformRole.PLATFORM_ADMINISTRATOR)
+        db.add(staff)
+        db.commit()
+        staff_id = staff.id
+    with Session(lp_engine) as db:
+        actor = Actor(staff=db.get(PlatformStaff, staff_id), session_id=None, ip_address=None, user_agent=None)
+        with patch("backend.app.services.subscription_request_service.send_email", return_value=True):
+            out = svc.approve(db, req_id, actor, seats=4, reason="Runtime role approval")
+        assert out["status"] == "approved" and out["approved_seats"] == 4
+        assert db.get(Organization, org_id).status == OrganizationStatus.ACTIVE
+        with tenant_context(org_id):
+            assert db.scalars(select(OrganizationEntitlement.module_key)
+                              .where(OrganizationEntitlement.organization_id == org_id)).all() == ["quotes"]

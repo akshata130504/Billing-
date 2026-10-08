@@ -25,10 +25,12 @@ import { PlanModal } from './components/PlanModal';
 import { planPricingService } from '../../services/planPricingService';
 import { currencySymbol } from '../../utils/format';
 import type { PlanPricingItem, CreatePlanPricingInput } from '../../types/plans_pricing';
+import { usePageSpec } from '../../appUi/usePageSpec';
 
 const PAGE_SIZE = 25;
 
 export function PlansPricingPage() {
+  const ui = usePageSpec('plans_pricing');
   const { showToast } = useToast();
   const { hasRole } = useAuth();
   const navigate = useNavigate();
@@ -186,13 +188,13 @@ export function PlansPricingPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold text-slate-900">Plans & Pricing</h1>
-            <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-              Commercial Engine
+            <h1 className="text-xl font-bold text-slate-900" {...ui.edit('header')}>{ui.text('header', 'title')}</h1>
+            <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200" {...ui.edit('header')}>
+              {ui.text('header', 'badge')}
             </span>
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Manage recurring subscriptions, dynamic volume & graduated tiers, discrete packages, and pricing simulations.
+          <p className="text-xs text-slate-500 mt-0.5" {...ui.edit('header')}>
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
 
@@ -219,49 +221,57 @@ export function PlansPricingPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Active Plans</p>
-          <p className="text-2xl font-bold text-emerald-600 mt-1">{kpis.active}</p>
-          <p className="text-[11px] text-slate-500 mt-0.5">Ready for quotes & checkout</p>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Draft Plans</p>
-          <p className="text-2xl font-bold text-amber-600 mt-1">{kpis.draft}</p>
-          <p className="text-[11px] text-slate-500 mt-0.5">In configuration</p>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Archived Plans</p>
-          <p className="text-2xl font-bold text-slate-500 mt-1">{kpis.archived}</p>
-          <p className="text-[11px] text-slate-500 mt-0.5">Legacy & deactivated</p>
-        </div>
-
-        <div className="min-w-0 bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Avg Plan Rate</p>
-          <p className="text-2xl font-bold text-slate-900 mt-1 min-w-0 break-all tabular-nums">₹{Math.round(kpis.avgPrice).toLocaleString('en-IN')}</p>
-          <p className="text-[11px] text-slate-500 mt-0.5">Across plans on this page</p>
-        </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4" {...ui.edit('kpis')}>
+        {ui.render('kpis', {
+          active: (item, edit) => (
+            <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs" {...edit}>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{item.label}</p>
+              <p className="text-2xl font-bold text-emerald-600 mt-1">{kpis.active}</p>
+              {item.caption && <p className="text-[11px] text-slate-500 mt-0.5">{item.caption}</p>}
+            </div>
+          ),
+          draft: (item, edit) => (
+            <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs" {...edit}>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{item.label}</p>
+              <p className="text-2xl font-bold text-amber-600 mt-1">{kpis.draft}</p>
+              {item.caption && <p className="text-[11px] text-slate-500 mt-0.5">{item.caption}</p>}
+            </div>
+          ),
+          archived: (item, edit) => (
+            <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs" {...edit}>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{item.label}</p>
+              <p className="text-2xl font-bold text-slate-500 mt-1">{kpis.archived}</p>
+              {item.caption && <p className="text-[11px] text-slate-500 mt-0.5">{item.caption}</p>}
+            </div>
+          ),
+          avg_rate: (item, edit) => (
+            <div className="min-w-0 bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs" {...edit}>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{item.label}</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1 min-w-0 break-all tabular-nums">₹{Math.round(kpis.avgPrice).toLocaleString('en-IN')}</p>
+              {item.caption && <p className="text-[11px] text-slate-500 mt-0.5">{item.caption}</p>}
+            </div>
+          ),
+        })}
       </div>
 
       {/* Tabs & Filters Bar */}
       <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           {/* Tabs */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold text-slate-600">
-            {(['all', 'active', 'draft', 'archived'] as const).map((tab) => (
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold text-slate-600" {...ui.edit('tabs')}>
+            {ui.shown('tabs').map((tab) => (
               <button
-                key={tab}
+                key={tab.key}
+                {...ui.edit(`tabs.${tab.key}`)}
                 onClick={() => {
-                  setActiveTab(tab);
+                  setActiveTab(tab.key as any);
                   setPage(1);
                 }}
                 className={`px-3 py-1.5 rounded-lg capitalize transition-all ${
-                  activeTab === tab ? 'bg-white text-slate-900 shadow-2xs font-bold' : 'text-slate-500 hover:text-slate-900'
+                  activeTab === tab.key ? 'bg-white text-slate-900 shadow-2xs font-bold' : 'text-slate-500 hover:text-slate-900'
                 }`}
               >
-                {tab}
+                {tab.label}
               </button>
             ))}
           </div>
@@ -323,143 +333,171 @@ export function PlansPricingPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-600 border-collapse">
             <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              <tr>
-                <th
-                  className="px-4 py-3 cursor-pointer hover:text-slate-900"
-                  onClick={() => {
-                    if (sortBy === 'name') setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                    else { setSortBy('name'); setSortOrder('asc'); }
-                  }}
-                >
-                  Plan / Code {sortBy === 'name' ? (sortOrder === 'asc' ? '↑' : '↓') : ''}
-                </th>
-                <th className="px-4 py-3">Category</th>
-                <th className="px-4 py-3">Pricing Model</th>
-                <th
-                  className="px-4 py-3 cursor-pointer hover:text-slate-900"
-                  onClick={() => {
-                    if (sortBy === 'price') setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                    else { setSortBy('price'); setSortOrder('asc'); }
-                  }}
-                >
-                  Price / Rate {sortBy === 'price' ? (sortOrder === 'asc' ? '↑' : '↓') : ''}
-                </th>
-                <th className="px-4 py-3">Billing Frequency</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Actions</th>
+              <tr {...ui.edit('columns')}>
+                {ui.shown('columns').map((col) => (
+                  <th
+                    key={col.key}
+                    className={`px-4 py-3${col.key === 'actions' ? ' text-right' : ''}${col.key === 'plan_name' || col.key === 'base_price' ? ' cursor-pointer hover:text-slate-900' : ''}`}
+                    {...ui.edit(`columns.${col.key}`)}
+                    onClick={() => {
+                      if (col.key === 'plan_name') {
+                        if (sortBy === 'name') setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                        else { setSortBy('name'); setSortOrder('asc'); }
+                      } else if (col.key === 'base_price') {
+                        if (sortBy === 'price') setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                        else { setSortBy('price'); setSortOrder('asc'); }
+                      }
+                    }}
+                  >
+                    {col.label}
+                    {col.key === 'plan_name' && sortBy === 'name' ? (sortOrder === 'asc' ? ' ↑' : ' ↓') : ''}
+                    {col.key === 'base_price' && sortBy === 'price' ? (sortOrder === 'asc' ? ' ↑' : ' ↓') : ''}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredPlans.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-400 italic">
-                    No pricing plans found matching your filters. Click &quot;New Plan&quot; to create one.
+                  <td colSpan={ui.shown('columns').length} className="px-4 py-12 text-center text-slate-400 italic" {...ui.edit('empty')}>
+                    {ui.text('empty', 'none')}
                   </td>
                 </tr>
               ) : (
                 filteredPlans.map((plan) => (
                   <tr key={plan.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-4 py-3">
-                      <p className="font-semibold text-slate-900">{plan.name}</p>
-                      <p className="text-[10px] font-mono text-slate-400">{plan.code || plan.sku}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700">
-                        {plan.category || 'General'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold capitalize ${
-                          plan.pricing_model === 'tiered'
-                            ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                            : plan.pricing_model === 'volume'
-                            ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                            : plan.pricing_model === 'package'
-                            ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                            : plan.pricing_model === 'flat'
-                            ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                            : 'bg-slate-100 text-slate-700'
-                        }`}
-                      >
-                        {plan.pricing_model.replace('_', ' ')}
-                      </span>
-                      {plan.pricing_tiers && plan.pricing_tiers.length > 0 && (
-                        <span className="text-[10px] text-slate-400 block mt-0.5">
-                          {plan.pricing_tiers.length} {plan.pricing_model === 'package' ? 'packages' : 'tiers'}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 font-semibold text-slate-900 min-w-0 max-w-[16rem] break-all tabular-nums">
-                      {currencySymbol(plan.currency)}{Number(plan.base_price).toLocaleString((plan.currency || 'INR') === 'INR' ? 'en-IN' : 'en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                      <span className="text-[10px] text-slate-400 font-normal ml-1">/ {plan.unit}</span>
-                    </td>
-                    <td className="px-4 py-3 capitalize">{plan.billing_frequency.replace('_', ' ')}</td>
-                    <td className="px-4 py-3">
-                      {plan.is_active ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Active
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-400">
-                          <XCircle className="w-3.5 h-3.5" /> Archived
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {!canEdit && <span className="text-[11px] text-slate-400">View only</span>}
-                        {canEdit && (
-                        <>
-                        {plan.is_active && (
-                        <button
-                          onClick={() => {
-                            setEditingPlan(plan);
-                            setIsPlanModalOpen(true);
-                          }}
-                          className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-                          title="Edit Plan"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        )}
-                        {plan.is_active && plan.billing_frequency !== 'one_time' && (
-                          <button
-                            onClick={() => navigate(`/subscriptions/new?offering_id=${plan.id}`)}
-                            className="p-1 rounded text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
-                            title="Create subscription"
-                            aria-label={`Create subscription on ${plan.name}`}
-                          >
-                            <Repeat className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        <button
-                          onClick={() => handleClonePlan(plan)}
-                          className="p-1 rounded text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"
-                          title="Clone Plan"
-                        >
-                          <Copy className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleToggleStatus(plan)}
-                          className="p-1 rounded text-slate-400 hover:text-amber-600 hover:bg-amber-50"
-                          title={plan.is_active ? 'Archive Plan' : 'Activate Plan'}
-                        >
-                          <Archive className="w-3.5 h-3.5" />
-                        </button>
-                        </>
-                        )}
-                        {canDelete && (
-                        <button
-                          onClick={() => setPlanToDelete(plan)}
-                          className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50"
-                          title="Delete Plan"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                        )}
-                      </div>
-                    </td>
+                    {ui.shown('columns').map((col) => {
+                      if (col.key === 'plan_name') {
+                        return (
+                          <td key="plan_name" className="px-4 py-3">
+                            <p className="font-semibold text-slate-900">{plan.name}</p>
+                            <p className="text-[10px] font-mono text-slate-400">{plan.code || plan.sku}</p>
+                          </td>
+                        );
+                      }
+                      if (col.key === 'code') {
+                        return (
+                          <td key="code" className="px-4 py-3">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700">
+                              {plan.category || 'General'}
+                            </span>
+                          </td>
+                        );
+                      }
+                      if (col.key === 'pricing_model') {
+                        return (
+                          <td key="pricing_model" className="px-4 py-3">
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold capitalize ${
+                                plan.pricing_model === 'tiered'
+                                  ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                                  : plan.pricing_model === 'volume'
+                                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                  : plan.pricing_model === 'package'
+                                  ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                  : plan.pricing_model === 'flat'
+                                  ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                  : 'bg-slate-100 text-slate-700'
+                              }`}
+                            >
+                              {plan.pricing_model.replace('_', ' ')}
+                            </span>
+                            {plan.pricing_tiers && plan.pricing_tiers.length > 0 && (
+                              <span className="text-[10px] text-slate-400 block mt-0.5">
+                                {plan.pricing_tiers.length} {plan.pricing_model === 'package' ? 'packages' : 'tiers'}
+                              </span>
+                            )}
+                          </td>
+                        );
+                      }
+                      if (col.key === 'base_price') {
+                        return (
+                          <td key="base_price" className="px-4 py-3 font-semibold text-slate-900 min-w-0 max-w-[16rem] break-all tabular-nums">
+                            {currencySymbol(plan.currency)}{Number(plan.base_price).toLocaleString((plan.currency || 'INR') === 'INR' ? 'en-IN' : 'en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                            <span className="text-[10px] text-slate-400 font-normal ml-1">/ {plan.unit}</span>
+                          </td>
+                        );
+                      }
+                      if (col.key === 'billing_interval') {
+                        return (
+                          <td key="billing_interval" className="px-4 py-3 capitalize">{plan.billing_frequency.replace('_', ' ')}</td>
+                        );
+                      }
+                      if (col.key === 'status') {
+                        return (
+                          <td key="status" className="px-4 py-3">
+                            {plan.is_active ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Active
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-400">
+                                <XCircle className="w-3.5 h-3.5" /> Archived
+                              </span>
+                            )}
+                          </td>
+                        );
+                      }
+                      if (col.key === 'actions') {
+                        return (
+                          <td key="actions" className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              {!canEdit && <span className="text-[11px] text-slate-400">View only</span>}
+                              {canEdit && (
+                              <>
+                              {plan.is_active && (
+                              <button
+                                onClick={() => {
+                                  setEditingPlan(plan);
+                                  setIsPlanModalOpen(true);
+                                }}
+                                className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                                title="Edit Plan"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              )}
+                              {plan.is_active && plan.billing_frequency !== 'one_time' && (
+                                <button
+                                  onClick={() => navigate(`/subscriptions/new?offering_id=${plan.id}`)}
+                                  className="p-1 rounded text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+                                  title="Create subscription"
+                                  aria-label={`Create subscription on ${plan.name}`}
+                                >
+                                  <Repeat className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleClonePlan(plan)}
+                                className="p-1 rounded text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"
+                                title="Clone Plan"
+                              >
+                                <Copy className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleToggleStatus(plan)}
+                                className="p-1 rounded text-slate-400 hover:text-amber-600 hover:bg-amber-50"
+                                title={plan.is_active ? 'Archive Plan' : 'Activate Plan'}
+                              >
+                                <Archive className="w-3.5 h-3.5" />
+                              </button>
+                              </>
+                              )}
+                              {canDelete && (
+                              <button
+                                onClick={() => setPlanToDelete(plan)}
+                                className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50"
+                                title="Delete Plan"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                              )}
+                            </div>
+                          </td>
+                        );
+                      }
+                      return <td key={col.key} className="px-4 py-3" />;
+                    })}
                   </tr>
                 ))
               )}

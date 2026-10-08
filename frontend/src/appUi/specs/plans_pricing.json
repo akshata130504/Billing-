@@ -1,0 +1,131 @@
+{
+  "key": "plans_pricing",
+  "title": "Plans",
+  "route": "/plans-pricing",
+  "nav_item": "plans_pricing",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Plans & Pricing"
+        },
+        {
+          "name": "badge",
+          "label": "Badge",
+          "kind": "label",
+          "default": "Commercial Engine"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Manage recurring subscriptions, dynamic volume and graduated tiers, discrete packages, and pricing simulations."
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty table messages",
+      "fields": [
+        {
+          "name": "none",
+          "label": "No plans",
+          "kind": "body",
+          "default": "No plans found."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "KPI cards",
+      "captions": true,
+      "items": [
+        {
+          "key": "active",
+          "label": "Active Plans",
+          "caption": "Ready for quotes and checkout"
+        },
+        {
+          "key": "draft",
+          "label": "Draft Plans",
+          "caption": "In configuration"
+        },
+        {
+          "key": "archived",
+          "label": "Archived Plans",
+          "caption": "Legacy and deactivated"
+        },
+        {
+          "key": "avg_rate",
+          "label": "Avg Plan Rate",
+          "caption": "Across plans on this page"
+        }
+      ]
+    },
+    {
+      "id": "tabs",
+      "label": "Status tabs",
+      "items": [
+        {
+          "key": "all",
+          "label": "All Plans",
+          "required": true
+        },
+        {
+          "key": "active",
+          "label": "Active"
+        },
+        {
+          "key": "draft",
+          "label": "Draft"
+        },
+        {
+          "key": "archived",
+          "label": "Archived"
+        }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Plan table columns",
+      "items": [
+        {
+          "key": "plan_name",
+          "label": "Plan Name",
+          "required": true
+        },
+        {
+          "key": "code",
+          "label": "Plan Code"
+        },
+        {
+          "key": "pricing_model",
+          "label": "Pricing Model"
+        },
+        {
+          "key": "billing_interval",
+          "label": "Interval"
+        },
+        {
+          "key": "base_price",
+          "label": "Base Rate"
+        },
+        {
+          "key": "status",
+          "label": "Status"
+        },
+        {
+          "key": "actions",
+          "label": "Actions"
+        }
+      ]
+    }
+  ]
+}

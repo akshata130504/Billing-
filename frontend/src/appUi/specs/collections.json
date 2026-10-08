@@ -1,0 +1,68 @@
+{
+  "key": "collections",
+  "title": "Collections",
+  "route": "/collections",
+  "nav_item": "collections",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "eyebrow",
+          "label": "Eyebrow",
+          "kind": "label",
+          "default": "Revenue"
+        },
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Collections"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "Track outstanding balances, follow up on overdue invoices, and monitor collection performance across every customer."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "KPI cards",
+      "items": [
+        {
+          "key": "outstanding",
+          "label": "Total Outstanding"
+        },
+        {
+          "key": "overdue",
+          "label": "Overdue Amount"
+        },
+        {
+          "key": "current",
+          "label": "Current (Not Due)"
+        },
+        {
+          "key": "due_7d",
+          "label": "Due in 7 Days"
+        },
+        {
+          "key": "due_30d",
+          "label": "Due in 30 Days"
+        },
+        {
+          "key": "rate",
+          "label": "Collection Rate"
+        },
+        {
+          "key": "invoice_count",
+          "label": "Overdue Invoices"
+        }
+      ]
+    }
+  ]
+}

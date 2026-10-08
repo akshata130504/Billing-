@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { FileText, CreditCard, User, BarChart3 } from 'lucide-react';
 
-export function QuickActionsCard() {
+export function QuickActionsCard({ title = 'Quick Actions' }: { title?: string } = {}) {
   const navigate = useNavigate();
 
   const actions = [
@@ -38,7 +38,7 @@ export function QuickActionsCard() {
   return (
     <div className="bg-white p-5 rounded-2xl border border-[#E7E9F2] shadow-sm space-y-3.5">
       <h3 className="text-sm font-bold text-[#11194F] tracking-tight">
-        Quick Actions
+        {title}
       </h3>
 
       <div className="grid grid-cols-2 gap-3">

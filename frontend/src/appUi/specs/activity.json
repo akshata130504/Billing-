@@ -1,0 +1,130 @@
+{
+  "key": "activity",
+  "title": "Activity",
+  "route": "/activity",
+  "nav_item": "activity",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        {
+          "name": "eyebrow",
+          "label": "Eyebrow",
+          "kind": "label",
+          "default": "Insights"
+        },
+        {
+          "name": "title",
+          "label": "Heading",
+          "kind": "heading",
+          "default": "Activity"
+        },
+        {
+          "name": "subtitle",
+          "label": "Subtitle",
+          "kind": "body",
+          "default": "A chronological feed of everything that happens in your organization, derived from the audit log."
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Empty feed messages",
+      "fields": [
+        {
+          "name": "none_title",
+          "label": "No activity (all categories) - title",
+          "kind": "heading",
+          "default": "No activity yet"
+        },
+        {
+          "name": "none_description",
+          "label": "No activity (all categories) - description",
+          "kind": "body",
+          "default": "Every change made in your organization — invoices, customers, payments and settings — will show up here as it happens."
+        },
+        {
+          "name": "category_title",
+          "label": "No activity in a category - title",
+          "kind": "heading",
+          "default": "No {category} activity yet",
+          "hint": "{category} is the selected category filter, in lower case."
+        },
+        {
+          "name": "category_description",
+          "label": "No activity in a category - description",
+          "kind": "body",
+          "default": "Nothing in this category has been recorded yet. Switch to \"All activity\" to see everything."
+        },
+        {
+          "name": "no_match_title",
+          "label": "No search matches - title",
+          "kind": "heading",
+          "default": "No matching activity"
+        },
+        {
+          "name": "no_match_description",
+          "label": "No search matches - description",
+          "kind": "body",
+          "default": "No events match your search or date range. Try widening the range or clearing the filters."
+        },
+        {
+          "name": "no_match_more",
+          "label": "No matches among loaded events - description",
+          "kind": "body",
+          "default": "None of the {count} loaded events match. Load more to search further back, or clear the filters.",
+          "hint": "{count} is the number of events loaded so far."
+        }
+      ]
+    },
+    {
+      "id": "feed",
+      "label": "Feed notes",
+      "fields": [
+        {
+          "name": "filter_note",
+          "label": "Search filter note",
+          "kind": "body",
+          "default": "Search and date filters apply to the {count} events loaded so far. Load more to include older activity.",
+          "hint": "{count} is the number of events loaded so far."
+        },
+        {
+          "name": "end_of_log",
+          "label": "End of log",
+          "kind": "body",
+          "default": "You have reached the beginning of the log."
+        }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "filters",
+      "label": "Category filters",
+      "items": [
+        {
+          "key": "all",
+          "label": "All activity",
+          "required": true
+        },
+        {
+          "key": "billing",
+          "label": "Billing"
+        },
+        {
+          "key": "customers",
+          "label": "Customers"
+        },
+        {
+          "key": "payments",
+          "label": "Payments"
+        },
+        {
+          "key": "system",
+          "label": "System"
+        }
+      ]
+    }
+  ]
+}

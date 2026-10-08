@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { Fragment, useState, useEffect, useMemo, useCallback, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Plus,
@@ -25,6 +25,9 @@ import { dashboardSummaryService, formatPerCurrency } from '../../services/dashb
 import type { QuoteValueByCurrency } from '../../services/dashboardSummaryService';
 import { formatMoney } from '../../utils/format';
 import type { Quote, QuoteStatus } from '../../types/quotes';
+import { usePageSpec } from '../../appUi/usePageSpec';
+import type { EditableProps } from '../../appUi/UiConfigContext';
+import type { ResolvedItem } from '../../appUi/registry';
 
 const PAGE_SIZE = 20;
 
@@ -50,6 +53,7 @@ export function QuotesListPage() {
   const { hasRole } = useAuth();
   const canEdit = hasRole('finance');
   const canApprove = hasRole('admin');
+  const ui = usePageSpec('quotes');
 
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [totalQuotes, setTotalQuotes] = useState(0);
@@ -226,19 +230,111 @@ export function QuotesListPage() {
     }
   };
 
+  const columns = ui.shown('columns');
+  const quoteCells: Record<string, (quote: Quote) => ReactNode> = {
+    quote_number: (quote) => (
+      <td className="px-4 py-3">
+        <span className="font-bold font-mono text-slate-900">{quote.quote_number}</span>
+        {quote.title && <p className="text-[10px] text-slate-400 truncate max-w-xs">{quote.title}</p>}
+      </td>
+    ),
+    customer: (quote) => (
+      <td className="px-4 py-3">
+        <p className="font-semibold text-slate-900">{quote.customer?.display_name}</p>
+        <p className="text-[10px] text-slate-400">{quote.customer?.customer_number}</p>
+      </td>
+    ),
+    issue_date: (quote) => (
+      <td className="px-4 py-3">{quote.issue_date}</td>
+    ),
+    expiry_date: (quote) => (
+      <td className="px-4 py-3">{quote.expiry_date || '—'}</td>
+    ),
+    amount: (quote) => (
+      <td className="px-4 py-3 font-semibold text-slate-900">
+        ₹{Number(quote.total).toLocaleString('en-IN')}
+        {Number(quote.discount_pct) > 0 && (
+          <span className="text-[10px] text-amber-600 block">({quote.discount_pct}% off)</span>
+        )}
+      </td>
+    ),
+    status: (quote) => (
+      <td className="px-4 py-3">{getStatusBadge(quote.status)}</td>
+    ),
+    actions: (quote) => (
+      <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-end gap-1.5">
+          <Link to={`/quotes/${quote.id}`}>
+            <button className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100" title="View Quote">
+              <Eye className="w-3.5 h-3.5" />
+            </button>
+          </Link>
+
+          {canEdit && (quote.status === 'draft' || quote.status === 'pending_approval') && (
+            <Link to={`/quotes/${quote.id}/edit`}>
+              <button className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100" title="Edit Quote">
+                <Edit2 className="w-3.5 h-3.5" />
+              </button>
+            </Link>
+          )}
+
+          {canApprove && quote.status === 'pending_approval' && (
+            <button
+              onClick={(e) => handleApproveQuote(quote.id, e)}
+              className="p-1 rounded text-amber-600 hover:bg-amber-50"
+              title="Approve discount & send quote"
+            >
+              <CheckSquare className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {canEdit && (quote.status === 'draft' || quote.status === 'approved') && (
+            <button
+              onClick={(e) => handleSendQuote(quote.id, e)}
+              className="p-1 rounded text-indigo-600 hover:bg-indigo-50"
+              title="Send to Customer"
+            >
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {canEdit && quote.status === 'accepted' && (
+            <button
+              onClick={(e) => handleConvertToInvoice(quote.id, e)}
+              className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-1"
+              title="Convert to Live Invoice"
+            >
+              <Receipt className="w-3 h-3" />
+              Invoice
+            </button>
+          )}
+
+          {canEdit && quote.status === 'draft' && (
+            <button
+              onClick={(e) => handleDeleteQuote(quote.id, e)}
+              className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50"
+              title="Delete Quote"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </td>
+    ),
+  };
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-150">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
+        <div {...ui.edit('header')}>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold text-slate-900">Quotes & Proposals</h1>
+            <h1 className="text-xl font-bold text-slate-900">{ui.text('header', 'title')}</h1>
             <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
-              Revenue Lifecycle
+              {ui.text('header', 'badge')}
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Create, price, discount-gate, send, track customer acceptance, and automatically convert quotes to invoices.
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
 
@@ -254,61 +350,26 @@ export function QuotesListPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Total Quotes</p>
-          <p className="text-xl font-bold text-slate-900 mt-1">{kpis.total}</p>
-          <p className="text-[10px] text-slate-400 mt-0.5">All propositions</p>
-        </div>
-
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Draft</p>
-          <p className="text-xl font-bold text-slate-700 mt-1">{kpis.draft}</p>
-          <p className="text-[10px] text-slate-400 mt-0.5">In composition</p>
-        </div>
-
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Pending Approval</p>
-          <p className="text-xl font-bold text-amber-600 mt-1">{kpis.pendingApproval}</p>
-          <p className="text-[10px] text-slate-400 mt-0.5">Above discount threshold</p>
-        </div>
-
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Sent / Viewed</p>
-          <p className="text-xl font-bold text-indigo-600 mt-1">{kpis.sent}</p>
-          <p className="text-[10px] text-slate-400 mt-0.5">With customer</p>
-        </div>
-
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Accepted / Invoiced</p>
-          <p className="text-xl font-bold text-emerald-600 mt-1">{kpis.accepted}</p>
-          <p className="text-[10px] text-slate-400 mt-0.5">Incl. partially invoiced</p>
-        </div>
-
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
-          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Total Value</p>
-          <p className="text-xl font-bold text-slate-900 mt-1">{kpis.totalValue}</p>
-          <p className="text-[10px] text-slate-400 mt-0.5">All matching quotes, per currency</p>
-        </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3" {...ui.edit('kpis')}>
+        {ui.render('kpis', {
+          total: (item, edit) => <QuoteKpi {...edit} item={item} value={kpis.total} tone="text-slate-900" />,
+          draft: (item, edit) => <QuoteKpi {...edit} item={item} value={kpis.draft} tone="text-slate-700" />,
+          pending_approval: (item, edit) => <QuoteKpi {...edit} item={item} value={kpis.pendingApproval} tone="text-amber-600" />,
+          sent: (item, edit) => <QuoteKpi {...edit} item={item} value={kpis.sent} tone="text-indigo-600" />,
+          accepted: (item, edit) => <QuoteKpi {...edit} item={item} value={kpis.accepted} tone="text-emerald-600" />,
+          total_value: (item, edit) => <QuoteKpi {...edit} item={item} value={kpis.totalValue} tone="text-slate-900" />,
+        })}
       </div>
 
       {/* Tabs & Search Bar */}
       <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs space-y-3">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           {/* Tabs */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold text-slate-600 overflow-x-auto">
-            {[
-              { id: 'all', label: 'All' },
-              { id: 'draft', label: 'Draft' },
-              { id: 'pending_approval', label: 'Pending Approval' },
-              { id: 'approved', label: 'Approved' },
-              { id: 'sent', label: 'Sent' },
-              { id: 'accepted', label: 'Accepted' },
-              { id: 'invoiced', label: 'Invoiced' },
-              { id: 'declined', label: 'Declined' },
-            ].map((tab) => (
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold text-slate-600 overflow-x-auto" {...ui.edit('tabs')}>
+            {ui.shown('tabs').map((item) => ({ id: item.key, label: item.label })).map((tab) => (
               <button
                 key={tab.id}
+                {...ui.edit(`tabs.${tab.id}`)}
                 onClick={() => setActiveTab(tab.id)}
                 className={`px-3 py-1.5 rounded-lg capitalize whitespace-nowrap transition-all ${
                   activeTab === tab.id ? 'bg-white text-slate-900 shadow-2xs font-bold' : 'text-slate-500 hover:text-slate-900'
@@ -368,25 +429,23 @@ export function QuotesListPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-600 border-collapse">
             <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              <tr>
-                <th className="px-4 py-3">Quote #</th>
-                <th className="px-4 py-3">Customer</th>
-                <th className="px-4 py-3">Quote Date</th>
-                <th className="px-4 py-3">Expiry Date</th>
-                <th className="px-4 py-3">Amount</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Actions</th>
+              <tr {...ui.edit('columns')}>
+                {columns.map((col) => (
+                  <th key={col.key} className={`px-4 py-3${col.key === 'actions' ? ' text-right' : ''}`} {...ui.edit(`columns.${col.key}`)}>
+                    {col.label}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredQuotes.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-400 italic">
+                  <td colSpan={columns.length} className="px-4 py-12 text-center text-slate-400 italic" {...ui.edit('empty')}>
                     {debouncedSearch || dateFilter || activeTab !== 'all'
-                      ? 'No quotes match these filters.'
+                      ? ui.text('empty', 'filtered')
                       : canEdit
-                        ? 'No quotes found. Click "New Quote" to create your first quote.'
-                        : 'No quotes found.'}
+                        ? ui.text('empty', 'none')
+                        : ui.text('empty', 'none_read_only')}
                   </td>
                 </tr>
               ) : (
@@ -396,81 +455,7 @@ export function QuotesListPage() {
                     onClick={() => navigate(`/quotes/${quote.id}`)}
                     className="hover:bg-slate-50/80 transition-colors cursor-pointer"
                   >
-                    <td className="px-4 py-3">
-                      <span className="font-bold font-mono text-slate-900">{quote.quote_number}</span>
-                      {quote.title && <p className="text-[10px] text-slate-400 truncate max-w-xs">{quote.title}</p>}
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="font-semibold text-slate-900">{quote.customer?.display_name}</p>
-                      <p className="text-[10px] text-slate-400">{quote.customer?.customer_number}</p>
-                    </td>
-                    <td className="px-4 py-3">{quote.issue_date}</td>
-                    <td className="px-4 py-3">{quote.expiry_date || '—'}</td>
-                    <td className="px-4 py-3 font-semibold text-slate-900">
-                      ₹{Number(quote.total).toLocaleString('en-IN')}
-                      {Number(quote.discount_pct) > 0 && (
-                        <span className="text-[10px] text-amber-600 block">({quote.discount_pct}% off)</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">{getStatusBadge(quote.status)}</td>
-                    <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Link to={`/quotes/${quote.id}`}>
-                          <button className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100" title="View Quote">
-                            <Eye className="w-3.5 h-3.5" />
-                          </button>
-                        </Link>
-
-                        {canEdit && (quote.status === 'draft' || quote.status === 'pending_approval') && (
-                          <Link to={`/quotes/${quote.id}/edit`}>
-                            <button className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100" title="Edit Quote">
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                          </Link>
-                        )}
-
-                        {canApprove && quote.status === 'pending_approval' && (
-                          <button
-                            onClick={(e) => handleApproveQuote(quote.id, e)}
-                            className="p-1 rounded text-amber-600 hover:bg-amber-50"
-                            title="Approve discount & send quote"
-                          >
-                            <CheckSquare className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-
-                        {canEdit && (quote.status === 'draft' || quote.status === 'approved') && (
-                          <button
-                            onClick={(e) => handleSendQuote(quote.id, e)}
-                            className="p-1 rounded text-indigo-600 hover:bg-indigo-50"
-                            title="Send to Customer"
-                          >
-                            <Send className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-
-                        {canEdit && quote.status === 'accepted' && (
-                          <button
-                            onClick={(e) => handleConvertToInvoice(quote.id, e)}
-                            className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-1"
-                            title="Convert to Live Invoice"
-                          >
-                            <Receipt className="w-3 h-3" />
-                            Invoice
-                          </button>
-                        )}
-
-                        {canEdit && quote.status === 'draft' && (
-                          <button
-                            onClick={(e) => handleDeleteQuote(quote.id, e)}
-                            className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50"
-                            title="Delete Quote"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
+                    {columns.map((col) => <Fragment key={col.key}>{quoteCells[col.key]?.(quote)}</Fragment>)}
                   </tr>
                 ))
               )}
@@ -518,3 +503,13 @@ export function QuotesListPage() {
 }
 
 export default QuotesListPage;
+
+function QuoteKpi({ item, value, tone, ...edit }: { item: ResolvedItem; value: ReactNode; tone: string } & EditableProps) {
+  return (
+    <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-2xs" {...edit}>
+      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{item.label}</p>
+      <p className={`text-xl font-bold mt-1 ${tone}`}>{value}</p>
+      <p className="text-[10px] text-slate-400 mt-0.5">{item.caption}</p>
+    </div>
+  );
+}

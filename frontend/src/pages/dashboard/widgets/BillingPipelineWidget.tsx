@@ -3,6 +3,8 @@ import type { DashboardPipeline, PipelineBucket } from '../../../types';
 import { formatMoney, parseMoney } from '../../../utils/format';
 
 export interface BillingPipelineWidgetProps {
+  /** Card title (configurable in the Super Admin visual editor). */
+  title?: string;
   pipeline: DashboardPipeline;
   currency: string;
 }
@@ -33,7 +35,7 @@ const STAGE_COLOR: Record<StageKey, string> = {
   paid_this_period: 'border-emerald-200 bg-emerald-50/40',
 };
 
-export function BillingPipelineWidget({ pipeline, currency }: BillingPipelineWidgetProps) {
+export function BillingPipelineWidget({ pipeline, currency, title = 'Billing Pipeline' }: BillingPipelineWidgetProps) {
   const totalAmount = STAGES.reduce((sum, s) => sum + (parseMoney(pipeline[s.key].amount) || 0), 0);
 
   return (
@@ -42,7 +44,7 @@ export function BillingPipelineWidget({ pipeline, currency }: BillingPipelineWid
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
         <div>
           <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-            Billing Pipeline
+            {title}
           </h3>
           <p className="text-xs text-slate-400">
             Invoice status breakdown, draft through paid

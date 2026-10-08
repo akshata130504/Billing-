@@ -1,0 +1,81 @@
+{
+  "key": "proration",
+  "title": "Proration",
+  "route": "/proration",
+  "nav_item": "proration",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        { "name": "eyebrow", "label": "Eyebrow", "kind": "label", "default": "Subscriptions" },
+        { "name": "title", "label": "Heading", "kind": "heading", "default": "Proration" },
+        { "name": "subtitle", "label": "Subtitle", "kind": "body", "default": "Upgrade, downgrade or resize a subscription mid-cycle. Preview the exact credit and charge before anything is billed." }
+      ]
+    },
+    {
+      "id": "explainer",
+      "label": "How proration is calculated",
+      "fields": [
+        { "name": "title", "label": "Heading", "kind": "heading", "default": "How proration is calculated" },
+        { "name": "description", "label": "Description", "kind": "body", "default": "Mid-cycle plan and quantity changes are settled against the current period only. The next renewal bills the new terms in full." }
+      ]
+    },
+    {
+      "id": "picker",
+      "label": "Subscription picker",
+      "fields": [
+        { "name": "title", "label": "Heading", "kind": "heading", "default": "Choose a subscription" },
+        { "name": "description", "label": "Description", "kind": "body", "default": "Only active and trialing subscriptions can be changed mid-cycle." },
+        { "name": "empty_title", "label": "No subscriptions: title", "kind": "heading", "default": "No eligible subscriptions" },
+        { "name": "empty", "label": "No subscriptions: description", "kind": "body", "default": "Proration applies to active or trialing subscriptions. Create and activate a subscription to plan a mid-cycle change." },
+        { "name": "no_match_title", "label": "No search matches: title", "kind": "heading", "default": "No matching subscriptions" },
+        { "name": "no_match", "label": "No search matches: description", "kind": "body", "default": "No active or trialing subscriptions match your search. Try a different number, customer or plan." }
+      ]
+    },
+    {
+      "id": "terms",
+      "label": "Current terms panel",
+      "fields": [
+        { "name": "description", "label": "Description", "kind": "body", "default": "Current terms used as the baseline for every proration below." }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "Stat cards",
+      "items": [
+        { "key": "eligible", "label": "Eligible subscriptions" },
+        { "key": "scheduled", "label": "Scheduled changes" },
+        { "key": "applied", "label": "Applied changes" },
+        { "key": "net_billing", "label": "Net prorated billing" }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Subscription picker columns",
+      "items": [
+        { "key": "subscription", "label": "Subscription", "required": true },
+        { "key": "customer", "label": "Customer" },
+        { "key": "plan", "label": "Plan" },
+        { "key": "quantity", "label": "Qty" },
+        { "key": "period", "label": "Current period" },
+        { "key": "recurring", "label": "Recurring" },
+        { "key": "status", "label": "Status" },
+        { "key": "action", "label": "Action" }
+      ]
+    },
+    {
+      "id": "terms_fields",
+      "label": "Current terms fields",
+      "items": [
+        { "key": "plan", "label": "Plan" },
+        { "key": "unit_price", "label": "Unit price" },
+        { "key": "quantity", "label": "Quantity" },
+        { "key": "rate", "label": "Recurring rate" },
+        { "key": "period", "label": "Current period" }
+      ]
+    }
+  ]
+}

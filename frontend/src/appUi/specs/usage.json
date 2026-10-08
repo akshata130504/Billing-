@@ -1,0 +1,87 @@
+{
+  "key": "usage",
+  "title": "Usage / Metering",
+  "route": "/usage",
+  "nav_item": "usage",
+  "texts": [
+    {
+      "id": "header",
+      "label": "Page header",
+      "fields": [
+        { "name": "eyebrow", "label": "Eyebrow", "kind": "label", "default": "Subscriptions" },
+        { "name": "title", "label": "Heading", "kind": "heading", "default": "Usage / Metering" },
+        { "name": "subtitle", "label": "Subtitle", "kind": "body", "default": "Define billable meters, ingest usage events idempotently, and rate consumption into subscription billing cycles." }
+      ]
+    },
+    {
+      "id": "empty",
+      "label": "Meters empty states",
+      "fields": [
+        { "name": "no_meters_title", "label": "No meters: title", "kind": "heading", "default": "No meters yet" },
+        { "name": "no_meters_admin", "label": "No meters (admin)", "kind": "body", "default": "Create your first meter — for example API requests, storage in GB or active seats — then start recording usage against customers and subscriptions." },
+        { "name": "no_meters_member", "label": "No meters (other members)", "kind": "body", "default": "No usage meters have been defined for this organisation yet. An admin can create meters; you will then be able to record usage here." },
+        { "name": "no_match_title", "label": "No matches: title", "kind": "heading", "default": "No meters match" },
+        { "name": "no_match", "label": "No matches: description", "kind": "body", "default": "Try a different search term or clear the filters." }
+      ]
+    },
+    {
+      "id": "events",
+      "label": "Recorded events panel",
+      "fields": [
+        { "name": "title", "label": "Heading", "kind": "heading", "default": "Recorded usage events" },
+        { "name": "description", "label": "Description", "kind": "body", "default": "Confirmations for events posted from this page. The API does not list historical events." },
+        { "name": "empty_title", "label": "Empty: title", "kind": "heading", "default": "No usage recorded yet" },
+        { "name": "empty", "label": "Empty: description", "kind": "body", "default": "Use Record usage for a single event or Batch import to load a CSV/JSON file. Each accepted event will be listed here." }
+      ]
+    },
+    {
+      "id": "cycles",
+      "label": "Finalised cycles panel",
+      "fields": [
+        { "name": "title", "label": "Heading", "kind": "heading", "default": "Finalised cycles" },
+        { "name": "description", "label": "Description", "kind": "body", "default": "Rated usage aggregates produced this session." },
+        { "name": "empty_title", "label": "Empty: title", "kind": "heading", "default": "Nothing finalised yet" },
+        { "name": "empty_finance", "label": "Empty (finance)", "kind": "body", "default": "Finalising a billing cycle aggregates the linked usage, rates it and freezes the cycle so the next invoice picks it up." },
+        { "name": "empty_member", "label": "Empty (other members)", "kind": "body", "default": "Finance users can finalise a subscription billing cycle to rate its usage. Results will appear here." }
+      ]
+    }
+  ],
+  "lists": [
+    {
+      "id": "kpis",
+      "label": "Stat cards",
+      "items": [
+        { "key": "meters", "label": "Meters" },
+        { "key": "active", "label": "Active Meters" },
+        { "key": "events", "label": "Events Recorded" },
+        { "key": "aggregations", "label": "Aggregation Types" }
+      ]
+    },
+    {
+      "id": "columns",
+      "label": "Meters table columns",
+      "items": [
+        { "key": "meter", "label": "Meter", "required": true },
+        { "key": "code", "label": "Code" },
+        { "key": "unit", "label": "Unit" },
+        { "key": "aggregation", "label": "Aggregation" },
+        { "key": "session_usage", "label": "Session Usage" },
+        { "key": "status", "label": "Status" },
+        { "key": "created", "label": "Created" },
+        { "key": "actions", "label": "Actions" }
+      ]
+    },
+    {
+      "id": "event_columns",
+      "label": "Recorded events columns",
+      "items": [
+        { "key": "meter", "label": "Meter", "required": true },
+        { "key": "customer", "label": "Customer" },
+        { "key": "quantity", "label": "Quantity" },
+        { "key": "timestamp", "label": "Timestamp" },
+        { "key": "key", "label": "Key" },
+        { "key": "status", "label": "Status" }
+      ]
+    }
+  ]
+}

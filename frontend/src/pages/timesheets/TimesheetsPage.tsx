@@ -39,8 +39,10 @@ import { formatMoney, formatDate, humanize } from '../../utils/format';
 import { TimeEntryModal } from './TimeEntryModal';
 import { WeeklyTimesheetView } from './WeeklyTimesheetView';
 import { GenerateInvoiceModal } from './GenerateInvoiceModal';
+import { usePageSpec } from '../../appUi/usePageSpec';
 
 export function TimesheetsPage() {
+  const ui = usePageSpec('timesheets');
   const [searchParams] = useSearchParams();
   const { showToast } = useToast();
   const { hasRole } = useAuth();
@@ -166,15 +168,17 @@ export function TimesheetsPage() {
   return (
     <div className="space-y-6 pb-16">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4" {...ui.edit('header')}>
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">
             <Timer className="w-4 h-4" />
             Operations & Delivery
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Timesheets & Time Tracking</h1>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+            {ui.text('header', 'title')}
+          </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Log time against customers and projects, manage approvals, and convert billable hours directly into invoices.
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2.5">
@@ -212,64 +216,87 @@ export function TimesheetsPage() {
       </div>
 
       {/* KPI Stat Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <StatCard
-          title="Total Hours"
-          value={`${summary?.total_hours || '0.00'}h`}
-          icon={<Clock className="w-4 h-4 text-slate-500" />}
-        />
-        <StatCard
-          title="Billable Hours"
-          value={`${summary?.billable_hours || '0.00'}h`}
-          icon={<CheckCircle2 className="w-4 h-4 text-emerald-600" />}
-        />
-        <StatCard
-          title="Non-Billable"
-          value={`${summary?.non_billable_hours || '0.00'}h`}
-          icon={<Layers className="w-4 h-4 text-slate-500" />}
-        />
-        <StatCard
-          title="Billable Amount"
-          value={formatMoney(summary?.billable_amount || '0.00')}
-          icon={<DollarSign className="w-4 h-4 text-blue-600" />}
-        />
-        <StatCard
-          title="Unbilled Value"
-          value={formatMoney(summary?.unbilled_amount || '0.00')}
-          icon={<Receipt className="w-4 h-4 text-amber-600" />}
-        />
-        <StatCard
-          title="Pending Approval"
-          value={summary?.pending_approval_count ?? 0}
-          icon={<Send className="w-4 h-4 text-amber-600" />}
-        />
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4" {...ui.edit('kpis')}>
+        {ui.render('kpis', {
+          total_hours: (item, edit) => (
+            <div key="total_hours" {...edit}>
+              <StatCard
+                title={item.label}
+                value={`${summary?.total_hours || '0.00'}h`}
+                icon={<Clock className="w-4 h-4 text-slate-500" />}
+              />
+            </div>
+          ),
+          billable_hours: (item, edit) => (
+            <div key="billable_hours" {...edit}>
+              <StatCard
+                title={item.label}
+                value={`${summary?.billable_hours || '0.00'}h`}
+                icon={<CheckCircle2 className="w-4 h-4 text-emerald-600" />}
+              />
+            </div>
+          ),
+          non_billable: (item, edit) => (
+            <div key="non_billable" {...edit}>
+              <StatCard
+                title={item.label}
+                value={`${summary?.non_billable_hours || '0.00'}h`}
+                icon={<Layers className="w-4 h-4 text-slate-500" />}
+              />
+            </div>
+          ),
+          billable_amount: (item, edit) => (
+            <div key="billable_amount" {...edit}>
+              <StatCard
+                title={item.label}
+                value={formatMoney(summary?.billable_amount || '0.00')}
+                icon={<DollarSign className="w-4 h-4 text-blue-600" />}
+              />
+            </div>
+          ),
+          unbilled_value: (item, edit) => (
+            <div key="unbilled_value" {...edit}>
+              <StatCard
+                title={item.label}
+                value={formatMoney(summary?.unbilled_amount || '0.00')}
+                icon={<Receipt className="w-4 h-4 text-amber-600" />}
+              />
+            </div>
+          ),
+          pending_approval: (item, edit) => (
+            <div key="pending_approval" {...edit}>
+              <StatCard
+                title={item.label}
+                value={summary?.pending_approval_count ?? 0}
+                icon={<Send className="w-4 h-4 text-amber-600" />}
+              />
+            </div>
+          ),
+        })}
       </div>
 
       {/* View Switcher & Filter Bar */}
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           {/* View Switcher */}
-          <div className="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200 w-fit">
-            <button
-              onClick={() => setActiveTab('list')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
-                activeTab === 'list'
-                  ? 'bg-white text-blue-700 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              List View
-            </button>
-            <button
-              onClick={() => setActiveTab('weekly')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
-                activeTab === 'weekly'
-                  ? 'bg-white text-blue-700 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Weekly Matrix
-            </button>
+          <div className="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200 w-fit" {...ui.edit('tabs')}>
+            {ui.shown('tabs').map((tab) => {
+              const isSelected = activeTab === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key as any)}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+                    isSelected
+                      ? 'bg-white text-blue-700 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  {...ui.edit(`tabs.${tab.key}`)}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
           </div>
 
           {/* Quick Filters */}
@@ -324,9 +351,9 @@ export function TimesheetsPage() {
               <LoadingState message="Loading time entries..." />
             </div>
           ) : entries.length === 0 ? (
-            <div className="py-12">
+            <div className="py-12" {...ui.edit('empty')}>
               <EmptyState
-                title="No time entries logged"
+                title={ui.text('empty', 'none')}
                 description="Start recording time against client engagements and projects."
                 icon={<Timer className="w-8 h-8 text-slate-400" />}
                 action={
@@ -347,15 +374,15 @@ export function TimesheetsPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm text-slate-600">
                 <thead className="bg-slate-50/80 text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-200">
-                  <tr>
-                    <th className="px-5 py-3.5">Date</th>
-                    <th className="px-5 py-3.5">Member</th>
-                    <th className="px-5 py-3.5">Customer & Project</th>
-                    <th className="px-5 py-3.5">Description</th>
-                    <th className="px-5 py-3.5 text-center">Hours</th>
-                    <th className="px-5 py-3.5">Rate / Amount</th>
-                    <th className="px-5 py-3.5">Status</th>
-                    <th className="px-5 py-3.5 text-right">Actions</th>
+                  <tr {...ui.edit('columns')}>
+                    {ui.shown('columns').map((col) => {
+                      const align = col.key === 'hours' ? 'text-center' : col.key === 'actions' ? 'text-right' : '';
+                      return (
+                        <th key={col.key} className={`px-5 py-3.5 ${align}`} {...ui.edit(`columns.${col.key}`)}>
+                          {col.label}
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -368,161 +395,192 @@ export function TimesheetsPage() {
 
                     return (
                       <tr key={entry.id} className="hover:bg-slate-50/70 transition-colors">
-                        <td className="px-5 py-4 whitespace-nowrap text-xs font-medium text-slate-900">
-                          {formatDate(entry.date)}
-                        </td>
-                        <td className="px-5 py-4 whitespace-nowrap text-xs text-slate-700">
-                          <span className="font-semibold text-slate-900">{entry.user_name || 'Member'}</span>
-                        </td>
-                        <td className="px-5 py-4">
-                          <div className="font-semibold text-slate-900 flex items-center gap-1.5">
-                            <Briefcase className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
-                            <span>{entry.project_name || 'General'}</span>
-                          </div>
-                          {entry.customer_name ? (
-                            <div className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
-                              <Building2 className="w-3 h-3 text-slate-300" />
-                              <Link
-                                to={`/customer-lifecycle/${entry.customer_id}`}
-                                className="hover:text-blue-600 hover:underline"
-                              >
-                                {entry.customer_name}
-                              </Link>
-                            </div>
-                          ) : (
-                            <span className="text-[11px] text-slate-400 italic">Internal</span>
-                          )}
-                        </td>
-                        <td className="px-5 py-4 max-w-xs truncate text-xs text-slate-600">
-                          <span title={entry.description}>{entry.description}</span>
-                          {entry.rejection_reason && (
-                            <div className="text-[11px] text-rose-600 font-medium mt-0.5 flex items-center gap-1">
-                              <XCircle className="w-3 h-3 flex-shrink-0" />
-                              <span>{entry.rejection_reason}</span>
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-5 py-4 text-center">
-                          <span className="inline-block px-2 py-0.5 rounded bg-blue-50 font-bold text-blue-900 text-xs border border-blue-100">
-                            {entry.duration_hours}h
-                          </span>
-                        </td>
-                        <td className="px-5 py-4 whitespace-nowrap">
-                          {entry.billable ? (
-                            <div>
-                              <div className="font-bold text-slate-900 text-xs">
-                                {formatMoney(entry.billable_amount)}
-                              </div>
-                              <div className="text-[10px] text-slate-400">
-                                @ INR {entry.billing_rate}/hr
-                              </div>
-                            </div>
-                          ) : (
-                            <Badge variant="neutral" className="text-[10px]">
-                              Non-Billable
-                            </Badge>
-                          )}
-                        </td>
-                        <td className="px-5 py-4 whitespace-nowrap">
-                          <Badge
-                            variant={
-                              isBilled
-                                ? 'success'
-                                : isApproved
-                                ? 'info'
-                                : isSubmitted
-                                ? 'warning'
-                                : isRejected
-                                ? 'danger'
-                                : 'neutral'
-                            }
-                          >
-                            {humanize(entry.status)}
-                          </Badge>
-                          {isBilled && entry.invoice_id && (
-                            <div className="text-[10px] text-blue-600 mt-1 flex items-center gap-1">
-                              <Link to={`/invoices/${entry.invoice_id}`} className="hover:underline flex items-center gap-0.5">
-                                <Receipt className="w-3 h-3" />
-                                <span>{entry.invoice_number || 'View Invoice'}</span>
-                              </Link>
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-5 py-4 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-1.5">
-                            {/* Draft action: Submit */}
-                            {(isDraft || isRejected) && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-xs text-blue-600 hover:bg-blue-50 px-2 py-1"
-                                onClick={() => handleSubmitEntry(entry.id)}
-                                title="Submit for Approval"
-                              >
-                                <Send className="w-3.5 h-3.5 mr-1" />
-                                Submit
-                              </Button>
-                            )}
-
-                            {/* Submitted action: Approve / Reject (finance) */}
-                            {isSubmitted && canApprove && (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-xs text-emerald-700 hover:bg-emerald-50 px-2 py-1"
-                                  onClick={() => handleApproveEntry(entry.id)}
-                                  title="Approve Entry"
+                        {ui.shown('columns').map((col) => {
+                          if (col.key === 'date') {
+                            return (
+                              <td key="date" className="px-5 py-4 whitespace-nowrap text-xs font-medium text-slate-900">
+                                {formatDate(entry.date)}
+                              </td>
+                            );
+                          }
+                          if (col.key === 'member') {
+                            return (
+                              <td key="member" className="px-5 py-4 whitespace-nowrap text-xs text-slate-700">
+                                <span className="font-semibold text-slate-900">{entry.user_name || 'Member'}</span>
+                              </td>
+                            );
+                          }
+                          if (col.key === 'project_customer') {
+                            return (
+                              <td key="project_customer" className="px-5 py-4">
+                                <div className="font-semibold text-slate-900 flex items-center gap-1.5">
+                                  <Briefcase className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                                  <span>{entry.project_name || 'General'}</span>
+                                </div>
+                                {entry.customer_name ? (
+                                  <div className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
+                                    <Building2 className="w-3 h-3 text-slate-300" />
+                                    <Link
+                                      to={`/customer-lifecycle/${entry.customer_id}`}
+                                      className="hover:text-blue-600 hover:underline"
+                                    >
+                                      {entry.customer_name}
+                                    </Link>
+                                  </div>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400 italic">Internal</span>
+                                )}
+                              </td>
+                            );
+                          }
+                          if (col.key === 'task') {
+                            return (
+                              <td key="task" className="px-5 py-4 max-w-xs truncate text-xs text-slate-600">
+                                <span title={entry.description}>{entry.description}</span>
+                                {entry.rejection_reason && (
+                                  <div className="text-[11px] text-rose-600 font-medium mt-0.5 flex items-center gap-1">
+                                    <XCircle className="w-3 h-3 flex-shrink-0" />
+                                    <span>{entry.rejection_reason}</span>
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          }
+                          if (col.key === 'hours') {
+                            return (
+                              <td key="hours" className="px-5 py-4 text-center">
+                                <span className="inline-block px-2 py-0.5 rounded bg-blue-50 font-bold text-blue-900 text-xs border border-blue-100">
+                                  {entry.duration_hours}h
+                                </span>
+                              </td>
+                            );
+                          }
+                          if (col.key === 'rate_amount') {
+                            return (
+                              <td key="rate_amount" className="px-5 py-4 whitespace-nowrap">
+                                {entry.billable ? (
+                                  <div>
+                                    <div className="font-bold text-slate-900 text-xs">
+                                      {formatMoney(entry.billable_amount)}
+                                    </div>
+                                    <div className="text-[10px] text-slate-400">
+                                      @ INR {entry.billing_rate}/hr
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <Badge variant="neutral" className="text-[10px]">
+                                    Non-Billable
+                                  </Badge>
+                                )}
+                              </td>
+                            );
+                          }
+                          if (col.key === 'status') {
+                            return (
+                              <td key="status" className="px-5 py-4 whitespace-nowrap">
+                                <Badge
+                                  variant={
+                                    isBilled
+                                      ? 'success'
+                                      : isApproved
+                                      ? 'info'
+                                      : isSubmitted
+                                      ? 'warning'
+                                      : isRejected
+                                      ? 'danger'
+                                      : 'neutral'
+                                  }
                                 >
-                                  <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600" />
-                                  Approve
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-xs text-rose-700 hover:bg-rose-50 px-2 py-1"
-                                  onClick={() => {
-                                    setEntryToReject(entry);
-                                    setRejectModalOpen(true);
-                                  }}
-                                  title="Reject Entry"
-                                >
-                                  <XCircle className="w-3.5 h-3.5 mr-1 text-rose-600" />
-                                  Reject
-                                </Button>
-                              </>
-                            )}
+                                  {humanize(entry.status)}
+                                </Badge>
+                                {isBilled && entry.invoice_id && (
+                                  <div className="text-[10px] text-blue-600 mt-1 flex items-center gap-1">
+                                    <Link to={`/invoices/${entry.invoice_id}`} className="hover:underline flex items-center gap-0.5">
+                                      <Receipt className="w-3 h-3" />
+                                      <span>{entry.invoice_number || 'View Invoice'}</span>
+                                    </Link>
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          }
+                          if (col.key === 'actions') {
+                            return (
+                              <td key="actions" className="px-5 py-4 text-right whitespace-nowrap">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {(isDraft || isRejected) && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="text-xs text-blue-600 hover:bg-blue-50 px-2 py-1"
+                                      onClick={() => handleSubmitEntry(entry.id)}
+                                      title="Submit for Approval"
+                                    >
+                                      <Send className="w-3.5 h-3.5 mr-1" />
+                                      Submit
+                                    </Button>
+                                  )}
 
-                            {/* Edit (if not billed) */}
-                            {!isBilled && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-xs text-slate-500 hover:text-slate-900 px-2 py-1"
-                                onClick={() => {
-                                  setSelectedEntry(entry);
-                                  setEntryModalOpen(true);
-                                }}
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </Button>
-                            )}
+                                  {isSubmitted && canApprove && (
+                                    <>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="text-xs text-emerald-700 hover:bg-emerald-50 px-2 py-1"
+                                        onClick={() => handleApproveEntry(entry.id)}
+                                        title="Approve Entry"
+                                      >
+                                        <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600" />
+                                        Approve
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="text-xs text-rose-700 hover:bg-rose-50 px-2 py-1"
+                                        onClick={() => {
+                                          setEntryToReject(entry);
+                                          setRejectModalOpen(true);
+                                        }}
+                                        title="Reject Entry"
+                                      >
+                                        <XCircle className="w-3.5 h-3.5 mr-1 text-rose-600" />
+                                        Reject
+                                      </Button>
+                                    </>
+                                  )}
 
-                            {/* Delete (if not billed) */}
-                            {!isBilled && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-xs text-rose-500 hover:text-rose-700 hover:bg-rose-50 px-2 py-1"
-                                onClick={() => setEntryToDelete(entry)}
-                                title="Delete Entry"
-                                aria-label="Delete time entry"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </Button>
-                            )}
-                          </div>
-                        </td>
+                                  {!isBilled && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="text-xs text-slate-500 hover:text-slate-900 px-2 py-1"
+                                      onClick={() => {
+                                        setSelectedEntry(entry);
+                                        setEntryModalOpen(true);
+                                      }}
+                                    >
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                    </Button>
+                                  )}
+
+                                  {!isBilled && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="text-xs text-rose-500 hover:text-rose-700 hover:bg-rose-50 px-2 py-1"
+                                      onClick={() => setEntryToDelete(entry)}
+                                      title="Delete Entry"
+                                      aria-label="Delete time entry"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </Button>
+                                  )}
+                                </div>
+                              </td>
+                            );
+                          }
+                          return null;
+                        })}
                       </tr>
                     );
                   })}

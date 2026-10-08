@@ -1,4 +1,14 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react';
+import type { ReactNode } from 'react';
+import {
+  CUSTOMERS_COLUMN_DEFS,
+  CUSTOMERS_EMPTY_DEFAULTS,
+  CUSTOMERS_HEADER_DEFAULTS,
+  CUSTOMERS_STAT_DEFS,
+  resolveList,
+  visible,
+} from '../../appUi/registry';
+import { usePageUi, useUiEditable } from '../../appUi/UiConfigContext';
 import { Link, useNavigate } from 'react-router-dom';
 import { Building2, Plus, RefreshCw, Search, UserCheck, UserX, Users, X } from 'lucide-react';
 import { customerService } from '../../services/customerService';
@@ -41,6 +51,8 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 }
 
 export function CustomersListPage() {
+  const ui = usePageUi('customers');
+  const editable = useUiEditable();
   const navigate = useNavigate();
   const { hasRole } = useAuth();
   const canWrite = hasRole('finance');
@@ -193,15 +205,55 @@ export function CustomersListPage() {
     ],
     []
   );
+  // Visual-editor configuration: column order, labels and visibility over the defaults.
+  const configuredColumns = useMemo(() => {
+    const byUiKey: Record<string, Column<CustomerOut> | undefined> = {
+      customer_number: columns.find((c) => c.key === 'customer_number'),
+      customer: columns.find((c) => c.key === 'display_name'),
+      company: columns.find((c) => c.key === 'company_name'),
+      status: columns.find((c) => c.key === 'status'),
+      currency_terms: columns.find((c) => c.key === 'terms'),
+      created: columns.find((c) => c.key === 'created_at'),
+    };
+    return visible(resolveList(CUSTOMERS_COLUMN_DEFS, ui.columns))
+      .map((item) => {
+        const column = byUiKey[item.key];
+        return column ? { ...column, title: item.label } : null;
+      })
+      .filter((c): c is Column<CustomerOut> => c !== null);
+  }, [columns, ui.columns]);
+  const renderStat = (key: string, title: string): ReactNode => {
+    switch (key) {
+      case 'total':
+        return <StatCard title={title} value={counts ? counts.total : '—'} icon={<Users className="w-4 h-4" />} />;
+      case 'active':
+        return <StatCard title={title} value={counts ? counts.active : '—'} icon={<UserCheck className="w-4 h-4" />} />;
+      case 'inactive':
+        return <StatCard title={title} value={counts ? counts.inactive : '—'} icon={<UserX className="w-4 h-4" />} />;
+      case 'matching':
+        return (
+          <StatCard
+            title={title}
+            value={loading && items.length === 0 ? '—' : total}
+            comparisonText={hasFilters ? 'Search and status filters applied' : 'No filters applied'}
+            icon={<Building2 className="w-4 h-4" />}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+  const configuredStats = visible(resolveList(CUSTOMERS_STAT_DEFS, ui.stats));
 
   const showEmptyState = !loading && !error && items.length === 0;
 
   return (
     <div className="space-y-6 pb-12">
+      <div {...editable('customers.header')}>
       <PageHeader
-        eyebrow="Workspace"
-        title="Customers"
-        subtitle="Every organisation and individual you bill. Open a customer to see contacts, invoices, payments and subscriptions in one place."
+        eyebrow={ui.header?.eyebrow ?? CUSTOMERS_HEADER_DEFAULTS.eyebrow}
+        title={ui.header?.title ?? CUSTOMERS_HEADER_DEFAULTS.title}
+        subtitle={ui.header?.subtitle ?? CUSTOMERS_HEADER_DEFAULTS.subtitle}
         actions={
           <>
             <Button
@@ -225,29 +277,14 @@ export function CustomersListPage() {
           </>
         }
       />
+      </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title="Total customers"
-          value={counts ? counts.total : '—'}
-          icon={<Users className="w-4 h-4" />}
-        />
-        <StatCard
-          title="Active"
-          value={counts ? counts.active : '—'}
-          icon={<UserCheck className="w-4 h-4" />}
-        />
-        <StatCard
-          title="Inactive"
-          value={counts ? counts.inactive : '—'}
-          icon={<UserX className="w-4 h-4" />}
-        />
-        <StatCard
-          title="Matching filters"
-          value={loading && items.length === 0 ? '—' : total}
-          comparisonText={hasFilters ? 'Search and status filters applied' : 'No filters applied'}
-          icon={<Building2 className="w-4 h-4" />}
-        />
+        {configuredStats.map((stat) => (
+          <div key={stat.key} {...editable(`customers.stat.${stat.key}`)}>
+            {renderStat(stat.key, stat.label)}
+          </div>
+        ))}
       </div>
 
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
@@ -319,10 +356,11 @@ export function CustomersListPage() {
             }
           />
         ) : (
+          <div {...editable('customers.empty')}>
           <EmptyState
             icon={<Users className="w-6 h-6 stroke-1" />}
-            title="No customers yet"
-            description="Customers are the organisations and people you invoice. Add your first customer to start creating quotes, invoices and subscriptions."
+            title={ui.empty?.title ?? CUSTOMERS_EMPTY_DEFAULTS.title}
+            description={ui.empty?.description ?? CUSTOMERS_EMPTY_DEFAULTS.description}
             action={
               canWrite ? (
                 <Button
@@ -336,11 +374,12 @@ export function CustomersListPage() {
               ) : undefined
             }
           />
+          </div>
         )
       ) : (
-        <div onClick={handleTableClick} className="[&_tbody_tr]:cursor-pointer">
+        <div {...editable('customers.columns')} onClick={handleTableClick} className="[&_tbody_tr]:cursor-pointer">
           <DataTable<CustomerOut>
-            columns={columns}
+            columns={configuredColumns}
             data={items}
             keyExtractor={(c) => c.id}
             isLoading={loading}

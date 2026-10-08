@@ -6,7 +6,7 @@ import type { SubscriptionChangeOut } from '../../types/proration';
 import { subscriptionService } from '../../services/subscriptionService';
 import { catalogService } from '../../services/catalogService';
 import { prorationService } from '../../services/prorationService';
-import { StatCard } from '../../components/common/StatCard';
+import { StatCard, type StatCardProps } from '../../components/common/StatCard';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { useAuth } from '../../hooks/useAuth';
@@ -17,6 +17,8 @@ import { SubscriptionPicker } from './SubscriptionPicker';
 import { ChangePlanner } from './ChangePlanner';
 import { ChangeHistoryTable } from './ChangeHistoryTable';
 import { formatQuantity, intervalLabel } from './prorationLabels';
+import { usePageSpec } from '../../appUi/usePageSpec';
+import type { EditableProps } from '../../appUi/UiConfigContext';
 
 const PAGE_SIZE = 50;
 
@@ -28,6 +30,7 @@ export function ProrationPage() {
 
   const canApply = hasRole('finance');
   const canCancel = hasRole('admin');
+  const ui = usePageSpec('proration');
 
   // Eligible subscriptions (active + trialing)
   const [subscriptions, setSubscriptions] = useState<SubscriptionOut[]>([]);
@@ -158,14 +161,14 @@ export function ProrationPage() {
     <div className="space-y-6 pb-12">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
+        <div {...ui.edit('header')}>
           <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">
             <Repeat className="w-4 h-4" />
-            Subscriptions
+            {ui.text('header', 'eyebrow')}
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Proration</h1>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{ui.text('header', 'title')}</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Upgrade, downgrade or resize a subscription mid-cycle. Preview the exact credit and charge before anything is billed.
+            {ui.text('header', 'subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -181,37 +184,51 @@ export function ProrationPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title="Eligible subscriptions"
-          value={subsLoading ? '…' : stats.eligible}
-          icon={<Repeat className="w-5 h-5" />}
-          comparisonText="Active or trialing, changeable mid-cycle"
-        />
-        <StatCard
-          title="Scheduled changes"
-          value={selected ? (changesLoading ? '…' : stats.scheduled) : '—'}
-          icon={<CalendarClock className="w-5 h-5" />}
-          comparisonText={
-            selected
-              ? stats.nextScheduled
-                ? `Next runs ${formatDate(stats.nextScheduled)}`
-                : 'Nothing pending for this subscription'
-              : 'Select a subscription'
-          }
-        />
-        <StatCard
-          title="Applied changes"
-          value={selected ? (changesLoading ? '…' : stats.applied) : '—'}
-          icon={<CheckCircle2 className="w-5 h-5" />}
-          comparisonText={selected ? `On ${selected.subscription_number}` : 'Select a subscription'}
-        />
-        <StatCard
-          title="Net prorated billing"
-          value={selected ? (changesLoading ? '…' : formatMoney(stats.netBilled, currency)) : '—'}
-          icon={<ReceiptText className="w-5 h-5" />}
-          comparisonText={selected ? 'Invoices minus credit notes from applied changes' : 'Select a subscription'}
-        />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" {...ui.edit('kpis')}>
+        {ui.render('kpis', {
+          eligible: (item, edit) => (
+            <ProrationKpi
+              edit={edit}
+              title={item.label}
+              value={subsLoading ? '…' : stats.eligible}
+              icon={<Repeat className="w-5 h-5" />}
+              comparisonText="Active or trialing, changeable mid-cycle"
+            />
+          ),
+          scheduled: (item, edit) => (
+            <ProrationKpi
+              edit={edit}
+              title={item.label}
+              value={selected ? (changesLoading ? '…' : stats.scheduled) : '—'}
+              icon={<CalendarClock className="w-5 h-5" />}
+              comparisonText={
+                selected
+                  ? stats.nextScheduled
+                    ? `Next runs ${formatDate(stats.nextScheduled)}`
+                    : 'Nothing pending for this subscription'
+                  : 'Select a subscription'
+              }
+            />
+          ),
+          applied: (item, edit) => (
+            <ProrationKpi
+              edit={edit}
+              title={item.label}
+              value={selected ? (changesLoading ? '…' : stats.applied) : '—'}
+              icon={<CheckCircle2 className="w-5 h-5" />}
+              comparisonText={selected ? `On ${selected.subscription_number}` : 'Select a subscription'}
+            />
+          ),
+          net_billing: (item, edit) => (
+            <ProrationKpi
+              edit={edit}
+              title={item.label}
+              value={selected ? (changesLoading ? '…' : formatMoney(stats.netBilled, currency)) : '—'}
+              icon={<ReceiptText className="w-5 h-5" />}
+              comparisonText={selected ? 'Invoices minus credit notes from applied changes' : 'Select a subscription'}
+            />
+          ),
+        })}
       </div>
 
       <ProrationExplainerCard />
@@ -248,8 +265,8 @@ export function ProrationPage() {
                       {humanize(selected.status)}
                     </Badge>
                   </div>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Current terms used as the baseline for every proration below.
+                  <p className="text-xs text-slate-500 mt-0.5" {...ui.edit('terms')}>
+                    {ui.text('terms', 'description')}
                   </p>
                 </div>
               </div>
@@ -257,40 +274,52 @@ export function ProrationPage() {
                 View subscription
               </Button>
             </div>
-            <dl className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-4 text-xs">
-              <div>
-                <dt className="text-slate-500 uppercase tracking-wide text-[11px] font-medium">Plan</dt>
-                <dd className="mt-1 font-semibold text-slate-900">{selected.plan.name}</dd>
-                <dd className="text-slate-400 text-[11px]">{selected.plan.product_name}</dd>
-              </div>
-              <div>
-                <dt className="text-slate-500 uppercase tracking-wide text-[11px] font-medium">Unit price</dt>
-                <dd className="mt-1 font-semibold text-slate-900 tabular-nums">
-                  {formatMoney(selected.plan.unit_amount, selected.plan.currency)}
-                </dd>
-                <dd className="text-slate-400 text-[11px]">
-                  per {intervalLabel(selected.plan.billing_interval, selected.plan.interval_count)}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-slate-500 uppercase tracking-wide text-[11px] font-medium">Quantity</dt>
-                <dd className="mt-1 font-semibold text-slate-900 tabular-nums">{formatQuantity(selected.quantity)}</dd>
-                <dd className="text-slate-400 text-[11px]">{humanize(selected.pricing_model ?? selected.plan.billing_interval)}</dd>
-              </div>
-              <div>
-                <dt className="text-slate-500 uppercase tracking-wide text-[11px] font-medium">Recurring rate</dt>
-                <dd className="mt-1 font-semibold text-slate-900 tabular-nums">{formatMoney(currentRate, currency)}</dd>
-                <dd className="text-slate-400 text-[11px]">before tax, per cycle</dd>
-              </div>
-              <div>
-                <dt className="text-slate-500 uppercase tracking-wide text-[11px] font-medium">Current period</dt>
-                <dd className="mt-1 font-semibold text-slate-900 whitespace-nowrap">
-                  {formatDate(selected.current_period_start)} → {formatDate(selected.current_period_end)}
-                </dd>
-                <dd className="text-slate-400 text-[11px]">
-                  {selected.next_billing_date ? `Next bill ${formatDate(selected.next_billing_date)}` : 'No next billing date'}
-                </dd>
-              </div>
+            <dl className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-4 text-xs" {...ui.edit('terms_fields')}>
+              {ui.render('terms_fields', {
+                plan: (item, edit) => (
+                  <div {...edit}>
+                    <dt className="text-slate-500 uppercase tracking-wide text-[11px] font-medium">{item.label}</dt>
+                    <dd className="mt-1 font-semibold text-slate-900">{selected.plan.name}</dd>
+                    <dd className="text-slate-400 text-[11px]">{selected.plan.product_name}</dd>
+                  </div>
+                ),
+                unit_price: (item, edit) => (
+                  <div {...edit}>
+                    <dt className="text-slate-500 uppercase tracking-wide text-[11px] font-medium">{item.label}</dt>
+                    <dd className="mt-1 font-semibold text-slate-900 tabular-nums">
+                      {formatMoney(selected.plan.unit_amount, selected.plan.currency)}
+                    </dd>
+                    <dd className="text-slate-400 text-[11px]">
+                      per {intervalLabel(selected.plan.billing_interval, selected.plan.interval_count)}
+                    </dd>
+                  </div>
+                ),
+                quantity: (item, edit) => (
+                  <div {...edit}>
+                    <dt className="text-slate-500 uppercase tracking-wide text-[11px] font-medium">{item.label}</dt>
+                    <dd className="mt-1 font-semibold text-slate-900 tabular-nums">{formatQuantity(selected.quantity)}</dd>
+                    <dd className="text-slate-400 text-[11px]">{humanize(selected.pricing_model ?? selected.plan.billing_interval)}</dd>
+                  </div>
+                ),
+                rate: (item, edit) => (
+                  <div {...edit}>
+                    <dt className="text-slate-500 uppercase tracking-wide text-[11px] font-medium">{item.label}</dt>
+                    <dd className="mt-1 font-semibold text-slate-900 tabular-nums">{formatMoney(currentRate, currency)}</dd>
+                    <dd className="text-slate-400 text-[11px]">before tax, per cycle</dd>
+                  </div>
+                ),
+                period: (item, edit) => (
+                  <div {...edit}>
+                    <dt className="text-slate-500 uppercase tracking-wide text-[11px] font-medium">{item.label}</dt>
+                    <dd className="mt-1 font-semibold text-slate-900 whitespace-nowrap">
+                      {formatDate(selected.current_period_start)} → {formatDate(selected.current_period_end)}
+                    </dd>
+                    <dd className="text-slate-400 text-[11px]">
+                      {selected.next_billing_date ? `Next bill ${formatDate(selected.next_billing_date)}` : 'No next billing date'}
+                    </dd>
+                  </div>
+                ),
+              })}
             </dl>
           </div>
 
@@ -320,6 +349,15 @@ export function ProrationPage() {
           />
         </>
       )}
+    </div>
+  );
+}
+
+/** A StatCard the visual-editor preview can select (StatCard itself takes no extra props). */
+function ProrationKpi({ edit, ...card }: { edit: EditableProps } & StatCardProps) {
+  return (
+    <div className="flex" {...edit}>
+      <StatCard className="flex-1" {...card} />
     </div>
   );
 }

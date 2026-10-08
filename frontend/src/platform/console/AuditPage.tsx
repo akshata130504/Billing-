@@ -109,6 +109,7 @@ export function AuditPage() {
             <option value="organization">Organization</option>
             <option value="platform_staff">Platform staff</option>
             <option value="website_page">Website page</option>
+            <option value="app_ui_page">App UI page (visual editor)</option>
             <option value="access_grant">Access grant</option>
           </select>
         </label>

@@ -4,6 +4,8 @@ import type { DashboardRevenue } from '../../../types';
 import { parseMoney, formatMoney } from '../../../utils/format';
 
 export interface RevenueOverviewWidgetProps {
+  /** Card title (configurable in the Super Admin visual editor). */
+  title?: string;
   revenue?: DashboardRevenue;
   currency?: string;
 }
@@ -15,7 +17,7 @@ interface MonthBarData {
   received: number; // raw value in currency
 }
 
-export function RevenueOverviewWidget({ revenue, currency = 'INR' }: RevenueOverviewWidgetProps) {
+export function RevenueOverviewWidget({ revenue, currency = 'INR', title = 'Revenue Overview' }: RevenueOverviewWidgetProps) {
   const [selectedRange, setSelectedRange] = useState('Last 8 Months');
   const [rangeOpen, setRangeOpen] = useState(false);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
@@ -122,7 +124,7 @@ export function RevenueOverviewWidget({ revenue, currency = 'INR' }: RevenueOver
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <h3 className="text-sm font-bold text-[#11194F] tracking-tight">
-            Revenue Overview
+            {title}
           </h3>
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />

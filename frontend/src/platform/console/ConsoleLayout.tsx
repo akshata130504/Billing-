@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity,
   Building2,
+  ClipboardCheck,
   Globe,
   KeyRound,
   LayoutDashboard,
@@ -12,7 +13,7 @@ import {
   ShieldCheck,
   UserCircle,
   Users,
-  X,
+  X, Palette
 } from 'lucide-react';
 import { ErrorState } from '../../components/common/ErrorState';
 import { LoadingState } from '../../components/common/LoadingState';
@@ -33,9 +34,11 @@ interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/organizations', label: 'Organizations', icon: Building2 },
+  { to: '/subscription-requests', label: 'Subscription requests', icon: ClipboardCheck },
   { to: '/staff', label: 'Platform staff', icon: Users, roles: [ADMIN] },
   { to: '/audit', label: 'Audit log', icon: ScrollText, roles: [ADMIN] },
   { to: '/website', label: 'Website', icon: Globe, roles: [ADMIN] },
+  { to: '/visual-editor', label: 'Visual editor', icon: Palette },
   { to: '/access-grants', label: 'Access grants', icon: KeyRound, roles: [ADMIN, 'platform_support'] },
   { to: '/health', label: 'System health', icon: Activity },
   { to: '/account', label: 'My account', icon: UserCircle },

@@ -8,6 +8,8 @@ import type { Invoice } from '../../../types/invoices';
 import type { PaymentOut } from '../../../types';
 
 export interface RecentInvoicesWidgetProps {
+  /** Card title (configurable in the Super Admin visual editor). */
+  title?: string;
   transactions?: PaymentOut[];
 }
 
@@ -20,7 +22,7 @@ const statusBadgeStyles: Record<string, { bg: string; text: string; label: strin
   VOID: { bg: 'bg-slate-100', text: 'text-slate-400', label: 'Void' },
 };
 
-export function RecentInvoicesWidget({ transactions: _transactions }: RecentInvoicesWidgetProps = {}) {
+export function RecentInvoicesWidget({ transactions: _transactions, title = 'Recent Invoices' }: RecentInvoicesWidgetProps = {}) {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -51,7 +53,7 @@ export function RecentInvoicesWidget({ transactions: _transactions }: RecentInvo
       {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-bold text-[#11194F] tracking-tight">
-          Recent Invoices
+          {title}
         </h3>
         <Link
           to="/invoices"

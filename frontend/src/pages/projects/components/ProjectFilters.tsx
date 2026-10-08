@@ -2,6 +2,7 @@ import { ProjectFilterState } from '../types';
 import { Card, CardContent } from '../../../components/common/Card';
 import { Button } from '../../../components/common/Button';
 import { Search, X, Filter, LayoutList, LayoutGrid } from 'lucide-react';
+import { usePageSpec } from '../../../appUi/usePageSpec';
 
 interface ProjectFiltersProps {
   filters: ProjectFilterState;
@@ -10,18 +11,13 @@ interface ProjectFiltersProps {
   customerOptions: string[];
 }
 
-const statusTabs: { label: string; value: 'all' | 'active' | 'inactive' }[] = [
-  { label: 'All', value: 'all' },
-  { label: 'Active', value: 'active' },
-  { label: 'Inactive', value: 'inactive' },
-];
-
 export function ProjectFilters({
   filters,
   onFilterChange,
   onClearFilters,
   customerOptions,
 }: ProjectFiltersProps) {
+  const ui = usePageSpec('projects');
   const isFiltered =
     filters.searchQuery !== '' ||
     filters.statusTab !== 'all' ||
@@ -32,19 +28,20 @@ export function ProjectFilters({
       <CardContent className="p-3 space-y-3">
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
           {/* Status Quick Pills: All | Active | Inactive */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
-            {statusTabs.map((tab) => {
-              const isSelected = filters.statusTab === tab.value;
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none" {...ui.edit('tabs')}>
+            {ui.shown('tabs').map((tab) => {
+              const isSelected = filters.statusTab === tab.key;
               return (
                 <button
-                  key={tab.value}
+                  key={tab.key}
                   type="button"
-                  onClick={() => onFilterChange({ statusTab: tab.value })}
+                  onClick={() => onFilterChange({ statusTab: tab.key as any })}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer select-none ${
                     isSelected
                       ? 'bg-slate-900 text-white shadow-2xs'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                   }`}
+                  {...ui.edit(`tabs.${tab.key}`)}
                 >
                   {tab.label}
                 </button>

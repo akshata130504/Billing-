@@ -3,11 +3,13 @@ import type { DashboardRecovery } from '../../../types';
 import { formatMoney, formatNumber, parseMoney } from '../../../utils/format';
 
 export interface PaymentRecoveryWidgetProps {
+  /** Card title (configurable in the Super Admin visual editor). */
+  title?: string;
   recovery: DashboardRecovery;
   currency: string;
 }
 
-export function PaymentRecoveryWidget({ recovery, currency }: PaymentRecoveryWidgetProps) {
+export function PaymentRecoveryWidget({ recovery, currency, title = 'Payment Recovery (Dunning)' }: PaymentRecoveryWidgetProps) {
   const failedAmount = parseMoney(recovery.failed_amount) || 0;
   const recoveredAmount = parseMoney(recovery.recovered_amount) || 0;
   const base = failedAmount + recoveredAmount;
@@ -19,7 +21,7 @@ export function PaymentRecoveryWidget({ recovery, currency }: PaymentRecoveryWid
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-            Payment Recovery (Dunning)
+            {title}
           </h3>
           <p className="text-xs text-slate-400">
             Failed payment retries & reminder-driven collections
