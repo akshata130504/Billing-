@@ -2,13 +2,18 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 
 # Regex patterns
-_NAME_CHARS_RE = re.compile(r"^[A-Za-z0-9\s.,'&\-\(\)\/]{1,200}$")
-_HAS_LETTER_RE = re.compile(r"[A-Za-z\u00C0-\u024F]")
+# Names may use any script (letters, combining marks, digits) plus common business
+# punctuation. HTML/script characters (< > " `) and '=' stay out, and a name may not
+# start with a spreadsheet-formula trigger (= + @).
+_NAME_PUNCTUATION = frozenset(" .,'&()-_/#+@:")
+_NAME_FORMULA_PREFIXES = ("=", "+", "@")
+_NAME_MAX_LEN = 200
 _PHONE_RE = re.compile(r"^\+?[0-9\s\-().]{7,20}$")
 _URL_RE = re.compile(r"^https?://([a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(:\d+)?([/?#].*)?$")
 _GSTIN_RE = re.compile(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$")
@@ -30,11 +35,19 @@ def validate_sensible_name(value: Optional[str], field_label: str = "Name") -> O
     val = value.strip()
     if not val:
         raise ValueError(f"{field_label} cannot be empty or whitespace-only.")
-    if not _HAS_LETTER_RE.search(val):
+    if not any(ch.isalpha() for ch in val):
         raise ValueError(f"{field_label} cannot be numeric-only and must contain at least one letter.")
-    if not _NAME_CHARS_RE.match(val):
+    if (
+        len(val) > _NAME_MAX_LEN
+        or val.startswith(_NAME_FORMULA_PREFIXES)
+        or not all(_is_name_char(ch) for ch in val)
+    ):
         raise ValueError(f"{field_label} contains invalid characters.")
     return val
+
+
+def _is_name_char(ch: str) -> bool:
+    return ch in _NAME_PUNCTUATION or ch.isspace() or unicodedata.category(ch)[0] in ("L", "M", "N")
 
 
 def validate_phone_number(value: Optional[str]) -> Optional[str]:
