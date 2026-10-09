@@ -21,7 +21,7 @@ from backend.app.core.exceptions import ConflictAppError, NotFoundAppError, Unau
 from backend.app.core.security import hash_password, validate_password_strength, verify_password
 from backend.app.models.base import utcnow
 from backend.app.models.customers import Customer, CustomerContact
-from backend.app.models.identity import Organization, User
+from backend.app.models.identity import MemberRole, Organization, User
 from backend.app.models.invoices import OPEN_INVOICE_STATUSES, Invoice, InvoiceStatus
 from backend.app.models.payments import CustomerPaymentMethod, CustomerPaymentMethodStatus
 from backend.app.models.portal import (
@@ -432,7 +432,7 @@ def create_customer_portal_invitation(
     invite_url = f"{settings.FRONTEND_URL.rstrip('/')}/portal/activate?token={raw_token}"
     org_name = ctx.organization.name if ctx.organization else "our organization"
 
-    _send_portal_invitation_email(db, ctx.organization_id, target_email, invite_url, org_name, ctx.user.full_name)
+    delivered = _send_portal_invitation_email(db, ctx.organization_id, target_email, invite_url, org_name, ctx.user.full_name)
 
     audit.record(
         db,
@@ -444,10 +444,17 @@ def create_customer_portal_invitation(
         after={
             "email": target_email,
             "expires_at": expires_at.isoformat(),
+            "email_delivered": delivered,
         },
     )
 
-    return serialize_portal_invitation(invitation, raw_token=raw_token)
+    # The link carries the customer's single-use activation credential. Like team invitations it
+    # is only handed back when the email could not be delivered, and only to admins and owners,
+    # so they can pass it on by hand; GET portal-access never returns it (only the hash is stored).
+    share_link = not delivered and ctx.has_role(MemberRole.ADMIN)
+    out = serialize_portal_invitation(invitation, raw_token=raw_token if share_link else None)
+    out.email_delivered = delivered
+    return out
 
 
 def revoke_customer_portal_access(

@@ -6,7 +6,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from backend.app.schemas.common_refs import CustomerRef, LineItemIn, LineItemOut, UserRef
+from backend.app.schemas.common_refs import CustomerRef, LineItemIn, LineItemOut, PublicLineItemOut, UserRef
 
 # Technical ceiling only (abuse/overflow prevention) — the business rules define no cap.
 _MAX_TEXT_LENGTH = 10000
@@ -286,7 +286,7 @@ class PublicQuote(BaseModel):
     total: str
     notes: Optional[str] = None
     terms: Optional[str] = None
-    items: List[LineItemOut]
+    items: List[PublicLineItemOut]
     sent_at: Optional[datetime] = None
     accepted_at: Optional[datetime] = None
     declined_at: Optional[datetime] = None
