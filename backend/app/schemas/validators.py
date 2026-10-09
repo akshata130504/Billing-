@@ -5,7 +5,15 @@ import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import Annotated, Optional
+
+from pydantic import Field
+
+# Money inputs map to NUMERIC(14, 2) columns: at most 12 digits before the decimal point
+# and 2 after. Larger or more precise amounts are a 422 - never a database overflow (500)
+# or a silent rounding.
+MAX_MONEY = Decimal("999999999999.99")
+Money = Annotated[Decimal, Field(le=MAX_MONEY, max_digits=14, decimal_places=2)]
 
 # Regex patterns
 # Names may use any script (letters, combining marks, digits) plus common business

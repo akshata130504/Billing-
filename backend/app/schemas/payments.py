@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.app.models import PaymentGateway, PaymentMethod, PaymentStatus, ReconciliationStatus, RefundStatus
 from backend.app.schemas.common_refs import CustomerRef, UserRef
-from backend.app.schemas.validators import reject_future_datetime
+from backend.app.schemas.validators import Money, reject_future_datetime
 
 
 class AllocationIn(BaseModel):
@@ -19,7 +19,7 @@ class PaymentCreate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     customer_id: str
-    amount: Decimal = Field(..., gt=0)
+    amount: Money = Field(..., gt=0)
     method: PaymentMethod
     paid_at: Optional[datetime] = None
     reference: Optional[str] = Field(default=None, max_length=120)
@@ -51,7 +51,7 @@ class AllocationsPut(BaseModel):
 
 
 class RefundIn(BaseModel):
-    amount: Decimal = Field(..., gt=0)
+    amount: Money = Field(..., gt=0)
     reason: Optional[str] = Field(default=None, max_length=500)
 
 

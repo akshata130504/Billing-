@@ -9,13 +9,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.models.credits import CreditNoteStatus
 from backend.app.schemas.common_refs import CustomerRef
+from backend.app.schemas.validators import Money
 
 
 class CreditNoteLineIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     description: str = Field(..., min_length=1, max_length=255)
-    amount: Decimal = Field(..., gt=0, description="Pre-tax line amount")
+    amount: Money = Field(..., gt=0, description="Pre-tax line amount")
     tax_rate_pct: Decimal = Field(default=Decimal("0"), ge=0, le=100)
     product_id: Optional[str] = None
     plan_id: Optional[str] = None
@@ -53,7 +54,7 @@ class CreditApplicationIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     invoice_id: str
-    amount: Decimal = Field(..., gt=0)
+    amount: Money = Field(..., gt=0)
 
 
 class CreditNoteOut(BaseModel):

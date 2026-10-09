@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.app.models import InvoiceStatus, PaymentMethod, PaymentStatus
 from backend.app.schemas.common_refs import CustomerRef, LineItemIn, LineItemOut, UserRef
-from backend.app.schemas.validators import reject_future_datetime
+from backend.app.schemas.validators import Money, reject_future_datetime
 
 # Technical ceiling only (abuse/overflow prevention) — the business rules define no cap.
 _MAX_TEXT_LENGTH = 10000
@@ -89,7 +89,7 @@ class InvoiceVoidIn(BaseModel):
 class RecordPaymentIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    amount: Decimal = Field(..., gt=0)
+    amount: Money = Field(..., gt=0)
     method: PaymentMethod
     paid_at: Optional[datetime] = None
     reference: Optional[str] = Field(default=None, max_length=120)

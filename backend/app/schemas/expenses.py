@@ -12,6 +12,7 @@ from backend.app.models.expenses import (
     RecurringExpenseFrequency,
     RecurringExpenseStatus,
 )
+from backend.app.schemas.validators import Money
 
 
 class ExpenseBase(BaseModel):
@@ -21,14 +22,14 @@ class ExpenseBase(BaseModel):
     description: Optional[str] = None
     date: date
     category: str = Field(..., min_length=1, max_length=100)
-    amount: Decimal = Field(..., gt=Decimal("0.00"))
+    amount: Money = Field(..., gt=Decimal("0.00"))
     currency: str = Field(default="INR", min_length=3, max_length=3)
     billable: bool = False
     customer_id: Optional[str] = None
     customer_name: Optional[str] = None
     project_id: Optional[str] = None
     project_name: Optional[str] = None
-    billable_amount: Optional[Decimal] = Field(default=None, ge=Decimal("0.00"))
+    billable_amount: Optional[Money] = Field(default=None, ge=Decimal("0.00"))
     tax_rate: Optional[Decimal] = Field(default=None, ge=Decimal("0.00"), le=Decimal("100.00"))
     invoice_treatment: Optional[str] = None
     invoice_id: Optional[str] = None
@@ -61,14 +62,14 @@ class ExpenseUpdate(BaseModel):
     description: Optional[str] = None
     date: Optional[date] = None
     category: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    amount: Optional[Decimal] = Field(default=None, gt=Decimal("0.00"))
+    amount: Optional[Money] = Field(default=None, gt=Decimal("0.00"))
     currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
     billable: Optional[bool] = None
     customer_id: Optional[str] = None
     customer_name: Optional[str] = None
     project_id: Optional[str] = None
     project_name: Optional[str] = None
-    billable_amount: Optional[Decimal] = Field(default=None, ge=Decimal("0.00"))
+    billable_amount: Optional[Money] = Field(default=None, ge=Decimal("0.00"))
     tax_rate: Optional[Decimal] = Field(default=None, ge=Decimal("0.00"), le=Decimal("100.00"))
     invoice_treatment: Optional[str] = None
     invoice_id: Optional[str] = None
@@ -141,7 +142,7 @@ class RecurringExpenseBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     category: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
-    amount: Decimal = Field(..., gt=Decimal("0.00"))
+    amount: Money = Field(..., gt=Decimal("0.00"))
     currency: str = Field(default="INR", min_length=3, max_length=3)
     frequency: RecurringExpenseFrequency = RecurringExpenseFrequency.MONTHLY
     start_date: date
@@ -154,7 +155,7 @@ class RecurringExpenseBase(BaseModel):
     customer_name: Optional[str] = None
     project_id: Optional[str] = None
     project_name: Optional[str] = None
-    billable_amount: Optional[Decimal] = Field(default=None, ge=Decimal("0.00"))
+    billable_amount: Optional[Money] = Field(default=None, ge=Decimal("0.00"))
     invoice_treatment: Optional[str] = None
     payment_method: str = Field(default="Cash", max_length=50)
     paid_by: str = Field(default="Self", max_length=200)
@@ -182,7 +183,7 @@ class RecurringExpenseUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     category: Optional[str] = Field(default=None, min_length=1, max_length=100)
     description: Optional[str] = None
-    amount: Optional[Decimal] = Field(default=None, gt=Decimal("0.00"))
+    amount: Optional[Money] = Field(default=None, gt=Decimal("0.00"))
     currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
     frequency: Optional[RecurringExpenseFrequency] = None
     start_date: Optional[date] = None
@@ -195,7 +196,7 @@ class RecurringExpenseUpdate(BaseModel):
     customer_name: Optional[str] = None
     project_id: Optional[str] = None
     project_name: Optional[str] = None
-    billable_amount: Optional[Decimal] = Field(default=None, ge=Decimal("0.00"))
+    billable_amount: Optional[Money] = Field(default=None, ge=Decimal("0.00"))
     invoice_treatment: Optional[str] = None
     payment_method: Optional[str] = Field(default=None, max_length=50)
     paid_by: Optional[str] = Field(default=None, max_length=200)
