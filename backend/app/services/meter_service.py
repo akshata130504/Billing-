@@ -5,7 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import CurrentContext
@@ -298,6 +298,113 @@ def list_billing_cycles(db: Session, organization_id: str, subscription_id: str)
     )
 
 
+def _usage_event_filters(
+    db: Session,
+    organization_id: str,
+    meter_id_or_code: Optional[str],
+    customer_id: Optional[str],
+    subscription_id: Optional[str],
+    date_from: Optional[date],
+    date_to: Optional[date],
+) -> list:
+    """Tenant-scoped filters for usage history; dates are inclusive org-local days."""
+    filters = [UsageEvent.organization_id == organization_id]
+    if meter_id_or_code:
+        filters.append(UsageEvent.meter_id == get_meter(db, organization_id, meter_id_or_code).id)
+    if customer_id:
+        filters.append(UsageEvent.customer_id == customer_id)
+    if subscription_id:
+        filters.append(UsageEvent.subscription_id == subscription_id)
+    start_dt, end_dt = timezones.range_bounds_utc(date_from, date_to, timezones.org_tz_for_id(db, organization_id))
+    if start_dt is not None:
+        filters.append(UsageEvent.timestamp >= start_dt)
+    if end_dt is not None:
+        filters.append(UsageEvent.timestamp < end_dt)
+    return filters
+
+
+def list_usage_events_query(
+    db: Session,
+    organization_id: str,
+    *,
+    meter_id_or_code: Optional[str] = None,
+    customer_id: Optional[str] = None,
+    subscription_id: Optional[str] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+):
+    """Select of recorded usage events (newest first) for the paginated history list."""
+    filters = _usage_event_filters(
+        db, organization_id, meter_id_or_code, customer_id, subscription_id, date_from, date_to
+    )
+    return select(UsageEvent).where(*filters).order_by(UsageEvent.timestamp.desc(), UsageEvent.id.desc())
+
+
+def usage_summary(
+    db: Session,
+    organization_id: str,
+    *,
+    meter_id_or_code: Optional[str] = None,
+    customer_id: Optional[str] = None,
+    subscription_id: Optional[str] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+) -> List[Dict[str, Any]]:
+    """Per-meter running totals of accepted events over a period. `total_quantity` follows
+    the meter's aggregation type (sum / max / count / last) like rating does."""
+    filters = _usage_event_filters(
+        db, organization_id, meter_id_or_code, customer_id, subscription_id, date_from, date_to
+    )
+    filters.append(UsageEvent.status == UsageEventStatus.ACCEPTED)
+    rows = (
+        db.query(
+            UsageEvent.meter_id,
+            func.count(UsageEvent.id),
+            func.coalesce(func.sum(UsageEvent.quantity), 0),
+            func.coalesce(func.max(UsageEvent.quantity), 0),
+            func.max(UsageEvent.timestamp),
+        )
+        .filter(*filters)
+        .group_by(UsageEvent.meter_id)
+        .all()
+    )
+    stats = {r[0]: r for r in rows}
+    meters = [get_meter(db, organization_id, meter_id_or_code)] if meter_id_or_code else list_meters(db, organization_id)
+    out: List[Dict[str, Any]] = []
+    for meter in meters:
+        row = stats.get(meter.id)
+        count = int(row[1]) if row else 0
+        total = Decimal("0")
+        if row:
+            if meter.aggregation_type == AggregationType.SUM:
+                total = Decimal(str(row[2]))
+            elif meter.aggregation_type == AggregationType.MAX:
+                total = Decimal(str(row[3]))
+            elif meter.aggregation_type == AggregationType.COUNT:
+                total = Decimal(count)
+            elif meter.aggregation_type == AggregationType.LAST:
+                latest = (
+                    db.query(UsageEvent.quantity)
+                    .filter(*filters, UsageEvent.meter_id == meter.id)
+                    .order_by(desc(UsageEvent.timestamp))
+                    .first()
+                )
+                total = Decimal(str(latest[0])) if latest else Decimal("0")
+        out.append(
+            {
+                "meter_id": meter.id,
+                "meter_code": meter.code,
+                "meter_name": meter.name,
+                "unit_name": meter.unit_name,
+                "aggregation_type": meter.aggregation_type,
+                "event_count": count,
+                "total_quantity": total,
+                "last_event_at": row[4] if row else None,
+            }
+        )
+    return out
+
+
 def finalize_usage_for_cycle(
     db: Session,
     ctx: CurrentContext,
@@ -343,10 +450,42 @@ def _finalize_usage(
 
     Meters without a price rate at 0 and are logged/flagged on the invoice line - usage
     used to be rated at the plan's recurring price, which has nothing to do with usage.
+
+    Idempotent: a cycle whose usage is already finalized returns its existing aggregates
+    unchanged - the usage invoice is never rebuilt, so a retry neither deletes a numbered
+    invoice nor consumes a new number. The cycle row is locked so concurrent calls serialize.
     """
+    try:
+        return _finalize_usage_locked(
+            db,
+            organization_id=organization_id,
+            subscription_id=subscription_id,
+            billing_cycle_id=billing_cycle_id,
+            unit_price=unit_price,
+            created_by_id=created_by_id,
+        )
+    except Exception:
+        # Nothing (aggregates, invoice, reserved number) survives a failed finalization.
+        db.rollback()
+        raise
+
+
+def _finalize_usage_locked(
+    db: Session,
+    *,
+    organization_id: str,
+    subscription_id: str,
+    billing_cycle_id: str,
+    unit_price: Optional[Decimal],
+    created_by_id: Optional[str],
+) -> List[UsageAggregate]:
+    from backend.app.models.billing_cycles import BillingCycleStatus
+
     cycle = (
         db.query(BillingCycle)
         .filter(BillingCycle.id == billing_cycle_id, BillingCycle.organization_id == organization_id)
+        .with_for_update()
+        .populate_existing()
         .first()
     )
     if not cycle:
@@ -364,6 +503,25 @@ def _finalize_usage(
     )
     if not sub:
         raise NotFoundAppError(f"Subscription {subscription_id} not found.")
+
+    existing = (
+        db.query(UsageAggregate)
+        .filter(
+            UsageAggregate.organization_id == organization_id,
+            UsageAggregate.subscription_id == subscription_id,
+            UsageAggregate.period_start == cycle.period_start,
+            UsageAggregate.period_end == cycle.period_end,
+        )
+        .order_by(UsageAggregate.created_at, UsageAggregate.id)
+        .all()
+    )
+    if cycle.status == BillingCycleStatus.FINALIZED or any(
+        a.status == UsageAggregateStatus.FINALIZED for a in existing
+    ):
+        # Usage can no longer be recorded into a finalized cycle, so a repeat call has
+        # nothing new to rate: hand back what the first finalization produced.
+        db.commit()  # releases the row lock
+        return existing
 
     meters = list_meters(db, organization_id)
     if not meters:
@@ -444,26 +602,34 @@ def _finalize_usage(
         aggregates.append(aggregate)
 
     # Freeze billing cycle
-    from backend.app.models.billing_cycles import (
-        BillingCycleStatus,
-        SubscriptionItem,
-        SubscriptionItemStatus,
-        SubscriptionItemType,
-    )
     cycle.status = BillingCycleStatus.FINALIZED
     cycle.finalized_at = utcnow()
 
-    prior_invoice_id = next((a.invoice_id for a in aggregates if a.invoice_id), None)
-    invoice = _build_usage_invoice(db, organization_id, sub, cycle, rated, prior_invoice_id, created_by_id)
+    invoice = _build_usage_invoice(db, organization_id, sub, cycle, rated, created_by_id)
     if invoice is not None:
         db.flush()
         for aggregate in aggregates:
             aggregate.invoice_id = invoice.id
-        if not cycle.invoice_id or cycle.invoice_id == prior_invoice_id:
+        if not cycle.invoice_id:
             cycle.invoice_id = invoice.id
 
-    # Link metered usage to SubscriptionItem. SubscriptionItem has no meter reference,
-    # so a single METERED item carries the combined usage and its blended rate.
+    _link_metered_item(db, organization_id, subscription_id, rated)
+
+    db.commit()
+    for aggregate in aggregates:
+        db.refresh(aggregate)
+    return aggregates
+
+
+def _link_metered_item(db: Session, organization_id: str, subscription_id: str, rated: List[Dict[str, Any]]) -> None:
+    """Link metered usage to SubscriptionItem. SubscriptionItem has no meter reference,
+    so a single METERED item carries the combined usage and its blended rate."""
+    from backend.app.models.billing_cycles import (
+        SubscriptionItem,
+        SubscriptionItemStatus,
+        SubscriptionItemType,
+    )
+
     total_qty = sum((e["quantity"] for e in rated), Decimal("0"))
     total_amount = sum((e["amount"] for e in rated), Decimal("0"))
     blended_rate = (total_amount / total_qty).quantize(Decimal("0.01")) if total_qty > 0 else Decimal("0")
@@ -486,11 +652,6 @@ def _finalize_usage(
         )
         db.add(metered_item)
 
-    db.commit()
-    for aggregate in aggregates:
-        db.refresh(aggregate)
-    return aggregates
-
 
 def _build_usage_invoice(
     db: Session,
@@ -498,14 +659,13 @@ def _build_usage_invoice(
     sub: Subscription,
     cycle: BillingCycle,
     rated: List[Dict[str, Any]],
-    prior_invoice_id: Optional[str] = None,
     created_by_id: Optional[str] = None,
 ) -> Optional[Invoice]:
-    """Creates (or rebuilds) the draft usage invoice for a cycle with one line per meter,
-    through the standard invoice builder so it carries the plan product's tax rate.
+    """Creates the draft usage invoice for a cycle with one line per meter, through the
+    standard invoice builder so it carries the plan product's tax rate.
 
-    Only an invoice this function previously raised (reached through the aggregates'
-    invoice_id) is rebuilt; the cycle's recurring subscription invoice is never touched.
+    Called once per cycle (finalization is idempotent): a numbered invoice is never
+    deleted and rebuilt, which used to burn an invoice number on every retry (BUG-43).
     """
     if not rated:
         return None
@@ -513,25 +673,6 @@ def _build_usage_invoice(
     from backend.app.services.invoice_service import create_invoice_record
     from backend.app.services.money import LineInput
     from backend.app.services.subscription_service import plan_tax_rate
-
-    if prior_invoice_id:
-        prior = (
-            db.query(Invoice)
-            .filter(Invoice.id == prior_invoice_id, Invoice.organization_id == organization_id)
-            .first()
-        )
-        if prior is not None and prior.status != InvoiceStatus.DRAFT:
-            # Never mutate an issued document; the aggregates keep pointing at it.
-            return prior
-        if prior is not None:
-            # A draft is rebuilt from scratch (drafts are freely deletable).
-            if cycle.invoice_id == prior.id:
-                cycle.invoice_id = None
-            for agg in db.query(UsageAggregate).filter(UsageAggregate.invoice_id == prior.id).all():
-                agg.invoice_id = None
-            db.flush()
-            db.delete(prior)
-            db.flush()
 
     if sum((e["amount"] for e in rated), Decimal("0")) <= 0:
         # Nothing billable (e.g. only unpriced meters): record the aggregates, no invoice.

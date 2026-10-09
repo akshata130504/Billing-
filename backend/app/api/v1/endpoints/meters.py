@@ -1,13 +1,14 @@
 """Usage meters, event ingestion, and rating API endpoints."""
 from __future__ import annotations
 
-from typing import List
+from datetime import date
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import CurrentContext, get_db, require_admin, require_finance, require_viewer
-from backend.app.schemas.common_refs import money_str
+from backend.app.schemas.common_refs import money_str, paginated_of
 from backend.app.schemas.meters import (
     BillingCycleOut,
     UsageAggregateOut,
@@ -16,9 +17,11 @@ from backend.app.schemas.meters import (
     UsageEventOut,
     UsageMeterCreateIn,
     UsageMeterOut,
+    UsageMeterSummaryOut,
     UsageMeterUpdateIn,
 )
 from backend.app.services import meter_service
+from backend.app.services.pagination import PageParams, page_params, paginate
 
 router = APIRouter()
 
@@ -112,6 +115,59 @@ def list_billing_cycles(
         }
         for c in cycles
     ]
+
+
+@router.get(
+    "/events",
+    response_model=paginated_of(UsageEventOut),
+    summary="List recorded usage events (newest first), filterable by meter, customer, subscription and date",
+)
+def list_events(
+    meter_id: Optional[str] = Query(None, description="Meter id or code"),
+    customer_id: Optional[str] = None,
+    subscription_id: Optional[str] = None,
+    date_from: Optional[date] = Query(None, description="Inclusive, organization-local day"),
+    date_to: Optional[date] = Query(None, description="Inclusive, organization-local day"),
+    params: PageParams = Depends(page_params),
+    ctx: CurrentContext = Depends(require_viewer),
+    db: Session = Depends(get_db),
+):
+    stmt = meter_service.list_usage_events_query(
+        db,
+        ctx.organization_id,
+        meter_id_or_code=meter_id,
+        customer_id=customer_id,
+        subscription_id=subscription_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    return paginate(db, stmt, params).to_response(_serialize_event)
+
+
+@router.get(
+    "/usage-summary",
+    response_model=List[UsageMeterSummaryOut],
+    summary="Per-meter running totals of recorded usage for a period",
+)
+def usage_summary(
+    meter_id: Optional[str] = Query(None, description="Meter id or code"),
+    customer_id: Optional[str] = None,
+    subscription_id: Optional[str] = None,
+    date_from: Optional[date] = Query(None, description="Inclusive, organization-local day"),
+    date_to: Optional[date] = Query(None, description="Inclusive, organization-local day"),
+    ctx: CurrentContext = Depends(require_viewer),
+    db: Session = Depends(get_db),
+):
+    rows = meter_service.usage_summary(
+        db,
+        ctx.organization_id,
+        meter_id_or_code=meter_id,
+        customer_id=customer_id,
+        subscription_id=subscription_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    return [{**r, "total_quantity": str(r["total_quantity"])} for r in rows]
 
 
 @router.get(
