@@ -22,6 +22,8 @@ export const LOGOUT_EVENT = 'rooman:logout';
  * module not in the plan...): the app reloads /auth/me so the lifecycle screens update. */
 export const ACCESS_CHANGED_EVENT = 'rooman:access-changed';
 const ACCESS_CODES = new Set(['ORGANIZATION_TRIAL_EXPIRED', 'FEATURE_NOT_ENTITLED']);
+/** Fired when the API refuses a change because the organization's free trial has ended. */
+export const TRIAL_EXPIRED_EVENT = 'rooman:trial-expired';
 
 // ---------------------------------------------------------------------------
 // Token storage
@@ -276,6 +278,16 @@ apiClient.interceptors.response.use(
     if (status === 403 && ACCESS_CODES.has(error.response?.data?.error?.code ?? '')) {
       try {
         window.dispatchEvent(new CustomEvent(ACCESS_CHANGED_EVENT));
+      } catch {
+        // no window (SSR/test)
+      }
+    }
+
+    if (status === 403 && error.response?.data?.error?.code === 'TRIAL_EXPIRED') {
+      // The trial ended while the page was open: let the app re-read /auth/me so the banner and
+      // read-only state appear without a reload. The caller still gets the API error to display.
+      try {
+        window.dispatchEvent(new CustomEvent(TRIAL_EXPIRED_EVENT));
       } catch {
         // no window (SSR/test)
       }

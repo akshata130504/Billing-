@@ -161,12 +161,25 @@ class OrganizationSummary(BaseModel):
     role: MemberRole
 
 
+class TrialOut(BaseModel):
+    """The organization's own free trial. `state` is derived from the end time, so it flips to
+    `trial_expired` at the exact moment the trial ends. `server_time` lets the browser correct for a
+    wrong local clock."""
+
+    state: str = Field(description="trialing | trial_expired")
+    trial_started_at: UTCDateTime
+    trial_ends_at: UTCDateTime
+    server_time: UTCDateTime
+    seconds_remaining: int
+
+
 class MeResponse(BaseModel):
     user: UserOut
     organization: OrganizationOut
     membership: MembershipOut
     organizations: List[OrganizationSummary] = Field(description="Every organization the user is an active member of")
     access: Optional[OrganizationAccess] = Field(default=None, description="Trial state, modules and seats (API-enforced)")
+    trial: Optional[TrialOut] = Field(default=None, description="Free-trial timing; null for organizations without a trial")
 
 
 class SignupResponse(AuthTokens):

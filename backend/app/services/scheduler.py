@@ -31,6 +31,7 @@ from backend.app.services.org_lifecycle import AutomationGuard, automation_allow
 _scheduler = None
 
 JOB_NAME = "billing_jobs"
+TRIAL_REMINDER_JOB_NAME = "trial_reminders"
 # Arbitrary, stable 64-bit key for pg_try_advisory_lock ("RBILLJOB").
 ADVISORY_LOCK_KEY = 0x52_42_49_4C_4C_4A_4F_42
 
@@ -569,6 +570,25 @@ def _job() -> None:
         db.close()
 
 
+def _trial_reminder_job() -> None:
+    """Send due free-trial reminder emails and the "trial expired" email. Light and frequent (seconds),
+    separate from billing_jobs, because reminders are minutes apart in testing. Expiry itself (the
+    read-only mode) never depends on this job."""
+    from backend.app.core.database import SessionLocal
+    from backend.app.services import platform_trial_service
+
+    db = SessionLocal()
+    try:
+        for step in (platform_trial_service.send_due_trial_reminders, platform_trial_service.send_trial_expiry_emails):
+            try:
+                step(db)
+            except Exception:  # pragma: no cover - defensive; one step never blocks the other
+                logger.exception("Trial email step %s failed", getattr(step, "__name__", "?"))
+                db.rollback()
+    finally:
+        db.close()
+
+
 def start_scheduler():
     """Start the in-process APScheduler (idempotent). Returns the scheduler or None when disabled."""
     global _scheduler
@@ -590,6 +610,17 @@ def start_scheduler():
         coalesce=True,
         replace_existing=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
+    )
+    scheduler.add_job(
+        _trial_reminder_job,
+        trigger="interval",
+        seconds=max(5, int(settings.TRIAL_REMINDER_CHECK_SECONDS)),
+        id=TRIAL_REMINDER_JOB_NAME,
+        name="Free trial reminder emails",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=10),
     )
     scheduler.start()
     _scheduler = scheduler

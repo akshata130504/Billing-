@@ -100,7 +100,7 @@ const TrialExpiredScreen = lazyNamed(() => import('../pages/subscription-access/
  *
  * Also applies the organization lifecycle policy (docs/platform-administration-design.md §8),
  * mirroring backend/app/api/deps.py `_check_org_active`:
- * - pending_approval / rejected / deleted: a status screen only.
+ * - rejected / deleted: a status screen only.
  * - suspended: Owner and Admin keep read-only access under a banner; Finance and Viewer get a screen.
  * - pending_deletion: the Owner keeps read-only access under a banner; everyone else gets a screen.
  * - trial: everything, under a banner counting down to trial_ends_at.
@@ -109,7 +109,7 @@ const TrialExpiredScreen = lazyNamed(() => import('../pages/subscription-access/
  * since the last scheduler run already shows as ended.
  */
 export function ProtectedRoute({ children }: { children?: ReactNode }) {
-  const { isAuthenticated, isLoading, organization, access, logout, refreshMe, hasRole } = useAuth();
+  const { isAuthenticated, isLoading, organization, access, logout, hasRole } = useAuth();
   const location = useLocation();
 
   if (isLoading) {
@@ -142,8 +142,6 @@ export function ProtectedRoute({ children }: { children?: ReactNode }) {
       );
     case 'trial':
       return content; // AppLayout shows the trial banner
-    case 'pending_approval':
-      return <OrgPendingApprovalScreen organization={organization} onRefresh={() => void refreshMe()} onLogout={onLogout} />;
     case 'rejected':
       return <OrgRejectedScreen organization={organization} onLogout={onLogout} />;
     case 'suspended':
@@ -221,44 +219,6 @@ function OrgReadOnlyBanner({ title, message, reason }: { title: string; message:
           <span className="font-semibold">{title}.</span> {message}
           {reason ? <span className="block text-amber-800">Reason: {reason}</span> : null}
         </p>
-      </div>
-    </div>
-  );
-}
-
-function OrgPendingApprovalScreen({
-  organization,
-  onRefresh,
-  onLogout,
-}: {
-  organization: { name: string; slug: string };
-  onRefresh: () => void;
-  onLogout: () => void;
-}) {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm text-center">
-        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-50 text-amber-600 border border-amber-200">
-          <AlertCircle className="h-7 w-7" />
-        </div>
-        <h1 className="text-xl font-bold text-slate-900">Your organization is pending approval from Rooman.</h1>
-        <p className="mt-2 text-sm text-slate-600">
-          Thank you for registering <span className="font-semibold text-slate-800">{organization.name}</span>.
-          Our platform team is reviewing your details. Normal billing and workspace operations will be unlocked as soon as your account is approved.
-        </p>
-        <p className="mt-2 text-sm text-slate-600">
-          You don&apos;t need to keep this page open. We&apos;ll email you once your organization has been approved,
-          and you can then sign in with the password you created.
-        </p>
-        <div className="mt-6 flex flex-col gap-2">
-          <Button variant="primary" onClick={onRefresh}>
-            Check Approval Status
-          </Button>
-          <Button variant="outline" onClick={onLogout}>
-            Sign Out
-          </Button>
-        </div>
-        <OtherOrganizations />
       </div>
     </div>
   );

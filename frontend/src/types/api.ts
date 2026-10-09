@@ -193,12 +193,23 @@ export interface OrganizationAccess {
   seats_used: number;
 }
 
+/** The organization's own free trial (not a customer subscription). Null/absent: no trial. */
+export interface TrialInfo {
+  state: 'trialing' | 'trial_expired';
+  trial_started_at: string;
+  trial_ends_at: string;
+  /** The server's clock when this was produced, so the countdown does not trust the browser's. */
+  server_time: string;
+  seconds_remaining: number;
+}
+
 export interface MeResponse {
   user: MeUser;
   organization: OrganizationOut;
   membership: MeMembership;
   organizations: MeOrganizationSummary[];
   access?: OrganizationAccess | null;
+  trial?: TrialInfo | null;
 }
 
 export type SignupResponse = AuthTokens & { me: MeResponse };

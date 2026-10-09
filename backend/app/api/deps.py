@@ -251,7 +251,7 @@ def _path_allowed(path: str, prefixes) -> bool:
 def _check_org_active(ctx: CurrentContext, method: str, path: str = "", db: Optional[Session] = None) -> None:
     """Organization lifecycle gate for tenant users (docs/platform-administration-design.md §8).
 
-    - pending_approval / rejected: no business endpoints (self-service /auth/* still works).
+    - rejected: no business endpoints (self-service /auth/* still works).
     - suspended: Owner and Admin read-only; Finance and Viewer refused; every write refused.
     - pending_deletion: Owner read-only (data export); everyone else refused.
     - deleted: refused.
@@ -267,6 +267,9 @@ def _check_org_active(ctx: CurrentContext, method: str, path: str = "", db: Opti
         return
     st = org_access.effective_status(org).value
     is_read = method.upper() in _READ_METHODS
+    # Organizations whose access mode is 'trial' (module_access, org_access.py). Signup no longer
+    # creates them (new organizations start the platform_subscriptions trial, `_check_trial` below);
+    # the branch stays for rows that already carry that mode.
     if st == OrganizationStatus.TRIAL_EXPIRED.value:
         if _path_allowed(path, TRIAL_EXPIRED_ALLOWED):
             return
@@ -274,8 +277,7 @@ def _check_org_active(ctx: CurrentContext, method: str, path: str = "", db: Opti
             "Your free trial has ended. Choose your modules and request a subscription to continue.",
             "ORGANIZATION_TRIAL_EXPIRED",
         )
-    if st == OrganizationStatus.PENDING_APPROVAL.value:
-        raise OrganizationNotActiveError("Your organization is pending approval from Rooman.", "ORGANIZATION_PENDING_APPROVAL")
+    # No approval gate: a PENDING_APPROVAL organization is not locked out (signup needs no approval).
     if st == OrganizationStatus.REJECTED.value:
         msg = f"Your organization registration was rejected: {org.status_reason}" if org.status_reason else "Your organization registration was rejected."
         raise OrganizationNotActiveError(msg, "ORGANIZATION_REJECTED")
@@ -306,6 +308,45 @@ def _check_org_active(ctx: CurrentContext, method: str, path: str = "", db: Opti
             )
 
 
+class TrialExpiredError(ForbiddenError):
+    """403 TRIAL_EXPIRED: the organization's free trial has ended, so it is read-only until it
+    chooses a plan. Deliberately not ORGANIZATION_SUSPENDED: commercial state, not a lifecycle one."""
+
+    def __init__(self):
+        super().__init__("Your free trial has ended. Your data is safe - choose a plan to continue making changes.")
+        self.code = "TRIAL_EXPIRED"
+
+
+# POST routes that only calculate, simulate, preview or answer and change no stored data. They stay
+# usable after the trial ends. Matched against the end of the route template.
+_TRIAL_READ_ONLY_POST_ROUTES = (
+    "/pricing/calculate",
+    "/pricing/simulate",
+    "/cpq/simulate",
+    "/ai/queries",
+    "/ai/writing",
+    "/chat/roomi",
+    "/settings/number-series/preview",
+    "/templates/{template_id}/preview",
+    "/notifications/templates/{template_id}/preview",
+)
+
+
+def _check_trial(ctx: CurrentContext, request: Request, db: Session) -> None:
+    """After the free trial ends the organization is read-only: reads (and the read-only POSTs above)
+    pass, anything that changes data is refused with TRIAL_EXPIRED. Expiry is judged from the stored
+    end time on every request, never from a scheduler. Organizations without a trial are unaffected."""
+    if request.method.upper() in _READ_METHODS:
+        return
+    route_path = getattr(request.scope.get("route"), "path", "") or ""
+    if request.method.upper() == "POST" and route_path.endswith(_TRIAL_READ_ONLY_POST_ROUTES):
+        return
+    from backend.app.services import platform_trial_service
+
+    if platform_trial_service.is_trial_expired(db, ctx.organization_id):
+        raise TrialExpiredError()
+
+
 def require_tenant_user(minimum: MemberRole) -> Callable[..., CurrentContext]:
     """Like require_role, but NEVER satisfied by a platform grant (e.g. deciding on grants)."""
 
@@ -315,6 +356,7 @@ def require_tenant_user(minimum: MemberRole) -> Callable[..., CurrentContext]:
         if ctx.grant is not None or ctx.user is None:
             raise ForbiddenError("This action can only be performed by a member of this organization.")
         _check_org_active(ctx, request.method, _api_path(request), db)
+        _check_trial(ctx, request, db)
         if not ctx.has_role(minimum):
             raise ForbiddenError(f"This action requires the {minimum.value} role or higher.")
         from backend.app.core.tenant_context import set_tenant_context
@@ -332,6 +374,7 @@ def require_role(minimum: MemberRole) -> Callable[..., CurrentContext]:
     ) -> CurrentContext:
         if ctx.grant is None:
             _check_org_active(ctx, request.method, _api_path(request), db)
+            _check_trial(ctx, request, db)
         if not ctx.has_role(minimum):
             raise ForbiddenError(f"This action requires the {minimum.value} role or higher.")
         from backend.app.core.tenant_context import set_tenant_context

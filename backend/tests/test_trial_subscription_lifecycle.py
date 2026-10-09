@@ -169,14 +169,18 @@ def _pending(db) -> Organization:
     return org
 
 
-def test_pending_organization_has_no_tenant_access_and_no_trial(client, db):
+def test_pending_organization_is_not_locked_out_and_has_no_trial(client, db):
+    """Signup needs no approval, so there is no approval gate any more: an organization an earlier build
+    left in PENDING_APPROVAL is not refused with ORGANIZATION_PENDING_APPROVAL (a Platform Administrator
+    can still approve or reject it). It has no trial of its own either: nothing starts one until approval."""
     org = _pending(db)
     owner = Member(db, org, MemberRole.OWNER)
+    assert client.get(f"{API}/customers", headers=owner.headers).status_code == 200
     for path in ("/customers", "/subscription-requests", "/reports/dashboard"):
         r = client.get(f"{API}{path}", headers=owner.headers)
-        assert r.status_code == 403 and _code(r) == "ORGANIZATION_PENDING_APPROVAL", (path, r.text)
+        assert (r.json().get("error") or {}).get("code") != "ORGANIZATION_PENDING_APPROVAL", (path, r.text)
     r = _request(client, owner)
-    assert r.status_code == 403 and _code(r) == "ORGANIZATION_PENDING_APPROVAL"
+    assert (r.json().get("error") or {}).get("code") != "ORGANIZATION_PENDING_APPROVAL", r.text
     access = client.get(f"{API}/auth/me", headers=owner.headers).json()["access"]
     assert access["status"] == "pending_approval" and access["trial_ends_at"] is None
 

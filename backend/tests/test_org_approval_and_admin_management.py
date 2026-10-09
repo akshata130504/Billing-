@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import select
 
+from backend.app.core.config import settings
 from backend.app.core.security import create_access_token
 from backend.app.models import (
     Customer,
@@ -54,14 +55,14 @@ def _token(user: User, org: Organization, mem: Membership) -> str:
     return create_access_token(user.id, org.id, mem.role.value)
 
 
-def test_signup_creates_active_trial_org(client, db):
-    """Signup needs no Super Admin approval: the organization is ACTIVE and its trial starts at once."""
+def test_signup_creates_active_org_usable_immediately(client, db):
+    """Signup + OTP creates an ACTIVE organization: no Super Admin approval, no approval emails, and
+    the organization's free trial (platform_subscriptions) starts at once."""
     email = f"owner-{uuid.uuid4().hex[:6]}@example.com"
     org_name = f"Startup {uuid.uuid4().hex[:6]}"
     captured_otp = "123456"
 
-    with patch("backend.app.services.auth_service.send_email", return_value=True), \
-         patch("backend.app.services.auth_service.generate_otp", return_value=captured_otp):
+    with patch("backend.app.services.auth_service.send_email", return_value=True) as send,          patch("backend.app.services.auth_service.generate_otp", return_value=captured_otp):
         r1 = client.post(
             f"{API}/auth/signup/request-verification",
             json={
@@ -80,62 +81,36 @@ def test_signup_creates_active_trial_org(client, db):
         assert r2.status_code == 201, r2.text
         data = r2.json()
         assert data["me"]["organization"]["status"] == "active"
-        assert data["me"]["access"]["status"] == "trial"
-        # Signed in straight into the trial: business endpoints work with the returned token.
-        token = data["access_token"]
-        assert client.get(f"{API}/customers", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+        # The trial is the organization's own one (platform_subscriptions): /auth/me reports it.
+        assert data["me"]["trial"]["state"] == "trialing"
+        # Only the verification-code email goes through auth_service: nothing about pending approval.
+        assert [c.kwargs.get("subject") or c.args[1] for c in send.call_args_list] == ["Verify your Rooman Billing email"]
 
     org = db.scalars(select(Organization).where(Organization.name == org_name)).first()
     assert org is not None
     assert org.status == OrganizationStatus.ACTIVE
-    assert org.module_access == "trial"
-    started = org.trial_started_at if org.trial_started_at.tzinfo else org.trial_started_at.replace(tzinfo=timezone.utc)
-    ends = org.trial_ends_at if org.trial_ends_at.tzinfo else org.trial_ends_at.replace(tzinfo=timezone.utc)
-    assert (ends - started).total_seconds() == 3 * 86400
+    # Signup does not put the organization in the older module_access='trial' mode.
+    assert org.module_access == "unrestricted" and org.trial_ends_at is None
     owner = db.scalars(select(Membership).where(Membership.organization_id == org.id)).one()
     assert owner.role == MemberRole.OWNER and owner.status == MembershipStatus.ACTIVE
-    trial_row = db.scalars(select(PlatformAuditLog).where(
-        PlatformAuditLog.action == platform_audit.ORGANIZATION_TRIAL_STARTED, PlatformAuditLog.organization_id == org.id)).first()
-    assert trial_row is not None and trial_row.details["trial_days"] == 3
 
-    # Check audit log
-    audit_row = db.scalars(
-        select(PlatformAuditLog).where(
-            PlatformAuditLog.action == platform_audit.ORGANIZATION_CREATED,
-            PlatformAuditLog.organization_id == org.id,
-        )
-    ).first()
-    assert audit_row is not None
-    assert audit_row.details["owner_email"] == email
+    # The new owner can use the workspace straight away, with the tokens signup issued ...
+    headers = {"Authorization": f"Bearer {data['access_token']}"}
+    assert client.get(f"{API}/customers", headers=headers).status_code == 200
+    # ... and can sign in normally afterwards.
+    assert client.post(f"{API}/auth/login", json={"email": email, "password": PASSWORD}).status_code == 200
 
+    # Platform audit: the organization was created ACTIVE, its trial started, nothing awaited approval.
+    def audit_rows(action):
+        return db.scalars(
+            select(PlatformAuditLog).where(PlatformAuditLog.action == action, PlatformAuditLog.organization_id == org.id)
+        ).all()
 
-def test_pending_org_blocks_tenant_endpoints_and_allows_auth_me(client, db):
-    """Pending organization blocks normal tenant business operations but allows /auth/me."""
-    org = Organization(
-        name=f"Pending Org {uuid.uuid4().hex[:6]}",
-        slug=f"pending-{uuid.uuid4().hex[:6]}",
-        status=OrganizationStatus.PENDING_APPROVAL,
-    )
-    db.add(org)
-    db.flush()
-    user, membership = _create_tenant_user(db, org, f"owner-{uuid.uuid4().hex[:6]}@test.com", MemberRole.OWNER)
-
-    token = _token(user, org, membership)
-    headers = {"Authorization": f"Bearer {token}"}
-
-    # /auth/me should succeed and return status='pending_approval'
-    r_me = client.get(f"{API}/auth/me", headers=headers)
-    assert r_me.status_code == 200, r_me.text
-    assert r_me.json()["organization"]["status"] == "pending_approval"
-
-    # Business operations (customers, invoices) should return 403 Forbidden
-    r_cust = client.get(f"{API}/customers", headers=headers)
-    assert r_cust.status_code == 403
-    assert "pending approval" in r_cust.text.lower()
-
-    r_inv = client.get(f"{API}/invoices", headers=headers)
-    assert r_inv.status_code == 403
-    assert "pending approval" in r_inv.text.lower()
+    created = audit_rows(platform_audit.ORGANIZATION_CREATED)
+    assert len(created) == 1 and created[0].details["status"] == "active"
+    started = audit_rows(platform_audit.ORGANIZATION_TRIAL_STARTED)
+    assert len(started) == 1 and started[0].details["trial_minutes"] == settings.TRIAL_DURATION_MINUTES
+    assert audit_rows(platform_audit.ORGANIZATION_CREATED_PENDING_APPROVAL) == []
 
 
 def test_super_admin_approves_org(client, db):

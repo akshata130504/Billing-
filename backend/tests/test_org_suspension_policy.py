@@ -3,11 +3,11 @@
 Tenant staff API:
 - suspended: Owner and Admin read-only; Finance and Viewer refused; every write refused.
 - pending deletion: Owner read-only; everyone else refused.
-- pending approval / rejected: business endpoints refused, /auth/me still works.
+- rejected: business endpoints refused, /auth/me still works.
 Customer-facing pages:
 - suspended: public invoice viewable but no new Razorpay orders; quotes cannot be accepted or
   declined; customer portal read-only.
-- pending deletion / deleted / pending approval / rejected: customer portal and public invoice
+- pending deletion / deleted / rejected: customer portal and public invoice
   and quote links refused (invalid link).
 Reactivation restores normal access; other organizations are never affected.
 (Scheduler skipping and webhooks-still-recorded are covered in test_scheduler_org_lifecycle.py.)
@@ -94,7 +94,6 @@ def test_pending_deletion_owner_read_only_everyone_else_refused(client, db, tena
 @pytest.mark.parametrize(
     "status,code",
     [
-        (OrganizationStatus.PENDING_APPROVAL, "ORGANIZATION_PENDING_APPROVAL"),
         (OrganizationStatus.REJECTED, "ORGANIZATION_REJECTED"),
         (OrganizationStatus.DELETED, "ORGANIZATION_DELETED"),
     ],

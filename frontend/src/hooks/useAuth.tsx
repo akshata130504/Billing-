@@ -10,7 +10,7 @@ import {
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { authService } from '../services/authService';
-import { ACCESS_CHANGED_EVENT, LOGOUT_EVENT, tokenStorage } from '../services/apiClient';
+import { ACCESS_CHANGED_EVENT, LOGOUT_EVENT, TRIAL_EXPIRED_EVENT, tokenStorage } from '../services/apiClient';
 import type {
   LoginRequest,
   MeMembership,
@@ -20,6 +20,7 @@ import type {
   MeUser,
   MemberRole,
   OrganizationOut,
+  TrialInfo,
 } from '../types/api';
 
 const ROLE_RANK: Record<MemberRole, number> = {
@@ -46,6 +47,10 @@ export interface AuthContextValue {
   organizations: MeOrganizationSummary[];
   /** Trial state, modules and seats (absent in previews and older test doubles: no restriction). */
   access?: OrganizationAccess | null;
+  /** The organization's own free trial, or null when it has none (absent in previews and older test doubles). */
+  trial?: TrialInfo | null;
+  /** Server clock minus browser clock (ms), measured when /auth/me was last loaded (absent: 0). */
+  serverClockOffsetMs?: number;
   isAuthenticated: boolean;
   /** True while the initial GET /auth/me (or an org switch) is in flight. */
   isLoading: boolean;
@@ -65,6 +70,7 @@ export const AuthContext = createContext<AuthContextValue | undefined>(undefined
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [me, setMe] = useState<MeResponse | null>(null);
+  const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
   const [isLoading, setIsLoading] = useState<boolean>(() => tokenStorage.hasSession());
   const mounted = useRef(true);
 
@@ -76,7 +82,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadMe = useCallback(async (): Promise<MeResponse> => {
     const data = await authService.me();
-    if (mounted.current) setMe(data);
+    if (mounted.current) {
+      const serverMs = data.trial ? Date.parse(data.trial.server_time) : NaN;
+      setServerClockOffsetMs(Number.isNaN(serverMs) ? 0 : serverMs - Date.now());
+      setMe(data);
+    }
     return data;
   }, []);
 
@@ -190,6 +200,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(ACCESS_CHANGED_EVENT, onAccessChanged);
   }, [loadMe]);
 
+  // A write was refused because the trial ended: re-read /auth/me so the whole UI follows.
+  useEffect(() => {
+    const onTrialExpired = () => {
+      if (tokenStorage.hasSession()) void loadMe().catch(() => undefined);
+    };
+    window.addEventListener(TRIAL_EXPIRED_EVENT, onTrialExpired);
+    return () => window.removeEventListener(TRIAL_EXPIRED_EVENT, onTrialExpired);
+  }, [loadMe]);
+
   const hasRole = useCallback(
     (min: MemberRole) => roleAtLeast(me?.membership.role, min),
     [me]
@@ -202,6 +221,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       membership: me?.membership ?? null,
       organizations: me?.organizations ?? [],
       access: me?.access ?? null,
+      trial: me?.trial ?? null,
+      serverClockOffsetMs,
       isAuthenticated: me !== null,
       isLoading,
       login,
@@ -212,7 +233,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       applyTokens,
       hasRole,
     }),
-    [me, isLoading, login, completeMfaLogin, logout, switchOrganization, refreshMe, applyTokens, hasRole]
+    [me, serverClockOffsetMs, isLoading, login, completeMfaLogin, logout, switchOrganization, refreshMe, applyTokens, hasRole]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

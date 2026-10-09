@@ -4,6 +4,7 @@ import type { ApiError } from '../types/api';
 import {
   API_BASE_URL,
   LOGOUT_EVENT,
+  TRIAL_EXPIRED_EVENT,
   absoluteUrl,
   apiClient,
   cleanParams,
@@ -361,6 +362,45 @@ describe('apiClient interceptors', () => {
 
     await apiClient.get('/customers');
     expect(AxiosHeaders.from(seen!.headers).get('Authorization')).toBe('Bearer acc-1');
+  });
+
+  it('announces TRIAL_EXPIRED refusals and still rejects with the API error', async () => {
+    tokenStorage.set({ access_token: 'acc-1', refresh_token: 'ref-1' });
+    const onExpired = vi.fn();
+    window.addEventListener(TRIAL_EXPIRED_EVENT, onExpired);
+    apiClient.defaults.adapter = async (config) =>
+      Promise.reject(
+        new AxiosError('Forbidden', 'ERR_BAD_REQUEST', config, {}, {
+          data: { error: { code: 'TRIAL_EXPIRED', message: 'Your free trial has ended.' } },
+          status: 403,
+          statusText: '',
+          headers: {},
+          config,
+        } as AxiosResponse)
+      );
+
+    await expect(apiClient.post('/customers', {})).rejects.toMatchObject({ status: 403, code: 'TRIAL_EXPIRED' });
+    window.removeEventListener(TRIAL_EXPIRED_EVENT, onExpired);
+    expect(onExpired).toHaveBeenCalledTimes(1);
+    expect(tokenStorage.getAccessToken()).toBe('acc-1'); // still signed in: expiry is not a logout
+  });
+
+  it('does not announce other 403s as a trial expiry', async () => {
+    const onExpired = vi.fn();
+    window.addEventListener(TRIAL_EXPIRED_EVENT, onExpired);
+    apiClient.defaults.adapter = async (config) =>
+      Promise.reject(
+        new AxiosError('Forbidden', 'ERR_BAD_REQUEST', config, {}, {
+          data: { error: { code: 'ORGANIZATION_SUSPENDED', message: 'Suspended' } },
+          status: 403,
+          statusText: '',
+          headers: {},
+          config,
+        } as AxiosResponse)
+      );
+    await expect(apiClient.post('/customers', {})).rejects.toMatchObject({ status: 403 });
+    window.removeEventListener(TRIAL_EXPIRED_EVENT, onExpired);
+    expect(onExpired).not.toHaveBeenCalled();
   });
 
   it('sends no Authorization header when signed out', async () => {

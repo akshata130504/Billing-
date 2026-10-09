@@ -59,6 +59,10 @@
           "label": "Billing & numbering"
         },
         {
+          "key": "subscription",
+          "label": "Subscription"
+        },
+        {
           "key": "integrations",
           "label": "Integrations"
         }

@@ -63,17 +63,17 @@ from backend.app.models import (
     utcnow,
 )
 from backend.app.models.identity import LoginThrottle
-from backend.app.models.subscription_access import ModuleAccess
 from backend.app.schemas.auth import (
     MeResponse,
     MembershipOut,
     OrganizationSummary,
     SignupVerificationRequest,
+    TrialOut,
     UserOut,
 )
 from backend.app.schemas.organization import OrganizationOut, normalize_email
 from backend.app.schemas.subscription_access import OrganizationAccess
-from backend.app.services import audit, org_access
+from backend.app.services import audit, org_access, platform_trial_service
 from backend.app.services.email import EmailDeliveryError, frontend_url, send_email
 
 # Failed credential checks allowed per (email, client IP) - or per account for TOTP codes -
@@ -330,7 +330,9 @@ def build_me(db: Session, ctx: CurrentContext) -> MeResponse:
         .order_by(Membership.created_at, Membership.id)
     ).all()
     m = ctx.membership
+    trial = platform_trial_service.trial_info(db, ctx.organization.id)
     return MeResponse(
+        trial=TrialOut.model_validate(trial) if trial else None,
         user=UserOut.model_validate(ctx.user),
         organization=OrganizationOut.model_validate(ctx.organization),
         membership=MembershipOut(id=m.id, role=m.role, status=m.status, joined_at=m.accepted_at or m.created_at),
@@ -772,16 +774,14 @@ def _create_verified_signup(
     db.delete(pending)
     db.flush()
 
-    # Self-service signup: the organization is ACTIVE at once and its free trial starts now (no
-    # approval). After the trial a subscription request, decided by a Platform Administrator, sets
-    # its modules and seats (subscription_request_service); the platform can suspend it any time.
+    # Self-service signup: the organization is ACTIVE as soon as the OTP is verified (no approval)
+    # and its free trial starts now (platform_trial_service.start_trial, below). The organization's
+    # module_access stays at the column default ('unrestricted'): the trial is not the older
+    # organizations.module_access='trial' mode (org_access.py), which signup no longer creates.
     organization = Organization(
         name=org_name,
         slug=unique_slug(db, org_name),
         status=OrganizationStatus.ACTIVE,
-        module_access=ModuleAccess.TRIAL.value,
-        trial_started_at=now,
-        trial_ends_at=now + timedelta(days=settings.ORGANIZATION_TRIAL_DAYS),
     )
     db.add(organization)
     db.flush()
@@ -837,6 +837,8 @@ def _create_verified_signup(
             "organization_status": organization.status.value,
         },
     )
+    # The organization's free trial starts with the organization, in the same transaction.
+    trial = platform_trial_service.start_trial(db, organization.id, now)
     from backend.app.services import platform_audit
     platform_audit.record(
         db,
@@ -856,22 +858,29 @@ def _create_verified_signup(
             "status": organization.status.value,
         },
     )
-    platform_audit.record(
-        db,
-        action=platform_audit.ORGANIZATION_TRIAL_STARTED,
-        result=platform_audit.SUCCESS,
-        ip_address=ip,
-        user_agent=user_agent,
-        organization=organization,
-        target_type="organization",
-        target_id=organization.id,
-        details={
-            "trial_started_at": organization.trial_started_at.isoformat(),
-            "trial_ends_at": organization.trial_ends_at.isoformat(),
-            "trial_days": settings.ORGANIZATION_TRIAL_DAYS,
-        },
-    )
+    if trial is not None:  # trials switched off (TRIAL_DURATION_MINUTES=0): nothing started
+        platform_audit.record(
+            db,
+            action=platform_audit.ORGANIZATION_TRIAL_STARTED,
+            result=platform_audit.SUCCESS,
+            ip_address=ip,
+            user_agent=user_agent,
+            organization=organization,
+            target_type="organization",
+            target_id=organization.id,
+            details={
+                "trial_started_at": trial.trial_started_at.isoformat(),
+                "trial_ends_at": trial.trial_ends_at.isoformat(),
+                "trial_minutes": int((trial.trial_ends_at - trial.trial_started_at).total_seconds() // 60),
+            },
+        )
+    organization_id, organization_name, owner_email, owner_name = organization.id, organization.name, user.email, user.full_name
     _commit(db, "An account with this email or organization already exists.")
+    # Best-effort and strictly after the commit: the signup stands whatever happens to the email.
+    try:
+        platform_trial_service.send_welcome_email(owner_email, owner_name, organization_name)
+    except Exception as exc:  # noqa: BLE001 - never fail a committed signup over a notification
+        logger.error("Trial welcome email to %s for organization %s failed: %s", owner_email, organization_id, exc)
     return tokens, ctx
 
 

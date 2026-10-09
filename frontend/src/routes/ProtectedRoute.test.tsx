@@ -14,7 +14,6 @@ let auth: {
   organizations: { id: string; name: string; slug: string; role: string }[];
 };
 const switchOrganization = vi.fn();
-const refreshMe = vi.fn();
 
 vi.mock('../hooks/useAuth', () => ({
   useAuth: () => ({
@@ -24,7 +23,7 @@ vi.mock('../hooks/useAuth', () => ({
     organizations: auth.organizations,
     access: auth.accessStatus ? { status: auth.accessStatus, trial_ends_at: null, nav_items: [] } : null,
     logout: vi.fn(),
-    refreshMe,
+    refreshMe: vi.fn(),
     switchOrganization,
     hasRole: (min: Role) => RANK[auth.role] >= RANK[min],
   }),
@@ -53,7 +52,6 @@ describe('ProtectedRoute organization lifecycle', () => {
   beforeEach(() => {
     auth = { role: 'owner', status: 'active', organizations: [] };
     switchOrganization.mockReset();
-    refreshMe.mockReset();
   });
 
   it('renders the workspace for an active organization', () => {
@@ -77,25 +75,11 @@ describe('ProtectedRoute organization lifecycle', () => {
     expect(screen.queryByText('Workspace content')).not.toBeInTheDocument();
   });
 
-  it('shows the pending approval screen instead of the workspace', () => {
+  it('no longer shows an approval screen: a pending organization gets the workspace', () => {
     auth.status = 'pending_approval';
     renderGuard();
-    expect(screen.getByText(/pending approval from Rooman/i)).toBeInTheDocument();
-    expect(screen.queryByText('Workspace content')).not.toBeInTheDocument();
-  });
-
-  it('tells a pending organization it can close the page and will be emailed', () => {
-    auth.status = 'pending_approval';
-    renderGuard();
-    expect(screen.getByText(/don't need to keep this page open/i)).toBeInTheDocument();
-    expect(screen.getByText(/email you once your organization has been approved/i)).toBeInTheDocument();
-  });
-
-  it('keeps Check Approval Status as a manual refresh fallback', () => {
-    auth.status = 'pending_approval';
-    renderGuard();
-    screen.getByRole('button', { name: 'Check Approval Status' }).click();
-    expect(refreshMe).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Workspace content')).toBeInTheDocument();
+    expect(screen.queryByText(/pending approval/i)).not.toBeInTheDocument();
   });
 
   it('shows the rejection reason', () => {

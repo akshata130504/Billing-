@@ -7,6 +7,7 @@ import {
   Building2,
   Users,
   Receipt,
+  CreditCard,
   Boxes,
   ShieldCheck,
   ShieldAlert,
@@ -31,6 +32,7 @@ import { NotificationsTab } from './NotificationsTab';
 import { HelpTab } from './HelpTab';
 import { PlatformAccessTab } from './PlatformAccessTab';
 import { usePageSpec } from '../../appUi/usePageSpec';
+import { SubscriptionTab } from './SubscriptionTab';
 
 export type SettingsTab =
   | 'profile'
@@ -40,6 +42,7 @@ export type SettingsTab =
   | 'users'
   | 'team'
   | 'billing'
+  | 'subscription'
   | 'integrations'
   | 'security'
   | 'platform-access'
@@ -53,6 +56,7 @@ const NAV_ICONS: Record<string, typeof User> = {
   users: Users,
   team: Users,
   billing: Receipt,
+  subscription: CreditCard,
   integrations: Boxes,
   security: ShieldCheck,
   'platform-access': ShieldAlert,
@@ -68,6 +72,7 @@ const ALL_TABS: SettingsTab[] = [
   'users',
   'team',
   'billing',
+  'subscription',
   'integrations',
   'security',
   'platform-access',
@@ -237,6 +242,7 @@ export function SettingsPage() {
           {activeTab === 'organization' && renderOrgTab((org) => <OrganizationTab organization={org} canEdit={canEdit} />)}
           {(activeTab === 'users' || activeTab === 'team') && <TeamTab canEdit={canEdit} />}
           {activeTab === 'billing' && renderOrgTab((org) => <BillingTab organization={org} canEdit={canEdit} />)}
+          {activeTab === 'subscription' && <SubscriptionTab />}
           {activeTab === 'integrations' && <IntegrationsTab />}
           {activeTab === 'security' && <SecurityTab />}
           {activeTab === 'platform-access' && (canEdit ? <PlatformAccessTab /> : (

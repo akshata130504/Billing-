@@ -403,6 +403,24 @@ class Settings(BaseSettings):
     DUNNING_REMINDER_INTERVAL_DAYS: int = 3
     DUNNING_MAX_REMINDERS: int = 3
 
+    # --- Organization free trial (platform-level; NOT the tenant's customer trials) ---------
+    # A new organization starts a trial when its signup completes. The duration and the reminder
+    # offsets are minutes so they can be tiny while developing; the production value will be
+    # a number of days (e.g. 14 days = 20160). 0 disables the trial entirely.
+    # TEST DEFAULTS: 15-minute trial, reminders with 10, 5 and 2 minutes remaining.
+    TRIAL_DURATION_MINUTES: int = 15
+    # Comma-separated "minutes remaining" at which a reminder email is sent (each at most once).
+    TRIAL_REMINDER_OFFSETS_MINUTES: str = "10,5,2"
+    # A reminder is only sent while it is still timely: if the scheduler wakes up later than this
+    # after the offset was reached, that reminder is skipped instead of sent stale.
+    TRIAL_REMINDER_TOLERANCE_SECONDS: int = 90
+    # How often the trial reminder job looks for due reminders.
+    TRIAL_REMINDER_CHECK_SECONDS: int = 30
+    # The "your trial has expired" email is sent once, and retried while delivery keeps failing, but
+    # only for trials that ended within this many minutes (so a first run after an outage or a
+    # deploy never mails organizations whose trial ended long ago).
+    TRIAL_EXPIRY_EMAIL_WINDOW_MINUTES: int = 1440
+
     # --- AI / Roomi Assistant -----------------------------------------------------------
     # Optional external LLM integration (Google Gemini). When omitted, Roomi operates
     # purely in deterministic in-house knowledge mode.

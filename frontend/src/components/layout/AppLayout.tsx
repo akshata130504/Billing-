@@ -8,7 +8,8 @@ import { RoomiChatbot } from '../chat/RoomiChatbot';
 import { ErrorBoundary } from '../common/ErrorBoundary';
 import { PageLoader } from '../common/PageLoader';
 import { PlatformAccessBanner } from './PlatformAccessBanner';
-import { EntitlementGuard, TrialBanner } from './Entitlements';
+import { EntitlementGuard, TrialBanner as AccessTrialBanner } from './Entitlements';
+import { TrialBanner } from './TrialBanner';
 import { UiConfigProvider } from '../../appUi/UiConfigContext';
 
 export function AppLayout() {
@@ -56,7 +57,10 @@ export function AppLayout() {
             onOpenSearch={() => setSearchOpen(true)}
           />
           <PlatformAccessBanner />
+          {/* Two independent banners, each renders only for its own trial state: ours reads /auth/me `trial`
+              (the organization's free trial), the other reads `access` (organizations in the trial access mode). */}
           <TrialBanner />
+          <AccessTrialBanner />
 
           {/* Scrollable Page Body */}
           <main
