@@ -113,8 +113,11 @@ export interface CustomerPortalInvitationOut {
   expires_at: string;
   created_at: string;
   invited_by_name?: string | null;
+  /** Only on the invite response, only when the email was not delivered, and only for admin+. */
   invite_url?: string | null;
   status: 'pending' | 'accepted' | 'revoked' | 'expired';
+  /** Set on the invite response; false means the activation email was not delivered. */
+  email_delivered?: boolean | null;
 }
 
 export interface CustomerPortalAccessStatusOut {
