@@ -17,6 +17,8 @@ export interface ExpensesSummary {
   billable: number;
   nonBillable: number;
   pending: number;
+  /** Expenses (not cancelled) dated in the current local calendar month. */
+  thisMonth: number;
 }
 
 export interface RecurringSummary {
@@ -95,6 +97,9 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
     let billable = 0;
     let nonBillable = 0;
     let pending = 0;
+    let thisMonth = 0;
+    // Expense dates are plain YYYY-MM-DD calendar dates: compare against the local month.
+    const monthPrefix = todayIso().slice(0, 7);
 
     for (const exp of expenses) {
       total += exp.amount;
@@ -107,9 +112,13 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
       if (exp.billable && exp.status !== 'invoiced' && exp.status !== 'cancelled') {
         pending += exp.amount;
       }
+
+      if (exp.status !== 'cancelled' && (exp.date || '').slice(0, 7) === monthPrefix) {
+        thisMonth += exp.amount;
+      }
     }
 
-    return { total, billable, nonBillable, pending };
+    return { total, billable, nonBillable, pending, thisMonth };
   }, [expenses]);
 
   // Compute recurring summary metrics
@@ -145,8 +154,8 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
 
     return {
       activeProfiles,
-      monthlyRecurring: Math.round(monthlyRecurring),
-      billableRecurring: Math.round(billableRecurring),
+      monthlyRecurring: Math.round(monthlyRecurring * 100) / 100,
+      billableRecurring: Math.round(billableRecurring * 100) / 100,
       nextRun,
     };
   }, [recurringExpenses]);
