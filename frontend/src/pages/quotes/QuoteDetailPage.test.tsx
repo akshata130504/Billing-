@@ -207,3 +207,42 @@ describe('<QuoteDetailPage /> internal workflow', () => {
     if (reason) expect(screen.getByText(`Reason: ${reason}`)).toBeInTheDocument();
   });
 });
+
+describe('<QuoteDetailPage /> pricing explanation (BUG-05)', () => {
+  const explanation = JSON.stringify({
+    catalog_base_price: '1200.00',
+    price_book_adjustment: '-200.00',
+    effective_unit_price: '1000.00',
+    tier_explanation: 'Volume tier 1-10',
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    role = 'admin';
+  });
+
+  it('renders the stored JSON as readable pricing details, never the raw string', async () => {
+    getQuote().mockResolvedValue(
+      makeQuote({
+        items: [{ id: 'li-1', description: 'Analytics Seat', quantity: '1', unit_price: '1000.00', tax_rate_pct: '18', amount: '1000.00', position: 0, pricing_explanation: explanation }],
+      } as Partial<Quote>)
+    );
+    const { container } = renderPage();
+    expect(await screen.findByText('Pricing details')).toBeInTheDocument();
+    expect(screen.getByText('Catalog base price')).toBeInTheDocument();
+    expect(screen.getByText('Volume tier 1-10')).toBeInTheDocument();
+    expect(container.textContent).not.toContain(explanation);
+    expect(container.textContent).not.toContain('catalog_base_price');
+    expect(container.textContent).not.toContain('{"');
+  });
+
+  it('keeps a plain-text explanation as text', async () => {
+    getQuote().mockResolvedValue(
+      makeQuote({
+        items: [{ id: 'li-1', description: 'Seat', quantity: '1', unit_price: '10.00', tax_rate_pct: '18', amount: '10.00', position: 0, pricing_explanation: 'Base Catalog Price' }],
+      } as Partial<Quote>)
+    );
+    renderPage();
+    expect(await screen.findByText('Base Catalog Price')).toBeInTheDocument();
+  });
+});

@@ -8,7 +8,6 @@ import {
   Ban,
   Printer,
   AlertCircle,
-  HelpCircle,
   Clock,
   Copy,
   Check,
@@ -23,6 +22,7 @@ import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
 import { Modal } from '../../components/common/Modal';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
+import { PricingExplanation } from '../../components/common/PricingExplanation';
 import { loadPreferences } from '../settings/PreferencesTab';
 import { validateDateNotFuture } from '../../utils/validation';
 import { useToast } from '../../components/common/Toast';
@@ -456,12 +456,7 @@ export const InvoiceDetailPage = () => {
                           {item.description && item.name && item.description !== item.name && (
                             <div className="text-xs text-gray-500 mt-0.5">{item.description}</div>
                           )}
-                          {item.pricing_explanation && (
-                            <div className="mt-1 flex items-center gap-1 text-xs text-indigo-600 bg-indigo-50/70 px-2 py-0.5 rounded w-fit">
-                              <HelpCircle className="w-3.5 h-3.5" />
-                              <span>{item.pricing_explanation}</span>
-                            </div>
-                          )}
+                          <PricingExplanation value={item.pricing_explanation} />
                         </td>
                         <td className="px-4 py-3 text-right text-gray-700">{item.quantity}</td>
                         <td className="px-4 py-3 text-right text-gray-700">
