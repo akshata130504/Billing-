@@ -29,8 +29,12 @@ import { todayIso, addDays, calculateValidityDays, formatQuoteTerms, updateTerms
 
 const VALIDITY_PRESETS = [7, 15, 30, 60, 90] as const;
 
-interface FormLineItem extends QuoteItemIn {
+interface FormLineItem extends Omit<QuoteItemIn, 'unit_price'> {
   id?: string;
+  /** '' while a new custom line has no price yet. */
+  unit_price: number | '';
+  /** The user typed this line's price: re-pricing on a quantity change must not overwrite it. */
+  price_overridden?: boolean;
   name?: string;
   sku?: string;
   pricing_model?: string;
@@ -184,6 +188,8 @@ export function QuoteFormPage() {
               unit_price: Number(it.unit_price || 0),
               tax_rate_pct: Number(it.tax_rate_pct || 18),
               pricing_explanation: it.pricing_explanation,
+              // An offering line saved without the engine's explanation carries a typed price.
+              price_overridden: Boolean(it.offering_id) && !it.pricing_explanation,
             }))
           );
 
@@ -246,6 +252,23 @@ export function QuoteFormPage() {
 
   // Recalculate line pricing when offering or quantity changes
   const handleSelectOffering = async (index: number, offeringId: string) => {
+    if (!offeringId) {
+      // Back to "Custom Item": drop the offering link (and its pricing), keep what the user typed.
+      const updated = [...items];
+      updated[index] = {
+        ...updated[index],
+        id: undefined,
+        offering_id: undefined,
+        name: undefined,
+        sku: undefined,
+        pricing_model: undefined,
+        pricing_explanation: undefined,
+        price_overridden: undefined,
+        is_custom: true,
+      };
+      setItems(updated);
+      return;
+    }
     const off = offerings.find((o) => o.id === offeringId);
     if (!off) return;
 
@@ -270,6 +293,8 @@ export function QuoteFormPage() {
         tax_rate_pct: Number(off.tax_rate_pct || 18),
         pricing_model: off.pricing_model,
         pricing_explanation: JSON.stringify(sim.explanation),
+        price_overridden: undefined,
+        is_custom: undefined,
       };
       setItems(updated);
     } catch (err) {
@@ -291,6 +316,8 @@ export function QuoteFormPage() {
         unit_price: Number(off.base_price || 0),
         tax_rate_pct: Number(off.tax_rate_pct || 18),
         pricing_model: off.pricing_model,
+        price_overridden: undefined,
+        is_custom: undefined,
       };
       setItems(updated);
     }
@@ -301,8 +328,8 @@ export function QuoteFormPage() {
     const newQty = Math.max(1, qty);
 
     // A retained archived line keeps its stored price: archived offerings cannot be priced, and
-    // only its quantity is editable.
-    if (item.offering_id && !archivedIds.has(item.offering_id)) {
+    // only its quantity is editable. A price the user typed is kept too.
+    if (item.offering_id && !archivedIds.has(item.offering_id) && !item.price_overridden) {
       try {
         const sim = await planPricingService.simulatePricing({
           offering_id: item.offering_id,
@@ -329,34 +356,18 @@ export function QuoteFormPage() {
     setItems(updated);
   };
 
+  // A new line is a blank "Custom Item": it never inherits another line's offering or price.
   const handleAddItem = () => {
-    if (offerings.length > 0) {
-      const firstOff = offerings[0];
-      setItems([
-        ...items,
-        {
-          offering_id: firstOff.id,
-          name: firstOff.name,
-          sku: firstOff.sku,
-          description: `${firstOff.name} (${firstOff.sku})`,
-          quantity: 1,
-          unit_price: Number(firstOff.base_price || 0),
-          tax_rate_pct: Number(firstOff.tax_rate_pct || 18),
-          pricing_model: firstOff.pricing_model,
-        },
-      ]);
-    } else {
-      setItems([
-        ...items,
-        {
-          description: 'Consulting & Engineering Services',
-          quantity: 1,
-          unit_price: 5000,
-          tax_rate_pct: 18,
-          is_custom: true,
-        },
-      ]);
-    }
+    setItems([
+      ...items,
+      {
+        description: '',
+        quantity: 1,
+        unit_price: '',
+        tax_rate_pct: 18,
+        is_custom: true,
+      },
+    ]);
   };
 
   const handleDuplicateItem = (index: number) => {
@@ -440,7 +451,7 @@ export function QuoteFormPage() {
         setError(qtyError);
         return;
       }
-      const priceError = validateNonNegativeMoney(it.unit_price, `${label} unit price`);
+      const priceError = validateNonNegativeMoney(it.unit_price, `${label} unit price`, { required: true });
       if (priceError) {
         setError(priceError);
         return;
@@ -757,7 +768,13 @@ export function QuoteFormPage() {
                         value={item.unit_price}
                         onChange={(e) => {
                           const updated = [...items];
-                          updated[idx] = { ...item, unit_price: Number(e.target.value) };
+                          updated[idx] = {
+                            ...item,
+                            unit_price: e.target.value === '' ? '' : Number(e.target.value),
+                            price_overridden: true,
+                            // A typed price is no longer the engine's: its explanation would be wrong.
+                            pricing_explanation: undefined,
+                          };
                           setItems(updated);
                         }}
                         className="w-full px-2 py-1.5 text-xs font-semibold rounded border border-slate-200 text-right font-mono"

@@ -179,6 +179,42 @@ describe('<InvoiceFormPage /> line item quantity editing', () => {
     expect(qtyInput().value).toBe('4');
     expect(rateInput().value).toBe('50');
   });
+
+  it('keeps a typed rate when the quantity of a tiered line changes (BUG-13)', async () => {
+    mockedPricing.getPlans.mockResolvedValue({ items: [plan('p4', 'tiered', 100)], total: 1 } as any);
+    mockedPricing.calculatePrice.mockResolvedValue(priceResponse(100));
+    renderPage();
+    await selectPlan('p4');
+    await waitFor(() => expect(rateInput().value).toBe('100'));
+
+    await act(async () => {
+      fireEvent.change(rateInput(), { target: { value: '75.5' } });
+    });
+    mockedPricing.calculatePrice.mockResolvedValue(priceResponse(80));
+    await act(async () => {
+      fireEvent.change(qtyInput(), { target: { value: '10' } });
+    });
+
+    expect(qtyInput().value).toBe('10');
+    expect(rateInput().value).toBe('75.5');
+    expect(mockedPricing.calculatePrice).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts an added line as a blank custom item', async () => {
+    mockedPricing.getPlans.mockResolvedValue({ items: [plan('p5', 'flat', 100)], total: 1 } as any);
+    mockedPricing.calculatePrice.mockResolvedValue(priceResponse(100, 'flat'));
+    renderPage();
+    await selectPlan('p5');
+    await waitFor(() => expect(rateInput().value).toBe('100'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Add (Another )?(Line|Item|Row)/i }));
+    });
+    const selects = screen
+      .getAllByRole('combobox')
+      .filter((el) => el.tagName === 'SELECT' && (el as HTMLSelectElement).options[0]?.text.startsWith('-- Choose')) as HTMLSelectElement[];
+    expect(selects).toHaveLength(2);
+    expect(selects[1].value).toBe('');
+  });
 });
 
 describe('<InvoiceFormPage /> line item selection switching', () => {
