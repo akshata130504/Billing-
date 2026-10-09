@@ -11,6 +11,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { ErrorState } from '../../components/common/ErrorState';
 import { Plus, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { usePageSpec } from '../../appUi/usePageSpec';
+import { useCreateDeepLink } from '../../hooks/useCreateDeepLink';
 
 export function PaymentsPage() {
   const ui = usePageSpec('payments');
@@ -31,6 +32,8 @@ export function PaymentsPage() {
   const canRecord = hasRole('finance');
 
   const [isRecordOpen, setIsRecordOpen] = useState(false);
+  // Quick-action deep link (`/payments?new=1`): open the record-payment form.
+  useCreateDeepLink(() => setIsRecordOpen(true), canRecord);
   const [refundTarget, setRefundTarget] = useState<Payment | null>(null);
   const [receiptTarget, setReceiptTarget] = useState<Payment | null>(null);
 

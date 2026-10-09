@@ -8,7 +8,8 @@ import {
   visible,
 } from '../../appUi/registry';
 import { usePageUi, useUiEditable } from '../../appUi/UiConfigContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { isCreateRequested } from '../../hooks/useCreateDeepLink';
 import {
   FileText,
   Plus,
@@ -34,6 +35,13 @@ export const InvoicesListPage: React.FC = () => {
   const { hasRole } = useAuth();
   const canCreate = hasRole('finance');
   const navigate = useNavigate();
+
+  // Quick-action deep link (`/invoices?action=new`): open the create form.
+  const [searchParams] = useSearchParams();
+  const createRequested = isCreateRequested(searchParams);
+  useEffect(() => {
+    if (createRequested && canCreate) navigate('/invoices/new', { replace: true });
+  }, [createRequested, canCreate, navigate]);
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
