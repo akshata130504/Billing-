@@ -385,8 +385,9 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* Core Financial KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Core Financial KPI Cards. Three across only from xl: at 1024 px the content area (next to
+          the sidebar) is too narrow for three multi-currency values. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         {visibleKpis.map((metric) => (
           <div
             key={metric.key}
@@ -399,7 +400,8 @@ export function DashboardPage() {
                 <span className="text-xs font-medium text-[#7B829A] block truncate">
                   {metric.title}
                 </span>
-                <span className="text-xl sm:text-2xl font-bold text-[#11194F] tracking-tight tabular-nums block mt-0.5 truncate">
+                {/* Wraps instead of truncating: an Outstanding value may list several currencies. */}
+                <span className="text-xl sm:text-2xl font-bold text-[#11194F] tracking-tight tabular-nums block mt-0.5 break-words">
                   {metric.value}
                 </span>
               </div>
@@ -418,14 +420,16 @@ export function DashboardPage() {
       </div>
 
       {/* Main Dashboard Layout (Left Column: Charts & Tables | Right Column: Payment Status, Quick Actions, Promo & Operations) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      {/* Two columns only from xl: at 1024 px a 4/12 side column is ~230 px and clipped the
+          Payment Status legend and Quick Actions labels, so the columns stack until then. */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
         {/* Left Column (8 cols): Revenue Overview dual-bar chart + Recent Invoices table */}
-        <div className="lg:col-span-8 space-y-6">
+        <div className="xl:col-span-8 space-y-6 min-w-0">
           {renderColumn(resolveList(OVERVIEW_MAIN_WIDGET_DEFS, ui.main_widgets))}
         </div>
 
         {/* Right Column (4 cols): Payment Status, Quick Actions, Promo, Action Center, Activity */}
-        <div className="lg:col-span-4 space-y-6">
+        <div className="xl:col-span-4 space-y-6 min-w-0">
           {renderColumn(resolveList(OVERVIEW_SIDE_WIDGET_DEFS, ui.side_widgets))}
         </div>
       </div>

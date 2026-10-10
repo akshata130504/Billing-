@@ -133,13 +133,13 @@ export function PaymentStatusWidget({ pipeline, title = 'Payment Status' }: Paym
           {statuses.map((s) => (
             <div
               key={s.label}
-              className="flex items-center justify-between text-xs"
+              className="flex items-center justify-between gap-2 text-xs"
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 min-w-0">
                 <span className={`w-2 h-2 rounded-full shrink-0 ${s.dotColor}`} />
                 <span className="text-[#59617D] font-medium text-xs">{s.label}</span>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 shrink-0">
                 <span className="font-bold text-[#11194F] tabular-nums text-xs">
                   {s.count}
                 </span>
