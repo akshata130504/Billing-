@@ -71,6 +71,8 @@ GRANT_READ_ROUTES: Dict[str, GrantScope] = {
     "/trials/{subscription_id}": GrantScope.READ_SUBSCRIPTIONS,
     "/meters": GrantScope.READ_SUBSCRIPTIONS,
     "/meters/{meter_id}": GrantScope.READ_SUBSCRIPTIONS,
+    "/meters/events": GrantScope.READ_SUBSCRIPTIONS,
+    "/meters/usage-summary": GrantScope.READ_SUBSCRIPTIONS,
     # READ_AUDIT: the tenant's own audit log (never its export).
     "/audit-logs": GrantScope.READ_AUDIT,
     # READ_CONFIG: templates, automation rules, number series, dunning policies (never credentials).

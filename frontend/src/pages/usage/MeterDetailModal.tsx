@@ -1,11 +1,21 @@
-import type { ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Activity, PlusCircle } from 'lucide-react';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
-import type { RecordedUsageEvent, UsageAggregateOut, UsageMeterOut } from '../../types/meters';
+import { meterService } from '../../services/meterService';
+import type {
+  RecordedUsageEvent,
+  UsageAggregateOut,
+  UsageEventOut,
+  UsageMeterOut,
+  UsageMeterSummaryOut,
+} from '../../types/meters';
 import { formatDate, formatDateTime, formatMoney, humanize } from '../../utils/format';
-import { AGGREGATION_LABELS, formatQuantity, normaliseApiTimestamp } from './usageUtils';
+import { AGGREGATION_LABELS, formatQuantity, historyRow, normaliseApiTimestamp } from './usageUtils';
+
+/** How many of the meter's most recent stored events the panel lists. */
+const METER_HISTORY_PAGE_SIZE = 20;
 
 interface MeterDetailModalProps {
   meter: UsageMeterOut | null;
@@ -13,6 +23,8 @@ interface MeterDetailModalProps {
   onClose: () => void;
   /** Events recorded from this page during the current session, already filtered to this meter. */
   sessionEvents: RecordedUsageEvent[];
+  /** Changes whenever usage was recorded, so an open panel reloads the meter's history. */
+  refreshKey?: number;
   /** Aggregates finalised from this page during the current session, already filtered to this meter. */
   sessionAggregates: UsageAggregateOut[];
   canRecord: boolean;
@@ -36,10 +48,41 @@ export function MeterDetailModal({
   sessionAggregates,
   canRecord,
   onRecordUsage,
+  refreshKey,
 }: MeterDetailModalProps) {
+  const meterId = meter?.id;
+  const [history, setHistory] = useState<UsageEventOut[]>([]);
+  const [totals, setTotals] = useState<UsageMeterSummaryOut | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || !meterId) return;
+    let live = true;
+    setHistoryError(null);
+    Promise.all([
+      meterService.listEvents({ meter_id: meterId, page_size: METER_HISTORY_PAGE_SIZE }),
+      meterService.usageSummary({ meter_id: meterId }),
+    ])
+      .then(([page, summary]) => {
+        if (!live) return;
+        setHistory(page.items);
+        setTotals(summary[0] ?? null);
+      })
+      .catch((err: any) => {
+        if (live) setHistoryError(err?.message || 'Could not load usage history');
+      });
+    return () => {
+      live = false;
+    };
+  }, [isOpen, meterId, refreshKey]);
+
+  const rows = useMemo(() => {
+    const shown = new Set(sessionEvents.map((r) => r.event.id));
+    return [...sessionEvents, ...history.filter((ev) => !shown.has(ev.id)).map((ev) => historyRow(ev, meter ?? undefined))];
+  }, [sessionEvents, history, meter]);
+
   if (!meter) return null;
   const agg = AGGREGATION_LABELS[meter.aggregation_type];
-  const sessionTotal = sessionEvents.reduce((sum, r) => sum + (Number(r.event.quantity) || 0), 0);
 
   return (
     <Modal
@@ -145,15 +188,16 @@ export function MeterDetailModal({
           <div className="flex items-center justify-between mb-2">
             <h4 className="text-sm font-semibold text-slate-900">Usage events</h4>
             <span className="text-xs text-slate-400">
-              {sessionEvents.length ? `${sessionEvents.length} recorded this session · ${formatQuantity(sessionTotal)} ${meter.unit_name}` : 'Recorded in this session'}
+              {totals && totals.event_count > 0
+                ? `${totals.event_count} recorded · ${formatQuantity(totals.total_quantity)} ${meter.unit_name} (${agg.label.toLowerCase()})`
+                : 'All recorded events'}
             </span>
           </div>
-          {sessionEvents.length === 0 ? (
+          {rows.length === 0 ? (
             <div className="flex items-start gap-3 rounded-lg border border-dashed border-slate-300 px-4 py-3">
               <Activity className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
               <p className="text-xs text-slate-500 leading-relaxed">
-                No events recorded for this meter in your current session. Historical events are stored server-side but the
-                API has no listing endpoint yet, so only events you post from this page are shown.
+                {historyError ?? 'No usage has been recorded for this meter yet.'}
               </p>
             </div>
           ) : (
@@ -169,7 +213,7 @@ export function MeterDetailModal({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {sessionEvents.map((r) => (
+                  {rows.map((r) => (
                     <tr key={r.event.id}>
                       <td className="px-4 py-2.5 whitespace-nowrap">{formatDateTime(normaliseApiTimestamp(r.event.timestamp))}</td>
                       <td className="px-4 py-2.5">{r.customer_label}</td>

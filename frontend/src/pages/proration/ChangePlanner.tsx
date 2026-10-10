@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Lock, TrendingUp, TrendingDown, Sliders, Eye, RotateCcw } from 'lucide-react';
-import type { PlanOut, SubscriptionOut } from '../../types/api';
+import type { SubscribablePlanOption, SubscriptionOut } from '../../types/api';
 import type {
   ProrationEffectiveType,
   SubscriptionChangeOut,
@@ -16,13 +16,14 @@ import { useToast } from '../../components/common/Toast';
 import { cn } from '../../utils/cn';
 import { formatMoney, formatDate, todayIso } from '../../utils/format';
 import { ProrationPreviewCard } from './ProrationPreviewCard';
-import { changeTypeLabel, formatQuantity, intervalLabel, monthlyEquivalent } from './prorationLabels';
+import { changeTypeLabel, formatQuantity, intervalLabel } from './prorationLabels';
 
 export type ChangeWorkflowType = 'upgrade' | 'downgrade' | 'resize';
 
 interface ChangePlannerProps {
   subscription: SubscriptionOut;
-  plans: PlanOut[];
+  /** GET /subscriptions/plan-options: legacy plans and Plans & Pricing / Catalog plan offerings. */
+  planOptions: SubscribablePlanOption[];
   plansLoading: boolean;
   canApply: boolean;
   onApplied: (change: SubscriptionChangeOut) => void;
@@ -39,9 +40,50 @@ const EFFECTIVE_HELP: Record<string, string> = {
   end_of_term: 'Recorded as a scheduled change and applied on the period end date. No proration is billed today.',
 };
 
+/** Select value for a plan option; legacy plan and offering ids live in different tables. */
+const optionKey = (o: Pick<SubscribablePlanOption, 'source' | 'id'>) => `${o.source}:${o.id}`;
+
+/** The option the subscription is on today (an offering subscription bills through a linked plan). */
+function currentOptionKey(subscription: SubscriptionOut): string {
+  const { plan } = subscription;
+  return plan.source === 'offering' && plan.offering_id
+    ? optionKey({ source: 'offering', id: plan.offering_id })
+    : optionKey({ source: 'plan', id: plan.id });
+}
+
+/**
+ * Plans the subscription can move to: same currency and same billing frequency (so the
+ * price comparison is like for like), upgrades priced above the current plan, downgrades
+ * below; nearest price first.
+ */
+export function changeCandidates(
+  subscription: SubscriptionOut,
+  options: SubscribablePlanOption[],
+  workflow: 'upgrade' | 'downgrade'
+): SubscribablePlanOption[] {
+  const current = currentOptionKey(subscription);
+  const currency = (subscription.currency ?? subscription.plan.currency ?? '').toUpperCase();
+  const currentPrice = Number(subscription.plan.unit_amount);
+  return options
+    .filter((o) => {
+      if (!o.is_active || optionKey(o) === current) return false;
+      if ((o.currency || '').toUpperCase() !== currency) return false;
+      if (o.billing_interval !== subscription.plan.billing_interval) return false;
+      if ((o.interval_count || 1) !== (subscription.plan.interval_count || 1)) return false;
+      const price = Number(o.unit_amount);
+      if (!Number.isFinite(price) || !Number.isFinite(currentPrice)) return false;
+      return workflow === 'upgrade' ? price > currentPrice : price < currentPrice;
+    })
+    .sort((a, b) =>
+      workflow === 'upgrade'
+        ? Number(a.unit_amount) - Number(b.unit_amount)
+        : Number(b.unit_amount) - Number(a.unit_amount)
+    );
+}
+
 export function ChangePlanner({
   subscription,
-  plans,
+  planOptions,
   plansLoading,
   canApply,
   onApplied,
@@ -51,7 +93,7 @@ export function ChangePlanner({
   const currency = subscription.currency ?? subscription.plan.currency ?? 'INR';
 
   const [changeWorkflow, setChangeWorkflow] = useState<ChangeWorkflowType>('upgrade');
-  const [targetPlanId, setTargetPlanId] = useState<string>(subscription.plan.id);
+  const [targetKey, setTargetKey] = useState<string>(() => currentOptionKey(subscription));
   const [quantity, setQuantity] = useState<string>(String(subscription.quantity));
   const [effectiveType, setEffectiveType] = useState<ProrationEffectiveType>('immediate');
   const [effectiveDate, setEffectiveDate] = useState<string>(todayIso());
@@ -63,154 +105,123 @@ export function ChangePlanner({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [applying, setApplying] = useState(false);
 
-  // Switch workflow and pick a smart default plan if needed
+  const currentKey = currentOptionKey(subscription);
+
+  // Switch workflow and default to the nearest plan in that direction.
   const handleWorkflowChange = (wf: ChangeWorkflowType) => {
     setChangeWorkflow(wf);
-    if (wf === 'resize') {
-      setTargetPlanId(subscription.plan.id);
-    } else if (wf === 'upgrade' || wf === 'downgrade') {
-      // Pick the default on price per month and within the same currency, so the
-      // suggestion agrees with the (Upgrade)/(Downgrade) tags in the dropdown.
-      const currentMonthly = monthlyEquivalent(
-        subscription.plan.unit_amount,
-        subscription.plan.billing_interval,
-        subscription.plan.interval_count
-      );
-      const candidate = plans.find((p) => {
-        if (p.id === subscription.plan.id) return false;
-        if (p.currency !== subscription.plan.currency) return false;
-        const planMonthly = monthlyEquivalent(p.unit_amount, p.billing_interval, p.interval_count);
-        if (currentMonthly === null || planMonthly === null) return false;
-        return wf === 'upgrade' ? planMonthly > currentMonthly : planMonthly < currentMonthly;
-      });
-      if (candidate && targetPlanId === subscription.plan.id) {
-        setTargetPlanId(candidate.id);
-      }
-    }
+    const nearest = wf === 'resize' ? undefined : changeCandidates(subscription, planOptions, wf)[0];
+    setTargetKey(nearest ? optionKey(nearest) : currentKey);
   };
 
   // Reset the form whenever a different subscription is selected
   useEffect(() => {
     setChangeWorkflow('upgrade');
-    setTargetPlanId(subscription.plan.id);
+    setTargetKey(currentOptionKey(subscription));
     setQuantity(String(subscription.quantity));
     setEffectiveType('immediate');
     setEffectiveDate(todayIso());
     setPreview(null);
     setPreviewError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subscription.id, subscription.plan.id, subscription.quantity]);
 
   const quantityNumber = Number(quantity);
   const quantityValid = quantity.trim() !== '' && Number.isFinite(quantityNumber) && quantityNumber > 0;
   const quantityError = quantity.trim() !== '' && !quantityValid ? 'Quantity must be greater than zero' : undefined;
 
-  const isNoop = targetPlanId === subscription.plan.id && quantityValid && quantityNumber === subscription.quantity;
-  const formValid = quantityValid && targetPlanId !== '';
+  const isNoop = targetKey === currentKey && quantityValid && quantityNumber === subscription.quantity;
+  const formValid = quantityValid && targetKey !== '';
 
-  // Plans categorized and labeled based on current workflow
-  const planOptions = useMemo(() => {
-    const sorted = [...plans].sort((a, b) => {
-      if (a.id === subscription.plan.id) return -1;
-      if (b.id === subscription.plan.id) return 1;
-      const am = monthlyEquivalent(a.unit_amount, a.billing_interval, a.interval_count);
-      const bm = monthlyEquivalent(b.unit_amount, b.billing_interval, b.interval_count);
-      return (am ?? Number(a.unit_amount)) - (bm ?? Number(b.unit_amount));
-    });
-
-    // Rank on price per month, not the raw unit_amount: a 24,000/year plan is
-    // cheaper per month than a 2,500/month one, and tagging it "Upgrade" would
-    // mislead on a screen where the choice costs the customer money. Plans in a
-    // different currency are left untagged rather than compared numerically.
-    const currentMonthly = monthlyEquivalent(
-      subscription.plan.unit_amount,
-      subscription.plan.billing_interval,
-      subscription.plan.interval_count
-    );
-
-    const opts = sorted.map((p) => {
-      const planMonthly = monthlyEquivalent(p.unit_amount, p.billing_interval, p.interval_count);
-      const comparable =
-        currentMonthly !== null && planMonthly !== null && p.currency === subscription.plan.currency;
-      let tierTag = '';
-      if (p.id === subscription.plan.id) {
-        tierTag = ' (Current)';
-      } else if (comparable && planMonthly > currentMonthly) {
-        tierTag = ' (Upgrade)';
-      } else if (comparable && planMonthly < currentMonthly) {
-        tierTag = ' (Downgrade)';
-      }
-
-      return {
-        value: p.id,
-        label: `${p.name} — ${formatMoney(p.unit_amount, p.currency)} / ${intervalLabel(
-          p.billing_interval,
-          p.interval_count
-        )}${tierTag}${p.currency !== currency ? ` · ${p.currency}` : ''}`,
-      };
-    });
-
-    // Ensure the current plan is selectable even if it has been archived
-    if (!plans.some((p) => p.id === subscription.plan.id)) {
-      opts.unshift({
-        value: subscription.plan.id,
-        label: `${subscription.plan.name} — ${formatMoney(
-          subscription.plan.unit_amount,
-          subscription.plan.currency
-        )} / ${intervalLabel(subscription.plan.billing_interval, subscription.plan.interval_count)} (Current)`,
-      });
-    }
-    return opts;
-  }, [plans, subscription, currency]);
+  // The current plan first, then the compatible plans in the chosen direction.
+  const candidates = useMemo(
+    () => (changeWorkflow === 'resize' ? [] : changeCandidates(subscription, planOptions, changeWorkflow)),
+    [subscription, planOptions, changeWorkflow]
+  );
+  const selectOptions = useMemo(() => {
+    const tag = changeWorkflow === 'downgrade' ? ' (Downgrade)' : ' (Upgrade)';
+    const current = subscription.plan;
+    return [
+      {
+        value: currentKey,
+        label: `${current.name} — ${formatMoney(current.unit_amount, current.currency)} / ${intervalLabel(
+          current.billing_interval,
+          current.interval_count
+        )} (Current)`,
+      },
+      ...candidates.map((o) => ({
+        value: optionKey(o),
+        label: `${o.name} — ${formatMoney(o.unit_amount, o.currency)} / ${intervalLabel(
+          o.billing_interval ?? current.billing_interval,
+          o.interval_count
+        )}${tag}`,
+      })),
+    ];
+  }, [candidates, changeWorkflow, currentKey, subscription]);
+  const selectedOption = candidates.find((o) => optionKey(o) === targetKey);
 
   const buildBody = useCallback((): SubscriptionChangePreviewIn => {
     const body: SubscriptionChangePreviewIn = {};
-    if (targetPlanId && targetPlanId !== subscription.plan.id) body.target_plan_id = targetPlanId;
+    if (selectedOption) {
+      // Catalog / Plans & Pricing plans are offerings; the server resolves their linked plan.
+      if (selectedOption.source === 'offering') body.target_offering_id = selectedOption.id;
+      else body.target_plan_id = selectedOption.id;
+    }
     if (quantityValid && quantityNumber !== subscription.quantity) body.target_quantity = quantity.trim();
     if (effectiveType === 'scheduled' && effectiveDate) body.effective_date = effectiveDate;
     return body;
-  }, [targetPlanId, quantity, quantityValid, quantityNumber, effectiveType, effectiveDate, subscription]);
+  }, [selectedOption, quantity, quantityValid, quantityNumber, effectiveType, effectiveDate, subscription]);
 
-  // Live preview calculation, debounced
+  // Live preview calculation, debounced. `previewKey` identifies the request whose result
+  // is shown (or in flight), so the Preview Change button never re-sends an identical
+  // request the live preview already made.
   const requestSeq = useRef(0);
+  const previewKey = useRef<string | null>(null);
+  const runPreview = useCallback(
+    async (manual: boolean) => {
+      const body = buildBody();
+      const key = JSON.stringify([subscription.id, subscription.updated_at, body]);
+      if (key === previewKey.current) {
+        if (manual) showToast('info', 'Proration preview is up to date', 'Showing the latest adjustments and renewal rates.');
+        return;
+      }
+      previewKey.current = key;
+      const seq = ++requestSeq.current;
+      setPreviewLoading(true);
+      try {
+        const data = await prorationService.preview(subscription.id, body);
+        if (seq !== requestSeq.current) return;
+        setPreview(data);
+        setPreviewError(null);
+        if (manual) showToast('info', 'Proration preview updated', 'Calculated latest adjustments and renewal rates.');
+      } catch (err: any) {
+        if (seq !== requestSeq.current) return;
+        previewKey.current = null; // a failed preview may be retried
+        setPreviewError(err?.details?.fields?.target_quantity || err?.message || 'Could not calculate proration');
+      } finally {
+        if (seq === requestSeq.current) setPreviewLoading(false);
+      }
+    },
+    [buildBody, subscription.id, subscription.updated_at, showToast]
+  );
+
   useEffect(() => {
     if (!formValid || isNoop) {
+      ++requestSeq.current; // drop any response still in flight
+      previewKey.current = null;
       setPreview(null);
       setPreviewError(null);
       setPreviewLoading(false);
       return;
     }
-    const seq = ++requestSeq.current;
-    setPreviewLoading(true);
-    const timer = window.setTimeout(async () => {
-      try {
-        const data = await prorationService.preview(subscription.id, buildBody());
-        if (seq !== requestSeq.current) return;
-        setPreview(data);
-        setPreviewError(null);
-      } catch (err: any) {
-        if (seq !== requestSeq.current) return;
-        setPreviewError(err?.details?.fields?.target_quantity || err?.message || 'Could not calculate proration');
-      } finally {
-        if (seq === requestSeq.current) setPreviewLoading(false);
-      }
-    }, 350);
+    const timer = window.setTimeout(() => runPreview(false), 350);
     return () => window.clearTimeout(timer);
-  }, [subscription.id, buildBody, formValid, isNoop]);
+  }, [runPreview, formValid, isNoop]);
 
   // Explicit manual trigger for Preview Change button
-  const handleManualPreview = async () => {
+  const handleManualPreview = () => {
     if (!formValid || isNoop) return;
-    try {
-      setPreviewLoading(true);
-      const data = await prorationService.preview(subscription.id, buildBody());
-      setPreview(data);
-      setPreviewError(null);
-      showToast('info', 'Proration preview updated', 'Calculated latest adjustments and renewal rates.');
-    } catch (err: any) {
-      setPreviewError(err?.details?.fields?.target_quantity || err?.message || 'Could not calculate proration');
-    } finally {
-      setPreviewLoading(false);
-    }
+    runPreview(true);
   };
 
   const handleApply = async () => {
@@ -249,7 +260,7 @@ export function ChangePlanner({
 
   const handleReset = () => {
     setChangeWorkflow('upgrade');
-    setTargetPlanId(subscription.plan.id);
+    setTargetKey(currentKey);
     setQuantity(String(subscription.quantity));
     setEffectiveType('immediate');
     setEffectiveDate(todayIso());
@@ -264,8 +275,6 @@ export function ChangePlanner({
       handleReset();
     }
   };
-
-  const selectedPlan = plans.find((p) => p.id === targetPlanId);
 
   const applyButtonLabel = useMemo(() => {
     const isEnd = effectiveType === 'end_of_term';
@@ -391,20 +400,21 @@ export function ChangePlanner({
           {changeWorkflow !== 'resize' ? (
             <Select
               label={`New plan (${workflowTitle})`}
-              value={targetPlanId}
-              onChange={(e) => setTargetPlanId(e.target.value)}
-              options={planOptions}
+              value={targetKey}
+              onChange={(e) => setTargetKey(e.target.value)}
+              options={selectOptions}
               disabled={plansLoading}
               helperText={
                 plansLoading
                   ? 'Loading plans...'
-                  : selectedPlan && selectedPlan.currency !== currency
-                  ? `This plan bills in ${selectedPlan.currency}; the subscription is in ${currency}.`
-                  : selectedPlan && selectedPlan.billing_interval !== subscription.plan.billing_interval
-                  ? `Billing interval changes from ${intervalLabel(subscription.plan.billing_interval)} to ${intervalLabel(selectedPlan.billing_interval)}.`
+                  : candidates.length === 0
+                  ? `No active ${changeWorkflow === 'upgrade' ? 'higher' : 'lower'}-priced plan in ${currency} billed ${intervalLabel(
+                      subscription.plan.billing_interval,
+                      subscription.plan.interval_count
+                    )}.`
                   : changeWorkflow === 'upgrade'
-                  ? 'Select a higher-tier plan to upgrade this subscription.'
-                  : 'Select a lower-tier plan to downgrade this subscription.'
+                  ? 'Select a higher-priced plan to upgrade this subscription.'
+                  : 'Select a lower-priced plan to downgrade this subscription.'
               }
             />
           ) : (

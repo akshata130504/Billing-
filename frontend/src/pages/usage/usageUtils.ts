@@ -1,4 +1,4 @@
-import type { AggregationType, UsageEventIn } from '../../types/meters';
+import type { AggregationType, RecordedUsageEvent, UsageEventIn, UsageEventOut, UsageMeterOut } from '../../types/meters';
 
 export const AGGREGATION_LABELS: Record<AggregationType, { label: string; hint: string }> = {
   sum: { label: 'Sum', hint: 'Adds every event quantity in the period (e.g. API calls, GB transferred).' },
@@ -210,4 +210,19 @@ export function parseBatchInput(text: string): ParsedBatch {
 export function normaliseApiTimestamp(value: string | null | undefined): string | null {
   if (!value) return null;
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(value) ? `${value}Z` : value;
+}
+
+/** A stored event from GET /meters/events, labelled for the events table. */
+export function historyRow(ev: UsageEventOut, meter: UsageMeterOut | undefined): RecordedUsageEvent {
+  return {
+    event: ev,
+    meter_code: meter?.code ?? ev.meter_id,
+    meter_name: meter?.name ?? ev.meter_id,
+    unit_name: meter?.unit_name ?? '',
+    customer_label: ev.customer_name || ev.customer_id,
+    subscription_label: ev.subscription_number ?? null,
+    replayed: false,
+    recorded_at: ev.created_at,
+    source: 'history',
+  };
 }

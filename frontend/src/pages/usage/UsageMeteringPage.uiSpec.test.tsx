@@ -1,7 +1,7 @@
 /**
  * The Usage / Metering page honours its visual-editor spec (appUi/specs/usage.json) and renders exactly its
  * built-in UI without configuration. Rendered against the preview sample-data adapter
- * (its GET /meters comes from platform/uiPreview/fixtures/usage.ts).
+ * (its GET /meters, /meters/events and /meters/usage-summary come from platform/uiPreview/fixtures/usage.ts).
  */
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -55,7 +55,9 @@ function renderPage(pages?: PageConfigs) {
   );
 }
 
-const headers = () => screen.getAllByRole('columnheader').map((th) => th.textContent);
+// The meters table is the first table; the usage history table follows it.
+const metersTable = () => screen.getAllByRole('table')[0];
+const headers = () => within(metersTable()).getAllByRole('columnheader').map((th) => th.textContent);
 const ids = (container: HTMLElement, prefix: string) =>
   Array.from(container.querySelectorAll(`[data-ui-id^="${prefix}"]`)).map((el) => el.getAttribute('data-ui-id'));
 const firstRowCells = () => within(screen.getAllByRole('row')[1]).getAllByRole('cell');
@@ -73,16 +75,16 @@ afterEach(() => {
 describe('UsageMeteringPage visual-editor spec', { timeout: 20000 }, () => {
   it('renders the built-in UI without configuration', async () => {
     const { container } = renderPage();
-    expect(await screen.findByText('API Requests')).toBeInTheDocument();
+    expect((await screen.findAllByText('API Requests'))[0]).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Usage / Metering');
     expect(screen.getByText('Subscriptions')).toBeInTheDocument();
     for (const title of ['Meters', 'Active Meters', 'Events Recorded', 'Aggregation Types']) {
       expect(screen.getByText(title)).toBeInTheDocument();
     }
-    expect(headers()).toEqual(['Meter', 'Code', 'Unit', 'Aggregation', 'Session Usage', 'Status', 'Created', 'Actions']);
+    expect(headers()).toEqual(['Meter', 'Code', 'Unit', 'Aggregation', 'Recorded Usage', 'Status', 'Created', 'Actions']);
     expect(firstRowCells()).toHaveLength(8);
     expect(screen.getByText('Recorded usage events')).toBeInTheDocument();
-    expect(screen.getByText('No usage recorded yet')).toBeInTheDocument();
+    expect(await screen.findAllByText('Nimbus Analytics')).toHaveLength(2);
     expect(screen.getByText('Finalised cycles')).toBeInTheDocument();
     expect(screen.getByText('Nothing finalised yet')).toBeInTheDocument();
     expect(container.querySelector('[data-ui-id]')).toBeNull();
@@ -94,25 +96,25 @@ describe('UsageMeteringPage visual-editor spec', { timeout: 20000 }, () => {
         header: { title: 'Metered Billing', eyebrow: 'Billing' },
         kpis: [{ key: 'meters', label: 'All meters' }],
         columns: [{ key: 'unit', label: 'Unit of measure' }],
-        events: { empty_title: 'No events this session' },
+        events: { title: 'Usage history' },
         cycles: { title: 'Rated cycles' },
       },
     });
-    await screen.findByText('API Requests');
+    await screen.findAllByText('API Requests');
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Metered Billing');
     expect(screen.getByText('Billing')).toBeInTheDocument();
     expect(screen.getByText('All meters')).toBeInTheDocument();
     expect(headers()).toContain('Unit of measure');
     expect(headers()).not.toContain('Unit');
-    expect(screen.getByText('No events this session')).toBeInTheDocument();
+    expect(screen.getByText('Usage history')).toBeInTheDocument();
     expect(screen.getByText('Rated cycles')).toBeInTheDocument();
   });
 
   it('hides a column (header and cells)', async () => {
     renderPage({ usage: { columns: [{ key: 'code', hidden: true }] } });
-    await screen.findByText('API Requests');
+    await screen.findAllByText('API Requests');
     expect(headers()).not.toContain('Code');
-    expect(screen.queryByText('api_calls')).toBeNull();
+    expect(within(metersTable()).queryByText('api_calls')).toBeNull();
     expect(firstRowCells()).toHaveLength(7);
   });
 
@@ -120,12 +122,25 @@ describe('UsageMeteringPage visual-editor spec', { timeout: 20000 }, () => {
     const { container } = renderPage({
       usage: { columns: [{ key: 'status' }, { key: 'meter' }], kpis: [{ key: 'events' }] },
     });
-    await screen.findByText('API Requests');
+    await screen.findAllByText('API Requests');
     expect(headers().slice(0, 3)).toEqual(['Status', 'Meter', 'Code']);
     const cells = firstRowCells();
     expect(cells[0]).toHaveTextContent('Active');
     expect(cells[1]).toHaveTextContent('API Requests');
     expect(cells[2]).toHaveTextContent('api_calls');
     expect(ids(container, 'usage.kpis.')).toEqual(['usage.kpis.events', 'usage.kpis.meters', 'usage.kpis.active', 'usage.kpis.aggregations']);
+  });
+
+  it('shows stored usage history and per-meter totals after a reload (BUG-44)', async () => {
+    renderPage();
+    await screen.findAllByText('API Requests');
+    // Events posted in an earlier session come back from GET /meters/events ...
+    expect(await screen.findByText('Kestrel Logistics')).toBeInTheDocument();
+    expect(screen.queryByText('No usage recorded yet')).toBeNull();
+    expect(screen.queryByText(/does not list historical events/)).toBeNull();
+    // ... and the meters table shows each meter's recorded total from GET /meters/usage-summary.
+    const apiRow = within(metersTable()).getByText('API Requests').closest('tr')!;
+    expect(apiRow).toHaveTextContent('1,730 requests');
+    expect(apiRow).toHaveTextContent('2 events');
   });
 });

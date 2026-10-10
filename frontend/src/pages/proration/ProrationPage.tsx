@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Repeat, Scale, CalendarClock, CheckCircle2, ReceiptText, ExternalLink } from 'lucide-react';
-import type { PlanOut, SubscriptionOut } from '../../types/api';
+import type { PlanOut, SubscribablePlanOption, SubscriptionOut } from '../../types/api';
 import type { SubscriptionChangeOut } from '../../types/proration';
 import { subscriptionService } from '../../services/subscriptionService';
 import { catalogService } from '../../services/catalogService';
@@ -39,8 +39,10 @@ export function ProrationPage() {
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Plans catalogue
+  // Plans catalogue (names for the change history) and the plans a subscription can move to
+  // (legacy plans plus Catalog / Plans & Pricing plan offerings).
   const [plans, setPlans] = useState<PlanOut[]>([]);
+  const [planOptions, setPlanOptions] = useState<SubscribablePlanOption[]>([]);
   const [plansLoading, setPlansLoading] = useState(true);
 
   // Selection + history
@@ -72,8 +74,12 @@ export function ProrationPage() {
   const fetchPlans = useCallback(async () => {
     try {
       setPlansLoading(true);
-      const data = await catalogService.listPlans({ is_active: true, page_size: 100 });
+      const [data, options] = await Promise.all([
+        catalogService.listPlans({ is_active: true, page_size: 100 }),
+        subscriptionService.planOptions(),
+      ]);
       setPlans(data.items);
+      setPlanOptions(options);
     } catch (err: any) {
       showToast('error', 'Could not load plans', err?.message || 'The plan catalogue is unavailable.');
     } finally {
@@ -325,7 +331,7 @@ export function ProrationPage() {
 
           <ChangePlanner
             subscription={selected}
-            plans={plans}
+            planOptions={planOptions}
             plansLoading={plansLoading}
             canApply={canApply}
             onApplied={handleApplied}

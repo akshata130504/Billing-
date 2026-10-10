@@ -411,6 +411,9 @@ def _primary_snapshot_meta(subscription: Subscription) -> Dict[str, Any]:
     return {}
 
 
+_ENDED_STATUSES = (SubscriptionStatus.CANCELLED, SubscriptionStatus.EXPIRED, SubscriptionStatus.TRIAL_EXPIRED)
+
+
 def serialize_subscription(subscription: Subscription) -> Dict[str, Any]:
     plan = subscription.plan
     qty = int(subscription.quantity or 1)
@@ -474,7 +477,10 @@ def serialize_subscription(subscription: Subscription) -> Dict[str, Any]:
         "paused_at": iso_dt(subscription.paused_at),
         "ended_at": iso_dt(subscription.ended_at),
         "notes": subscription.notes,
-        "mrr": money_str(compute_mrr(plan, qty, unit_price)),
+        # An ended subscription contributes no recurring revenue (dashboards already say 0).
+        "mrr": money_str(Decimal("0") if subscription.status in _ENDED_STATUSES else compute_mrr(plan, qty, unit_price)),
+        # Mirrors the POST /renew guard, so the UI offers a manual renewal only when it is due.
+        "renewal_due": subscription.status == SubscriptionStatus.ACTIVE and is_renewal_due(subscription),
         "created_at": iso_dt(subscription.created_at),
         "updated_at": iso_dt(subscription.updated_at),
     }
@@ -1332,6 +1338,7 @@ def _end_now(subscription: Subscription, reason: Optional[str] = None) -> None:
     subscription.ended_at = now
     subscription.next_billing_date = None
     subscription.cancel_at_period_end = False
+    subscription.auto_renewal = False  # an ended subscription never renews
     subscription.updated_at = now
 
 

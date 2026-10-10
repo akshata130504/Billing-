@@ -85,6 +85,9 @@ class UsageEventOut(BaseModel):
     idempotency_key: str
     status: UsageEventStatus
     created_at: datetime
+    # Labels for the usage history list (GET /meters/events).
+    customer_name: Optional[str] = None
+    subscription_number: Optional[str] = None
 
 
 class UsageAggregateOut(BaseModel):
@@ -99,3 +102,15 @@ class UsageAggregateOut(BaseModel):
     status: UsageAggregateStatus
     finalized_at: Optional[datetime] = None
     invoice_id: Optional[str] = None
+
+
+class UsageMeterSummaryOut(BaseModel):
+    """Running total of one meter's accepted events over a period (usage history)."""
+    meter_id: str
+    meter_code: str
+    meter_name: str
+    unit_name: str
+    aggregation_type: AggregationType
+    event_count: int
+    total_quantity: str
+    last_event_at: Optional[datetime] = None

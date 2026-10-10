@@ -28,7 +28,9 @@ import {
   type AggregationType,
   type RecordedUsageEvent,
   type UsageAggregateOut,
+  type UsageEventOut,
   type UsageMeterOut,
+  type UsageMeterSummaryOut,
 } from '../../types/meters';
 import { formatDate, formatDateTime, formatMoney, humanize } from '../../utils/format';
 import { BatchImportModal } from './BatchImportModal';
@@ -36,7 +38,7 @@ import { FinalizeUsageModal } from './FinalizeUsageModal';
 import { MeterDetailModal } from './MeterDetailModal';
 import { NewMeterModal } from './NewMeterModal';
 import { RecordUsageModal } from './RecordUsageModal';
-import { AGGREGATION_LABELS, formatQuantity, normaliseApiTimestamp } from './usageUtils';
+import { AGGREGATION_LABELS, formatQuantity, historyRow, normaliseApiTimestamp } from './usageUtils';
 import { usePageSpec } from '../../appUi/usePageSpec';
 import type { EditableProps } from '../../appUi/UiConfigContext';
 
@@ -50,6 +52,9 @@ interface SessionAggregate {
 }
 
 type StatusFilter = 'all' | 'active' | 'inactive';
+
+/** How many of the most recent events the history panel shows. */
+const HISTORY_PAGE_SIZE = 50;
 
 export function UsageMeteringPage() {
   const { hasRole } = useAuth();
@@ -67,7 +72,10 @@ export function UsageMeteringPage() {
   const [aggregationFilter, setAggregationFilter] = useState<'all' | AggregationType>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
-  // In-session activity (the API has no endpoint for listing events or aggregates).
+  // Stored usage history (survives reloads) plus what this page posted in the current session.
+  const [historyEvents, setHistoryEvents] = useState<UsageEventOut[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [meterTotals, setMeterTotals] = useState<UsageMeterSummaryOut[]>([]);
   const [sessionEvents, setSessionEvents] = useState<RecordedUsageEvent[]>([]);
   const [sessionAggregates, setSessionAggregates] = useState<SessionAggregate[]>([]);
 
@@ -92,9 +100,24 @@ export function UsageMeteringPage() {
     }
   }, []);
 
+  const loadUsage = useCallback(async () => {
+    try {
+      const [page, totals] = await Promise.all([
+        meterService.listEvents({ page_size: HISTORY_PAGE_SIZE }),
+        meterService.usageSummary(),
+      ]);
+      setHistoryEvents(page.items);
+      setHistoryTotal(page.total);
+      setMeterTotals(totals);
+    } catch {
+      // History is supplementary: the meters table still works without it.
+    }
+  }, []);
+
   useEffect(() => {
     loadMeters();
-  }, [loadMeters]);
+    loadUsage();
+  }, [loadMeters, loadUsage]);
 
   const filteredMeters = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -117,20 +140,26 @@ export function UsageMeteringPage() {
     const set = new Set<AggregationType>(meters.map((m) => m.aggregation_type));
     return AGGREGATION_TYPES.filter((t) => set.has(t));
   }, [meters]);
-  const sessionEventCount = useMemo(() => sessionEvents.filter((r) => !r.replayed).length, [sessionEvents]);
   const eventsPerMeter = useMemo(() => {
     const map = new Map<string, { count: number; total: number }>();
-    sessionEvents.forEach((r) => {
-      if (r.replayed) return;
-      const cur = map.get(r.event.meter_id) ?? { count: 0, total: 0 };
-      cur.count += 1;
-      cur.total += Number(r.event.quantity) || 0;
-      map.set(r.event.meter_id, cur);
+    meterTotals.forEach((t) => {
+      if (t.event_count > 0) map.set(t.meter_id, { count: t.event_count, total: Number(t.total_quantity) || 0 });
     });
     return map;
-  }, [sessionEvents]);
-  const knownKeys = useMemo(() => new Set(sessionEvents.map((r) => r.event.idempotency_key)), [sessionEvents]);
+  }, [meterTotals]);
   const meterById = useMemo(() => new Map(meters.map((m) => [m.id, m])), [meters]);
+  // Newly posted events first (incl. duplicate replays), then the stored history.
+  const eventRows = useMemo(() => {
+    const shown = new Set(sessionEvents.map((r) => r.event.id));
+    return [
+      ...sessionEvents,
+      ...historyEvents.filter((ev) => !shown.has(ev.id)).map((ev) => historyRow(ev, meterById.get(ev.meter_id))),
+    ];
+  }, [sessionEvents, historyEvents, meterById]);
+  const knownKeys = useMemo(
+    () => new Set([...sessionEvents.map((r) => r.event.idempotency_key), ...historyEvents.map((ev) => ev.idempotency_key)]),
+    [sessionEvents, historyEvents]
+  );
 
   const openRecord = (meterCode?: string | null) => {
     setRecordMeterCode(meterCode ?? null);
@@ -145,6 +174,7 @@ export function UsageMeteringPage() {
       const fresh = list.filter((r) => !seen.has(r.event.id));
       return [...fresh, ...prev];
     });
+    loadUsage();
   };
 
   const handleFinalized = (aggregates: UsageAggregateOut[], subscription: SubscriptionOut | null) => {
@@ -300,7 +330,15 @@ export function UsageMeteringPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0 flex-nowrap overflow-x-auto pb-1 sm:pb-0">
-          <Button variant="outline" size="sm" onClick={() => loadMeters()} leadingIcon={<RefreshCw className="w-4 h-4" />}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              loadMeters();
+              loadUsage();
+            }}
+            leadingIcon={<RefreshCw className="w-4 h-4" />}
+          >
             Refresh
           </Button>
           {canFinalize && (
@@ -363,8 +401,8 @@ export function UsageMeteringPage() {
             <UsageKpi
               edit={edit}
               title={item.label}
-              value={sessionEventCount}
-              comparisonText={sessionEventCount ? 'this session' : 'none yet this session'}
+              value={historyTotal}
+              comparisonText={historyTotal ? 'all time' : 'none recorded yet'}
               icon={<Activity className="w-4 h-4" />}
             />
           ),
@@ -515,13 +553,13 @@ export function UsageMeteringPage() {
                   {ui.text('events', 'description')}
                 </p>
               </div>
-              {sessionEvents.length > 0 && (
-                <Button variant="ghost" size="sm" className="text-xs" onClick={() => setSessionEvents([])}>
-                  Clear
-                </Button>
+              {historyTotal > historyEvents.length && (
+                <span className="text-xs text-slate-400 shrink-0">
+                  Latest {historyEvents.length} of {historyTotal}
+                </span>
               )}
             </div>
-            {sessionEvents.length === 0 ? (
+            {eventRows.length === 0 ? (
               <div {...ui.edit('events')}>
                 <EmptyState
                   className="border-0 rounded-none py-10"
@@ -559,7 +597,7 @@ export function UsageMeteringPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {sessionEvents.map((r) => (
+                    {eventRows.map((r) => (
                       <tr key={r.event.id} className="hover:bg-slate-50/70">
                         {eventColumns.map((col) => <Fragment key={col.key}>{eventCells[col.key]?.(r)}</Fragment>)}
                       </tr>
@@ -663,6 +701,7 @@ export function UsageMeteringPage() {
         isOpen={detailMeter !== null}
         onClose={() => setDetailMeter(null)}
         sessionEvents={detailMeter ? sessionEvents.filter((r) => r.event.meter_id === detailMeter.id) : []}
+        refreshKey={historyTotal}
         sessionAggregates={detailMeter ? sessionAggregates.filter((a) => a.aggregate.meter_id === detailMeter.id).map((a) => a.aggregate) : []}
         canRecord={canRecord}
         onRecordUsage={(m) => openRecord(m.code)}
