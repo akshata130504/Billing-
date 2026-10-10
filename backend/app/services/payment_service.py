@@ -389,15 +389,24 @@ def reconciliation_summary(db: Session, organization_id: str) -> Dict[str, Any]:
 # --- allocation validation ---------------------------------------------------------------------------------------------
 
 
+def _currency(code: Optional[str]) -> str:
+    return (code or "INR").upper()
+
+
 def _validate_allocations(
     db: Session,
     organization_id: str,
     payment_amount: Decimal,
     allocations: Sequence[AllocationIn],
     *,
+    customer_id: str,
+    currency: str,
     own_existing: Optional[Dict[str, Decimal]] = None,
 ) -> List[tuple[Invoice, Decimal]]:
-    """Return (invoice, amount) pairs or raise 422. `own_existing` = this payment's current allocation per invoice."""
+    """Return (invoice, amount) pairs or raise 422. `own_existing` = this payment's current allocation per invoice.
+
+    A payment can only settle invoices of the customer who paid it, in the payment's own currency:
+    there is no conversion, so 5 INR must never become 5 USD paid."""
     own_existing = own_existing or {}
     seen: Set[str] = set()
     total = Decimal("0")
@@ -411,6 +420,14 @@ def _validate_allocations(
         invoice = get_invoice(db, organization_id, alloc.invoice_id)  # 404 for other tenants
         lock_invoice(db, invoice)  # serialise with concurrent allocations before reading amount_due
         amount = q2(alloc.amount)
+        if invoice.customer_id != customer_id:
+            fields[f"allocations.{idx}.invoice_id"] = f"invoice {invoice.invoice_number} belongs to a different customer"
+            continue
+        if _currency(invoice.currency) != _currency(currency):
+            fields[f"allocations.{idx}.invoice_id"] = (
+                f"invoice {invoice.invoice_number} is in {_currency(invoice.currency)}; this payment is in {_currency(currency)}"
+            )
+            continue
         if invoice.status not in OPEN_INVOICE_STATUSES:
             fields[f"allocations.{idx}.invoice_id"] = f"invoice {invoice.invoice_number} is {invoice.status.value}, not open"
             continue
@@ -442,13 +459,16 @@ def create_payment(db: Session, ctx: CurrentContext, data: PaymentCreate) -> Pay
     # the same org -> invoice order every other allocation path uses. A validation
     # failure rolls the reserved number back with the transaction.
     payment_number = next_number(db, ctx.organization_id, "payment")
-    pairs = _validate_allocations(db, ctx.organization_id, amount, data.allocations or [])
+    currency = customer.currency or ctx.organization.default_currency or "INR"
+    pairs = _validate_allocations(
+        db, ctx.organization_id, amount, data.allocations or [], customer_id=customer.id, currency=currency
+    )
     payment = Payment(
         organization_id=ctx.organization_id,
         payment_number=payment_number,
         customer_id=customer.id,
         amount=amount,
-        currency=customer.currency or ctx.organization.default_currency or "INR",
+        currency=currency,
         method=data.method,
         gateway=PaymentGateway.MANUAL,
         status=PaymentStatus.SUCCEEDED,
@@ -571,10 +591,21 @@ def update_payment(db: Session, ctx: CurrentContext, payment: Payment, data: Pay
 def set_allocations(db: Session, ctx: CurrentContext, payment: Payment, allocations: Sequence[AllocationIn]) -> Payment:
     if payment.status not in (PaymentStatus.SUCCEEDED, PaymentStatus.PARTIALLY_REFUNDED):
         raise InvalidStateError(f"Allocations can only be changed on settled payments; this payment is {payment.status.value}.")
+    # Serialise concurrent re-allocations of the same payment (payment row, then invoice rows,
+    # the order the refund paths use) so two requests cannot both read the old allocations.
+    payment = lock_payment(db, payment)
     own_existing: Dict[str, Decimal] = {}
     for a in payment.allocations:
         own_existing[a.invoice_id] = own_existing.get(a.invoice_id, Decimal("0")) + D(a.amount)
-    pairs = _validate_allocations(db, ctx.organization_id, effective_amount(payment), allocations, own_existing=own_existing)
+    pairs = _validate_allocations(
+        db,
+        ctx.organization_id,
+        effective_amount(payment),
+        allocations,
+        customer_id=payment.customer_id,
+        currency=payment.currency,
+        own_existing=own_existing,
+    )
     before = {**snapshot(payment), "allocations": [{"invoice_id": a.invoice_id, "amount": a.amount} for a in payment.allocations]}
 
     affected: Dict[str, Invoice] = {}
@@ -965,6 +996,8 @@ def allocate_captured_payment(db: Session, payment: Payment, invoice: Invoice, *
         return payment
     if any(a.invoice_id == invoice.id for a in payment.allocations):
         return payment
+    if invoice.customer_id != payment.customer_id or _currency(invoice.currency) != _currency(payment.currency):
+        return payment  # never settle another customer's invoice or convert currencies implicitly
     headroom = q2(effective_amount(payment) - allocated_amount(payment))
     alloc_amount = min(headroom, q2(invoice.amount_due)) if invoice.status in OPEN_INVOICE_STATUSES else Decimal("0")
     if alloc_amount > 0:
