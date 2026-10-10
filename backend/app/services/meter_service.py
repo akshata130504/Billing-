@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import desc, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from backend.app.api.deps import CurrentContext
 from backend.app.core.exceptions import ConflictAppError, NotFoundAppError, ValidationAppError
@@ -337,7 +337,12 @@ def list_usage_events_query(
     filters = _usage_event_filters(
         db, organization_id, meter_id_or_code, customer_id, subscription_id, date_from, date_to
     )
-    return select(UsageEvent).where(*filters).order_by(UsageEvent.timestamp.desc(), UsageEvent.id.desc())
+    return (
+        select(UsageEvent)
+        .where(*filters)
+        .options(selectinload(UsageEvent.customer), selectinload(UsageEvent.subscription))
+        .order_by(UsageEvent.timestamp.desc(), UsageEvent.id.desc())
+    )
 
 
 def usage_summary(

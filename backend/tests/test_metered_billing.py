@@ -964,6 +964,8 @@ def test_usage_event_history_and_meter_totals(client, tenant, auth_headers):
     body = page.json()
     assert body["total"] == 3 and len(body["items"]) == 2 and body["total_pages"] == 2
     assert body["items"][0]["idempotency_key"] == "h-3"  # newest first
+    assert body["items"][0]["customer_name"] == customer.display_name
+    assert body["items"][0]["subscription_number"]
 
     by_meter = client.get("/api/v1/meters/events?meter_id=hist_calls&subscription_id=" + sub_id, headers=auth_headers).json()
     assert {e["idempotency_key"] for e in by_meter["items"]} == {"h-1", "h-2"}

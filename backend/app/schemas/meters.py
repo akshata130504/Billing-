@@ -85,6 +85,9 @@ class UsageEventOut(BaseModel):
     idempotency_key: str
     status: UsageEventStatus
     created_at: datetime
+    # Labels for the usage history list (GET /meters/events).
+    customer_name: Optional[str] = None
+    subscription_number: Optional[str] = None
 
 
 class UsageAggregateOut(BaseModel):

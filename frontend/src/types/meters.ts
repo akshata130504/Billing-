@@ -79,6 +79,31 @@ export interface UsageEventOut {
   idempotency_key: string;
   status: UsageEventStatus;
   created_at: string;
+  /** Labels returned by the history list (GET /meters/events) only. */
+  customer_name?: string | null;
+  subscription_number?: string | null;
+}
+
+/** Filters for the usage history endpoints; dates are inclusive organization-local days. */
+export interface UsageHistoryQuery {
+  meter_id?: string;
+  customer_id?: string;
+  subscription_id?: string;
+  date_from?: string;
+  date_to?: string;
+}
+
+/** Per-meter running total of recorded (accepted) usage over a period. */
+export interface UsageMeterSummaryOut {
+  meter_id: string;
+  meter_code: string;
+  meter_name: string;
+  unit_name: string;
+  aggregation_type: AggregationType;
+  event_count: number;
+  /** Decimal string, aggregated per the meter's aggregation type. */
+  total_quantity: string;
+  last_event_at: string | null;
 }
 
 export interface UsageAggregateOut {
@@ -97,9 +122,8 @@ export interface UsageAggregateOut {
 }
 
 /**
- * The API has no endpoint that lists usage events, so the page keeps an
- * in-session log of what it recorded. This wraps the server response with the
- * labels the UI needs to render it.
+ * A usage event with the labels the UI needs to render it - either one posted
+ * from the page this session or one loaded from the history endpoint.
  */
 export interface RecordedUsageEvent {
   event: UsageEventOut;
@@ -111,5 +135,5 @@ export interface RecordedUsageEvent {
   /** True when the server returned an existing event for a re-used idempotency key. */
   replayed: boolean;
   recorded_at: string;
-  source: 'single' | 'batch';
+  source: 'single' | 'batch' | 'history';
 }

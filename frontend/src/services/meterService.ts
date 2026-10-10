@@ -1,12 +1,15 @@
 import { apiClient } from './apiClient';
+import type { Paginated } from '../types/api';
 import type {
   BillingCycleOut,
   UsageAggregateOut,
   UsageEventBatchIn,
   UsageEventIn,
   UsageEventOut,
+  UsageHistoryQuery,
   UsageMeterCreateIn,
   UsageMeterOut,
+  UsageMeterSummaryOut,
   UsageMeterUpdateIn,
 } from '../types/meters';
 
@@ -49,6 +52,20 @@ export const meterService = {
   /** Up to 1000 events per call. */
   recordBatch: async (body: UsageEventBatchIn): Promise<UsageEventOut[]> => {
     const { data } = await apiClient.post<UsageEventOut[]>('/meters/events/batch', body);
+    return data;
+  },
+
+  /** Recorded usage events, newest first (meter_id accepts an id or a code). */
+  listEvents: async (
+    query: UsageHistoryQuery & { page?: number; page_size?: number } = {}
+  ): Promise<Paginated<UsageEventOut>> => {
+    const { data } = await apiClient.get<Paginated<UsageEventOut>>('/meters/events', { params: query });
+    return data;
+  },
+
+  /** Per-meter running totals of recorded usage (every meter, zero when unused). */
+  usageSummary: async (query: UsageHistoryQuery = {}): Promise<UsageMeterSummaryOut[]> => {
+    const { data } = await apiClient.get<UsageMeterSummaryOut[]>('/meters/usage-summary', { params: query });
     return data;
   },
 

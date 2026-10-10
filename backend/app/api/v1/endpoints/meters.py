@@ -141,7 +141,13 @@ def list_events(
         date_from=date_from,
         date_to=date_to,
     )
-    return paginate(db, stmt, params).to_response(_serialize_event)
+    return paginate(db, stmt, params).to_response(
+        lambda ev: {
+            **_serialize_event(ev),
+            "customer_name": ev.customer.display_name if ev.customer else None,
+            "subscription_number": ev.subscription.subscription_number if ev.subscription else None,
+        }
+    )
 
 
 @router.get(
