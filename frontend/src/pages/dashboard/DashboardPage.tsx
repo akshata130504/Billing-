@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   OVERVIEW_HEADER_DEFAULTS,
@@ -44,12 +44,19 @@ import { PaymentStatusWidget } from './widgets/PaymentStatusWidget';
 import { QuickActionsCard } from './QuickActionsCard';
 import { BillingPromoCard } from './widgets/BillingPromoCard';
 import type { DashboardRange, WidgetVisibilityState } from '../../types';
+import {
+  clearWidgetVisibility,
+  DEFAULT_WIDGET_VISIBILITY,
+  loadWidgetVisibility,
+  saveWidgetVisibility,
+  widgetVisibilityKey,
+} from './widgetVisibility';
 
 export function DashboardPage() {
   const ui = usePageUi('overview');
   const editable = useUiEditable();
   const { showToast } = useToast();
-  const { user } = useAuth();
+  const { user, organization } = useAuth();
 
   // Date Range Filter State. The backend only understands the five DashboardRange
   // values below; "custom" is a UI-only placeholder until a real custom-range
@@ -59,30 +66,22 @@ export function DashboardPage() {
 
   // Customize Dashboard State
   const [customizeOpen, setCustomizeOpen] = useState(false);
-  const [visibility, setVisibility] = useState<WidgetVisibilityState>({
-    revenueIntelligence: true,
-    actionCenter: true,
-    billingPipeline: true,
-    customerHealth: true,
-    paymentRecovery: true,
-    recentTransactions: true,
-    activityTimeline: true,
-  });
+  // Remembered per user and organization (see widgetVisibility.ts).
+  const visibilityStorageKey = widgetVisibilityKey(user?.id, organization?.id);
+  const [visibility, setVisibility] = useState<WidgetVisibilityState>(() => loadWidgetVisibility(visibilityStorageKey));
+  useEffect(() => {
+    setVisibility(loadWidgetVisibility(visibilityStorageKey));
+  }, [visibilityStorageKey]);
 
   const handleToggleWidget = (key: keyof WidgetVisibilityState) => {
-    setVisibility((prev) => ({ ...prev, [key]: !prev[key] }));
+    const next = { ...visibility, [key]: !visibility[key] };
+    setVisibility(next);
+    saveWidgetVisibility(visibilityStorageKey, next);
   };
 
   const handleResetWidgets = () => {
-    setVisibility({
-      revenueIntelligence: true,
-      actionCenter: true,
-      billingPipeline: true,
-      customerHealth: true,
-      paymentRecovery: true,
-      recentTransactions: true,
-      activityTimeline: true,
-    });
+    setVisibility(DEFAULT_WIDGET_VISIBILITY);
+    clearWidgetVisibility(visibilityStorageKey);
     showToast('info', 'Reset Layout', 'All dashboard widgets restored to default view.');
   };
 
