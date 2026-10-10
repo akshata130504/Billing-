@@ -327,3 +327,24 @@ def test_production_still_refuses_postgres_user_as_the_runtime_role(monkeypatch)
     env = {**_container_db_env("backend"), "POSTGRES_USER": "rooman_app"}
     with pytest.raises(ValidationError, match="APP_POSTGRES_USER must differ from POSTGRES_USER"):
         _settings(monkeypatch, env)
+
+
+def test_proxied_api_responses_carry_each_security_header_once():
+    """Production QA BUG-25: /api responses had every security header twice (backend middleware
+    + nginx snippet) with conflicting values. nginx must drop the backend's copies."""
+    conf = _read("frontend/docker/nginx.conf")
+    for spec in ("location /api/ {", "location ^~ /api/v1/platform/ {", "location = /api/v1/platform/website/assets {"):
+        block = conf.split(spec, 1)[1].split("\n    }", 1)[0]
+        assert "upstream-header-dedup.conf" in block, spec
+    dedup = _read("frontend/docker/upstream-header-dedup.conf")
+    for header in ("X-Frame-Options", "Content-Security-Policy", "X-Content-Type-Options", "Referrer-Policy",
+                   "Permissions-Policy", "Strict-Transport-Security", "Cache-Control"):
+        assert f"proxy_hide_header {header};" in dedup, header
+    assert "upstream-header-dedup.conf /etc/nginx/snippets/upstream-header-dedup.conf" in _read("frontend/Dockerfile")
+
+
+def test_backend_fallback_csp_does_not_allow_inline_scripts():
+    from backend.app.main import SECURITY_HEADERS
+
+    script_src = [d for d in SECURITY_HEADERS["Content-Security-Policy"].split(";") if d.strip().startswith("script-src")][0]
+    assert "'unsafe-inline'" not in script_src
