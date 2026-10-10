@@ -38,4 +38,14 @@ describe('<ExpenseFormModal />', () => {
     unmount();
     expect(document.body.style.overflow).not.toBe('hidden');
   });
+
+  it('associates every field with its label (BUG-22)', () => {
+    render(<ExpenseFormModal isOpen onClose={vi.fn()} onSave={vi.fn()} />);
+    for (const label of [/^Expense Name/, /^Expense Date/, /^Category/, /^Amount/, /^Currency/, /^Paid By/, /^Payment Method/]) {
+      expect(screen.getByLabelText(label)).toBeInTheDocument();
+    }
+    expect(screen.getByLabelText(/^Category/).tagName).toBe('SELECT');
+    expect(screen.getByLabelText(/^Amount/)).toHaveAttribute('type', 'number');
+  });
 });
+

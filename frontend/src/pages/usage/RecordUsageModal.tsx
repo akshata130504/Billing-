@@ -305,8 +305,9 @@ export function RecordUsageModal({
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-slate-700 mb-1.5">Properties (JSON, optional)</label>
+          <label htmlFor="record-usage-properties" className="block text-xs font-medium text-slate-700 mb-1.5">Properties (JSON, optional)</label>
           <textarea
+            id="record-usage-properties"
             rows={3}
             spellCheck={false}
             placeholder='{"region": "ap-south-1", "endpoint": "/v1/search"}'

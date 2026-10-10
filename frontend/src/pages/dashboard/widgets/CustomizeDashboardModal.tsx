@@ -90,6 +90,7 @@ export function CustomizeDashboardModal({
                 type="button"
                 role="switch"
                 aria-checked={isEnabled}
+                aria-label={info.title}
                 onClick={(e) => {
                   e.stopPropagation();
                   onToggle(key);

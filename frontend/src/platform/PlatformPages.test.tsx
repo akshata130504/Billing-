@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { PlatformRoutes, SUPERADMIN_BASE } from './PlatformApp';
 import superadminHtml from '../../superadmin.html?raw';
 import tenantRoutesSource from '../routes/index.tsx?raw';
-import { PlatformApiError, platformApi } from './platformApi';
+import { PlatformApiError, platformApi, platformSessionExpired } from './platformApi';
 import { consoleApi } from './consoleApi';
 import { ToastProvider } from '../components/common/Toast';
 
@@ -257,5 +257,49 @@ describe('One application, separate console', () => {
     expect(tenantRoutesSource).not.toMatch(/platform\/Platform(Login|Home)Page/);
     // no /platform or /platform/* console route (the tenant's /platform-access grant workspace is different)
     expect(tenantRoutesSource).not.toMatch(/path="\/platform("|\/)/);
+  });
+});
+
+describe('Expired platform session (BUG-38)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    consoleMock.dashboard.mockResolvedValue(DASHBOARD);
+  });
+
+  it('sends the console to sign-in with a "session expired" notice, then back to the same page', async () => {
+    api.me.mockResolvedValue(ME);
+    renderSuperadmin('/superadmin');
+    expect(await screen.findByRole('heading', { name: 'Platform dashboard' })).toBeInTheDocument();
+
+    act(() => platformSessionExpired());
+    expect(await screen.findByText('Platform staff sign-in')).toBeInTheDocument();
+    expect(screen.getByText('Your session has expired. Please sign in again.')).toBeInTheDocument();
+    expect(screen.getByTestId('where')).toHaveTextContent('/superadmin/login');
+
+    api.login.mockResolvedValue(ME);
+    fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'ops@rooman.test' } });
+    fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
+    expect(await screen.findByRole('heading', { name: 'Platform dashboard' })).toBeInTheDocument();
+  });
+
+  it('returns to the requested console page after sign-in, never to another site', async () => {
+    api.me.mockResolvedValue(ME);
+    api.login.mockResolvedValue(ME);
+    renderSuperadmin('/superadmin/login?expired=1&next=%2Faccount');
+    fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'ops@rooman.test' } });
+    fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/superadmin/account'));
+  });
+
+  it('ignores an off-site return path', async () => {
+    api.me.mockResolvedValue(ME);
+    api.login.mockResolvedValue(ME);
+    renderSuperadmin('/superadmin/login?next=%2F%2Fevil.example');
+    fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'ops@rooman.test' } });
+    fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
+    expect(await screen.findByRole('heading', { name: 'Platform dashboard' })).toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PlatformApiError, consoleRequest, platformApi } from './platformApi';
+import { PlatformApiError, consoleRequest, platformApi, setPlatformSessionExpiredHandler } from './platformApi';
 import { consoleApi } from './consoleApi';
 
 function jsonResponse(status: number, body: unknown) {
@@ -112,5 +112,46 @@ describe('platformApi', () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { items: [], total: 0, page: 1, page_size: 25, total_pages: 0 }));
     await consoleApi.organizations({ q: 'a&b', status: '', page: 2 });
     expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/platform/organizations?q=a%26b&page=2');
+  });
+
+  it('step-up on an expired session refreshes once, then reports the session as expired (BUG-38)', async () => {
+    const expired = vi.fn();
+    const unregister = setPlatformSessionExpiredHandler(expired);
+    fetchMock.mockResolvedValue(jsonResponse(401, { error: { code: 'UNAUTHORIZED', message: 'Platform authentication required.' } }));
+    await expect(platformApi.stepUp('pw')).rejects.toMatchObject({ status: 401 });
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/v1/platform/auth/step-up', '/api/v1/platform/auth/refresh']);
+    expect(expired).toHaveBeenCalledTimes(1);
+    unregister();
+  });
+
+  it('step-up retries after a successful refresh of an idle access token', async () => {
+    const expired = vi.fn();
+    const unregister = setPlatformSessionExpiredHandler(expired);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { error: { code: 'UNAUTHORIZED', message: 'Platform access token has expired.' } }))
+      .mockResolvedValueOnce(jsonResponse(200, { staff: {} }))
+      .mockResolvedValueOnce(jsonResponse(200, { step_up_expires_at: '2026-10-10T00:15:00Z', expires_in: 900 }));
+    await expect(platformApi.stepUp('pw')).resolves.toMatchObject({ expires_in: 900 });
+    expect(expired).not.toHaveBeenCalled();
+    unregister();
+  });
+
+  it('a wrong step-up password (403) is shown as is, without refresh or sign-out', async () => {
+    const expired = vi.fn();
+    const unregister = setPlatformSessionExpiredHandler(expired);
+    fetchMock.mockResolvedValueOnce(jsonResponse(403, { error: { code: 'STEP_UP_FAILED', message: 'Incorrect password.' } }));
+    await expect(platformApi.stepUp('bad')).rejects.toMatchObject({ status: 403 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(expired).not.toHaveBeenCalled();
+    unregister();
+  });
+
+  it('console calls report the expired session when the refresh fails', async () => {
+    const expired = vi.fn();
+    const unregister = setPlatformSessionExpiredHandler(expired);
+    fetchMock.mockResolvedValue(jsonResponse(401, { error: { code: 'UNAUTHORIZED', message: 'Your platform session has ended.' } }));
+    await expect(consoleRequest('GET', '/dashboard')).rejects.toMatchObject({ status: 401 });
+    expect(expired).toHaveBeenCalledTimes(1);
+    unregister();
   });
 });

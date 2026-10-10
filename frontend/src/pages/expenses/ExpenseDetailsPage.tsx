@@ -214,7 +214,7 @@ export function ExpenseDetailsPage() {
                   Expense Amount
                 </span>
                 <span className="text-xl font-bold text-slate-900 font-mono tracking-tight">
-                  {formatINR(expense.amount)}
+                  {formatINR(expense.amount, expense.currency)}
                 </span>
                 <span className="text-[10px] text-slate-400 block mt-0.5">
                   Currency: {expense.currency}
@@ -227,7 +227,7 @@ export function ExpenseDetailsPage() {
                     Billable Amount
                   </span>
                   <span className="text-xl font-bold text-emerald-700 font-mono tracking-tight">
-                    {formatINR(expense.billableAmount ?? expense.amount)}
+                    {formatINR(expense.billableAmount ?? expense.amount, expense.currency)}
                   </span>
                   <span className="text-[10px] text-emerald-600/80 block mt-0.5">
                     GST Tax: {expense.taxRate ? `${expense.taxRate}%` : '0% Nil'}

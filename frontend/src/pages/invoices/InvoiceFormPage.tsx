@@ -28,7 +28,11 @@ import { useToast } from '../../components/common/Toast';
 import { PricingExplanation } from '../../components/common/PricingExplanation';
 import { toApiError } from '../../services/apiClient';
 import { validateDateNotBefore, validateNonNegativeMoney, validatePercentage, validatePositiveQuantity } from '../../utils/validation';
-import { todayIso, toIsoDate } from '../../utils/format';
+import { currencySymbol, formatMoney, todayIso, toIsoDate } from '../../utils/format';
+import { currencyChoices, currencyOptionLabel } from '../../utils/currencies';
+
+/** A form line; `rate_overridden` marks a rate the user typed, which re-pricing must keep. */
+type FormLineItem = InvoiceLineItemIn & { rate_overridden?: boolean };
 
 export const InvoiceFormPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -69,6 +73,7 @@ export const InvoiceFormPage: React.FC = () => {
     return toIsoDate(d);
   });
   const [paymentTerms, setPaymentTerms] = useState('Net 30');
+  const [currency, setCurrency] = useState('INR');
   const [reference, setReference] = useState('');
   const [salesperson, setSalesperson] = useState('');
   const [customerNotes, setCustomerNotes] = useState('');
@@ -102,7 +107,7 @@ export const InvoiceFormPage: React.FC = () => {
   // selection has not changed since the request was made.
   const selectionTokens = useRef<number[]>([]);
 
-  const [items, setItems] = useState<InvoiceLineItemIn[]>([
+  const [items, setItems] = useState<FormLineItem[]>([
     {
       name: '',
       description: '',
@@ -115,7 +120,7 @@ export const InvoiceFormPage: React.FC = () => {
     },
   ]);
 
-  const itemsRef = useRef<InvoiceLineItemIn[]>([]);
+  const itemsRef = useRef<FormLineItem[]>([]);
   itemsRef.current = items;
 
   useEffect(() => {
@@ -139,6 +144,7 @@ export const InvoiceFormPage: React.FC = () => {
         setInvoiceDate(inv.issue_date || inv.invoice_date || todayIso());
         setDueDate(inv.due_date);
         setPaymentTerms(inv.payment_terms || 'Net 30');
+        setCurrency(inv.currency || 'INR');
         setReference(inv.reference || '');
         setSalesperson(inv.salesperson || '');
         setCustomerNotes(inv.notes || inv.customer_notes || '');
@@ -221,8 +227,10 @@ export const InvoiceFormPage: React.FC = () => {
         const row = prev[index];
         if (!row) return prev;
         const rowPid = row.offering_id || row.plan_id;
-        // Stale response: the row now points at another item/selection or quantity.
+        // Stale response: the row now points at another item/selection or quantity, or the
+        // user has typed their own rate since.
         if (
+          row.rate_overridden ||
           (selectionTokens.current[index] ?? 0) !== token ||
           rowPid !== pid ||
           (Number(row.quantity) || 1) !== pricedQuantity
@@ -270,6 +278,11 @@ export const InvoiceFormPage: React.FC = () => {
       const next = [...prev];
       const prevRate = next[index].rate;
       next[index] = { ...next[index], [field]: value };
+      if (field === 'rate') {
+        // A typed rate is the user's, not the engine's: keep it and drop the engine's explanation.
+        next[index].rate_overridden = true;
+        next[index].pricing_explanation = '';
+      }
       // Never allow editing quantity or other non-rate fields to wipe out existing rate
       if (field === 'quantity' && (next[index].rate === undefined || Number.isNaN(next[index].rate))) {
         next[index].rate = prevRate ?? 0;
@@ -280,7 +293,7 @@ export const InvoiceFormPage: React.FC = () => {
     const pid = current.offering_id || current.plan_id;
     // A retained archived line keeps its stored rate: archived offerings cannot be priced, and
     // only its quantity (and other plain fields) are editable.
-    if (field === 'quantity' && pid && !archivedIds.has(pid)) {
+    if (field === 'quantity' && pid && !archivedIds.has(pid) && !current.rate_overridden) {
       // Only recalculate for dynamic pricing models where rate varies by volume/tier.
       // Backend models are lowercase ('flat', 'per_unit', 'tiered', ...), older
       // rows may carry 'FLAT' — compare case-insensitively.
@@ -306,7 +319,7 @@ export const InvoiceFormPage: React.FC = () => {
     const plan = type === 'plan' ? plans.find((p) => p.id === itemId) : undefined;
     const cat = type === 'offering' ? catalogItems.find((c) => c.id === itemId) : undefined;
 
-    let build: (qty: number) => InvoiceLineItemIn;
+    let build: (qty: number) => FormLineItem;
     let priceId: string | undefined;
     if (plan) {
       priceId = plan.id;
@@ -496,7 +509,7 @@ export const InvoiceFormPage: React.FC = () => {
         customer_id: customerId,
         issue_date: invoiceDate || todayIso(),
         due_date: dueDate || todayIso(),
-        currency: 'INR',
+        currency,
         discount_pct: 0,
         notes: customerNotes.trim() || undefined,
         terms: termsAndConditions.trim() || undefined,
@@ -631,7 +644,7 @@ export const InvoiceFormPage: React.FC = () => {
           </div>
 
           {/* Dates, Terms & Salesperson */}
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 pt-4 border-t border-gray-100">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 pt-4 border-t border-gray-100">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Invoice Date</label>
               <input
@@ -663,6 +676,21 @@ export const InvoiceFormPage: React.FC = () => {
                 <option value="Net 15">Net 15</option>
                 <option value="Net 30">Net 30</option>
                 <option value="Net 60">Net 60</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="invoice-currency" className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
+              <select
+                id="invoice-currency"
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              >
+                {currencyChoices(currency).map((c) => (
+                  <option key={c} value={c}>
+                    {currencyOptionLabel(c)}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -709,7 +737,7 @@ export const InvoiceFormPage: React.FC = () => {
                         <optgroup label="Plans & Pricing">
                           {plans.map((p) => (
                             <option key={`p-${p.id}`} value={`plan:${p.id}`}>
-                              Plan: {p.name} ({p.pricing_model || 'per_unit'} • ₹{Number(p.base_price || 0).toLocaleString()})
+                              Plan: {p.name} ({p.pricing_model || 'per_unit'} • {formatMoney(p.base_price || 0, p.currency || 'INR')})
                             </option>
                           ))}
                         </optgroup>
@@ -718,7 +746,7 @@ export const InvoiceFormPage: React.FC = () => {
                         <optgroup label="Catalog Offerings (Products / Services / Bundles)">
                           {catalogItems.map((c) => (
                             <option key={`c-${c.id}`} value={`offering:${c.id}`}>
-                              {c.type ? c.type.toUpperCase() : 'PRODUCT'}: {c.name} (₹{Number(c.base_price || 0).toLocaleString()})
+                              {c.type ? c.type.toUpperCase() : 'PRODUCT'}: {c.name} ({formatMoney(c.base_price || 0, c.currency || 'INR')})
                             </option>
                           ))}
                         </optgroup>
@@ -727,7 +755,7 @@ export const InvoiceFormPage: React.FC = () => {
                         .filter((o) => o.id === item.offering_id)
                         .map((o) => (
                           <option key={`a-${o.id}`} value={`offering:${o.id}`} disabled>
-                            {o.type ? o.type.toUpperCase() : 'PRODUCT'}: {o.name} (₹{Number(o.base_price || 0).toLocaleString()}) (Archived)
+                            {o.type ? o.type.toUpperCase() : 'PRODUCT'}: {o.name} ({formatMoney(o.base_price || 0, o.currency || 'INR')}) (Archived)
                           </option>
                         ))}
                     </select>
@@ -768,7 +796,7 @@ export const InvoiceFormPage: React.FC = () => {
                   {/* Rate */}
                   <div className="md:col-span-2">
                     <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">
-                      Rate (₹)
+                      Rate ({currencySymbol(currency)})
                     </label>
                     <input
                       type="number"
@@ -803,12 +831,12 @@ export const InvoiceFormPage: React.FC = () => {
                     <div className="text-right w-full pr-3">
                       <span className="text-xs text-gray-400 block">Amount</span>
                       <span className="text-sm font-bold text-gray-900">
-                        ₹
-                        {(
+                        {formatMoney(
                           (Number(item.quantity) || 0) *
-                          (Number(item.rate) || 0) *
-                          (1 + (noGst ? 0 : Number(item.tax_rate) || 0) / 100)
-                        ).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                            (Number(item.rate) || 0) *
+                            (1 + (noGst ? 0 : Number(item.tax_rate) || 0) / 100),
+                          currency
+                        )}
                       </span>
                     </div>
                     {items.length > 1 && (
@@ -836,11 +864,11 @@ export const InvoiceFormPage: React.FC = () => {
             <div className="w-full sm:w-80 space-y-2.5 text-sm">
               <div className="flex justify-between text-gray-600">
                 <span>Subtotal</span>
-                <span>₹{subtotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                <span>{formatMoney(subtotal, currency)}</span>
               </div>
               <div className="flex justify-between text-gray-600">
                 <span>Tax</span>
-                <span>+₹{taxAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                <span>+{formatMoney(taxAmount, currency)}</span>
               </div>
               {noGst && (
                 <p className="text-xs text-amber-700" data-testid="no-gst-notice">
@@ -870,7 +898,7 @@ export const InvoiceFormPage: React.FC = () => {
               <div className="flex justify-between text-lg font-bold text-gray-900 border-t border-gray-200 pt-3">
                 <span>Total Amount</span>
                 <span className="text-indigo-600">
-                  ₹{grandTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  {formatMoney(grandTotal, currency)}
                 </span>
               </div>
             </div>

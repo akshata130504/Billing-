@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { CatalogPage } from './CatalogPage';
 import { catalogCpqService } from '../../services/catalogCpqService';
 import { dashboardSummaryService } from '../../services/dashboardSummaryService';
@@ -29,6 +30,19 @@ vi.mock('../../components/common/ConfirmDialog', () => ({
   ConfirmDialog: ({ isOpen, onConfirm, confirmLabel }: any) =>
     isOpen ? <button onClick={() => void onConfirm()}>confirm-{confirmLabel}</button> : null,
 }));
+
+function Search() {
+  return <div data-testid="search">{useLocation().search}</div>;
+}
+
+function renderCatalog(path = '/catalog') {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <CatalogPage />
+      <Search />
+    </MemoryRouter>
+  );
+}
 
 function offering(id: string, name: string, is_active: boolean) {
   return {
@@ -63,7 +77,7 @@ describe('<CatalogPage /> archived offerings', () => {
   const within = (row: HTMLElement, title: string) => row.querySelector(`button[title="${title}"]`);
 
   it('archived row shows Unarchive and no Edit/Archive; active row is unchanged', async () => {
-    render(<CatalogPage />);
+    renderCatalog();
     await waitFor(() => expect(screen.getByText('Archived One')).toBeInTheDocument());
 
     const archived = rowOf('Archived One');
@@ -79,7 +93,7 @@ describe('<CatalogPage /> archived offerings', () => {
   });
 
   it('Unarchive calls the service, toasts and reloads', async () => {
-    render(<CatalogPage />);
+    renderCatalog();
     await waitFor(() => expect(screen.getByText('Archived One')).toBeInTheDocument());
     const loadsBefore = vi.mocked(catalogCpqService.listOfferings).mock.calls.length;
 
@@ -96,7 +110,7 @@ describe('<CatalogPage /> archived offerings', () => {
 
   it('shows an error toast when unarchive fails', async () => {
     vi.mocked(catalogCpqService.unarchiveOffering).mockRejectedValue(new Error('nope'));
-    render(<CatalogPage />);
+    renderCatalog();
     await waitFor(() => expect(screen.getByText('Archived One')).toBeInTheDocument());
     fireEvent.click(within(rowOf('Archived One'), 'Unarchive Offering') as HTMLElement);
     fireEvent.click(screen.getByText('confirm-Unarchive'));
@@ -106,7 +120,7 @@ describe('<CatalogPage /> archived offerings', () => {
   });
 
   it('Edit on an active row opens the modal; Archive still archives', async () => {
-    render(<CatalogPage />);
+    renderCatalog();
     await waitFor(() => expect(screen.getByText('Active One')).toBeInTheDocument());
 
     fireEvent.click(within(rowOf('Active One'), 'Edit Offering') as HTMLElement);
@@ -116,5 +130,26 @@ describe('<CatalogPage /> archived offerings', () => {
     fireEvent.click(screen.getByText('confirm-Archive'));
     await waitFor(() => expect(catalogCpqService.archiveOffering).toHaveBeenCalledWith('a1'));
     expect(catalogCpqService.unarchiveOffering).not.toHaveBeenCalled();
+  });
+});
+
+describe('<CatalogPage /> quick-action deep link (BUG-51)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(catalogCpqService.listOfferings).mockResolvedValue({ items: [], total: 0 } as any);
+    vi.mocked(catalogCpqService.listPriceBooks).mockResolvedValue({ items: [], total: 0 } as any);
+    vi.mocked(dashboardSummaryService.catalog).mockResolvedValue({ offerings: { total: 0, active: 0, by_type: {} } } as any);
+  });
+
+  it('opens the new-offering form for /catalog?new=product and drops the parameter', async () => {
+    renderCatalog('/catalog?new=product');
+    expect(await screen.findByText('offering-modal-open')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('search').textContent).toBe(''));
+  });
+
+  it('does not open the form without the parameter', async () => {
+    renderCatalog();
+    await waitFor(() => expect(catalogCpqService.listOfferings).toHaveBeenCalled());
+    expect(screen.queryByText('offering-modal-open')).toBeNull();
   });
 });

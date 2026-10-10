@@ -4,9 +4,9 @@
  */
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { AxiosRequestConfig } from 'axios';
 import { apiClient } from '../services/apiClient';
 import { previewAdapter } from '../platform/uiPreview/sampleData';
@@ -261,5 +261,60 @@ describe('Invoices configuration', { timeout: 20000 }, () => {
       ]),
     );
     expect(screen.queryByRole('button', { name: /View/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('Quick-action deep links (BUG-51)', { timeout: 20000 }, () => {
+  it('/customers?action=new opens the new-customer form', async () => {
+    renderWith(
+      <Routes>
+        <Route path="/customers" element={<CustomersListPage />} />
+        <Route path="/customers/new" element={<div>customer-form</div>} />
+      </Routes>,
+      undefined,
+      '/customers?action=new',
+    );
+    expect(await screen.findByText('customer-form')).toBeInTheDocument();
+  });
+
+  it('/invoices?action=new opens the new-invoice form', async () => {
+    renderWith(
+      <Routes>
+        <Route path="/invoices" element={<InvoicesListPage />} />
+        <Route path="/invoices/new" element={<div>invoice-form</div>} />
+      </Routes>,
+      undefined,
+      '/invoices?action=new',
+    );
+    expect(await screen.findByText('invoice-form')).toBeInTheDocument();
+  });
+});
+
+describe('Customize Dashboard is remembered (BUG-52)', { timeout: 30000 }, () => {
+  const KEY = 'rooman.dashboard.widgets.u.none';
+  afterEach(() => window.localStorage.clear());
+
+  const widgetShown = () => screen.queryAllByRole('heading', { name: 'Customer Health' }).length > 0;
+
+  it('keeps a hidden widget hidden after a reload, and Reset to Default restores it', async () => {
+    const first = renderWith(<DashboardPage />);
+    await screen.findByRole('heading', { level: 1, name: 'Welcome back, Asha!' });
+    await waitFor(() => expect(widgetShown()).toBe(true));
+    fireEvent.click(screen.getByRole('button', { name: /Customize Dashboard/ }));
+    fireEvent.click(await screen.findByRole('switch', { name: 'Customer Health' }));
+    expect(JSON.parse(window.localStorage.getItem(KEY) || '{}').customerHealth).toBe(false);
+    first.unmount();
+
+    // "Reload": a fresh mount reads the saved choice.
+    renderWith(<DashboardPage />);
+    await screen.findByRole('heading', { level: 1, name: 'Welcome back, Asha!' });
+    await waitFor(() => expect(screen.getByText('Churn Rate')).toBeInTheDocument());
+    expect(widgetShown()).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: /Customize Dashboard/ }));
+    expect(await screen.findByRole('switch', { name: 'Customer Health' })).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to Default' }));
+    expect(window.localStorage.getItem(KEY)).toBeNull();
+    expect(screen.getByRole('switch', { name: 'Customer Health' })).toHaveAttribute('aria-checked', 'true');
   });
 });

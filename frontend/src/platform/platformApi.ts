@@ -99,16 +99,38 @@ function request<T>(method: string, path: string, body?: unknown): Promise<T> {
 
 let refreshing: Promise<unknown> | null = null;
 
+let sessionExpiredHandler: (() => void) | null = null;
+
 /**
- * Console API call (`path` is relative to /api/v1/platform). The access token lives only 10
- * minutes, so a 401 triggers ONE shared refresh of the session cookie and a single retry; if the
- * refresh fails the original 401 is thrown and the console returns to the sign-in page.
+ * The console registers what to do when the platform session is gone for good (the refresh was
+ * refused): return to sign-in. Returns the unregister function.
  */
-export async function consoleRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+export function setPlatformSessionExpiredHandler(handler: () => void): () => void {
+  sessionExpiredHandler = handler;
+  return () => {
+    if (sessionExpiredHandler === handler) sessionExpiredHandler = null;
+  };
+}
+
+/** Report that the platform session has ended (sends the console to sign-in). */
+export function platformSessionExpired(): void {
+  sessionExpiredHandler?.();
+}
+
+function isUnauthorized(err: unknown): err is PlatformApiError {
+  return err instanceof PlatformApiError && err.status === 401;
+}
+
+/**
+ * The access token lives only 10 minutes, so a 401 triggers ONE shared refresh of the session
+ * cookie and a single retry. If the session cannot be refreshed (or is refused again) the 401 is
+ * thrown and the console is sent back to the sign-in page instead of repeating the error.
+ */
+async function withSessionRefresh<T>(call: () => Promise<T>): Promise<T> {
   try {
-    return await send<T>(method, `${ROOT}${path}`, body);
+    return await call();
   } catch (err) {
-    if (!(err instanceof PlatformApiError) || err.status !== 401) throw err;
+    if (!isUnauthorized(err)) throw err;
     if (!refreshing) {
       refreshing = platformApi.refresh().finally(() => {
         refreshing = null;
@@ -117,10 +139,21 @@ export async function consoleRequest<T>(method: string, path: string, body?: unk
     try {
       await refreshing;
     } catch {
+      platformSessionExpired();
       throw err;
     }
-    return send<T>(method, `${ROOT}${path}`, body);
+    try {
+      return await call();
+    } catch (retryErr) {
+      if (isUnauthorized(retryErr)) platformSessionExpired();
+      throw retryErr;
+    }
   }
+}
+
+/** Console API call (`path` is relative to /api/v1/platform), see withSessionRefresh. */
+export function consoleRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+  return withSessionRefresh(() => send<T>(method, `${ROOT}${path}`, body));
 }
 
 export const platformApi = {
@@ -132,5 +165,6 @@ export const platformApi = {
   logout: () => request<void>('POST', '/logout'),
   logoutAll: () => request<{ sessions_revoked: number }>('POST', '/logout-all'),
   /** Re-confirm identity with the current password before a sensitive action. */
-  stepUp: (password: string) => request<PlatformStepUp>('POST', '/step-up', { password }),
+  // A wrong password is a 403; a 401 means the session itself has expired (see withSessionRefresh).
+  stepUp: (password: string) => withSessionRefresh(() => request<PlatformStepUp>('POST', '/step-up', { password })),
 };

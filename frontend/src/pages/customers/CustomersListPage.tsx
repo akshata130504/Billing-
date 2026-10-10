@@ -9,9 +9,10 @@ import {
   visible,
 } from '../../appUi/registry';
 import { usePageUi, useUiEditable } from '../../appUi/UiConfigContext';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Building2, Plus, RefreshCw, Search, UserCheck, UserX, Users, X } from 'lucide-react';
 import { customerService } from '../../services/customerService';
+import { isCreateRequested } from '../../hooks/useCreateDeepLink';
 import type { CustomerListParams, CustomerOut, CustomerStatus } from '../../types/api';
 import type { CustomerSortKey } from '../../types/customers';
 import { Button } from '../../components/common/Button';
@@ -56,6 +57,13 @@ export function CustomersListPage() {
   const navigate = useNavigate();
   const { hasRole } = useAuth();
   const canWrite = hasRole('finance');
+
+  // Quick-action deep link (`/customers?action=new`): open the create form.
+  const [searchParams] = useSearchParams();
+  const createRequested = isCreateRequested(searchParams);
+  useEffect(() => {
+    if (createRequested && canWrite) navigate('/customers/new', { replace: true });
+  }, [createRequested, canWrite, navigate]);
 
   const [items, setItems] = useState<CustomerOut[]>([]);
   const [total, setTotal] = useState(0);

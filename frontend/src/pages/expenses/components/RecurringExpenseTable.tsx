@@ -181,7 +181,7 @@ export function RecurringExpenseTable({
 
                   {/* Amount */}
                   <td className="py-2.5 px-3 text-right whitespace-nowrap font-bold text-slate-900 font-mono">
-                    {formatINR(expense.amount)}
+                    {formatINR(expense.amount, expense.currency)}
                   </td>
 
                   {/* Next Run */}

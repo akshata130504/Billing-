@@ -24,6 +24,7 @@ import type { OfferingOut, PriceBookOut, OfferingIn, PriceBookIn } from '../../t
 import { OfferingModal } from './components/OfferingModal';
 import { PriceBookModal } from './components/PriceBookModal';
 import { usePageSpec } from '../../appUi/usePageSpec';
+import { useCreateDeepLink } from '../../hooks/useCreateDeepLink';
 
 const PAGE_SIZE = 25;
 
@@ -197,6 +198,8 @@ export function CatalogPage() {
     setIsOfferingModalOpen(true);
     void loadPickerOfferings();
   };
+  // Quick-action deep link (`/catalog?new=product`): open the new-offering form.
+  useCreateDeepLink(() => openOfferingModal(null), canEdit);
 
   const openPriceBookModal = (pb: PriceBookOut | null) => {
     setEditingPriceBook(pb);
