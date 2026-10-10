@@ -6,7 +6,7 @@ from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.app.models import InvoiceStatus, PaymentMethod, PaymentStatus
-from backend.app.schemas.common_refs import CustomerRef, LineItemIn, LineItemOut, UserRef
+from backend.app.schemas.common_refs import CustomerRef, LineItemIn, LineItemOut, StrictRequest, UserRef
 from backend.app.schemas.validators import Money, reject_future_datetime
 
 # Technical ceiling only (abuse/overflow prevention) — the business rules define no cap.
@@ -17,7 +17,7 @@ def _upper_currency(value: Optional[str]) -> Optional[str]:
     return value.upper() if value else value
 
 
-class InvoiceLineItemIn(LineItemIn):
+class InvoiceLineItemIn(LineItemIn, StrictRequest):
     """An invoice line as posted by the client. ``id`` is the stored id of an existing line of THIS
     invoice that the client is keeping (it lets the server tell a retained line from a removed and
     re-added one); omit it on new lines. Invoice-specific so the shared LineItemIn contract used by
@@ -42,7 +42,7 @@ def _accept_shared_line_items(value):
     return value
 
 
-class InvoiceCreate(BaseModel):
+class InvoiceCreate(StrictRequest):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     customer_id: str
@@ -62,7 +62,7 @@ class InvoiceCreate(BaseModel):
         return _accept_shared_line_items(value)
 
 
-class InvoiceUpdate(BaseModel):
+class InvoiceUpdate(StrictRequest):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     customer_id: Optional[str] = None
@@ -82,11 +82,11 @@ class InvoiceUpdate(BaseModel):
         return _accept_shared_line_items(value)
 
 
-class InvoiceVoidIn(BaseModel):
+class InvoiceVoidIn(StrictRequest):
     reason: str = Field(..., min_length=1, max_length=500)
 
 
-class RecordPaymentIn(BaseModel):
+class RecordPaymentIn(StrictRequest):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     amount: Money = Field(..., gt=0)

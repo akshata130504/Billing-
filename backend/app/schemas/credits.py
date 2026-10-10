@@ -8,11 +8,11 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.models.credits import CreditNoteStatus
-from backend.app.schemas.common_refs import CustomerRef
+from backend.app.schemas.common_refs import CustomerRef, StrictRequest
 from backend.app.schemas.validators import Money
 
 
-class CreditNoteLineIn(BaseModel):
+class CreditNoteLineIn(StrictRequest):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     description: str = Field(..., min_length=1, max_length=255)
@@ -38,7 +38,7 @@ class CreditApplicationOut(BaseModel):
     applied_at: datetime
 
 
-class CreditNoteCreateIn(BaseModel):
+class CreditNoteCreateIn(StrictRequest):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     customer_id: str
@@ -50,7 +50,7 @@ class CreditNoteCreateIn(BaseModel):
     lines: List[CreditNoteLineIn] = Field(..., min_length=1)
 
 
-class CreditApplicationIn(BaseModel):
+class CreditApplicationIn(StrictRequest):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     invoice_id: str

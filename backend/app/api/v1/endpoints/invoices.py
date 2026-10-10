@@ -153,7 +153,9 @@ def record_payment(
 
     def _record():
         payment = payment_service.record_invoice_payment(db, ctx, invoice, body)
-        return PaymentOut.model_validate(payment_service.serialize_payment(payment)).model_dump(mode="json")
+        out = PaymentOut.model_validate(payment_service.serialize_payment(payment))
+        out.warnings = payment_service.duplicate_reference_warnings(db, payment)
+        return out.model_dump(mode="json")
 
     status_code, out = idempotency_service.run_idempotent(
         db,

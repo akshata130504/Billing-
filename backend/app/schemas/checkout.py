@@ -5,9 +5,11 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
+from backend.app.schemas.common_refs import StrictRequest
+from backend.app.schemas.validators import Money
 
 
-class CheckoutTemplateCreate(BaseModel):
+class CheckoutTemplateCreate(StrictRequest):
     name: str = Field(..., max_length=100)
     template_type: str = Field("single_page", description="single_page or multi_page")
     primary_color: str = Field("#2563eb", max_length=20)
@@ -23,7 +25,7 @@ class CheckoutTemplateCreate(BaseModel):
     is_default: bool = False
 
 
-class CheckoutTemplateUpdate(BaseModel):
+class CheckoutTemplateUpdate(StrictRequest):
     name: Optional[str] = Field(None, max_length=100)
     template_type: Optional[str] = None
     primary_color: Optional[str] = None
@@ -63,7 +65,7 @@ class CheckoutTemplateOut(BaseModel):
     updated_at: datetime
 
 
-class CheckoutSessionCreate(BaseModel):
+class CheckoutSessionCreate(StrictRequest):
     purpose: str = Field(
         "invoice_payment",
         description="invoice_payment, new_subscription, update_subscription, update_card, one_time_addon, add_payment_method",
@@ -73,7 +75,7 @@ class CheckoutSessionCreate(BaseModel):
     invoice_id: Optional[str] = None
     subscription_id: Optional[str] = None
     plan_id: Optional[str] = None
-    amount: Optional[Decimal] = None
+    amount: Optional[Money] = None
     currency: Optional[str] = "INR"
     expires_in_hours: int = Field(1, ge=1, le=168, description="Session validity duration in hours")
     save_payment_method: bool = False

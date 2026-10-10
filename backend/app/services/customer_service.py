@@ -366,6 +366,27 @@ def serialize_contact(contact: CustomerContact) -> Dict[str, Any]:
     }
 
 
+def duplicate_email_warnings(db: Session, customer: Customer) -> List[str]:
+    """Non-blocking: the same email on another customer of the organization (group companies
+    often share an accounts mailbox, so it is never refused - the user is just told)."""
+    email = (customer.email or "").strip()
+    if not email:
+        return []
+    others = db.scalars(
+        select(Customer.display_name)
+        .where(
+            Customer.organization_id == customer.organization_id,
+            Customer.id != customer.id,
+            func.lower(Customer.email) == email.lower(),
+        )
+        .order_by(Customer.created_at)
+        .limit(3)
+    ).all()
+    if not others:
+        return []
+    return [f"Email {email} is also used by {', '.join(others)}. Check this is not a duplicate customer."]
+
+
 def serialize_customer(customer: Customer, stats: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     data = {
         "id": customer.id,

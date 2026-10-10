@@ -39,18 +39,26 @@ def organization_counts(db: Session) -> Dict[str, int]:
 
 
 def scheduler_status(db: Session) -> Dict[str, Any]:
+    """The billing scheduler's real state, from its own heartbeat.
+
+    The scheduler normally runs as a separate process, so this API process's SCHEDULER_ENABLED
+    flag says nothing about it: `running` is true when the scheduler finished a run within the
+    stale window, and `enabled` is true when it is running or this process runs it itself.
+    """
     interval = max(1, int(settings.SCHEDULER_INTERVAL_MINUTES or 5))
     stale_after = max(900, interval * 60 * 3)
     beat = get_scheduler_heartbeat(db)
     if beat is None:
-        return {"enabled": bool(settings.SCHEDULER_ENABLED), "status": "missing", "interval_minutes": interval,
-                "last_finished_at": None, "seconds_since_last_run": None, "last_error_count": None,
-                "total_runs": 0, "last_counts": {}}
+        return {"enabled": bool(settings.SCHEDULER_ENABLED), "running": False, "status": "missing",
+                "interval_minutes": interval, "last_finished_at": None, "seconds_since_last_run": None,
+                "last_error_count": None, "total_runs": 0, "last_counts": {}}
     age = beat.get("seconds_since_last_run")
     counts = beat.get("last_counts") or {}
+    running = age is not None and age <= stale_after
     return {
-        "enabled": bool(settings.SCHEDULER_ENABLED),
-        "status": "ok" if age is not None and age <= stale_after else "stale",
+        "enabled": running or bool(settings.SCHEDULER_ENABLED),
+        "running": running,
+        "status": "ok" if running else "stale",
         "interval_minutes": interval,
         "last_finished_at": beat.get("last_finished_at"),
         "seconds_since_last_run": age,
@@ -72,7 +80,10 @@ def health(db: Session) -> Dict[str, Any]:
             "current": migrations.get("current"),
             "head": migrations.get("head"),
         },
-        "scheduler": scheduler_status(db) if db_ok else {"enabled": bool(settings.SCHEDULER_ENABLED), "status": "unknown"},
+        "scheduler": (
+            scheduler_status(db) if db_ok
+            else {"enabled": bool(settings.SCHEDULER_ENABLED), "running": False, "status": "unknown"}
+        ),
         "platform": {
             "auth_enabled": settings.platform_auth_enabled,
             "step_up_minutes": settings.PLATFORM_STEP_UP_MINUTES,

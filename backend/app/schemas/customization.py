@@ -11,6 +11,7 @@ from backend.app.models.customization import (
     ScheduleFrequency,
     TemplateLayoutType,
 )
+from backend.app.schemas.common_refs import StrictRequest
 
 
 # ---------------------------------------------------------------------------
@@ -29,11 +30,11 @@ class TransactionNumberSeriesBase(BaseModel):
     notes: Optional[str] = Field(None, max_length=255)
 
 
-class TransactionNumberSeriesCreate(TransactionNumberSeriesBase):
+class TransactionNumberSeriesCreate(TransactionNumberSeriesBase, StrictRequest):
     pass
 
 
-class TransactionNumberSeriesUpdate(BaseModel):
+class TransactionNumberSeriesUpdate(StrictRequest):
     name: Optional[str] = Field(None, max_length=100)
     prefix: Optional[str] = Field(None, max_length=20)
     starting_number: Optional[int] = Field(None, ge=1)
@@ -54,7 +55,7 @@ class TransactionNumberSeriesOut(TransactionNumberSeriesBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-class NumberSeriesPreviewRequest(BaseModel):
+class NumberSeriesPreviewRequest(StrictRequest):
     prefix: str = ""
     starting_number: int = 1
     padding: int = 6
@@ -88,11 +89,11 @@ class DocumentTemplateBase(BaseModel):
     show_tax_summary: bool = True
 
 
-class DocumentTemplateCreate(DocumentTemplateBase):
+class DocumentTemplateCreate(DocumentTemplateBase, StrictRequest):
     pass
 
 
-class DocumentTemplateUpdate(BaseModel):
+class DocumentTemplateUpdate(StrictRequest):
     name: Optional[str] = Field(None, max_length=100)
     layout_type: Optional[TemplateLayoutType] = None
     is_default: Optional[bool] = None
@@ -144,11 +145,11 @@ class ReportingTagBase(BaseModel):
     is_active: bool = True
 
 
-class ReportingTagCreate(ReportingTagBase):
+class ReportingTagCreate(ReportingTagBase, StrictRequest):
     pass
 
 
-class ReportingTagUpdate(BaseModel):
+class ReportingTagUpdate(StrictRequest):
     name: Optional[str] = Field(None, max_length=100)
     code: Optional[str] = Field(None, max_length=50)
     description: Optional[str] = Field(None, max_length=255)
@@ -171,11 +172,11 @@ class WebTabBase(BaseModel):
     allowed_roles: List[str] = Field(default_factory=lambda: ["owner", "admin", "finance", "viewer"])
 
 
-class WebTabCreate(WebTabBase):
+class WebTabCreate(WebTabBase, StrictRequest):
     pass
 
 
-class WebTabUpdate(BaseModel):
+class WebTabUpdate(StrictRequest):
     tab_name: Optional[str] = Field(None, max_length=100)
     url: Optional[str] = Field(None, max_length=500)
     is_active: Optional[bool] = None
@@ -202,7 +203,7 @@ class AutomationActionBase(BaseModel):
     execution_order: int = Field(default=1, ge=1)
 
 
-class AutomationActionCreate(AutomationActionBase):
+class AutomationActionCreate(AutomationActionBase, StrictRequest):
     pass
 
 
@@ -242,11 +243,11 @@ class AutomationRuleBase(BaseModel):
     is_active: bool = True
 
 
-class AutomationRuleCreate(AutomationRuleBase):
+class AutomationRuleCreate(AutomationRuleBase, StrictRequest):
     actions: List[AutomationActionCreate] = Field(default_factory=list)
 
 
-class AutomationRuleUpdate(BaseModel):
+class AutomationRuleUpdate(StrictRequest):
     name: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = Field(None, max_length=255)
     module: Optional[str] = Field(None, max_length=50)
@@ -267,7 +268,7 @@ class AutomationRuleOut(AutomationRuleBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-class AutomationRuleTestRequest(BaseModel):
+class AutomationRuleTestRequest(StrictRequest):
     event_data: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -330,11 +331,11 @@ class AutomationScheduleBase(BaseModel):
     is_active: bool = True
 
 
-class AutomationScheduleCreate(AutomationScheduleBase):
+class AutomationScheduleCreate(AutomationScheduleBase, StrictRequest):
     pass
 
 
-class AutomationScheduleUpdate(BaseModel):
+class AutomationScheduleUpdate(StrictRequest):
     name: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = Field(None, max_length=255)
     frequency: Optional[ScheduleFrequency] = None

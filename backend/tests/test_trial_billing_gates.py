@@ -157,7 +157,9 @@ def test_payment_links_closed_in_trial_open_when_paid(client, db, tenant):
     view = client.get(f"{API}/public/invoices/{token}")
     assert view.status_code == 200, view.text  # the customer can still see the invoice
     assert view.json()["razorpay"]["enabled"] is False
-    assert view.json()["razorpay"]["unavailable_reason"]
+    # Trial wording, not the suspended-account wording (BUG-15).
+    assert "not accepting online payments yet" in view.json()["razorpay"]["unavailable_reason"]
+    assert "temporarily unavailable" not in view.json()["razorpay"]["unavailable_reason"]
     order = client.post(f"{API}/public/invoices/{token}/razorpay-order", json={})
     assert order.status_code == 403 and _code(order) == "ORGANIZATION_UNAVAILABLE"
     assert "not accepting online payments" in order.json()["error"]["message"]

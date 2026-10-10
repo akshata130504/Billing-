@@ -212,7 +212,9 @@ export function OrganizationDetailPage() {
             <dl className="grid gap-4 sm:grid-cols-2">
               <Field label="Status"><StatusBadge status={life.status} /></Field>
               <Field label="Billing automation">
-                {life.automation_running ? <span className="text-emerald-700">Running</span> : <span className="text-amber-700">Paused</span>}
+                {life.automation_running
+                  ? <span className="text-emerald-700">Running</span>
+                  : <span className="text-amber-700">{life.automation_label ?? 'Paused'}</span>}
               </Field>
               <Field label="Last change">{formatDateTime(life.status_changed_at)}</Field>
               <Field label="Changed by">{life.status_changed_by ? `${life.status_changed_by.full_name} (${life.status_changed_by.email})` : '-'}</Field>

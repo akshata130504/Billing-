@@ -319,6 +319,16 @@ describe('organization detail', () => {
     expect(within(dialog).getByLabelText(/^Ticket reference \(optional\)/)).toBeInTheDocument();
   });
 
+  it('shows billing automation as held for a trial organization (BUG-17)', async () => {
+    api.organization.mockResolvedValue(orgDetail({
+      lifecycle: { ...orgDetail().lifecycle, automation_running: false, automation_state: 'held_trial',
+        automation_label: 'Held - trial (no approved subscription)' },
+    }));
+    renderAt('/organizations/org-1');
+    expect(await screen.findByText('Held - trial (no approved subscription)')).toBeInTheDocument();
+    expect(screen.queryByText('Running')).not.toBeInTheDocument();
+  });
+
   it('shows server errors inside the dialog', async () => {
     api.organization.mockResolvedValue(orgDetail());
     api.lifecycle.mockRejectedValue(new PlatformApiError('Cannot suspend an organization that is suspended.', 409, 'CONFLICT'));
@@ -469,6 +479,22 @@ describe('system health', () => {
     expect(screen.getByText('Skipped (suspended or paused)')).toBeInTheDocument();
     expect(screen.getByText('Payment gateway not configured')).toBeInTheDocument();
     expect(screen.getByText('30 days')).toBeInTheDocument();
+  });
+
+  it('reports the scheduler as running from its heartbeat, not the API process flag (BUG-33)', async () => {
+    api.health.mockResolvedValue({
+      api: { status: 'ok', version: '0.1.0', environment: 'production' },
+      database: { status: 'connected' },
+      migrations: { status: 'at_head', current: 'x', head: 'x' },
+      scheduler: { enabled: true, running: true, status: 'ok', last_finished_at: '2026-10-10T08:00:00Z', interval_minutes: 15,
+        last_error_count: 0, total_runs: 40, last_counts: {} },
+      platform: { auth_enabled: true, step_up_minutes: 15, session_idle_minutes: 30, session_max_hours: 8, deletion_waiting_days: 30 },
+      integrations: { email_configured: true, payments_configured: true },
+    });
+    renderAt('/health');
+    const label = await screen.findByText('Running (last run within the expected interval)');
+    expect(label.parentElement).toHaveTextContent('Yes');
+    expect(screen.queryByText('Enabled', { selector: 'dt' })).not.toBeInTheDocument();
   });
 
   it('shows an error state', async () => {

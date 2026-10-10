@@ -398,6 +398,8 @@ export interface CustomerOut {
   stats?: CustomerStats;
   created_at: string;
   updated_at: string;
+  /** Non-blocking notices on create/update (e.g. the email is used by another customer). */
+  warnings?: string[];
 }
 
 export interface CustomerIn {
@@ -840,6 +842,8 @@ export interface PaymentOut {
   recorded_by: UserRef | null;
   created_at: string;
   updated_at: string;
+  /** Non-blocking notices on create/update (e.g. the reference is used on another payment). */
+  warnings?: string[];
 }
 
 export interface PaymentIn {

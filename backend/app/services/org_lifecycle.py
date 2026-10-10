@@ -120,11 +120,20 @@ def payment_collection_allowed(db: Session, organization_id: Optional[str]) -> b
     return customer_actions_allowed(db, organization_id) and billing_collection_allowed(db, organization_id)
 
 
-def assert_payment_collection_allowed(db: Session, organization_id: Optional[str]) -> None:
+def payment_unavailable_reason(db: Session, organization_id: Optional[str]) -> Optional[str]:
+    """Why a customer cannot pay online right now (None when they can): a non-ACTIVE merchant
+    is unavailable; one in its free trial simply does not accept online payments yet."""
     if not customer_actions_allowed(db, organization_id):
-        raise OrganizationUnavailableError()
+        return CUSTOMER_UNAVAILABLE_MESSAGE
     if not billing_collection_allowed(db, organization_id):
-        raise OrganizationUnavailableError(PAYMENTS_NOT_ACCEPTED_MESSAGE)
+        return PAYMENTS_NOT_ACCEPTED_MESSAGE
+    return None
+
+
+def assert_payment_collection_allowed(db: Session, organization_id: Optional[str]) -> None:
+    reason = payment_unavailable_reason(db, organization_id)
+    if reason is not None:
+        raise OrganizationUnavailableError(reason)
 
 
 class AutomationGuard:

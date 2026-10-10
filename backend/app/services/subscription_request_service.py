@@ -135,7 +135,7 @@ def submit(db: Session, ctx: CurrentContext, *, modules: List[str], seats: int, 
                      entity_id=req.id, entity_label=org.name, ctx=ctx, after=summary)
         platform_audit.record(
             db, action=platform_audit.SUBSCRIPTION_REQUEST_SUBMITTED, result=platform_audit.SUCCESS,
-            ip_address=ctx.ip_address, user_agent=ctx.user_agent, organization=org,
+            tenant_actor=ctx.user, tenant_role=ctx.role, ip_address=ctx.ip_address, user_agent=ctx.user_agent, organization=org,
             target_type="subscription_request", target_id=req.id, details={**summary, "requested_by": ctx.user.email},
         )
         db.commit()
@@ -158,7 +158,7 @@ def withdraw(db: Session, ctx: CurrentContext, request_id: str) -> Dict[str, Any
                      before={"status": "submitted"}, after={"status": "withdrawn"})
         platform_audit.record(
             db, action=platform_audit.SUBSCRIPTION_REQUEST_WITHDRAWN, result=platform_audit.SUCCESS,
-            ip_address=ctx.ip_address, user_agent=ctx.user_agent, organization=ctx.organization,
+            tenant_actor=ctx.user, tenant_role=ctx.role, ip_address=ctx.ip_address, user_agent=ctx.user_agent, organization=ctx.organization,
             target_type="subscription_request", target_id=req.id,
         )
         db.commit()

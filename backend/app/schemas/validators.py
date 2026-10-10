@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Optional
 
@@ -136,14 +136,36 @@ def validate_slug_format(value: Optional[str], field_label: str = "Code") -> Opt
     return val
 
 
+# The furthest ahead of UTC any timezone runs (UTC+14).
+_MAX_TZ_AHEAD = timedelta(hours=14)
+
+
 def reject_future_datetime(value: Optional[datetime], field_label: str = "Date") -> Optional[datetime]:
-    """Rejects a datetime later than today."""
+    """Rejects a datetime later than today.
+
+    An aware value is compared with today in its own timezone. A naive value (a plain date such
+    as "2026-10-10") is a calendar date in the organization's timezone, which is not known here:
+    it is only rejected once it is later than today everywhere (UTC+14), and the service re-checks
+    it against the organization's business day (`is_after_org_today`).
+    """
     if value is None:
         return None
-    now = datetime.now(value.tzinfo) if value.tzinfo else max(datetime.now(), datetime.now(timezone.utc).replace(tzinfo=None))
-    if value.date() > now.date():
+    from backend.app.services import timezones
+
+    now = timezones.utc_now()
+    today = now.astimezone(value.tzinfo).date() if value.tzinfo else (now + _MAX_TZ_AHEAD).date()
+    if value.date() > today:
         raise ValueError(f"{field_label} cannot be in the future.")
     return value
+
+
+def is_after_org_today(value: Optional[datetime], organization) -> bool:
+    """True when a naive (organization-local) datetime falls after the organization's today."""
+    if value is None or value.tzinfo is not None:
+        return False
+    from backend.app.services import timezones
+
+    return value.date() > timezones.org_today(organization)
 
 
 def validate_sku_format(value: Optional[str]) -> Optional[str]:
