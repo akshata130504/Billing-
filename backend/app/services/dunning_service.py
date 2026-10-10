@@ -51,7 +51,7 @@ from backend.app.schemas.dunning import (
     DunningPolicyUpdate,
     ExpiringCardNoticeOut,
 )
-from backend.app.services import audit, invoice_service, payment_service, razorpay_gateway, timezones
+from backend.app.services import audit, currency_totals, invoice_service, payment_service, razorpay_gateway, timezones
 from backend.app.services.gateways.registry import get_gateway_adapter
 from backend.app.services.notification_service import dispatch_notification
 from backend.app.services.numbering import next_number
@@ -1087,25 +1087,30 @@ def get_dunning_metrics(db: Session, organization_id: str) -> DunningMetricsOut:
         )
     ) or 0
 
-    total_risk = db.scalar(
-        select(func.coalesce(func.sum(DunningCase.amount_due), Decimal("0.00"))).where(
-            DunningCase.organization_id == organization_id,
-            DunningCase.status.in_([
-                DunningCaseStatus.OPEN,
-                DunningCaseStatus.RETRY_SCHEDULED,
-                DunningCaseStatus.RETRYING,
-                DunningCaseStatus.PAUSED,
-                DunningCaseStatus.EXHAUSTED,
-            ]),
-        )
-    ) or Decimal("0.00")
-
-    total_recovered = db.scalar(
-        select(func.coalesce(func.sum(DunningCase.amount_due), Decimal("0.00"))).where(
-            DunningCase.organization_id == organization_id,
-            DunningCase.status == DunningCaseStatus.RECOVERED,
-        )
-    ) or Decimal("0.00")
+    # Amounts per currency (no FX); the scalar totals are the org's base currency only.
+    base = currency_totals.org_base_currency(db, organization_id)
+    risk_by_currency = currency_totals.sums_by_currency(
+        db,
+        DunningCase.currency,
+        DunningCase.amount_due,
+        DunningCase.organization_id == organization_id,
+        DunningCase.status.in_([
+            DunningCaseStatus.OPEN,
+            DunningCaseStatus.RETRY_SCHEDULED,
+            DunningCaseStatus.RETRYING,
+            DunningCaseStatus.PAUSED,
+            DunningCaseStatus.EXHAUSTED,
+        ]),
+    )
+    recovered_by_currency = currency_totals.sums_by_currency(
+        db,
+        DunningCase.currency,
+        DunningCase.amount_due,
+        DunningCase.organization_id == organization_id,
+        DunningCase.status == DunningCaseStatus.RECOVERED,
+    )
+    total_risk = risk_by_currency.get(base, Decimal("0.00"))
+    total_recovered = recovered_by_currency.get(base, Decimal("0.00"))
 
     rate = (float(recovered_cases) / float(total_cases) * 100.0) if total_cases > 0 else 0.0
 
@@ -1119,7 +1124,15 @@ def get_dunning_metrics(db: Session, organization_id: str) -> DunningMetricsOut:
         recovery_rate_pct=round(rate, 1),
         total_amount_at_risk=Decimal(str(total_risk)),
         total_amount_recovered=Decimal(str(total_recovered)),
-        currency="INR",
+        currency=base,
+        by_currency=[
+            {
+                "currency": cur,
+                "total_amount_at_risk": str(risk_by_currency.get(cur, Decimal("0.00"))),
+                "total_amount_recovered": str(recovered_by_currency.get(cur, Decimal("0.00"))),
+            }
+            for cur in currency_totals.order_currencies(set(risk_by_currency) | set(recovered_by_currency), base)
+        ],
     )
 
 

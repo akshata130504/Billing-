@@ -28,10 +28,11 @@ router = APIRouter()
 
 @router.get("/dashboard", response_model=CollectionsDashboardOut, summary="Collections dashboard")
 def get_dashboard(
+    currency: Optional[str] = Query(None, pattern="^[A-Za-z]{3}$", description="Default: the organization's base currency"),
     ctx: CurrentContext = Depends(require_viewer),
     db: Session = Depends(get_db),
 ):
-    return collection_service.dashboard(db, ctx.organization_id)
+    return collection_service.dashboard(db, ctx.organization_id, currency)
 
 
 @router.get("/invoices", response_model=PaginatedResponse[CollectionInvoiceOut], summary="List invoices in collections")

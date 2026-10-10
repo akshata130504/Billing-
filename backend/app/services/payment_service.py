@@ -42,7 +42,7 @@ from backend.app.schemas.common_refs import customer_ref, iso_dt, money_str, use
 from backend.app.schemas.invoices import RecordPaymentIn
 from backend.app.schemas.payments import AllocationIn, PaymentCreate, PaymentUpdate
 from backend.app.schemas.validators import is_after_org_today
-from backend.app.services import audit, razorpay_gateway, timezones
+from backend.app.services import audit, currency_totals, razorpay_gateway, timezones
 from backend.app.services.invoice_service import (
     SETTLED_PAYMENT_STATUSES,
     get_customer,
@@ -318,29 +318,42 @@ def payments_summary(db: Session, organization_id: str, **filters) -> Dict[str, 
     ).subquery()
     matching = select(ids_stmt.c.id)
 
-    def _sum(column, *conditions):
-        stmt = select(func.coalesce(func.sum(column), 0)).where(Payment.id.in_(matching))
-        for condition in conditions:
-            stmt = stmt.where(condition)
-        return D(db.scalar(stmt))
+    def _sums(column, *conditions) -> Dict[str, Decimal]:
+        return currency_totals.sums_by_currency(db, Payment.currency, column, Payment.id.in_(matching), *conditions)
 
-    collected = _sum(Payment.amount - Payment.amount_refunded, Payment.status.in_(SETTLED_PAYMENT_STATUSES))
-    pending = _sum(Payment.amount, Payment.status == PaymentStatus.PENDING)
-    refunded = _sum(Payment.amount_refunded)
-    allocated = D(
-        db.scalar(
-            select(func.coalesce(func.sum(PaymentAllocation.amount), 0))
-            .join(Payment, Payment.id == PaymentAllocation.payment_id)
-            .where(Payment.id.in_(matching), Payment.status.in_(SETTLED_PAYMENT_STATUSES))
-        )
+    collected = _sums(Payment.amount - Payment.amount_refunded, Payment.status.in_(SETTLED_PAYMENT_STATUSES))
+    pending = _sums(Payment.amount, Payment.status == PaymentStatus.PENDING)
+    refunded = _sums(Payment.amount_refunded)
+    allocated = _sums(
+        PaymentAllocation.amount, PaymentAllocation.payment_id == Payment.id, Payment.status.in_(SETTLED_PAYMENT_STATUSES)
     )
-    count = db.scalar(select(func.count()).select_from(ids_stmt)) or 0
+    counts: Dict[str, int] = {}
+    for cur, n in db.execute(select(Payment.currency, func.count()).where(Payment.id.in_(matching)).group_by(Payment.currency)).all():
+        counts[currency_totals.norm(cur)] = counts.get(currency_totals.norm(cur), 0) + int(n)
+
+    base = currency_totals.org_base_currency(db, organization_id)
+    zero = Decimal("0")
+
+    def _row(cur: str) -> Dict[str, Any]:
+        return {
+            "currency": cur,
+            "count": counts.get(cur, 0),
+            "total_collected": money_str(collected.get(cur, zero)),
+            "pending_amount": money_str(pending.get(cur, zero)),
+            "total_refunded": money_str(refunded.get(cur, zero)),
+            "unallocated_amount": money_str(max(zero, collected.get(cur, zero) - allocated.get(cur, zero))),
+        }
+
+    base_row = _row(base)
+    # Money fields are the base currency only (labelled by `currency`); never summed across currencies.
     return {
-        "count": int(count),
-        "total_collected": money_str(collected),
-        "pending_amount": money_str(pending),
-        "total_refunded": money_str(refunded),
-        "unallocated_amount": money_str(max(Decimal("0"), collected - allocated)),
+        "count": sum(counts.values()),
+        "currency": base,
+        "total_collected": base_row["total_collected"],
+        "pending_amount": base_row["pending_amount"],
+        "total_refunded": base_row["total_refunded"],
+        "unallocated_amount": base_row["unallocated_amount"],
+        "by_currency": [_row(cur) for cur in currency_totals.order_currencies(counts, base)],
     }
 
 
@@ -370,20 +383,22 @@ def reconciliation_summary(db: Session, organization_id: str) -> Dict[str, Any]:
     for status_value, count in db.execute(base.group_by(Payment.reconciliation_status)).all():
         key = status_value.value if hasattr(status_value, "value") else str(status_value)
         counts[key] = int(count)
-    received = db.scalar(
-        select(func.coalesce(func.sum(Payment.amount - Payment.amount_refunded), 0)).where(
-            Payment.organization_id == organization_id, Payment.status.in_(SETTLED_PAYMENT_STATUSES)
-        )
+    settled = (Payment.organization_id == organization_id, Payment.status.in_(SETTLED_PAYMENT_STATUSES))
+    received = currency_totals.sums_by_currency(db, Payment.currency, Payment.amount - Payment.amount_refunded, *settled)
+    allocated = currency_totals.sums_by_currency(
+        db, Payment.currency, PaymentAllocation.amount, PaymentAllocation.payment_id == Payment.id, *settled
     )
-    allocated = db.scalar(
-        select(func.coalesce(func.sum(PaymentAllocation.amount), 0))
-        .join(Payment, Payment.id == PaymentAllocation.payment_id)
-        .where(Payment.organization_id == organization_id, Payment.status.in_(SETTLED_PAYMENT_STATUSES))
-    )
+    base = currency_totals.org_base_currency(db, organization_id)
+    unallocated = {cur: max(Decimal("0"), received[cur] - allocated.get(cur, Decimal("0"))) for cur in received}
     return {
         **counts,
         "total": sum(counts.values()),
-        "unallocated_amount": money_str(max(Decimal("0"), D(received) - D(allocated))),
+        # Base currency only (labelled); other currencies in unallocated_by_currency.
+        "currency": base,
+        "unallocated_amount": money_str(unallocated.get(base, Decimal("0"))),
+        "unallocated_by_currency": [
+            {"currency": cur, "amount": money_str(unallocated[cur])} for cur in currency_totals.order_currencies(unallocated, base)
+        ],
     }
 
 

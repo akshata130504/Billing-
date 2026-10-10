@@ -1,6 +1,7 @@
 import { Bell, CheckCircle2, AlertTriangle, TrendingUp } from 'lucide-react';
 import type { DashboardRecovery } from '../../../types';
 import { formatMoney, formatNumber, parseMoney } from '../../../utils/format';
+import { formatPerCurrency } from '../../../services/dashboardSummaryService';
 
 export interface PaymentRecoveryWidgetProps {
   /** Card title (configurable in the Super Admin visual editor). */
@@ -14,6 +15,11 @@ export function PaymentRecoveryWidget({ recovery, currency, title = 'Payment Rec
   const recoveredAmount = parseMoney(recovery.recovered_amount) || 0;
   const base = failedAmount + recoveredAmount;
   const recoveryRatePct = base > 0 ? (recoveredAmount / base) * 100 : 0;
+  // Amounts per currency (never summed); the rate is computed in the base currency.
+  const rows = recovery.by_currency?.length
+    ? recovery.by_currency
+    : [{ currency, failed_amount: recovery.failed_amount, recovered_amount: recovery.recovered_amount }];
+  const fmt = (a: string, c: string) => formatMoney(a, c);
 
   return (
     <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-sm space-y-4">
@@ -38,7 +44,7 @@ export function PaymentRecoveryWidget({ recovery, currency, title = 'Payment Rec
             <span>Failed Payments</span>
           </div>
           <span className="text-base font-bold text-slate-900 tabular-nums block mt-2">
-            {formatMoney(recovery.failed_amount, currency)}
+            {formatPerCurrency(rows, (r) => r.failed_amount, fmt, currency)}
           </span>
           <span className="text-[10px] text-slate-400 block mt-0.5">
             {formatNumber(recovery.failed_payments)} transaction failures
@@ -66,7 +72,7 @@ export function PaymentRecoveryWidget({ recovery, currency, title = 'Payment Rec
             <span>Recovered</span>
           </div>
           <span className="text-base font-bold text-slate-900 tabular-nums block mt-2">
-            {formatMoney(recovery.recovered_amount, currency)}
+            {formatPerCurrency(rows, (r) => r.recovered_amount, fmt, currency)}
           </span>
         </div>
 

@@ -141,7 +141,11 @@ class PortalDashboardOut(BaseModel):
     customer_email: Optional[str] = None
     active_subscriptions_count: int
     open_invoices_count: int
+    # The customer's billing currency. total_outstanding_amount covers invoices in that
+    # currency only; outstanding_by_currency has one balance per currency (never summed).
+    currency: str = "INR"
     total_outstanding_amount: Decimal
+    outstanding_by_currency: List[Dict[str, Any]] = Field(default_factory=list)
     recent_invoices: List[Dict[str, Any]] = Field(default_factory=list)
     subscriptions: List[Dict[str, Any]] = Field(default_factory=list)
     saved_payment_methods: List[Dict[str, Any]] = Field(default_factory=list)

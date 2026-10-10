@@ -23,6 +23,8 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { invoiceService } from '../../services/invoiceService';
+import { formatPerCurrency } from '../../services/dashboardSummaryService';
+import { formatMoney } from '../../utils/format';
 import type { Invoice, InvoiceStatus, InvoiceKPIs } from '../../types/invoices';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
@@ -88,6 +90,8 @@ export const InvoicesListPage: React.FC = () => {
           void_count: summaryData.void_count ?? 0,
           total_outstanding: Number(summaryData.total_outstanding ?? 0),
           total_revenue: Number(summaryData.total_revenue ?? 0),
+          currency: summaryData.currency,
+          by_currency: summaryData.by_currency,
         });
       }
     } catch (err) {
@@ -136,9 +140,16 @@ export const InvoicesListPage: React.FC = () => {
     { id: 'void', label: 'Void', count: kpis.void_count ?? 0 },
   ];
 
+  // One figure per currency (base first), e.g. "₹5,509.20 · AED 333.36" - never one summed total.
+  const baseCurrency = kpis.currency || 'INR';
+  const kpiRows = kpis.by_currency?.length
+    ? kpis.by_currency
+    : [{ currency: baseCurrency, count: 0, total_outstanding: String(kpis.total_outstanding), total_revenue: String(kpis.total_revenue) }];
+  const fmt = (amount: string, cur: string) => formatMoney(amount, cur);
+
   const kpiCards: Record<string, { value: ReactNode; valueClass: string; icon: ReactNode; iconClass: string }> = {
     outstanding: {
-      value: `₹${Number(kpis.total_outstanding).toLocaleString()}`,
+      value: formatPerCurrency(kpiRows, (r) => r.total_outstanding, fmt, baseCurrency),
       valueClass: 'text-gray-900',
       icon: <AlertTriangle className="w-6 h-6" />,
       iconClass: 'bg-red-50 text-red-600',
@@ -156,7 +167,7 @@ export const InvoicesListPage: React.FC = () => {
       iconClass: 'bg-amber-50 text-amber-600',
     },
     revenue: {
-      value: `₹${Number(kpis.total_revenue).toLocaleString()}`,
+      value: formatPerCurrency(kpiRows, (r) => r.total_revenue, fmt, baseCurrency),
       valueClass: 'text-emerald-600',
       icon: <DollarSign className="w-6 h-6" />,
       iconClass: 'bg-indigo-50 text-indigo-600',
@@ -181,17 +192,17 @@ export const InvoicesListPage: React.FC = () => {
     total: {
       align: 'right',
       cellClass: 'text-right font-semibold text-gray-900',
-      render: (inv) => `₹${Number(inv.total || inv.total_amount || 0).toLocaleString()}`,
+      render: (inv) => formatMoney(inv.total || inv.total_amount || 0, inv.currency || baseCurrency),
     },
     paid: {
       align: 'right',
       cellClass: 'text-right text-emerald-600 font-medium',
-      render: (inv) => `₹${Number(inv.amount_paid || inv.paid_amount || 0).toLocaleString()}`,
+      render: (inv) => formatMoney(inv.amount_paid || inv.paid_amount || 0, inv.currency || baseCurrency),
     },
     balance: {
       align: 'right',
       cellClass: 'text-right font-bold text-gray-900',
-      render: (inv) => `₹${Number(inv.amount_due || inv.balance_due || 0).toLocaleString()}`,
+      render: (inv) => formatMoney(inv.amount_due || inv.balance_due || 0, inv.currency || baseCurrency),
     },
     status: {
       cellClass: '',

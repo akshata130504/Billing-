@@ -100,14 +100,33 @@ class PaymentOut(BaseModel):
     warnings: List[str] = []
 
 
-class PaymentsSummary(BaseModel):
-    """Money totals across every payment matching the current filters."""
-
+class PaymentCurrencyTotals(BaseModel):
+    currency: str
     count: int
     total_collected: str
     pending_amount: str
     total_refunded: str
     unallocated_amount: str
+
+
+class PaymentsSummary(BaseModel):
+    """Money totals across every payment matching the current filters.
+
+    `count` covers every currency; the money fields are in `currency` (the organization's
+    base currency) only and `by_currency` has them for every currency (never summed)."""
+
+    count: int
+    currency: str = "INR"
+    total_collected: str
+    pending_amount: str
+    total_refunded: str
+    unallocated_amount: str
+    by_currency: List[PaymentCurrencyTotals] = []
+
+
+class CurrencyAmount(BaseModel):
+    currency: str
+    amount: str
 
 
 class ReconciliationSummary(BaseModel):
@@ -116,4 +135,6 @@ class ReconciliationSummary(BaseModel):
     unmatched: int
     exception: int
     total: int
+    currency: str = "INR"
     unallocated_amount: str
+    unallocated_by_currency: List[CurrencyAmount] = []

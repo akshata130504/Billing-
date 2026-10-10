@@ -21,6 +21,10 @@ from backend.app.services import timezones
 
 router = APIRouter()
 
+# Reporting currency (ISO-4217). Defaults to the organization's base currency; money in
+# other currencies is never converted or summed in (see services/currency_totals.py).
+CurrencyParam = Query(None, pattern="^[A-Za-z]{3}$", description="Reporting currency; default: the organization's base currency")
+
 
 def report_range(
     range: str = Query("this_month", description="One of: " + ", ".join(svc.REPORT_RANGE_KEYS)),
@@ -41,64 +45,71 @@ def report_range(
 @router.get("/dashboard", response_model=ReportKPIs, summary="Reports KPI cards")
 def get_kpis(
     r: svc.ReportRange = Depends(report_range),
+    currency: str | None = CurrencyParam,
     ctx: CurrentContext = Depends(require_viewer),
     db: Session = Depends(get_db),
 ):
-    return svc.kpis(db, ctx.organization_id, r)
+    return svc.kpis(db, ctx.organization_id, r, currency)
 
 
 @router.get("/revenue", response_model=RevenueAnalyticsOut, summary="Revenue analytics")
 def get_revenue(
     r: svc.ReportRange = Depends(report_range),
+    currency: str | None = CurrencyParam,
     ctx: CurrentContext = Depends(require_viewer),
     db: Session = Depends(get_db),
 ):
-    return svc.revenue_analytics(db, ctx.organization_id, r)
+    return svc.revenue_analytics(db, ctx.organization_id, r, currency)
 
 
 @router.get("/receivables", response_model=ReceivablesAnalyticsOut, summary="Receivables analytics")
 def get_receivables(
     r: svc.ReportRange = Depends(report_range),
+    currency: str | None = CurrencyParam,
     ctx: CurrentContext = Depends(require_viewer),
     db: Session = Depends(get_db),
 ):
-    return svc.receivables_analytics(db, ctx.organization_id, r)
+    return svc.receivables_analytics(db, ctx.organization_id, r, currency)
 
 
 @router.get("/invoices", response_model=InvoiceAnalyticsOut, summary="Invoice analytics")
 def get_invoice_analytics(
     r: svc.ReportRange = Depends(report_range),
+    currency: str | None = CurrencyParam,
     ctx: CurrentContext = Depends(require_viewer),
     db: Session = Depends(get_db),
 ):
-    return svc.invoice_analytics(db, ctx.organization_id, r)
+    return svc.invoice_analytics(db, ctx.organization_id, r, currency)
 
 
 @router.get("/payments", response_model=PaymentAnalyticsOut, summary="Payment analytics")
 def get_payment_analytics(
     r: svc.ReportRange = Depends(report_range),
+    currency: str | None = CurrencyParam,
     ctx: CurrentContext = Depends(require_viewer),
     db: Session = Depends(get_db),
 ):
-    return svc.payment_analytics(db, ctx.organization_id, r)
+    return svc.payment_analytics(db, ctx.organization_id, r, currency)
 
 
 @router.get("/customers", response_model=CustomerAnalyticsOut, summary="Customer analytics")
 def get_customer_analytics(
     r: svc.ReportRange = Depends(report_range),
+    currency: str | None = CurrencyParam,
     ctx: CurrentContext = Depends(require_viewer),
     db: Session = Depends(get_db),
 ):
-    return svc.customer_analytics(db, ctx.organization_id, r)
+    return svc.customer_analytics(db, ctx.organization_id, r, currency)
 
 
 @router.get("/products", response_model=ProductAnalyticsOut, summary="Product/plan analytics")
 def get_product_analytics(
     r: svc.ReportRange = Depends(report_range),
+    currency: str | None = CurrencyParam,
     ctx: CurrentContext = Depends(require_viewer),
     db: Session = Depends(get_db),
 ):
-    return svc.product_analytics(db, ctx.organization_id, r)
+    return svc.product_analytics(db, ctx.organization_id, r, currency)
 
 
 @router.get(
@@ -110,6 +121,7 @@ def get_product_analytics(
 def export_report(
     section: str = Query(..., description="One of: " + ", ".join(svc.EXPORTABLE_SECTIONS)),
     r: svc.ReportRange = Depends(report_range),
+    currency: str | None = CurrencyParam,
     ctx: CurrentContext = Depends(require_viewer),
     db: Session = Depends(get_db),
 ):
@@ -118,7 +130,7 @@ def export_report(
     # already been sent. Validate eagerly here instead of relying on a try/except around the call.
     if section not in svc.EXPORTABLE_SECTIONS:
         raise ValidationAppError(f"Unknown export section '{section}'.", {"fields": {"section": "invalid"}})
-    generator = svc.export_section_csv(db, ctx.organization_id, section, r)
+    generator = svc.export_section_csv(db, ctx.organization_id, section, r, currency)
     filename = f"report-{section}-{timezones.org_today(ctx.organization).isoformat()}.csv"
     return StreamingResponse(
         generator,

@@ -31,8 +31,13 @@ export interface CollectionsKPIs {
   current_due: string;
   due_in_7_days: string;
   due_in_30_days: string;
+  /** Net cash collected / invoiced over the last 30 days (same formula as Reports). */
   collection_rate: string | null;
   overdue_invoice_count: number;
+}
+
+export interface CurrencyCollectionsKPIs extends CollectionsKPIs {
+  currency: string;
 }
 
 export interface AgingBucketOut {
@@ -63,6 +68,7 @@ export interface TopOverdueCustomer {
   outstanding_amount: string;
   overdue_amount: string;
   invoice_count: number;
+  currency: string;
 }
 
 export interface UpcomingDueInvoice {
@@ -71,10 +77,19 @@ export interface UpcomingDueInvoice {
   customer: CustomerRef;
   due_date: string;
   amount_due: string;
+  currency: string;
 }
 
+/**
+ * `kpis`, `aging_summary`, `pipeline` and `top_overdue_customers` are in `currency`
+ * (default: the organization's base currency); amounts are never summed across
+ * currencies. `kpis_by_currency` has the KPIs for every currency in `currencies`.
+ */
 export interface CollectionsDashboardOut {
+  currency: string;
+  currencies: string[];
   kpis: CollectionsKPIs;
+  kpis_by_currency: CurrencyCollectionsKPIs[];
   aging_summary: AgingBucketOut[];
   pipeline: CollectionPipelineEntry[];
   recent_activities: CollectionActivityOut[];
@@ -92,6 +107,7 @@ export interface CollectionInvoiceOut {
   total: string;
   amount_paid: string;
   amount_due: string;
+  currency: string;
   days_overdue: number;
   aging_bucket: AgingBucket;
   collection_status: CollectionStatus;

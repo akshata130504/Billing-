@@ -44,7 +44,7 @@ from backend.app.schemas.ai import (
     AIWritingRequest,
     AIWritingResponse,
 )
-from backend.app.services import audit, credit_service, timezones
+from backend.app.services import audit, credit_service, currency_totals, timezones
 
 DRAFT_TTL_MINUTES = 30
 
@@ -74,12 +74,17 @@ def _get_or_create_conversation(
 # ---------------------------------------------------------------------------
 
 def _tool_outstanding_balance(db: Session, organization_id: str) -> Tuple[str, Dict[str, Any], List[Dict[str, Any]]]:
-    total = db.scalar(
-        select(func.coalesce(func.sum(Invoice.amount_due), Decimal("0.00"))).where(
-            Invoice.organization_id == organization_id,
-            Invoice.status.in_(OPEN_INVOICE_STATUSES),
-        )
-    ) or Decimal("0.00")
+    # One balance per currency (no FX): total_outstanding_balance is the base currency only.
+    base = currency_totals.org_base_currency(db, organization_id)
+    by_currency = currency_totals.sums_by_currency(
+        db,
+        Invoice.currency,
+        Invoice.amount_due,
+        Invoice.organization_id == organization_id,
+        Invoice.status.in_(OPEN_INVOICE_STATUSES),
+    )
+    total = by_currency.get(base, Decimal("0.00"))
+    balances = currency_totals.format_per_currency(by_currency, base)
     count = db.scalar(
         select(func.count(Invoice.id)).where(
             Invoice.organization_id == organization_id,
@@ -89,14 +94,19 @@ def _tool_outstanding_balance(db: Session, organization_id: str) -> Tuple[str, D
 
     answer = (
         f"Total outstanding balance across {count} open invoice(s) (due, partially paid, or overdue) "
-        f"is {total:.2f}."
+        f"is {balances}."
     )
-    data = {"total_outstanding_balance": str(total), "open_invoice_count": count}
+    data = {
+        "total_outstanding_balance": str(total),
+        "currency": base,
+        "by_currency": {cur: str(amount) for cur, amount in by_currency.items()},
+        "open_invoice_count": count,
+    }
     sources = [{
         "source_type": "receivable_summary",
         "source_id": None,
         "label": "Receivable Summary (open invoices)",
-        "snippet": f"open_invoice_count={count}, total_outstanding_balance={total}",
+        "snippet": f"open_invoice_count={count}, total_outstanding_balance={balances}",
     }]
     return answer, data, sources
 

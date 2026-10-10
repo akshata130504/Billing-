@@ -41,7 +41,7 @@ import { subscriptionService } from '../../services/subscriptionService';
 import { toApiError } from '../../services/apiClient';
 import { downloadAuthenticated } from '../../services/download';
 import { queryKeys } from '../../hooks/queries';
-import { formatMoney, formatNumber, formatPercent, humanize, parseMoney } from '../../utils/format';
+import { formatMoney as formatMoneyIn, formatNumber, formatPercent, humanize, parseMoney } from '../../utils/format';
 import { cn } from '../../utils/cn';
 import { AGING_BUCKET_LABELS, PAYMENT_METHOD_LABELS, formatReportPeriod } from '../reports/reportsUi';
 import type { SubscriptionSummaryOut } from '../../types/api';
@@ -69,6 +69,15 @@ import type { EditableProps } from '../../appUi/UiConfigContext';
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Every amount on this page is in the reporting currency (`currency` of the reports API,
+ * the organization's base currency). Other currencies are never converted or summed in.
+ */
+function moneyIn(currency: string) {
+  return (value: string | number | null | undefined, options?: { compact?: boolean }) =>
+    formatMoneyIn(value, currency, options);
+}
 
 function isRange(value: string | null): value is ReportRangeKey {
   return REVENUE_RANGE_OPTIONS.some((r) => r.value === value);
@@ -132,6 +141,7 @@ function buildInsights(input: {
 }): Insight[] {
   const { range, kpis, revenue, receivables, payments, customers, mix } = input;
   const out: Insight[] = [];
+  const formatMoney = moneyIn(kpis.currency);
 
   const invoiced = num(kpis.total_invoiced);
   const collected = num(kpis.total_collected);
@@ -421,8 +431,9 @@ function Resolved<T>({
 }
 
 /** Grouped column chart: invoiced vs collected per period. */
-function InvoicedVsCollectedColumns({ data }: { data: InvoicedVsCollectedPoint[] }) {
+function InvoicedVsCollectedColumns({ data, currency }: { data: InvoicedVsCollectedPoint[]; currency: string }) {
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  const formatMoney = moneyIn(currency);
   const width = 600;
   const height = 220;
   const padTop = 18;
@@ -499,7 +510,8 @@ const MIX_ROWS: { key: keyof Pick<SubscriptionMix, 'active' | 'trialing' | 'rene
   { key: 'cancelled', label: 'Cancelled', color: 'bg-slate-400' },
 ];
 
-function SubscriptionMixPanel({ mix }: { mix: SubscriptionMix }) {
+function SubscriptionMixPanel({ mix, currency }: { mix: SubscriptionMix; currency: string }) {
+  const formatMoney = moneyIn(currency);
   if (mix.total === 0) {
     return (
       <EmptyState
@@ -603,6 +615,7 @@ function TopCustomersTable({
 }) {
   const ui = usePageSpec('revenue_intelligence');
   const rows = revenue.revenue_by_customer;
+  const formatMoney = moneyIn(revenue.currency);
   if (rows.length === 0) {
     return (
       <EmptyState
@@ -791,10 +804,20 @@ export function RevenueIntelligencePage() {
   } else {
     const kpis = kpisQuery.data;
     const mix = mixQuery.data;
+    const formatMoney = moneyIn(kpis.currency);
+    const otherCurrencies = (kpis.by_currency ?? []).filter((row) => row.currency !== kpis.currency);
     const avgDays = receivablesQuery.data?.average_days_to_payment ?? null;
 
     body = (
       <>
+        {otherCurrencies.length > 0 && (
+          <p className="text-xs text-slate-500" data-testid="ri-other-currencies">
+            Figures in {kpis.currency}. Other currencies (not converted):{' '}
+            {otherCurrencies
+              .map((row) => `${row.currency} invoiced ${formatMoneyIn(row.total_invoiced, row.currency)}, collected ${formatMoneyIn(row.total_collected, row.currency)}`)
+              .join(' · ')}
+          </p>
+        )}
         {/* KPI row */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4" {...ui.edit('kpis')}>
           {ui.render('kpis', {
@@ -978,7 +1001,7 @@ export function RevenueIntelligencePage() {
               data.invoiced_vs_collected.length === 0 ? (
                 <EmptyState className="border-0 py-6" title="Nothing invoiced yet" description="Invoiced and collected amounts appear here once invoices exist for this range." />
               ) : (
-                <InvoicedVsCollectedColumns data={data.invoiced_vs_collected} />
+                <InvoicedVsCollectedColumns data={data.invoiced_vs_collected} currency={data.currency} />
               )
             }
           </Resolved>
@@ -1076,7 +1099,7 @@ export function RevenueIntelligencePage() {
             icon={<Repeat className="w-4 h-4 text-brand-600" />}
           >
             <Resolved query={mixQuery} loadingMessage="Loading subscriptions...">
-              {(data) => <SubscriptionMixPanel mix={data} />}
+              {(data) => <SubscriptionMixPanel mix={data} currency={kpis.currency} />}
             </Resolved>
           </Section>
         </div>

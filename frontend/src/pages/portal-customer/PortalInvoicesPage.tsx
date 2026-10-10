@@ -16,6 +16,7 @@ import { useToast } from '../../components/common/Toast';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
+import { formatMoney } from '../../utils/format';
 
 export const PortalInvoicesPage: React.FC = () => {
   const { showToast } = useToast();
@@ -188,10 +189,10 @@ export const PortalInvoicesPage: React.FC = () => {
                       <td className="px-5 py-3.5 text-slate-600">{inv.issue_date}</td>
                       <td className="px-5 py-3.5 text-slate-600">{inv.due_date}</td>
                       <td className="px-5 py-3.5 font-medium text-slate-900">
-                        ₹{Number(inv.total).toLocaleString()}
+                        {formatMoney(inv.total, inv.currency)}
                       </td>
                       <td className="px-5 py-3.5 font-semibold text-indigo-700">
-                        ₹{due.toLocaleString()}
+                        {formatMoney(inv.amount_due, inv.currency)}
                       </td>
                       <td className="px-5 py-3.5">
                         <Badge
@@ -268,13 +269,13 @@ export const PortalInvoicesPage: React.FC = () => {
                 <div>
                   <span className="text-xs text-slate-500 uppercase font-semibold">Total Amount</span>
                   <p className="text-xl font-bold text-slate-900">
-                    ₹{Number(selectedInvoice.total).toLocaleString()}
+                    {formatMoney(selectedInvoice.total, selectedInvoice.currency)}
                   </p>
                 </div>
                 <div className="text-right">
                   <span className="text-xs text-slate-500 uppercase font-semibold">Balance Due</span>
                   <p className="text-xl font-bold text-indigo-700">
-                    ₹{Number(selectedInvoice.amount_due).toLocaleString()}
+                    {formatMoney(selectedInvoice.amount_due, selectedInvoice.currency)}
                   </p>
                 </div>
               </div>
@@ -299,9 +300,9 @@ export const PortalInvoicesPage: React.FC = () => {
                         <tr key={item.id}>
                           <td className="p-2.5 font-medium text-slate-900">{item.description}</td>
                           <td className="p-2.5 text-right text-slate-600">{item.quantity}</td>
-                          <td className="p-2.5 text-right text-slate-600">₹{item.unit_price}</td>
+                          <td className="p-2.5 text-right text-slate-600">{formatMoney(item.unit_price, selectedInvoice.currency)}</td>
                           <td className="p-2.5 text-right font-semibold text-slate-900">
-                            ₹{item.amount.toLocaleString()}
+                            {formatMoney(item.amount, selectedInvoice.currency)}
                           </td>
                         </tr>
                       ))}
@@ -314,15 +315,15 @@ export const PortalInvoicesPage: React.FC = () => {
               <div className="text-xs space-y-1.5 border-t border-slate-100 pt-3">
                 <div className="flex justify-between text-slate-600">
                   <span>Subtotal</span>
-                  <span>₹{Number(selectedInvoice.subtotal).toLocaleString()}</span>
+                  <span>{formatMoney(selectedInvoice.subtotal, selectedInvoice.currency)}</span>
                 </div>
                 <div className="flex justify-between text-slate-600">
                   <span>Tax Amount</span>
-                  <span>₹{Number(selectedInvoice.tax_amount).toLocaleString()}</span>
+                  <span>{formatMoney(selectedInvoice.tax_amount, selectedInvoice.currency)}</span>
                 </div>
                 <div className="flex justify-between font-bold text-slate-900 text-sm pt-1 border-t border-slate-100">
                   <span>Total</span>
-                  <span>₹{Number(selectedInvoice.total).toLocaleString()}</span>
+                  <span>{formatMoney(selectedInvoice.total, selectedInvoice.currency)}</span>
                 </div>
               </div>
 

@@ -11,6 +11,20 @@ ZERO = Decimal("0.00")
 # supported by the split today, which is why the default is False).
 ZERO_RATE_EXPORTS_WITH_TAX = False
 
+# ISO-4217 codes the product supports (plans, customers, organization settings, expenses;
+# the frontend offers the same list). There is no FX conversion between them.
+SUPPORTED_CURRENCIES = ("INR", "USD", "EUR", "GBP", "AED", "SGD", "AUD", "CAD")
+
+
+def supported_currency(value):
+    """Pydantic validator body: upper-case a currency code and reject unsupported ones."""
+    if not isinstance(value, str):
+        return value
+    code = value.strip().upper()
+    if code not in SUPPORTED_CURRENCIES:
+        raise ValueError(f"Unsupported currency '{value}'. Use one of: {', '.join(SUPPORTED_CURRENCIES)}.")
+    return code
+
 
 def D(value) -> Decimal:
     """Coerce str/int/float/Decimal/None to a Decimal (None -> 0)."""

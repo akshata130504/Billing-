@@ -37,7 +37,7 @@ from backend.app.models import (
 )
 from backend.app.schemas.common_refs import customer_ref, iso_dt, line_item_out, money_str, user_ref
 from backend.app.schemas.invoices import InvoiceCreate, InvoiceUpdate
-from backend.app.services import audit
+from backend.app.services import audit, currency_totals
 from backend.app.services.email import frontend_url, send_email
 from backend.app.services.money import D, LineInput, compute_totals, q2
 from backend.app.services import gst
@@ -1309,61 +1309,63 @@ def _reactivate_subscription_if_clear(
 
 
 def get_invoices_summary(db: Session, organization_id: str) -> Dict[str, Any]:
-    """Calculate summary KPIs and status counts for invoices."""
+    """Calculate summary KPIs and status counts for invoices.
+
+    Counts cover every invoice. Money is never summed across currencies:
+    `total_outstanding` / `total_revenue` are in `currency` (the organization's base
+    currency) and `by_currency` lists the same figures for every currency.
+    """
     rows = db.execute(
         select(
             Invoice.status,
+            Invoice.currency,
             func.count(Invoice.id),
             func.coalesce(func.sum(Invoice.total), Decimal("0")),
             func.coalesce(func.sum(Invoice.amount_paid), Decimal("0")),
             func.coalesce(func.sum(Invoice.amount_due), Decimal("0")),
         )
         .where(Invoice.organization_id == organization_id)
-        .group_by(Invoice.status)
+        .group_by(Invoice.status, Invoice.currency)
     ).all()
 
-    total_invoices = 0
-    draft_count = 0
-    sent_count = 0
-    partially_paid_count = 0
-    paid_count = 0
-    overdue_count = 0
-    void_count = 0
-    total_revenue = Decimal("0")
-    total_outstanding = Decimal("0")
+    counts = {s.value: 0 for s in InvoiceStatus}
+    money: Dict[str, Dict[str, Any]] = {}
 
-    for status_val, count, total, amount_paid, amount_due in rows:
-        total_invoices += count
+    for status_val, currency, count, total, amount_paid, amount_due in rows:
         s = status_val.value if hasattr(status_val, "value") else str(status_val)
-        if s == "draft":
-            draft_count = count
-        elif s == "sent":
-            sent_count = count
-            total_outstanding += amount_due
-        elif s == "partially_paid":
-            partially_paid_count = count
-            total_revenue += amount_paid
-            total_outstanding += amount_due
-        elif s == "paid":
-            paid_count = count
-            total_revenue += amount_paid
-        elif s == "overdue":
-            overdue_count = count
-            total_revenue += amount_paid
-            total_outstanding += amount_due
-        elif s == "void":
-            void_count = count
+        counts[s] = counts.get(s, 0) + count
+        cur = money.setdefault(
+            currency_totals.norm(currency), {"count": 0, "total_revenue": Decimal("0"), "total_outstanding": Decimal("0")}
+        )
+        cur["count"] += count
+        if s in ("partially_paid", "paid", "overdue"):
+            cur["total_revenue"] += amount_paid
+        if s in ("sent", "partially_paid", "overdue"):
+            cur["total_outstanding"] += amount_due
 
+    base = currency_totals.org_base_currency(db, organization_id)
+    by_currency = [
+        {
+            "currency": cur,
+            "count": money[cur]["count"],
+            "total_outstanding": str(q2(money[cur]["total_outstanding"])),
+            "total_revenue": str(q2(money[cur]["total_revenue"])),
+        }
+        for cur in currency_totals.order_currencies(money, base)
+    ]
+    base_row = next((row for row in by_currency if row["currency"] == base), None)
     return {
-        "total_invoices": total_invoices,
-        "draft_count": draft_count,
-        "sent_count": sent_count,
-        "partially_paid_count": partially_paid_count,
-        "paid_count": paid_count,
-        "overdue_count": overdue_count,
-        "void_count": void_count,
-        "total_outstanding": str(q2(total_outstanding)),
-        "total_revenue": str(q2(total_revenue)),
+        "total_invoices": sum(counts.values()),
+        "draft_count": counts["draft"],
+        "sent_count": counts["sent"],
+        "partially_paid_count": counts["partially_paid"],
+        "paid_count": counts["paid"],
+        "overdue_count": counts["overdue"],
+        "void_count": counts["void"],
+        "currency": base,
+        "total_outstanding": base_row["total_outstanding"] if base_row else "0.00",
+        "total_revenue": base_row["total_revenue"] if base_row else "0.00",
+        "by_currency": by_currency,
     }
 
 

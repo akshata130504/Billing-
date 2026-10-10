@@ -43,7 +43,7 @@ from backend.app.schemas.portal import (
     PortalSignupIn,
     PortalUserOut,
 )
-from backend.app.services import audit
+from backend.app.services import audit, currency_totals
 from backend.app.services.email import resolve_smtp_config, send_email
 
 
@@ -759,7 +759,15 @@ def get_customer_dashboard(db: Session, portal_user: CustomerPortalUser) -> Port
         ).all()
     )
     open_invoices = [inv for inv in invoices if inv.status in OPEN_INVOICE_STATUSES]
-    total_due = sum((inv.amount_due or Decimal("0.00")) for inv in open_invoices)
+    # Balances per currency - an INR and an AED invoice are two balances, never one sum.
+    # total_outstanding_amount keeps only the customer's billing currency (labelled).
+    currency = currency_totals.norm(customer.currency)
+    due_by_currency: Dict[str, Dict[str, Any]] = {}
+    for inv in open_invoices:
+        entry = due_by_currency.setdefault(currency_totals.norm(inv.currency), {"amount_due": Decimal("0.00"), "open_count": 0})
+        entry["amount_due"] += inv.amount_due or Decimal("0.00")
+        entry["open_count"] += 1
+    total_due = due_by_currency.get(currency, {}).get("amount_due", Decimal("0.00"))
 
     # Payment methods scoped to tenant AND customer
     methods = list(
@@ -785,7 +793,12 @@ def get_customer_dashboard(db: Session, portal_user: CustomerPortalUser) -> Port
         customer_email=customer.email,
         active_subscriptions_count=active_subs_count,
         open_invoices_count=len(open_invoices),
+        currency=currency,
         total_outstanding_amount=total_due,
+        outstanding_by_currency=[
+            {"currency": cur, "amount_due": str(due_by_currency[cur]["amount_due"]), "open_count": due_by_currency[cur]["open_count"]}
+            for cur in currency_totals.order_currencies(due_by_currency, currency)
+        ],
         recent_invoices=[
             {
                 "id": inv.id,
@@ -794,6 +807,7 @@ def get_customer_dashboard(db: Session, portal_user: CustomerPortalUser) -> Port
                 "due_date": str(inv.due_date),
                 "total": str(inv.total),
                 "amount_due": str(inv.amount_due),
+                "currency": currency_totals.norm(inv.currency),
                 "status": inv.status.value,
                 "public_token": inv.public_token,
             }

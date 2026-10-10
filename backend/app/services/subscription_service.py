@@ -918,6 +918,22 @@ def create_subscription(db: Session, ctx: CurrentContext, data: SubscriptionCrea
         if not plan.is_active:
             raise ValidationAppError("This plan is inactive.", {"fields": {"plan_id": "inactive plan"}})
         terms = legacy_item_terms(plan, qty)
+    # The subscription is invoiced in the plan's currency. Billing a customer in a currency
+    # other than their own billing currency must be an explicit choice, never silent.
+    plan_currency = (terms.plan.currency or "INR").upper()
+    customer_currency = (customer.currency or "INR").upper()
+    currency_override = plan_currency != customer_currency
+    if currency_override and not data.allow_currency_mismatch:
+        raise ValidationAppError(
+            f"This plan is priced in {plan_currency} but the customer is billed in {customer_currency}. "
+            f"Choose a {customer_currency} plan, or confirm billing this customer in {plan_currency}.",
+            {
+                "reason": "CURRENCY_MISMATCH",
+                "fields": {"offering_id" if data.offering_id else "plan_id": "currency mismatch"},
+                "plan_currency": plan_currency,
+                "customer_currency": customer_currency,
+            },
+        )
     subscription = build_subscription(
         db,
         ctx,
@@ -930,6 +946,7 @@ def create_subscription(db: Session, ctx: CurrentContext, data: SubscriptionCrea
         notes=data.notes,
         billing_frequency=data.billing_frequency,
         generate_first_invoice=data.generate_first_invoice,
+        audit_extra={"currency_mismatch_override": f"{customer_currency}->{plan_currency}"} if currency_override else None,
     )
     db.commit()
     return get_subscription(db, ctx.organization_id, subscription.id)

@@ -6,7 +6,16 @@ from pydantic import BaseModel
 from backend.app.schemas.common_refs import CustomerRef
 
 
-class ReportKPIs(BaseModel):
+class CurrencyScopedReport(BaseModel):
+    # Every money figure in the response is in `currency` (default: the organization's
+    # base currency); `currencies` lists every currency the organization has invoices or
+    # payments in. Amounts in different currencies are never added together.
+    currency: str
+    currencies: List[str] = []
+
+
+class CurrencyKPIs(BaseModel):
+    currency: str
     total_revenue: str
     net_revenue: str
     total_invoiced: str
@@ -15,6 +24,21 @@ class ReportKPIs(BaseModel):
     overdue_receivables: str
     collection_rate: Optional[str] = None
     average_invoice_value: Optional[str] = None
+    invoice_count: int = 0
+
+
+class ReportKPIs(CurrencyScopedReport):
+    total_revenue: str
+    net_revenue: str
+    total_invoiced: str
+    total_collected: str
+    outstanding_receivables: str
+    overdue_receivables: str
+    collection_rate: Optional[str] = None
+    average_invoice_value: Optional[str] = None
+    invoice_count: int = 0
+    # The same KPIs for every currency (base first).
+    by_currency: List[CurrencyKPIs] = []
 
 
 class TimeSeriesPoint(BaseModel):
@@ -36,6 +60,7 @@ class CollectionRatePoint(BaseModel):
 class CustomerAmount(BaseModel):
     customer: CustomerRef
     amount: str
+    currency: str
 
 
 class NamedAmount(BaseModel):
@@ -43,9 +68,10 @@ class NamedAmount(BaseModel):
     name: str
     revenue: str
     quantity: str
+    currency: str
 
 
-class RevenueAnalyticsOut(BaseModel):
+class RevenueAnalyticsOut(CurrencyScopedReport):
     granularity: str
     revenue_over_time: List[TimeSeriesPoint]
     invoiced_vs_collected: List[InvoicedVsCollectedPoint]
@@ -60,7 +86,7 @@ class AgingBucketOut(BaseModel):
     amount: str
 
 
-class ReceivablesAnalyticsOut(BaseModel):
+class ReceivablesAnalyticsOut(CurrencyScopedReport):
     outstanding_by_aging: List[AgingBucketOut]
     overdue_by_due_period: List[TimeSeriesPoint]
     collection_rate_trend: List[CollectionRatePoint]
@@ -73,7 +99,7 @@ class InvoiceStatusBreakdown(BaseModel):
     amount: str
 
 
-class InvoiceAnalyticsOut(BaseModel):
+class InvoiceAnalyticsOut(CurrencyScopedReport):
     by_status: Dict[str, InvoiceStatusBreakdown]
     total_count: int
     average_invoice_amount: Optional[str] = None
@@ -82,9 +108,10 @@ class InvoiceAnalyticsOut(BaseModel):
 class MethodAmount(BaseModel):
     method: str
     amount: str
+    currency: str
 
 
-class PaymentAnalyticsOut(BaseModel):
+class PaymentAnalyticsOut(CurrencyScopedReport):
     total_payments: str
     payment_count: int
     method_breakdown: List[MethodAmount]
@@ -93,7 +120,7 @@ class PaymentAnalyticsOut(BaseModel):
     net_collected: str
 
 
-class CustomerAnalyticsOut(BaseModel):
+class CustomerAnalyticsOut(CurrencyScopedReport):
     total_customers: int
     active_customers: int
     customers_with_outstanding_balance: int
@@ -104,6 +131,7 @@ class CustomerAnalyticsOut(BaseModel):
 class PricingModelAmount(BaseModel):
     pricing_model: str
     amount: str
+    currency: str
 
 
 class QuantitySold(BaseModel):
@@ -112,7 +140,7 @@ class QuantitySold(BaseModel):
     quantity: str
 
 
-class ProductAnalyticsOut(BaseModel):
+class ProductAnalyticsOut(CurrencyScopedReport):
     best_selling: List[NamedAmount]
     revenue_by_offering: List[NamedAmount]
     revenue_by_pricing_model: List[PricingModelAmount]

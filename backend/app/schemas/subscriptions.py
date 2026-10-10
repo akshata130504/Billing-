@@ -28,6 +28,10 @@ class SubscriptionCreate(StrictRequest):
     status: Optional[SubscriptionStatus] = None
     # Default: True when the subscription does not start with a trial.
     generate_first_invoice: Optional[bool] = None
+    # The subscription is invoiced in the plan's currency. When that differs from the
+    # customer's billing currency the request is rejected (422, details.reason CURRENCY_MISMATCH) unless
+    # this is true: an explicit, audited decision to bill the customer in the plan's currency.
+    allow_currency_mismatch: bool = False
 
     @model_validator(mode="after")
     def _one_plan_source(self):

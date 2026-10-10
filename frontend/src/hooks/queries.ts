@@ -60,7 +60,7 @@ export const queryKeys = {
   },
   collections: {
     all: ['collections'] as const,
-    dashboard: () => ['collections', 'dashboard'] as const,
+    dashboard: (currency?: string) => ['collections', 'dashboard', currency ?? ''] as const,
     list: (params?: object) => ['collections', 'list', params ?? {}] as const,
     detail: (id: string) => ['collections', 'detail', id] as const,
   },

@@ -159,6 +159,11 @@ export function DashboardPage() {
     ? fin.receivables.reduce((n, r) => n + r.open_count, 0)
     : metrics?.outstanding_count || 0;
 
+  // One figure per currency (base first); never a sum across currencies.
+  const totalRevenueLabel = metrics?.by_currency?.length
+    ? formatPerCurrency(metrics.by_currency, (r) => r.total_revenue, formatMoney, currency)
+    : formatMoney(totalRevNum, currency);
+
   const revChangePct = metrics?.revenue_change_pct
     ? `${metrics.revenue_change_pct}% from last period`
     : 'No prior period data';
@@ -191,7 +196,7 @@ export function DashboardPage() {
     {
       key: 'total_revenue',
       title: 'Total Revenue',
-      value: formatMoney(totalRevNum, currency),
+      value: totalRevenueLabel,
       change: revChangePct,
       changeColor: isRevPositive ? 'text-[#10B981]' : 'text-[#E83E8C]',
       icon: (

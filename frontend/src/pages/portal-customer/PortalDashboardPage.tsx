@@ -19,6 +19,7 @@ import { LoadingState } from '../../components/common/LoadingState';
 import { useToast } from '../../components/common/Toast';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
+import { formatMoney } from '../../utils/format';
 
 export const PortalDashboardPage: React.FC = () => {
   const { showToast } = useToast();
@@ -70,9 +71,19 @@ export const PortalDashboardPage: React.FC = () => {
     );
   }
 
-  const outstanding = Number(data.total_outstanding_amount || 0);
+  // One balance per currency: an INR and an AED invoice are two balances, never one sum.
+  const billingCurrency = data.currency || 'INR';
+  const balances =
+    data.outstanding_by_currency ??
+    (Number(data.total_outstanding_amount || 0) > 0
+      ? [{ currency: billingCurrency, amount_due: String(data.total_outstanding_amount), open_count: data.open_invoices_count }]
+      : []);
+  const outstandingLabel = balances.length
+    ? balances.map((b) => formatMoney(b.amount_due, b.currency)).join(' · ')
+    : formatMoney(0, billingCurrency);
+  // Pay one invoice at a time (in its own currency) - never a cross-currency "pay all".
   const firstUnpaidInvoice = data.recent_invoices.find(
-    (inv) => Number(inv.amount_due) > 0 && inv.public_token
+    (inv) => Number(inv.amount_due) > 0 && inv.public_token && inv.status !== 'void'
   );
 
   return (
@@ -97,7 +108,7 @@ export const PortalDashboardPage: React.FC = () => {
           </p>
         </div>
 
-        {outstanding > 0 && firstUnpaidInvoice && (
+        {firstUnpaidInvoice && (
           <div className="shrink-0">
             <Button
               variant="primary"
@@ -106,7 +117,8 @@ export const PortalDashboardPage: React.FC = () => {
               onClick={() => window.open(`/pay/${firstUnpaidInvoice.public_token}`, '_blank')}
             >
               <CreditCard className="w-5 h-5 mr-2" />
-              Pay Outstanding (₹{outstanding.toLocaleString()})
+              Pay {firstUnpaidInvoice.invoice_number} (
+              {formatMoney(firstUnpaidInvoice.amount_due, firstUnpaidInvoice.currency || billingCurrency)})
             </Button>
           </div>
         )}
@@ -123,8 +135,8 @@ export const PortalDashboardPage: React.FC = () => {
               <DollarSign className="w-5 h-5" />
             </div>
           </div>
-          <p className="mt-3 text-2xl font-bold text-slate-900">
-            ₹{outstanding.toLocaleString()}
+          <p className="mt-3 text-2xl font-bold text-slate-900" data-testid="portal-outstanding">
+            {outstandingLabel}
           </p>
           <p className="mt-1 text-xs text-slate-500">
             {data.open_invoices_count} pending {data.open_invoices_count === 1 ? 'invoice' : 'invoices'}
@@ -207,10 +219,10 @@ export const PortalDashboardPage: React.FC = () => {
                       <td className="px-5 py-3.5 text-slate-600">{inv.issue_date}</td>
                       <td className="px-5 py-3.5 text-slate-600">{inv.due_date}</td>
                       <td className="px-5 py-3.5 font-medium text-slate-900">
-                        ₹{Number(inv.total).toLocaleString()}
+                        {formatMoney(inv.total, inv.currency || billingCurrency)}
                       </td>
                       <td className="px-5 py-3.5 font-semibold text-indigo-700">
-                        ₹{due.toLocaleString()}
+                        {formatMoney(inv.amount_due, inv.currency || billingCurrency)}
                       </td>
                       <td className="px-5 py-3.5">
                         <Badge

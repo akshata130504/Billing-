@@ -38,7 +38,8 @@ from backend.app.schemas.chat import (
     RoomiChatResponse,
     RoomiNavigationHint,
 )
-from backend.app.services import ai_service
+from backend.app.services import ai_service, currency_totals
+from backend.app.services.invoice_service import SETTLED_PAYMENT_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -562,13 +563,19 @@ def _get_conversation_turns(
 
 
 def _get_tenant_billing_metrics(db: Session, organization_id: str) -> Dict[str, Any]:
-    """Retrieves live aggregate billing metrics strictly scoped to the tenant."""
-    total_due = db.scalar(
-        select(func.coalesce(func.sum(Invoice.amount_due), Decimal("0.00"))).where(
-            Invoice.organization_id == organization_id,
-            Invoice.status.in_(OPEN_INVOICE_STATUSES),
-        )
-    ) or Decimal("0.00")
+    """Retrieves live aggregate billing metrics strictly scoped to the tenant.
+
+    Money is per currency (no FX): total_outstanding_balance is the base currency only and
+    total_outstanding_display shows every currency ("₹4,509.20 · AED 433.36")."""
+    base = currency_totals.org_base_currency(db, organization_id)
+    due_by_currency = currency_totals.sums_by_currency(
+        db,
+        Invoice.currency,
+        Invoice.amount_due,
+        Invoice.organization_id == organization_id,
+        Invoice.status.in_(OPEN_INVOICE_STATUSES),
+    )
+    total_due = due_by_currency.get(base, Decimal("0.00"))
     open_count = db.scalar(
         select(func.count(Invoice.id)).where(
             Invoice.organization_id == organization_id,
@@ -590,6 +597,8 @@ def _get_tenant_billing_metrics(db: Session, organization_id: str) -> Dict[str, 
 
     return {
         "total_outstanding_balance": str(total_due),
+        "currency": base,
+        "total_outstanding_display": currency_totals.format_per_currency(due_by_currency, base),
         "open_invoice_count": open_count,
         "overdue_invoice_count": overdue_count,
         "active_subscription_count": active_subs,
@@ -935,17 +944,21 @@ def process_chat(
                 mrr_val = "0.00"
                 subs_val = metrics.get("active_subscription_count", 0)
             
-            total_collected = db.scalar(
-                select(func.coalesce(func.sum(Payment.amount), Decimal("0.00"))).where(
-                    Payment.organization_id == ctx.organization_id,
-                )
-            ) or Decimal("0.00")
-            
+            base = currency_totals.org_base_currency(db, ctx.organization_id)
+            collected_by_currency = currency_totals.sums_by_currency(
+                db,
+                Payment.currency,
+                Payment.amount - Payment.amount_refunded,
+                Payment.organization_id == ctx.organization_id,
+                Payment.status.in_(SETTLED_PAYMENT_STATUSES),
+            )
+            total_collected = collected_by_currency.get(base, Decimal("0.00"))
+
             reply_text = (
                 f"📈 **Revenue Overview** (*{ctx.organization.name}*):\n\n"
-                f"• **Total Payments Collected**: ₹{total_collected:,.2f}\n"
-                f"• **Current MRR**: ₹{Decimal(mrr_val):,.2f} (from {subs_val} active recurring subscriptions)\n"
-                f"• **Outstanding Receivables**: ₹{Decimal(metrics.get('total_outstanding_balance', '0.00')):,.2f}\n\n"
+                f"• **Total Payments Collected**: {currency_totals.format_per_currency(collected_by_currency, base)}\n"
+                f"• **Current MRR**: {currency_totals.format_per_currency({base: Decimal(mrr_val)}, base)} (from {subs_val} active recurring subscriptions)\n"
+                f"• **Outstanding Receivables**: {metrics.get('total_outstanding_display') or currency_totals.format_per_currency({}, base)}\n\n"
                 f"Detailed revenue recognition and cohort graphs are available under **Insights → Revenue Intelligence**."
             )
             response = RoomiChatResponse(
@@ -953,7 +966,7 @@ def process_chat(
                 conversation_id=conv_id,
                 suggested_chips=["View Revenue Intelligence", "Show recent payments", "View invoices"],
                 navigation=RoomiNavigationHint(label="Revenue Intelligence", route="/revenue-intelligence", description="Open Revenue Intelligence"),
-                data={"total_collected": str(total_collected), "mrr": str(mrr_val)},
+                data={"total_collected": str(total_collected), "currency": base, "mrr": str(mrr_val)},
             )
 
         # (g) Subscriptions
@@ -987,10 +1000,14 @@ def process_chat(
         # (h) Expenses
         elif any(w in lowered for w in ["my expense", "show expense", "list expense", "total expense", "how much did we spend", "company spending"]) and not any(w in lowered for w in ["how to", "explain"]):
             exp_count = db.scalar(select(func.count(Expense.id)).where(Expense.organization_id == ctx.organization_id)) or 0
-            exp_sum = db.scalar(select(func.coalesce(func.sum(Expense.amount), Decimal("0.00"))).where(Expense.organization_id == ctx.organization_id)) or Decimal("0.00")
+            base = currency_totals.org_base_currency(db, ctx.organization_id)
+            exp_by_currency = currency_totals.sums_by_currency(
+                db, Expense.currency, Expense.amount, Expense.organization_id == ctx.organization_id
+            )
+            exp_sum = exp_by_currency.get(base, Decimal("0.00"))
             reply_text = (
                 f"🧾 **Expenses Summary** (*{ctx.organization.name}*):\n\n"
-                f"• **Total Expenses**: ₹{exp_sum:,.2f} ({exp_count} recorded items)\n\n"
+                f"• **Total Expenses**: {currency_totals.format_per_currency(exp_by_currency, base)} ({exp_count} recorded items)\n\n"
                 f"You can review categories, recurring expense schedules, and billable project allocations under **Operations → Expenses**."
             )
             response = RoomiChatResponse(
@@ -998,7 +1015,7 @@ def process_chat(
                 conversation_id=conv_id,
                 suggested_chips=["Add Expense", "Recurring Expenses", "View Projects"],
                 navigation=RoomiNavigationHint(label="Expenses", route="/expenses", description="View Expenses"),
-                data={"expense_total": str(exp_sum), "expense_count": exp_count},
+                data={"expense_total": str(exp_sum), "currency": base, "expense_count": exp_count},
             )
 
         # (i) Projects

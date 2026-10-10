@@ -32,6 +32,7 @@ import { useToast } from '../../components/common/Toast';
 import { SimpleLineChart } from '../../components/common/charts/SimpleLineChart';
 import { SimpleBarChart } from '../../components/common/charts/SimpleBarChart';
 import { reportsService, downloadAuthenticated, toApiError } from '../../services';
+import { formatPerCurrency } from '../../services/dashboardSummaryService';
 import { queryKeys } from '../../hooks/queries';
 import {
   formatMoney,
@@ -44,6 +45,7 @@ import {
 import { AGING_BUCKET_LABELS, PAYMENT_METHOD_LABELS, PRICING_MODEL_LABELS, formatReportPeriod } from './reportsUi';
 import { usePageSpec } from '../../appUi/usePageSpec';
 import type {
+  CurrencyKPIs,
   CustomerAmount,
   CustomerAnalyticsOut,
   InvoiceAnalyticsOut,
@@ -203,7 +205,7 @@ function CustomerAmountList({
             <p className="text-[11px] text-slate-500">{row.customer.customer_number}</p>
           </div>
           <span className="text-xs font-bold text-slate-900 tabular-nums shrink-0">
-            {formatMoney(row.amount)}
+            {formatMoney(row.amount, row.currency)}
           </span>
         </div>
       ))}
@@ -243,7 +245,7 @@ function NamedAmountTable({
                 {formatNumber(row.quantity)}
               </td>
               <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-slate-900">
-                {formatMoney(row.revenue)}
+                {formatMoney(row.revenue, row.currency)}
               </td>
             </tr>
           ))}
@@ -253,7 +255,13 @@ function NamedAmountTable({
   );
 }
 
-function InvoicedVsCollectedChart({ data }: { data: RevenueAnalyticsOut['invoiced_vs_collected'] }) {
+function InvoicedVsCollectedChart({
+  data,
+  currency,
+}: {
+  data: RevenueAnalyticsOut['invoiced_vs_collected'];
+  currency: string;
+}) {
   if (data.length === 0) {
     return (
       <EmptyState
@@ -286,8 +294,8 @@ function InvoicedVsCollectedChart({ data }: { data: RevenueAnalyticsOut['invoice
               <div className="flex items-center justify-between text-xs mb-1">
                 <span className="font-medium text-slate-700">{formatReportPeriod(d.period)}</span>
                 <span className="text-slate-500">
-                  <span className="text-brand-600 font-semibold">{formatMoney(d.invoiced)}</span> ·{' '}
-                  <span className="text-emerald-600 font-semibold">{formatMoney(d.collected)}</span>
+                  <span className="text-brand-600 font-semibold">{formatMoney(d.invoiced, currency)}</span> ·{' '}
+                  <span className="text-emerald-600 font-semibold">{formatMoney(d.collected, currency)}</span>
                 </span>
               </div>
               <div className="space-y-1">
@@ -316,47 +324,61 @@ function InvoicedVsCollectedChart({ data }: { data: RevenueAnalyticsOut['invoice
 // Tabs
 // ---------------------------------------------------------------------------
 
+/** "₹8,210.71 · AED 433.36" - a KPI in every currency (base first); never one summed figure. */
+function perCurrency(data: ReportKPIs, pick: (row: CurrencyKPIs) => string | null): string {
+  const rows = data.by_currency?.length ? data.by_currency : [data];
+  return formatPerCurrency(rows, (r) => pick(r) ?? '', (amount, cur) => (amount ? formatMoney(amount, cur) : '—'), data.currency);
+}
+
+function perCurrencyRate(data: ReportKPIs): string {
+  const rows = (data.by_currency?.length ? data.by_currency : [data]).filter((r) => r.collection_rate !== null);
+  if (rows.length === 0) return formatPercent(null);
+  if (rows.length === 1) return formatPercent(rows[0].collection_rate);
+  return rows.map((r) => `${r.currency} ${formatPercent(r.collection_rate)}`).join(' · ');
+}
+
 function OverviewTab({ data }: { data: ReportKPIs }) {
   const ui = usePageSpec('reports');
+  const nothingInvoiced = (data.by_currency?.length ? data.by_currency : [data]).every((r) => r.collection_rate === null);
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4" {...ui.edit('overview_kpis')}>
       {ui.render('overview_kpis', {
         total_revenue: (item, edit) => (
           <div key="total_revenue" {...edit}>
-            <StatCard title={item.label} value={formatMoney(data.total_revenue)} icon={<TrendingUp className="w-4 h-4" />} />
+            <StatCard title={item.label} value={perCurrency(data, (r) => r.total_revenue)} icon={<TrendingUp className="w-4 h-4" />} />
           </div>
         ),
         net_revenue: (item, edit) => (
           <div key="net_revenue" {...edit}>
-            <StatCard title={item.label} value={formatMoney(data.net_revenue)} icon={<Banknote className="w-4 h-4" />} />
+            <StatCard title={item.label} value={perCurrency(data, (r) => r.net_revenue)} icon={<Banknote className="w-4 h-4" />} />
           </div>
         ),
         total_invoiced: (item, edit) => (
           <div key="total_invoiced" {...edit}>
-            <StatCard title={item.label} value={formatMoney(data.total_invoiced)} icon={<ReceiptText className="w-4 h-4" />} />
+            <StatCard title={item.label} value={perCurrency(data, (r) => r.total_invoiced)} icon={<ReceiptText className="w-4 h-4" />} />
           </div>
         ),
         total_collected: (item, edit) => (
           <div key="total_collected" {...edit}>
-            <StatCard title={item.label} value={formatMoney(data.total_collected)} icon={<CreditCard className="w-4 h-4" />} />
+            <StatCard title={item.label} value={perCurrency(data, (r) => r.total_collected)} icon={<CreditCard className="w-4 h-4" />} />
           </div>
         ),
         outstanding: (item, edit) => (
           <div key="outstanding" {...edit}>
-            <StatCard title={item.label} value={formatMoney(data.outstanding_receivables)} icon={<Wallet className="w-4 h-4" />} />
+            <StatCard title={item.label} value={perCurrency(data, (r) => r.outstanding_receivables)} icon={<Wallet className="w-4 h-4" />} />
           </div>
         ),
         overdue: (item, edit) => (
           <div key="overdue" {...edit}>
-            <StatCard title={item.label} value={formatMoney(data.overdue_receivables)} icon={<AlertTriangle className="w-4 h-4" />} />
+            <StatCard title={item.label} value={perCurrency(data, (r) => r.overdue_receivables)} icon={<AlertTriangle className="w-4 h-4" />} />
           </div>
         ),
         collection_rate: (item, edit) => (
           <div key="collection_rate" {...edit}>
             <StatCard
               title={item.label}
-              value={formatPercent(data.collection_rate)}
-              comparisonText={data.collection_rate === null ? 'Nothing invoiced in this range' : undefined}
+              value={perCurrencyRate(data)}
+              comparisonText={nothingInvoiced ? 'Nothing invoiced in this range' : undefined}
               icon={<Percent className="w-4 h-4" />}
             />
           </div>
@@ -365,8 +387,8 @@ function OverviewTab({ data }: { data: ReportKPIs }) {
           <div key="avg_invoice" {...edit}>
             <StatCard
               title={item.label}
-              value={formatMoney(data.average_invoice_value)}
-              comparisonText={data.average_invoice_value === null ? 'Nothing invoiced in this range' : undefined}
+              value={perCurrency(data, (r) => r.average_invoice_value)}
+              comparisonText={nothingInvoiced ? 'Nothing invoiced in this range' : undefined}
               icon={<Calculator className="w-4 h-4" />}
             />
           </div>
@@ -389,6 +411,7 @@ function RevenueTab({
   const byCustomer = data.revenue_by_customer.map((r) => ({ label: r.customer.display_name, value: parseMoney(r.amount) || 0 }));
   const byProduct = data.revenue_by_product.map((r) => ({ label: r.name, value: parseMoney(r.revenue) || 0 }));
   const byPlan = data.revenue_by_plan.map((r) => ({ label: r.name, value: parseMoney(r.revenue) || 0 }));
+  const money = (v: number) => formatMoney(v, data.currency);
 
   return (
     <div className="space-y-6">
@@ -406,7 +429,7 @@ function RevenueTab({
             description="Revenue recognized for this range will appear here once invoices are issued."
           />
         ) : (
-          <SimpleLineChart data={revenueOverTime} formatPeriod={formatReportPeriod} />
+          <SimpleLineChart data={revenueOverTime} formatPeriod={formatReportPeriod} formatValue={money} />
         )}
       </ReportSection>
 
@@ -417,7 +440,7 @@ function RevenueTab({
         onExport={onExport}
         isExporting={exportingSection === 'invoiced_vs_collected'}
       >
-        <InvoicedVsCollectedChart data={data.invoiced_vs_collected} />
+        <InvoicedVsCollectedChart data={data.invoiced_vs_collected} currency={data.currency} />
       </ReportSection>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -432,7 +455,7 @@ function RevenueTab({
           {byCustomer.length === 0 ? (
             <EmptyState className="border-0 py-6" title="No customer revenue yet" description="No invoices billed to a customer in this range." />
           ) : (
-            <SimpleBarChart data={byCustomer} />
+            <SimpleBarChart data={byCustomer} formatValue={money} />
           )}
         </ReportSection>
 
@@ -446,7 +469,7 @@ function RevenueTab({
           {byProduct.length === 0 ? (
             <EmptyState className="border-0 py-6" title="No product revenue yet" description="No line items billed against a product in this range." />
           ) : (
-            <SimpleBarChart data={byProduct} />
+            <SimpleBarChart data={byProduct} formatValue={money} />
           )}
         </ReportSection>
       </div>
@@ -461,7 +484,7 @@ function RevenueTab({
         {byPlan.length === 0 ? (
           <EmptyState className="border-0 py-6" title="No plan revenue yet" description="No line items billed against a subscription plan in this range." />
         ) : (
-          <SimpleBarChart data={byPlan} />
+          <SimpleBarChart data={byPlan} formatValue={money} />
         )}
       </ReportSection>
     </div>
@@ -485,6 +508,7 @@ function ReceivablesTab({
   const collectionTrend = data.collection_rate_trend
     .filter((p) => p.rate !== null)
     .map((p) => ({ period: p.period, value: parseMoney(p.rate) || 0 }));
+  const money = (v: number) => formatMoney(v, data.currency);
 
   return (
     <div className="space-y-6">
@@ -506,7 +530,7 @@ function ReceivablesTab({
         {aging.length === 0 ? (
           <EmptyState className="border-0 py-6" title="Nothing outstanding" description="No unpaid invoices in this range." />
         ) : (
-          <SimpleBarChart data={aging} />
+          <SimpleBarChart data={aging} formatValue={money} />
         )}
       </ReportSection>
 
@@ -518,7 +542,7 @@ function ReceivablesTab({
         {overdueByDue.length === 0 ? (
           <EmptyState className="border-0 py-6" title="Nothing overdue" description="No invoices are currently overdue." />
         ) : (
-          <SimpleLineChart data={overdueByDue} color="#E11D48" formatPeriod={formatReportPeriod} />
+          <SimpleLineChart data={overdueByDue} color="#E11D48" formatPeriod={formatReportPeriod} formatValue={money} />
         )}
       </ReportSection>
 
@@ -555,12 +579,13 @@ function ReceivablesTab({
 function InvoicesTab({ data }: { data: InvoiceAnalyticsOut }) {
   const statuses = Object.entries(data.by_status);
   const byStatusChart = statuses.map(([status, s]) => ({ label: humanize(status), value: parseMoney(s.amount) || 0 }));
+  const money = (v: number) => formatMoney(v, data.currency);
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
         <StatCard title="Total Invoices" value={formatNumber(data.total_count)} icon={<ReceiptText className="w-4 h-4" />} />
-        <StatCard title="Average Invoice Amount" value={formatMoney(data.average_invoice_amount)} icon={<Calculator className="w-4 h-4" />} />
+        <StatCard title="Average Invoice Amount" value={formatMoney(data.average_invoice_amount, data.currency)} icon={<Calculator className="w-4 h-4" />} />
       </div>
 
       <Card>
@@ -574,7 +599,7 @@ function InvoicesTab({ data }: { data: InvoiceAnalyticsOut }) {
             <EmptyState className="border-0 py-6" title="No invoices yet" description="No invoices were issued in this range." />
           ) : (
             <>
-              <SimpleBarChart data={byStatusChart} />
+              <SimpleBarChart data={byStatusChart} formatValue={money} />
               <div className="overflow-x-auto border border-slate-100 rounded-lg">
                 <table className="w-full text-xs text-left">
                   <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200/80">
@@ -594,7 +619,7 @@ function InvoicesTab({ data }: { data: InvoiceAnalyticsOut }) {
                         </td>
                         <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">{formatNumber(s.count)}</td>
                         <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-slate-900">
-                          {formatMoney(s.amount)}
+                          {formatMoney(s.amount, data.currency)}
                         </td>
                       </tr>
                     ))}
@@ -623,14 +648,15 @@ function PaymentsTab({
     value: parseMoney(m.amount) || 0,
   }));
   const trend = data.trend.map((p) => ({ period: p.period, value: parseMoney(p.amount) || 0 }));
+  const money = (v: number) => formatMoney(v, data.currency);
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-        <StatCard title="Total Payments" value={formatMoney(data.total_payments)} icon={<CreditCard className="w-4 h-4" />} />
+        <StatCard title="Total Payments" value={formatMoney(data.total_payments, data.currency)} icon={<CreditCard className="w-4 h-4" />} />
         <StatCard title="Payment Count" value={formatNumber(data.payment_count)} icon={<ReceiptText className="w-4 h-4" />} />
-        <StatCard title="Refund Amount" value={formatMoney(data.refund_amount)} icon={<RefreshCcw className="w-4 h-4" />} />
-        <StatCard title="Net Collected" value={formatMoney(data.net_collected)} icon={<Banknote className="w-4 h-4" />} />
+        <StatCard title="Refund Amount" value={formatMoney(data.refund_amount, data.currency)} icon={<RefreshCcw className="w-4 h-4" />} />
+        <StatCard title="Net Collected" value={formatMoney(data.net_collected, data.currency)} icon={<Banknote className="w-4 h-4" />} />
       </div>
 
       <ReportSection
@@ -643,7 +669,7 @@ function PaymentsTab({
         {methodChart.length === 0 ? (
           <EmptyState className="border-0 py-6" title="No payments yet" description="No payments were recorded in this range." />
         ) : (
-          <SimpleBarChart data={methodChart} color="#059669" />
+          <SimpleBarChart data={methodChart} color="#059669" formatValue={money} />
         )}
       </ReportSection>
 
@@ -651,7 +677,7 @@ function PaymentsTab({
         {trend.length === 0 ? (
           <EmptyState className="border-0 py-6" title="No payments yet" description="No payments were recorded in this range." />
         ) : (
-          <SimpleLineChart data={trend} color="#059669" formatPeriod={formatReportPeriod} />
+          <SimpleLineChart data={trend} color="#059669" formatPeriod={formatReportPeriod} formatValue={money} />
         )}
       </ReportSection>
     </div>
@@ -733,7 +759,7 @@ function ProductsTab({ data }: { data: ProductAnalyticsOut }) {
         {pricingModelChart.length === 0 ? (
           <EmptyState className="border-0 py-6" title="No revenue yet" description="No line items billed in this range." />
         ) : (
-          <SimpleBarChart data={pricingModelChart} />
+          <SimpleBarChart data={pricingModelChart} formatValue={(v) => formatMoney(v, data.currency)} />
         )}
       </ReportSection>
 
@@ -784,11 +810,15 @@ export function ReportsPage() {
   const end = searchParams.get('end') ?? '';
 
   const isCustomIncomplete = range === 'custom' && (!start || !end);
+  // Reporting currency: '' = the organization's base currency. There is no FX conversion,
+  // so every tab reports one currency at a time (the overview lists each currency).
+  const currency = searchParams.get('currency') ?? '';
 
   const params: ReportRangeParams = useMemo(() => {
-    if (range === 'custom') return { range, start: start || undefined, end: end || undefined };
-    return { range };
-  }, [range, start, end]);
+    const base: ReportRangeParams =
+      range === 'custom' ? { range, start: start || undefined, end: end || undefined } : { range };
+    return currency ? { ...base, currency } : base;
+  }, [range, start, end, currency]);
 
   const updateParams = (mutate: (p: URLSearchParams) => void) => {
     const p = new URLSearchParams(searchParams);
@@ -807,6 +837,7 @@ export function ReportsPage() {
     });
   const setStart = (value: string) => updateParams((p) => (value ? p.set('start', value) : p.delete('start')));
   const setEnd = (value: string) => updateParams((p) => (value ? p.set('end', value) : p.delete('end')));
+  const selectCurrency = (value: string) => updateParams((p) => (value ? p.set('currency', value) : p.delete('currency')));
 
   const dashboardQuery = useQuery({
     queryKey: queryKeys.reports.dashboard(params),
@@ -843,6 +874,18 @@ export function ReportsPage() {
     queryFn: () => reportsService.products(params),
     enabled: tab === 'products' && !isCustomIncomplete,
   });
+
+  const activeQuery = {
+    overview: dashboardQuery,
+    revenue: revenueQuery,
+    receivables: receivablesQuery,
+    invoices: invoicesQuery,
+    payments: paymentsQuery,
+    customers: customersQuery,
+    products: productsQuery,
+  }[tab];
+  const activeData = activeQuery.data as { currency: string; currencies: string[] } | undefined;
+  const currencyOptions = activeData?.currencies ?? [];
 
   const runExport = async (section: ReportExportSection) => {
     setExportingSection(section);
@@ -888,6 +931,16 @@ export function ReportsPage() {
             )}
             {isCustomIncomplete && (
               <span className="text-xs text-amber-600 font-medium">Select both a start and end date.</span>
+            )}
+            {tab !== 'overview' && currencyOptions.length > 1 && (
+              <div className="w-full sm:w-40 sm:ml-auto">
+                <Select
+                  aria-label="Reporting currency"
+                  value={currency || activeData?.currency || ''}
+                  onChange={(e) => selectCurrency(e.target.value)}
+                  options={currencyOptions.map((c) => ({ value: c, label: `Amounts in ${c}` }))}
+                />
+              </div>
             )}
           </div>
         </CardContent>

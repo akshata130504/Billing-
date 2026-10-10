@@ -32,7 +32,8 @@ const LOTUS = customer(3, 'Lotus Textiles', 'finance@lotustextiles.example.in');
 const BLUEWAVE = customer(5, 'Bluewave Logistics', 'ap@bluewave.example.in');
 const SAFFRON = customer(6, 'Saffron Studio', 'studio@saffron.example.in');
 
-export const sampleRevenueKpis: ReportKPIs = {
+const sampleInrKpis = {
+  currency: 'INR',
   total_revenue: '285736.00',
   net_revenue: '243200.00',
   total_invoiced: '285736.00',
@@ -41,9 +42,18 @@ export const sampleRevenueKpis: ReportKPIs = {
   overdue_receivables: '50858.00',
   collection_rate: '57.91',
   average_invoice_value: '31748.44',
+  invoice_count: 9,
+};
+
+export const sampleRevenueKpis: ReportKPIs = {
+  ...sampleInrKpis,
+  currencies: ['INR'],
+  by_currency: [sampleInrKpis],
 };
 
 export const sampleRevenueAnalytics: RevenueAnalyticsOut = {
+  currency: 'INR',
+  currencies: ['INR'],
   granularity: 'month',
   revenue_over_time: [
     { period: '2026-05', amount: '28500.00' },
@@ -62,24 +72,26 @@ export const sampleRevenueAnalytics: RevenueAnalyticsOut = {
     { period: '2026-10', invoiced: '59920.00', collected: '23584.00' },
   ],
   revenue_by_customer: [
-    { customer: LOTUS, amount: '76700.00' },
-    { customer: ACME, amount: '67968.00' },
-    { customer: SUNRISE, amount: '46610.00' },
-    { customer: SAFFRON, amount: '41300.00' },
-    { customer: BLUEWAVE, amount: '32450.00' },
+    { customer: LOTUS, amount: '76700.00', currency: 'INR' },
+    { customer: ACME, amount: '67968.00', currency: 'INR' },
+    { customer: SUNRISE, amount: '46610.00', currency: 'INR' },
+    { customer: SAFFRON, amount: '41300.00', currency: 'INR' },
+    { customer: BLUEWAVE, amount: '32450.00', currency: 'INR' },
   ],
   revenue_by_product: [
-    { id: 'prod-1', name: 'Implementation services', revenue: '98000.00', quantity: '14' },
-    { id: 'prod-2', name: 'Annual support', revenue: '64500.00', quantity: '6' },
-    { id: 'prod-3', name: 'Training workshop', revenue: '27500.00', quantity: '11' },
+    { id: 'prod-1', name: 'Implementation services', revenue: '98000.00', quantity: '14', currency: 'INR' },
+    { id: 'prod-2', name: 'Annual support', revenue: '64500.00', quantity: '6', currency: 'INR' },
+    { id: 'prod-3', name: 'Training workshop', revenue: '27500.00', quantity: '11', currency: 'INR' },
   ],
   revenue_by_plan: [
-    { id: 'plan-1', name: 'Growth (monthly)', revenue: '53982.00', quantity: '6' },
-    { id: 'plan-2', name: 'Starter (monthly)', revenue: '17994.00', quantity: '6' },
+    { id: 'plan-1', name: 'Growth (monthly)', revenue: '53982.00', quantity: '6', currency: 'INR' },
+    { id: 'plan-2', name: 'Starter (monthly)', revenue: '17994.00', quantity: '6', currency: 'INR' },
   ],
 };
 
 export const sampleReceivablesAnalytics: ReceivablesAnalyticsOut = {
+  currency: 'INR',
+  currencies: ['INR'],
   outstanding_by_aging: [
     { bucket: 'current', count: 2, amount: '69414.00' },
     { bucket: '1_30', count: 1, amount: '32450.00' },
@@ -95,21 +107,23 @@ export const sampleReceivablesAnalytics: ReceivablesAnalyticsOut = {
     { period: '2026-10', rate: '39.36' },
   ],
   top_customers_by_outstanding: [
-    { customer: LOTUS, amount: '46700.00' },
-    { customer: BLUEWAVE, amount: '32450.00' },
-    { customer: SUNRISE, amount: '21830.00' },
-    { customer: ACME, amount: '18408.00' },
+    { customer: LOTUS, amount: '46700.00', currency: 'INR' },
+    { customer: BLUEWAVE, amount: '32450.00', currency: 'INR' },
+    { customer: SUNRISE, amount: '21830.00', currency: 'INR' },
+    { customer: ACME, amount: '18408.00', currency: 'INR' },
   ],
   average_days_to_payment: 18.4,
 };
 
 export const samplePaymentAnalytics: PaymentAnalyticsOut = {
+  currency: 'INR',
+  currencies: ['INR'],
   total_payments: '168464.00',
   payment_count: 7,
   method_breakdown: [
-    { method: 'bank_transfer', amount: '98560.00' },
-    { method: 'upi', amount: '45120.00' },
-    { method: 'card', amount: '24784.00' },
+    { method: 'bank_transfer', amount: '98560.00', currency: 'INR' },
+    { method: 'upi', amount: '45120.00', currency: 'INR' },
+    { method: 'card', amount: '24784.00', currency: 'INR' },
   ],
   trend: [
     { period: '2026-09', amount: '96780.00' },
@@ -120,6 +134,8 @@ export const samplePaymentAnalytics: PaymentAnalyticsOut = {
 };
 
 export const sampleCustomerAnalytics: CustomerAnalyticsOut = {
+  currency: 'INR',
+  currencies: ['INR'],
   total_customers: 8,
   active_customers: 6,
   customers_with_outstanding_balance: 4,
@@ -128,6 +144,8 @@ export const sampleCustomerAnalytics: CustomerAnalyticsOut = {
 };
 
 export const sampleInvoiceAnalytics: InvoiceAnalyticsOut = {
+  currency: 'INR',
+  currencies: ['INR'],
   by_status: {
     paid: { count: 3, amount: '85904.00' },
     sent: { count: 1, amount: '21830.00' },
