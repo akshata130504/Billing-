@@ -277,7 +277,8 @@ def test_public_quote_page_accept_and_decline(client, tenant, auth_headers, db):
 def test_actions_on_draft_are_invalid_state(client, tenant, auth_headers, path):
     customer = tenant.customer()
     quote = _create(client, auth_headers, customer)
-    resp = client.post(f"{BASE}/{quote['id']}/{path}", json={"reason": "Signed PDF received"}, headers=auth_headers)
+    body = {} if path == "convert" else {"reason": "Signed PDF received"}
+    resp = client.post(f"{BASE}/{quote['id']}/{path}", json=body, headers=auth_headers)
     assert resp.status_code == 409
     assert resp.json()["error"]["code"] == "INVALID_STATE"
 

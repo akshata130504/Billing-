@@ -181,7 +181,7 @@ def test_issued_invoice_carries_the_gst_split_and_hsn(client, tenant, auth_heade
             "customer_id": customer.id,
             "items": [
                 {"product_id": product["id"], "description": "Consulting", "quantity": 2,
-                 "unit_price": "1000", "tax_rate_pct": 18, "hsn_sac_code": "998314"}
+                 "unit_price": "1000", "tax_rate_pct": 18}
             ],
         },
     )
