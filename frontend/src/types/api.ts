@@ -634,6 +634,8 @@ export interface SubscriptionOut {
   notes: string | null;
   /** Monthly-normalised recurring amount. */
   mrr: string;
+  /** POST /renew would accept a manual renewal now (active and next billing date reached). */
+  renewal_due?: boolean;
   created_at: string;
   updated_at: string;
 }

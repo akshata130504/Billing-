@@ -32,6 +32,7 @@ import { Modal } from '../../components/common/Modal';
 import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { formatMoney, formatDate, formatDateTime, humanize, statusVariant } from '../../utils/format';
+import { manualRenewalState } from './renewal';
 
 export function SubscriptionDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -245,6 +246,8 @@ export function SubscriptionDetailPage() {
 
   const isDraft = subscription.status === 'draft' || subscription.status === 'pending_activation';
   const isActive = subscription.status === 'active';
+  // The server refuses a manual renewal (409) until the next billing date is reached.
+  const renewal = manualRenewalState(subscription);
   const isTrialing = subscription.status === 'trialing';
   const isPaused = subscription.status === 'paused';
   const isCancelled = subscription.status === 'cancelled' || subscription.status === 'expired';
@@ -324,15 +327,20 @@ export function SubscriptionDetailPage() {
                   <FileText className="w-3.5 h-3.5 text-brand-600" />
                   Generate Invoice
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setRenewModalOpen(true)}
-                  className="flex items-center gap-1.5"
-                >
-                  <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
-                  Renew
-                </Button>
+                {/* The wrapper carries the tooltip: a disabled button receives no pointer events. */}
+                <span title={renewal.reason ?? 'The renewal is due: advance to the next billing period now'}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setRenewModalOpen(true)}
+                    disabled={!renewal.due}
+                    aria-label={renewal.reason ? `Renew (${renewal.reason})` : 'Renew'}
+                    className="flex items-center gap-1.5"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
+                    Renew
+                  </Button>
+                </span>
                 <Button
                   variant="outline"
                   size="sm"
@@ -807,7 +815,7 @@ export function SubscriptionDetailPage() {
         onClose={() => setRenewModalOpen(false)}
         onConfirm={handleRenewConfirm}
         title="Advance Billing Period"
-        description="Manually renew this subscription for the next billing cycle? This advances the active period and generates the renewal invoice."
+        description="The renewal for this subscription is due. Renew it now? This advances the active period and generates the renewal invoice."
         confirmLabel="Renew Now"
         variant="default"
         isLoading={actionLoading}

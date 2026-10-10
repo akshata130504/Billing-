@@ -101,6 +101,8 @@ class SubscriptionOut(BaseModel):
     ended_at: Optional[datetime] = None
     notes: Optional[str] = None
     mrr: str
+    # True when POST /renew would accept a manual renewal now (active and next billing date reached).
+    renewal_due: bool = False
     created_at: datetime
     updated_at: datetime
 
