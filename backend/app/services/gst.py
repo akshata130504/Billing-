@@ -16,6 +16,10 @@ the state components understates the supplier's liability.
 
 Only India (`country == "IN"`) is treated as GST territory. Anything else is an
 export/overseas supply: zero-rated here and reported as such, with no split.
+
+No GSTIN, no GST (product decision, BUG-07): a supplier without a GSTIN is not
+registered and cannot charge GST, so its documents carry no tax at all (titled
+"Bill of Supply") whatever the line tax rates say.
 """
 from __future__ import annotations
 
@@ -96,6 +100,11 @@ class SupplyContext:
     place_of_supply_name: Optional[str]
     customer_gstin: Optional[str]
     is_gst_registered: bool               # recipient holds a GSTIN (B2B)
+    supplier_registered: bool = True      # supplier holds a GSTIN; False -> no GST is charged
+
+    @property
+    def charges_gst(self) -> bool:
+        return self.supplier_registered and not self.is_export
 
     @property
     def is_intra_state(self) -> bool:
@@ -113,6 +122,7 @@ def resolve_supply(organization, customer) -> SupplyContext:
     customer_gstin = (getattr(customer, "gstin", None) or "").strip().upper() or None
 
     supplier_code = resolve_state_code(getattr(organization, "gstin", None), getattr(organization, "state", None))
+    supplier_registered = bool((getattr(organization, "gstin", None) or "").strip())
 
     # Outside India (either side) is an export / overseas supply: no CGST/SGST/IGST split.
     if supplier_country != "IN" or customer_country != "IN":
@@ -123,6 +133,7 @@ def resolve_supply(organization, customer) -> SupplyContext:
             place_of_supply_name=None,
             customer_gstin=customer_gstin,
             is_gst_registered=bool(customer_gstin),
+            supplier_registered=supplier_registered,
         )
 
     pos_code = resolve_state_code(customer_gstin, getattr(customer, "billing_state", None))
@@ -139,6 +150,7 @@ def resolve_supply(organization, customer) -> SupplyContext:
         place_of_supply_name=state_name(pos_code),
         customer_gstin=customer_gstin,
         is_gst_registered=bool(customer_gstin),
+        supplier_registered=supplier_registered,
     )
 
 
@@ -166,7 +178,7 @@ def split_tax(tax_amount, supply: SupplyContext) -> TaxSplit:
     like 4.05 independently would otherwise lose or gain a paisa.
     """
     tax = q2(tax_amount)
-    if tax == 0 or supply.is_export:
+    if tax == 0 or not supply.charges_gst:
         return ZERO_SPLIT
     if supply.is_intra_state:
         cgst = q2(tax / 2)
@@ -177,7 +189,7 @@ def split_tax(tax_amount, supply: SupplyContext) -> TaxSplit:
 def split_rate(tax_rate_pct, supply: SupplyContext) -> TaxSplit:
     """Split a *rate* (e.g. 18 -> 9 CGST + 9 SGST) for display on the document."""
     rate = D(tax_rate_pct)
-    if rate == 0 or supply.is_export:
+    if rate == 0 or not supply.charges_gst:
         return ZERO_SPLIT
     if supply.is_intra_state:
         half = q2(rate / 2)

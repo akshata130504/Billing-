@@ -59,6 +59,7 @@ def _local_iana_timezone() -> str:
 
 
 TEST_ORG_TIMEZONE = _local_iana_timezone()
+TEST_ORG_GSTIN = "29AAFCB9900V1Z8"  # Karnataka
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -129,7 +130,12 @@ class Tenant:
     def __init__(self, db: Session, suffix: str):
         self.db = db
         self.suffix = suffix
-        self.organization = Organization(name=f"Test Org {suffix}", slug=f"test-org-{suffix}", timezone=TEST_ORG_TIMEZONE)
+        # A GST-registered (Karnataka) supplier by default: without a GSTIN no GST is
+        # charged at all (BUG-07), which tests opt into by clearing `gstin`.
+        self.organization = Organization(
+            name=f"Test Org {suffix}", slug=f"test-org-{suffix}", timezone=TEST_ORG_TIMEZONE,
+            gstin=TEST_ORG_GSTIN, state="Karnataka",
+        )
         db.add(self.organization)
         db.flush()
         self.owner = self.add_member("owner", MemberRole.OWNER)

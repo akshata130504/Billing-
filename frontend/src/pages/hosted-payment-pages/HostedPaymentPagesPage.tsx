@@ -53,6 +53,9 @@ import { usePageSpec } from '../../appUi/usePageSpec';
 
 const PAGE_SIZE = 20;
 
+// Invoice statuses a checkout session can collect (mirrors the server's OPEN_INVOICE_STATUSES).
+const PAYABLE_INVOICE_STATUSES = new Set(['sent', 'partially_paid', 'overdue']);
+
 const PURPOSE_LABELS: Record<CheckoutPurpose, string> = {
   invoice_payment: 'Invoice payment',
   new_subscription: 'New subscription',
@@ -686,8 +689,13 @@ function NewSessionModal({
         setPickerError(null);
         if (purpose === 'invoice_payment' && invoices === null) {
           const res = await invoiceService.list({ page: 1, page_size: 100, sort: '-issue_date' });
+          // Only payable invoices: the server refuses drafts (409), paid and void ones.
           if (!cancelled)
-            setInvoices(res.items.filter((i) => i.status !== 'paid' && i.status !== 'void' && Number(i.amount_due) > 0));
+            setInvoices(
+              res.items.filter(
+                (i) => PAYABLE_INVOICE_STATUSES.has(String(i.status).toLowerCase()) && Number(i.amount_due) > 0
+              )
+            );
         }
         if ((purpose === 'new_subscription' || purpose === 'update_subscription') && plans === null) {
           const res = await catalogService.listPlans({ page: 1, page_size: 100, is_active: true });

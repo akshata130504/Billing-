@@ -67,24 +67,8 @@ def render_quote_pdf(quote, organization, template=None) -> bytes:
                             DocumentTemplate.is_active.is_(True),
                         )
                     )
-                # 3. Fallback: Default Invoice template
-                if template is None:
-                    template = sess.scalar(
-                        select(DocumentTemplate).where(
-                            DocumentTemplate.organization_id == organization.id,
-                            DocumentTemplate.document_type == DocumentType.INVOICE,
-                            DocumentTemplate.is_default.is_(True),
-                        )
-                    )
-                # 4. Fallback: Any active Invoice template
-                if template is None:
-                    template = sess.scalar(
-                        select(DocumentTemplate).where(
-                            DocumentTemplate.organization_id == organization.id,
-                            DocumentTemplate.document_type == DocumentType.INVOICE,
-                            DocumentTemplate.is_active.is_(True),
-                        )
-                    )
+                # Never an invoice template: a template applies only to its own
+                # document type (BUG-49). No quote template -> built-in styling.
         except Exception as exc:
             logger.warning("Could not resolve document template for quote %s: %s", getattr(quote, "id", None), exc)
             template = None

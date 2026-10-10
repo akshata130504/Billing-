@@ -350,6 +350,17 @@ def _customer_or_404(db: Session, organization_id: str, customer_id: str) -> Cus
     return customer
 
 
+def supply_preview(db: Session, ctx: CurrentContext, customer_id: str) -> Dict[str, Any]:
+    """The GST treatment a quote/invoice for this customer will be saved with."""
+    supply = gst.resolve_supply(ctx.organization, _customer_or_404(db, ctx.organization_id, customer_id))
+    return {
+        "supply_type": supply.supply_type,
+        "charges_gst": supply.charges_gst,
+        "place_of_supply_code": supply.place_of_supply_code,
+        "place_of_supply_name": supply.place_of_supply_name,
+    }
+
+
 # --- mutations ---------------------------------------------------------------------------------------
 
 
@@ -891,6 +902,28 @@ def _lock_quote(db: Session, organization_id: str, quote_id: str) -> Quote:
 # --- conversion to invoice ------------------------------------------------------------------------------
 
 
+_QUOTE_VALIDITY_LINE = re.compile(r"(?i)\bquote\s+(?:is\s+)?valid\s+(?:for|until|till)\b")
+_NUMBERED_LINE = re.compile(r"^\s*\d+[.)]\s+")
+
+
+def _invoice_terms_from_quote(organization, quote_terms: Optional[str]) -> Optional[str]:
+    """Terms for an invoice converted from a quote (BUG-28).
+
+    The organization's own invoice terms win. Otherwise keep the quote's terms minus
+    the quote-validity sentence, which means nothing on an invoice; numbered lists
+    are renumbered so the gap does not show.
+    """
+    org_terms = (getattr(organization, "invoice_terms", None) or "").strip()
+    if org_terms:
+        return org_terms
+    if not quote_terms:
+        return quote_terms
+    lines = [ln for ln in quote_terms.splitlines() if not _QUOTE_VALIDITY_LINE.search(ln)]
+    if lines and all(_NUMBERED_LINE.match(ln) for ln in lines):
+        lines = [f"{i}. {_NUMBERED_LINE.sub('', ln, count=1)}" for i, ln in enumerate(lines, 1)]
+    return "\n".join(lines).strip() or None
+
+
 def _create_invoice_from_quote(db: Session, ctx: CurrentContext, quote: Quote, data: QuoteConvertIn) -> Invoice:
     """Small local invoice factory (the invoice module owns the general one)."""
     customer = quote.customer
@@ -902,6 +935,11 @@ def _create_invoice_from_quote(db: Session, ctx: CurrentContext, quote: Quote, d
     # Re-resolve the supply at conversion time: the invoice is the tax document,
     # and the customer's GSTIN/state may have been corrected since the quote.
     supply = gst.resolve_supply(ctx.organization, customer)
+    # No GSTIN, no GST (BUG-07): an unregistered organization's invoice carries no tax,
+    # even when converted from a quote priced with GST.
+    no_gst = not supply.supplier_registered
+    tax_amount = Decimal("0.00") if no_gst else quote.tax_amount
+    total = q2(D(quote.subtotal) - D(quote.discount_amount)) if no_gst else quote.total
     invoice = Invoice(
         organization_id=ctx.organization_id,
         invoice_number=next_number(db, ctx.organization_id, "invoice"),
@@ -914,20 +952,20 @@ def _create_invoice_from_quote(db: Session, ctx: CurrentContext, quote: Quote, d
         subtotal=quote.subtotal,
         discount_pct=quote.discount_pct,
         discount_amount=quote.discount_amount,
-        tax_amount=quote.tax_amount,
-        cgst_amount=quote.cgst_amount,
-        sgst_amount=quote.sgst_amount,
-        igst_amount=quote.igst_amount,
+        tax_amount=tax_amount,
+        cgst_amount=Decimal("0.00") if no_gst else quote.cgst_amount,
+        sgst_amount=Decimal("0.00") if no_gst else quote.sgst_amount,
+        igst_amount=Decimal("0.00") if no_gst else quote.igst_amount,
         supply_type=supply.supply_type,
         place_of_supply_code=supply.place_of_supply_code,
         place_of_supply_name=supply.place_of_supply_name,
         customer_gstin=supply.customer_gstin,
         supplier_gstin=getattr(ctx.organization, "gstin", None),
-        total=quote.total,
+        total=total,
         amount_paid=Decimal("0.00"),
-        amount_due=quote.total,
+        amount_due=total,
         notes=quote.notes,
-        terms=quote.terms,
+        terms=_invoice_terms_from_quote(ctx.organization, quote.terms),
         public_token=generate_opaque_token(),
         created_by_id=ctx.user.id,
     )
@@ -942,14 +980,14 @@ def _create_invoice_from_quote(db: Session, ctx: CurrentContext, quote: Quote, d
                 description=item.description,
                 quantity=item.quantity,
                 unit_price=item.unit_price,
-                tax_rate_pct=item.tax_rate_pct,
+                tax_rate_pct=Decimal("0") if no_gst else item.tax_rate_pct,
                 amount=item.amount,
-                cgst_amount=item.cgst_amount,
-                sgst_amount=item.sgst_amount,
-                igst_amount=item.igst_amount,
-                cgst_rate_pct=item.cgst_rate_pct,
-                sgst_rate_pct=item.sgst_rate_pct,
-                igst_rate_pct=item.igst_rate_pct,
+                cgst_amount=Decimal("0.00") if no_gst else item.cgst_amount,
+                sgst_amount=Decimal("0.00") if no_gst else item.sgst_amount,
+                igst_amount=Decimal("0.00") if no_gst else item.igst_amount,
+                cgst_rate_pct=Decimal("0.00") if no_gst else item.cgst_rate_pct,
+                sgst_rate_pct=Decimal("0.00") if no_gst else item.sgst_rate_pct,
+                igst_rate_pct=Decimal("0.00") if no_gst else item.igst_rate_pct,
                 hsn_sac_code=getattr(item, "hsn_sac_code", None),
                 position=item.position,
                 pricing_explanation=getattr(item, "pricing_explanation", None),

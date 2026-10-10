@@ -24,7 +24,7 @@ import { customerService } from '../../services/customerService';
 import { catalogCpqService } from '../../services/catalogCpqService';
 import { planPricingService } from '../../services/planPricingService';
 import type { OfferingOut } from '../../types/catalog_cpq';
-import type { QuoteItemIn } from '../../types/quotes';
+import type { QuoteItemIn, SupplyPreview } from '../../types/quotes';
 import { todayIso, addDays, calculateValidityDays, formatQuoteTerms, updateTermsValidity } from '../../utils/format';
 
 const VALIDITY_PRESETS = [7, 15, 30, 60, 90] as const;
@@ -123,6 +123,26 @@ export function QuoteFormPage() {
   const [terms, setTerms] = useState(formatQuoteTerms(30));
 
   const [items, setItems] = useState<FormLineItem[]>([]);
+
+  // GST treatment as the server will save it (org GSTIN/state vs the customer's place of
+  // supply). Null until a customer is picked or when it cannot be fetched.
+  const [supply, setSupply] = useState<SupplyPreview | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setSupply(null);
+    if (!customerId) return;
+    (async () => {
+      try {
+        const res = await quoteService.getSupplyPreview(customerId);
+        if (!cancelled) setSupply(res ?? null);
+      } catch {
+        if (!cancelled) setSupply(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId]);
 
   const handleQuickCreateCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -375,11 +395,13 @@ export function QuoteFormPage() {
     let taxTotal = 0;
 
     const disc = Math.max(0, Math.min(100, Number(discountPct) || 0));
+    // Same rule as the server: no GST without a GSTIN, and exports are zero-rated.
+    const noGst = supply !== null && !supply.charges_gst;
 
     for (const item of items) {
       const qty = Number(item.quantity || 1);
       const price = Number(item.unit_price || 0);
-      const taxRate = Number(item.tax_rate_pct || 0);
+      const taxRate = noGst ? 0 : Number(item.tax_rate_pct || 0);
 
       const amount = qty * price;
       const taxable = amount - (amount * disc) / 100;
@@ -391,16 +413,18 @@ export function QuoteFormPage() {
 
     const discountAmount = (subtotal * disc) / 100;
     const total = subtotal - discountAmount + taxTotal;
+    const intra = supply?.supply_type === 'intra_state';
 
     return {
       subtotal,
       discountAmount,
       taxTotal,
       total,
-      cgst: taxTotal / 2,
-      sgst: taxTotal / 2,
+      cgst: intra ? taxTotal / 2 : 0,
+      sgst: intra ? taxTotal / 2 : 0,
+      igst: supply?.supply_type === 'inter_state' ? taxTotal : 0,
     };
-  }, [items, discountPct]);
+  }, [items, discountPct, supply]);
 
   const handleSubmit = async (shouldSend = false) => {
     if (!customerId) {
@@ -865,15 +889,45 @@ export function QuoteFormPage() {
                 </span>
               </div>
 
-              <div className="flex justify-between text-slate-600 text-[11px] pt-1">
-                <span className="text-slate-500">CGST (9%)</span>
-                <span className="font-mono">₹{Math.round(totals.cgst).toLocaleString('en-IN')}</span>
-              </div>
-
-              <div className="flex justify-between text-slate-600 text-[11px]">
-                <span className="text-slate-500">SGST (9%)</span>
-                <span className="font-mono">₹{Math.round(totals.sgst).toLocaleString('en-IN')}</span>
-              </div>
+              {supply?.supply_type === 'intra_state' && supply.charges_gst && (
+                <>
+                  <div className="flex justify-between text-slate-600 text-[11px] pt-1">
+                    <span className="text-slate-500">CGST</span>
+                    <span className="font-mono">₹{Math.round(totals.cgst).toLocaleString('en-IN')}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600 text-[11px]">
+                    <span className="text-slate-500">SGST</span>
+                    <span className="font-mono">₹{Math.round(totals.sgst).toLocaleString('en-IN')}</span>
+                  </div>
+                </>
+              )}
+              {supply?.supply_type === 'inter_state' && supply.charges_gst && (
+                <div className="flex justify-between text-slate-600 text-[11px] pt-1">
+                  <span className="text-slate-500">IGST</span>
+                  <span className="font-mono">₹{Math.round(totals.igst).toLocaleString('en-IN')}</span>
+                </div>
+              )}
+              {(supply === null || !supply.charges_gst) && (
+                <div className="flex justify-between text-slate-600 text-[11px] pt-1">
+                  <span className="text-slate-500">GST</span>
+                  <span className="font-mono">₹{Math.round(totals.taxTotal).toLocaleString('en-IN')}</span>
+                </div>
+              )}
+              {supply !== null && !supply.charges_gst && (
+                <p className="text-[11px] text-amber-700" data-testid="no-gst-notice">
+                  {supply.supply_type === 'export' ? (
+                    'GST is not charged on an export supply.'
+                  ) : (
+                    <>
+                      GST is not charged because your organization has no GSTIN — add it in{' '}
+                      <Link to="/settings/organization" className="underline font-medium">
+                        Settings → Organization
+                      </Link>
+                      .
+                    </>
+                  )}
+                </p>
+              )}
 
               <hr className="border-slate-200" />
 

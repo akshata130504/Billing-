@@ -6,6 +6,7 @@ import type {
   QuoteUpdateInput,
   QuoteConvertInput,
   QuoteToSubscriptionInput,
+  SupplyPreview,
 } from '../types/quotes';
 import type { SubscriptionOut } from '../types/api';
 
@@ -44,6 +45,12 @@ export const quoteService = {
 
   async updateQuote(id: string, data: QuoteUpdateInput): Promise<Quote> {
     const res = await apiClient.patch<Quote>(`/quotes/${id}`, data);
+    return res.data;
+  },
+
+  /** The GST treatment the server will save a quote/invoice for this customer with. */
+  async getSupplyPreview(customerId: string): Promise<SupplyPreview> {
+    const res = await apiClient.get<SupplyPreview>(`/quotes/supply-preview?customer_id=${encodeURIComponent(customerId)}`);
     return res.data;
   },
 
