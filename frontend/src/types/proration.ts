@@ -20,7 +20,10 @@ export type SubscriptionChangeStatus = 'previewed' | 'scheduled' | 'applied' | '
 export type ProrationEffectiveType = 'immediate' | 'end_of_term' | 'scheduled';
 
 export interface SubscriptionChangePreviewIn {
+  /** A legacy plan. Exactly one of target_plan_id / target_offering_id (or neither for a resize). */
   target_plan_id?: string | null;
+  /** A Plans & Pricing / Catalog plan offering; the server resolves its linked plan. */
+  target_offering_id?: string | null;
   /** Decimal as string ("6") or number; must be > 0. */
   target_quantity?: string | number | null;
   /** YYYY-MM-DD. Clamped to the current billing period by the server. */

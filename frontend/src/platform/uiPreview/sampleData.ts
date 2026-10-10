@@ -890,7 +890,7 @@ const GET_ROUTES: Record<string, (query: Query) => unknown> = {
   '/dashboard/quotes-summary': () => sampleQuotesSummary,
   // Subscriptions
   // /subscriptions and /subscriptions/summary: typed fixtures in ./fixtures/trials.ts (full SubscriptionOut records).
-  '/subscriptions/plan-options': () => sampleOfferings.filter((o) => o.type === 'plan').map((p) => ({ id: p.id, name: p.name, price: p.base_price })),
+  // /subscriptions/plan-options: typed fixture in ./fixtures/proration.ts (SubscribablePlanOption records).
   // Payments
   '/payments': (query) => paginate(samplePayments.filter((p) => matchesSearch(query, p.payment_number, p.notes)), query),
   '/payments/summary': () => samplePaymentsSummary,
