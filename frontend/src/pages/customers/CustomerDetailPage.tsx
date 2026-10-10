@@ -436,10 +436,20 @@ function OverviewTab({ customer, canWrite }: { customer: CustomerOut; canWrite: 
     setActionLoading(true);
     try {
       const inv = await customerService.inviteToPortal(customer.id, inviteEmail.trim() || undefined);
-      showToast('success', 'Customer portal invitation sent successfully.');
-      if (inv.invite_url) {
-        setLastInviteUrl(inv.invite_url);
+      // The activation link is a customer credential: the API returns it only when the email
+      // could not be delivered, and only to admins, so they can share it by hand.
+      if (inv.email_delivered === false) {
+        showToast(
+          'warning',
+          'Invitation Created (Action Required)',
+          inv.invite_url
+            ? `Email could not be delivered to ${inv.email}. Share the activation link shown below with the customer.`
+            : `Email could not be delivered to ${inv.email}. Ask an admin to resend the invitation and share the link.`
+        );
+      } else {
+        showToast('success', 'Customer portal invitation sent successfully.');
       }
+      setLastInviteUrl(inv.invite_url || null);
       setInviteDialogOpen(false);
       await loadPortalAccess();
     } catch (err: any) {
@@ -691,7 +701,7 @@ function OverviewTab({ customer, canWrite }: { customer: CustomerOut; canWrite: 
                     {lastInviteUrl && (
                       <div className="p-2.5 bg-indigo-50/60 border border-indigo-100 rounded-lg space-y-1.5">
                         <div className="flex items-center justify-between text-[11px] font-semibold text-indigo-900">
-                          <span>Activation Link</span>
+                          <span>Activation link (email not delivered: share it with the customer)</span>
                           <button
                             type="button"
                             onClick={() => copyActivationLink(lastInviteUrl)}
@@ -766,7 +776,7 @@ function OverviewTab({ customer, canWrite }: { customer: CustomerOut; canWrite: 
                     {lastInviteUrl && (
                       <div className="p-2.5 bg-indigo-50/60 border border-indigo-100 rounded-lg space-y-1.5">
                         <div className="flex items-center justify-between text-[11px] font-semibold text-indigo-900">
-                          <span>New Activation Link</span>
+                          <span>New activation link (email not delivered: share it with the customer)</span>
                           <button
                             type="button"
                             onClick={() => copyActivationLink(lastInviteUrl)}

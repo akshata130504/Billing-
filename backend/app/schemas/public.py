@@ -6,7 +6,7 @@ from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.models import InvoiceStatus
-from backend.app.schemas.common_refs import LineItemOut
+from backend.app.schemas.common_refs import PublicLineItemOut
 from backend.app.schemas.invoices import InvoicePaymentRef
 
 
@@ -67,7 +67,7 @@ class PublicInvoice(BaseModel):
     total: str
     amount_paid: str
     amount_due: str
-    items: List[LineItemOut]
+    items: List[PublicLineItemOut]
     notes: Optional[str] = None
     terms: Optional[str] = None
     period_start: Optional[date] = None

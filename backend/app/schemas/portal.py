@@ -100,8 +100,11 @@ class CustomerPortalInvitationOut(BaseModel):
     expires_at: datetime
     created_at: datetime
     invited_by_name: Optional[str] = None
+    # Only on the invite response, only when the email was not delivered, and only for admin+.
     invite_url: Optional[str] = None
     status: str
+    # Set on the invite response: False means staff must share the activation link themselves.
+    email_delivered: Optional[bool] = None
 
 
 class CustomerPortalAccessStatusOut(BaseModel):

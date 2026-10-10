@@ -4,7 +4,6 @@ import {
   Plus,
   Trash2,
   ArrowLeft,
-  HelpCircle,
   AlertCircle,
   Save,
   Send,
@@ -24,6 +23,7 @@ import { loadPreferences } from '../settings/PreferencesTab';
 import { PhoneInput } from '../../components/common/PhoneInput';
 import { CustomerCombobox } from '../../components/common/CustomerCombobox';
 import { useToast } from '../../components/common/Toast';
+import { PricingExplanation } from '../../components/common/PricingExplanation';
 import { toApiError } from '../../services/apiClient';
 import { validateDateNotBefore, validateNonNegativeMoney, validatePercentage, validatePositiveQuantity } from '../../utils/validation';
 import { todayIso, toIsoDate } from '../../utils/format';
@@ -725,12 +725,7 @@ export const InvoiceFormPage: React.FC = () => {
                       className="w-full px-3 py-1 bg-white border border-gray-200 rounded text-xs text-gray-600 focus:ring-1 focus:ring-indigo-500"
                     />
 
-                    {item.pricing_explanation && (
-                      <div className="flex items-center gap-1 text-xs text-indigo-700 bg-indigo-50 px-2 py-1 rounded">
-                        <HelpCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                        <span className="truncate">{item.pricing_explanation}</span>
-                      </div>
-                    )}
+                    {item.pricing_explanation && <PricingExplanation value={item.pricing_explanation} />}
                   </div>
 
                   {/* Quantity */}
