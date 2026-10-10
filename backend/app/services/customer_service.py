@@ -4,6 +4,7 @@ Every query is scoped to ctx.organization_id; rows of another organization
 surface as 404. Each mutating function records an audit row and commits once.
 """
 from datetime import date
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import Select, exists, func, or_, select
@@ -27,7 +28,7 @@ from backend.app.models import (
 )
 from backend.app.schemas.common_refs import customer_ref, enum_value, iso_dt, money_str
 from backend.app.schemas.customers import ContactIn, CustomerCreate, CustomerUpdate
-from backend.app.services import audit, timezones
+from backend.app.services import audit, currency_totals, timezones
 from backend.app.services.numbering import next_number
 from backend.app.services.pagination import Page, PageParams, apply_sort, paginate
 
@@ -284,17 +285,45 @@ def set_contacts(db: Session, ctx: CurrentContext, customer_id: str, contacts: L
 
 
 def customer_stats(db: Session, organization_id: str, customer_id: str) -> Dict[str, Any]:
+    """Invoice totals for one customer. Money is never summed across currencies: the
+    top-level amounts are in `currency` (the customer's billing currency) and
+    `by_currency` lists every currency the customer has been invoiced in."""
     base = (Invoice.organization_id == organization_id, Invoice.customer_id == customer_id)
-    open_row = db.execute(
-        select(func.count(Invoice.id), func.coalesce(func.sum(Invoice.amount_due), 0)).where(
-            *base, Invoice.status.in_(OPEN_INVOICE_STATUSES)
+    totals: Dict[str, Dict[str, Any]] = {}
+
+    def _for(cur) -> Dict[str, Any]:
+        return totals.setdefault(
+            currency_totals.norm(cur),
+            {"open_invoice_count": 0, "outstanding": Decimal("0"), "billed": Decimal("0"), "paid": Decimal("0")},
         )
-    ).one()
-    billed_row = db.execute(
-        select(func.coalesce(func.sum(Invoice.total), 0), func.coalesce(func.sum(Invoice.amount_paid), 0)).where(
-            *base, Invoice.status.not_in((InvoiceStatus.DRAFT, InvoiceStatus.VOID))
-        )
-    ).one()
+
+    for cur, count, due in db.execute(
+        select(Invoice.currency, func.count(Invoice.id), func.coalesce(func.sum(Invoice.amount_due), 0))
+        .where(*base, Invoice.status.in_(OPEN_INVOICE_STATUSES))
+        .group_by(Invoice.currency)
+    ).all():
+        _for(cur)["open_invoice_count"] += int(count or 0)
+        _for(cur)["outstanding"] += Decimal(str(due))
+    for cur, billed, paid in db.execute(
+        select(Invoice.currency, func.coalesce(func.sum(Invoice.total), 0), func.coalesce(func.sum(Invoice.amount_paid), 0))
+        .where(*base, Invoice.status.not_in((InvoiceStatus.DRAFT, InvoiceStatus.VOID)))
+        .group_by(Invoice.currency)
+    ).all():
+        _for(cur)["billed"] += Decimal(str(billed))
+        _for(cur)["paid"] += Decimal(str(paid))
+    customer = db.get(Customer, customer_id)
+    currency = currency_totals.norm(customer.currency if customer else None)
+    by_currency = [
+        {
+            "currency": cur,
+            "open_invoice_count": totals[cur]["open_invoice_count"],
+            "outstanding_amount": money_str(totals[cur]["outstanding"]),
+            "total_billed": money_str(totals[cur]["billed"]),
+            "total_paid": money_str(totals[cur]["paid"]),
+        }
+        for cur in currency_totals.order_currencies(totals, currency)
+    ]
+    own = next((row for row in by_currency if row["currency"] == currency), None)
     active_subs = db.scalar(
         select(func.count(Subscription.id)).where(
             Subscription.organization_id == organization_id,
@@ -303,11 +332,13 @@ def customer_stats(db: Session, organization_id: str, customer_id: str) -> Dict[
         )
     )
     return {
-        "open_invoice_count": int(open_row[0] or 0),
-        "outstanding_amount": money_str(open_row[1]),
-        "total_billed": money_str(billed_row[0]),
-        "total_paid": money_str(billed_row[1]),
+        "open_invoice_count": sum(row["open_invoice_count"] for row in by_currency),
+        "currency": currency,
+        "outstanding_amount": own["outstanding_amount"] if own else "0.00",
+        "total_billed": own["total_billed"] if own else "0.00",
+        "total_paid": own["total_paid"] if own else "0.00",
         "active_subscriptions": int(active_subs or 0),
+        "by_currency": by_currency,
     }
 
 

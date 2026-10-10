@@ -193,6 +193,13 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
         pendingProcessing: Number(totals.pending_amount),
         totalRefunded: Number(totals.total_refunded),
         unappliedCredit: Number(totals.unallocated_amount),
+        byCurrency: (totals.by_currency ?? []).map((row) => ({
+          currency: row.currency,
+          totalCollected: row.total_collected,
+          pendingProcessing: row.pending_amount,
+          totalRefunded: row.total_refunded,
+          unappliedCredit: row.unallocated_amount,
+        })),
       });
     } catch {
       setSummary(EMPTY_SUMMARY);

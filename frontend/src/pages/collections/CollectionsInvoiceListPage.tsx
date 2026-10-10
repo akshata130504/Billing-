@@ -134,19 +134,19 @@ export function CollectionsInvoiceListPage() {
       key: 'total',
       title: 'Invoice Amount',
       align: 'right',
-      render: (item) => <span className="text-xs font-semibold text-slate-900 tabular-nums">{formatMoney(item.total)}</span>,
+      render: (item) => <span className="text-xs font-semibold text-slate-900 tabular-nums">{formatMoney(item.total, item.currency)}</span>,
     },
     {
       key: 'amount_paid',
       title: 'Paid',
       align: 'right',
-      render: (item) => <span className="text-xs text-emerald-600 tabular-nums">{formatMoney(item.amount_paid)}</span>,
+      render: (item) => <span className="text-xs text-emerald-600 tabular-nums">{formatMoney(item.amount_paid, item.currency)}</span>,
     },
     {
       key: 'amount_due',
       title: 'Outstanding',
       align: 'right',
-      render: (item) => <span className="text-xs font-bold text-slate-900 tabular-nums">{formatMoney(item.amount_due)}</span>,
+      render: (item) => <span className="text-xs font-bold text-slate-900 tabular-nums">{formatMoney(item.amount_due, item.currency)}</span>,
     },
     {
       key: 'days_overdue',

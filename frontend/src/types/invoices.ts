@@ -19,9 +19,12 @@ export interface InvoiceKPIs {
   partially_paid_count: number;
   paid_count: number;
   overdue_count: number;
+  /** In `currency` (the organization's base currency) only - never summed across currencies. */
   total_outstanding: number;
   total_revenue: number;
   void_count?: number;
+  currency?: string;
+  by_currency?: { currency: string; count: number; total_outstanding: string; total_revenue: string }[];
 }
 
 export interface InvoiceCustomerRef {

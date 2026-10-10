@@ -14,8 +14,11 @@ import type {
 } from '../types/collections';
 
 export const collectionsService = {
-  dashboard: async (): Promise<CollectionsDashboardOut> => {
-    const { data } = await apiClient.get<CollectionsDashboardOut>('/collections/dashboard');
+  /** `currency` (ISO-4217) selects the dashboard currency; omitted = the base currency. */
+  dashboard: async (currency?: string): Promise<CollectionsDashboardOut> => {
+    const { data } = await apiClient.get<CollectionsDashboardOut>('/collections/dashboard', {
+      params: cleanParams({ currency }),
+    });
     return data;
   },
 

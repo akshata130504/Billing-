@@ -224,6 +224,7 @@ def list_portal_invoices(
             "total": str(inv.total),
             "amount_paid": str(inv.amount_paid),
             "amount_due": str(inv.amount_due),
+            "currency": inv.currency,
             "status": inv.status.value,
             "public_token": inv.public_token,
         }

@@ -135,9 +135,11 @@ class DunningMetricsOut(BaseModel):
     paused_cases: int
     stopped_cases: int
     recovery_rate_pct: float
+    # In `currency` (the organization's base currency) only; never summed across currencies.
     total_amount_at_risk: Decimal
     total_amount_recovered: Decimal
     currency: str = "INR"
+    by_currency: List[Dict[str, str]] = []
 
 
 class ExpiringCardNoticeOut(BaseModel):

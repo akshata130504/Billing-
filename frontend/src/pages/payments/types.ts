@@ -125,4 +125,14 @@ export interface PaymentsSummary {
   pendingProcessing: number;
   totalRefunded: number;
   unappliedCredit: number;
+  /** The same totals per currency (base first); amounts are never summed across currencies. */
+  byCurrency?: PaymentsSummaryByCurrency[];
+}
+
+export interface PaymentsSummaryByCurrency {
+  currency: string;
+  totalCollected: string;
+  pendingProcessing: string;
+  totalRefunded: string;
+  unappliedCredit: string;
 }

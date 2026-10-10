@@ -28,6 +28,12 @@ class CustomerLifecycleUpdate(BaseModel):
     notes: Optional[str] = None
 
 
+class CustomerCurrencyTotals(BaseModel):
+    currency: str
+    total_spent: Decimal
+    amount_due: Decimal
+
+
 class CustomerLifecycleItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -45,9 +51,13 @@ class CustomerLifecycleItem(BaseModel):
     next_action_due: Optional[date] = None
     notes: Optional[str] = None
 
-    # Aggregated metrics from real database relationships
+    # Aggregated metrics from real database relationships. total_spent / amount_due are in
+    # `currency` (the customer's billing currency) only; other currencies are listed in
+    # totals_by_currency and never summed in.
+    currency: str = "INR"
     total_spent: Decimal = Decimal("0.00")
     amount_due: Decimal = Decimal("0.00")
+    totals_by_currency: List[CustomerCurrencyTotals] = []
     active_subscriptions_count: int = 0
     total_invoices_count: int = 0
     total_quotes_count: int = 0

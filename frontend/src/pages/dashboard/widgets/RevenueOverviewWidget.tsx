@@ -103,6 +103,20 @@ export function RevenueOverviewWidget({ revenue, currency = 'INR', title = 'Reve
     return { totalInvoiced: inv, totalReceived: rec, collectionRate: rate };
   }, [chartData]);
 
+  // Invoiced/received in other currencies over the same months (never converted or summed in).
+  const otherCurrencies = useMemo(() => {
+    const totals: Record<string, { invoiced: number; revenue: number }> = {};
+    for (const t of (revenue?.trend || []).slice(-monthsCount)) {
+      for (const row of t.by_currency || []) {
+        if (row.currency === currency) continue;
+        const entry = (totals[row.currency] ||= { invoiced: 0, revenue: 0 });
+        entry.invoiced += parseMoney(row.invoiced) || 0;
+        entry.revenue += parseMoney(row.revenue) || 0;
+      }
+    }
+    return Object.entries(totals).sort(([a], [b]) => a.localeCompare(b));
+  }, [revenue?.trend, monthsCount, currency]);
+
   // SVG dimensions
   const svgWidth = 560;
   const svgHeight = 220;
@@ -329,9 +343,17 @@ export function RevenueOverviewWidget({ revenue, currency = 'INR', title = 'Reve
         </div>
 
         <div className="text-[11px] text-slate-500 font-medium">
-          Collection Rate: <span className="font-bold text-emerald-600 font-mono">{collectionRate}%</span>
+          Collection Rate ({currency}): <span className="font-bold text-emerald-600 font-mono">{collectionRate}%</span>
         </div>
       </div>
+      {otherCurrencies.length > 0 && (
+        <p className="text-[11px] text-slate-500" data-testid="revenue-other-currencies">
+          Chart in {currency}. Other currencies (not converted):{' '}
+          {otherCurrencies
+            .map(([cur, t]) => `${cur} invoiced ${formatMoney(t.invoiced, cur)}, received ${formatMoney(t.revenue, cur)}`)
+            .join(' · ')}
+        </p>
+      )}
     </div>
   );
 }

@@ -31,6 +31,7 @@ import type { CustomerPortalAccessStatusOut } from '../../types/portal';
 import type {
   ContactIn,
   CustomerOut,
+  CustomerStats,
   InvoiceOut,
   Paginated,
   PaymentOut,
@@ -53,6 +54,7 @@ import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { cn } from '../../utils/cn';
 import { formatDate, formatDateTime, formatMoney, humanize, statusVariant } from '../../utils/format';
+import { formatPerCurrency } from '../../services/dashboardSummaryService';
 import { validateSensibleName, validateEmail, validatePhone } from '../../utils/validation';
 
 const TABS: { key: CustomerDetailTab; label: string; icon: ReactNode }[] = [
@@ -126,6 +128,20 @@ function usePagedResource<T>(
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
+
+type CustomerCurrencyStat = Pick<CustomerStats, 'outstanding_amount' | 'total_billed' | 'total_paid'> & { currency: string };
+
+/** A customer stat in every currency they were invoiced in ("₹5,509.20 · AED 333.36"), never summed. */
+function statPerCurrency(
+  stats: CustomerStats,
+  pick: (row: CustomerCurrencyStat) => string,
+  currency: string,
+): string {
+  const rows: CustomerCurrencyStat[] = stats.by_currency?.length
+    ? stats.by_currency
+    : [{ ...stats, currency: stats.currency || currency }];
+  return formatPerCurrency(rows, pick, (amount, cur) => formatMoney(amount, cur), currency);
+}
 
 export function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -289,17 +305,17 @@ export function CustomerDetailPage() {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <StatCard
           title="Outstanding"
-          value={stats ? formatMoney(stats.outstanding_amount, customer.currency) : '—'}
+          value={stats ? statPerCurrency(stats, (r) => r.outstanding_amount, customer.currency) : '—'}
           icon={<Wallet className="w-4 h-4" />}
         />
         <StatCard
           title="Total billed"
-          value={stats ? formatMoney(stats.total_billed, customer.currency) : '—'}
+          value={stats ? statPerCurrency(stats, (r) => r.total_billed, customer.currency) : '—'}
           icon={<FileText className="w-4 h-4" />}
         />
         <StatCard
           title="Total paid"
-          value={stats ? formatMoney(stats.total_paid, customer.currency) : '—'}
+          value={stats ? statPerCurrency(stats, (r) => r.total_paid, customer.currency) : '—'}
           icon={<Receipt className="w-4 h-4" />}
         />
         <StatCard

@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from backend.app.services.money import supported_currency
 from backend.app.models.expenses import (
     ExpenseStatus,
     RecurringExpenseFrequency,
@@ -43,7 +44,7 @@ class ExpenseBase(BaseModel):
     @field_validator("currency")
     @classmethod
     def _upper_currency(cls, v):
-        return v.upper() if isinstance(v, str) else v
+        return supported_currency(v)
 
 
 class ExpenseCreate(ExpenseBase):
@@ -83,7 +84,7 @@ class ExpenseUpdate(BaseModel):
     @field_validator("currency")
     @classmethod
     def _upper_currency(cls, v):
-        return v.upper() if isinstance(v, str) else v
+        return supported_currency(v)
 
 
 class ExpenseRead(BaseModel):
@@ -127,11 +128,23 @@ class ExpenseAddToInvoiceIn(BaseModel):
     invoice_id: Optional[str] = None
 
 
-class ExpenseSummaryKPIs(BaseModel):
+class ExpenseCurrencyTotals(BaseModel):
+    currency: str
     total: Decimal = Decimal("0.00")
     billable: Decimal = Decimal("0.00")
     non_billable: Decimal = Decimal("0.00")
     pending: Decimal = Decimal("0.00")
+
+
+class ExpenseSummaryKPIs(BaseModel):
+    # Scalars are in `currency` (the organization's base currency) only; every currency's
+    # totals are in by_currency. Amounts are never summed across currencies.
+    currency: str = "INR"
+    total: Decimal = Decimal("0.00")
+    billable: Decimal = Decimal("0.00")
+    non_billable: Decimal = Decimal("0.00")
+    pending: Decimal = Decimal("0.00")
+    by_currency: List[ExpenseCurrencyTotals] = []
 
 
 # Recurring Expenses
@@ -163,7 +176,7 @@ class RecurringExpenseBase(BaseModel):
     @field_validator("currency")
     @classmethod
     def _upper_currency(cls, v):
-        return v.upper() if isinstance(v, str) else v
+        return supported_currency(v)
 
     @model_validator(mode="after")
     def _end_after_start(self):
@@ -204,7 +217,7 @@ class RecurringExpenseUpdate(BaseModel):
     @field_validator("currency")
     @classmethod
     def _upper_currency(cls, v):
-        return v.upper() if isinstance(v, str) else v
+        return supported_currency(v)
 
     @model_validator(mode="after")
     def _end_after_start(self):
@@ -245,8 +258,17 @@ class RecurringExpenseRead(BaseModel):
     updated_at: datetime
 
 
-class RecurringExpenseSummaryKPIs(BaseModel):
-    active_profiles: int = 0
+class RecurringCurrencyTotals(BaseModel):
+    currency: str
     monthly_recurring: Decimal = Decimal("0.00")
     billable_recurring: Decimal = Decimal("0.00")
+
+
+class RecurringExpenseSummaryKPIs(BaseModel):
+    active_profiles: int = 0
+    # In `currency` (the organization's base currency) only; see by_currency.
+    currency: str = "INR"
+    monthly_recurring: Decimal = Decimal("0.00")
+    billable_recurring: Decimal = Decimal("0.00")
+    by_currency: List[RecurringCurrencyTotals] = []
     next_run: Optional[str] = None

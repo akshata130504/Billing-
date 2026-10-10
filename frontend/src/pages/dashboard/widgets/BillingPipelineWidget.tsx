@@ -1,6 +1,7 @@
 import { FileEdit, Send, CreditCard, AlertTriangle, CheckCircle2, ChevronRight } from 'lucide-react';
 import type { DashboardPipeline, PipelineBucket } from '../../../types';
 import { formatMoney, parseMoney } from '../../../utils/format';
+import { formatPerCurrency } from '../../../services/dashboardSummaryService';
 
 export interface BillingPipelineWidgetProps {
   /** Card title (configurable in the Super Admin visual editor). */
@@ -35,8 +36,22 @@ const STAGE_COLOR: Record<StageKey, string> = {
   paid_this_period: 'border-emerald-200 bg-emerald-50/40',
 };
 
+/** Per-currency amounts of a bucket ("₹1,000.00 · AED 433.36"); never one summed figure. */
+function bucketAmount(bucket: PipelineBucket, currency: string): string {
+  const rows = bucket.by_currency?.length ? bucket.by_currency : [{ currency, count: bucket.count, amount: bucket.amount }];
+  return formatPerCurrency(rows, (r) => r.amount, (a, c) => formatMoney(a, c), currency);
+}
+
 export function BillingPipelineWidget({ pipeline, currency, title = 'Billing Pipeline' }: BillingPipelineWidgetProps) {
-  const totalAmount = STAGES.reduce((sum, s) => sum + (parseMoney(pipeline[s.key].amount) || 0), 0);
+  const totals: Record<string, number> = {};
+  for (const stage of STAGES) {
+    const bucket = pipeline[stage.key];
+    const rows = bucket.by_currency?.length ? bucket.by_currency : [{ currency, amount: bucket.amount }];
+    for (const row of rows) totals[row.currency] = (totals[row.currency] || 0) + (parseMoney(row.amount) || 0);
+  }
+  const totalRows = Object.entries(totals)
+    .sort(([a], [b]) => (a === currency ? -1 : b === currency ? 1 : a.localeCompare(b)))
+    .map(([cur, amount]) => ({ currency: cur, amount: String(amount) }));
 
   return (
     <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-sm space-y-4">
@@ -51,7 +66,7 @@ export function BillingPipelineWidget({ pipeline, currency, title = 'Billing Pip
           </p>
         </div>
         <span className="text-xs font-semibold text-slate-500">
-          Total: <strong className="text-slate-900">{formatMoney(totalAmount, currency)}</strong>
+          Total: <strong className="text-slate-900">{formatPerCurrency(totalRows, (r) => r.amount, (a, c) => formatMoney(a, c), currency)}</strong>
         </span>
       </div>
 
@@ -79,7 +94,7 @@ export function BillingPipelineWidget({ pipeline, currency, title = 'Billing Pip
                     {stage.title}
                   </h4>
                   <span className="text-base font-bold text-slate-900 tabular-nums block mt-0.5">
-                    {formatMoney(bucket.amount, currency)}
+                    {bucketAmount(bucket, currency)}
                   </span>
                 </div>
               </div>

@@ -169,6 +169,13 @@ class InvoiceOut(BaseModel):
     updated_at: datetime
 
 
+class InvoiceCurrencyTotals(BaseModel):
+    currency: str
+    count: int
+    total_outstanding: str
+    total_revenue: str
+
+
 class InvoiceSummaryKPIs(BaseModel):
     total_invoices: int
     draft_count: int
@@ -177,5 +184,8 @@ class InvoiceSummaryKPIs(BaseModel):
     paid_count: int
     overdue_count: int
     void_count: int
+    # In `currency` (the organization's base currency) only; never summed across currencies.
+    currency: str = "INR"
     total_outstanding: str
     total_revenue: str
+    by_currency: List[InvoiceCurrencyTotals] = []

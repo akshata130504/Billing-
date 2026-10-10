@@ -9,7 +9,7 @@ import {
 import { LoadingState } from '../../components/common/LoadingState';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { Badge } from '../../components/common/Badge';
-import { humanize, statusVariant } from '../../utils/format';
+import { formatMoney, humanize, statusVariant } from '../../utils/format';
 
 export const PortalPaymentsPage: React.FC = () => {
   const [payments, setPayments] = useState<PortalPayment[]>([]);
@@ -202,7 +202,7 @@ export const PortalPaymentsPage: React.FC = () => {
                         {p.created_at ? p.created_at.split('T')[0] : '—'}
                       </td>
                       <td className="px-5 py-3.5 font-bold text-slate-900">
-                        ₹{Number(p.amount).toLocaleString()}
+                        {formatMoney(p.amount, p.currency)}
                       </td>
                       <td className="px-5 py-3.5 text-slate-600 capitalize">
                         {p.method.replace(/_/g, ' ')}

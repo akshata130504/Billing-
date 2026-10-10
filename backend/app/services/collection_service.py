@@ -35,6 +35,7 @@ from backend.app.models import (
 from backend.app.schemas.collections import CollectionActivityIn, PromiseToPayIn
 from backend.app.schemas.common_refs import customer_ref, iso_dt, money_str, user_ref
 from backend.app.services import audit
+from backend.app.services import currency_totals
 from backend.app.services import invoice_service
 from backend.app.services import timezones
 from backend.app.services.money import D, q2
@@ -126,6 +127,7 @@ def serialize_collection_invoice(
         "total": money_str(invoice.total),
         "amount_paid": money_str(invoice.amount_paid),
         "amount_due": money_str(invoice.amount_due),
+        "currency": currency_totals.norm(invoice.currency),
         "days_overdue": days,
         "aging_bucket": aging_bucket(days),
         "collection_status": effective_status(invoice, collection, today),
@@ -457,8 +459,18 @@ def send_reminder(db: Session, ctx: CurrentContext, invoice_id: str):
 # --- dashboard ---------------------------------------------------------------------------
 
 
-def dashboard(db: Session, organization_id: str) -> Dict[str, Any]:
+def dashboard(db: Session, organization_id: str, currency: Optional[str] = None) -> Dict[str, Any]:
+    """Collections dashboard in one currency (default: the organization's base currency).
+
+    Money is never added across currencies: `kpis`, `aging_summary`, `pipeline` and
+    `top_overdue_customers` cover invoices in `currency` only; `kpis_by_currency` has the
+    KPIs for every currency with open or recently issued invoices.
+    """
+    from backend.app.services import reports_service
+
     today = timezones.org_today_for_id(db, organization_id)
+    base = currency_totals.org_base_currency(db, organization_id)
+    currency = currency_totals.norm(currency) if currency else base
 
     open_invoices = list(
         db.scalars(
@@ -469,12 +481,50 @@ def dashboard(db: Session, organization_id: str) -> Dict[str, Any]:
     )
     collections = _collections_by_invoice(db, organization_id, [i.id for i in open_invoices])
 
-    total_outstanding = Decimal("0")
-    overdue_amount = Decimal("0")
-    current_due = Decimal("0")
-    due_in_7 = Decimal("0")
-    due_in_30 = Decimal("0")
-    overdue_count = 0
+    # Collection rate window: invoices issued / cash received in the last 30 days.
+    rate_range = reports_service.ReportRange(
+        "custom", today - timedelta(days=30), today, timezones.org_tz_for_id(db, organization_id)
+    )
+    currencies = set(reports_service.report_currencies(db, organization_id))
+    currencies |= {currency_totals.norm(inv.currency) for inv in open_invoices}
+    currencies.add(currency)
+
+    def _kpis_for(cur: str) -> Dict[str, Any]:
+        total_outstanding = Decimal("0")
+        overdue_amount = Decimal("0")
+        current_due = Decimal("0")
+        due_in_7 = Decimal("0")
+        due_in_30 = Decimal("0")
+        overdue_count = 0
+        for inv in open_invoices:
+            if currency_totals.norm(inv.currency) != cur:
+                continue
+            due = q2(inv.amount_due)
+            total_outstanding += due
+            if invoice_service.days_overdue(inv, today) > 0:
+                overdue_amount += due
+                overdue_count += 1
+            else:
+                current_due += due
+                if inv.due_date and inv.due_date <= today + timedelta(days=7):
+                    due_in_7 += due
+                if inv.due_date and inv.due_date <= today + timedelta(days=30):
+                    due_in_30 += due
+        return {
+            "currency": cur,
+            "total_outstanding": money_str(total_outstanding),
+            "overdue_amount": money_str(overdue_amount),
+            "current_due": money_str(current_due),
+            "due_in_7_days": money_str(due_in_7),
+            "due_in_30_days": money_str(due_in_30),
+            # Same formula and figures as the Reports KPI card (currency_totals.collection_rate).
+            "collection_rate": reports_service.collection_rate_for(db, organization_id, rate_range, cur),
+            "overdue_invoice_count": overdue_count,
+        }
+
+    ordered = currency_totals.order_currencies(currencies, base)
+    kpis_by_currency = [_kpis_for(cur) for cur in ordered]
+
     bucket_totals: Dict[str, Dict[str, Any]] = {
         b: {"count": 0, "amount": Decimal("0")} for b in ("current", "1_30", "31_60", "61_90", "90_plus")
     }
@@ -484,8 +534,11 @@ def dashboard(db: Session, organization_id: str) -> Dict[str, Any]:
 
     for inv in open_invoices:
         due = q2(inv.amount_due)
-        total_outstanding += due
         days = invoice_service.days_overdue(inv, today)
+        if days <= 0 and inv.due_date and today <= inv.due_date <= today + timedelta(days=30):
+            upcoming.append(inv)  # a list of single invoices (each labelled), not a total
+        if currency_totals.norm(inv.currency) != currency:
+            continue
         bucket = aging_bucket(days)
         bucket_totals[bucket]["count"] += 1
         bucket_totals[bucket]["amount"] += due
@@ -496,8 +549,6 @@ def dashboard(db: Session, organization_id: str) -> Dict[str, Any]:
         entry["amount"] += due
 
         if days > 0:
-            overdue_amount += due
-            overdue_count += 1
             cust = customer_overdue.setdefault(
                 inv.customer_id,
                 {"customer": inv.customer, "outstanding_amount": Decimal("0"), "overdue_amount": Decimal("0"), "invoice_count": 0},
@@ -505,32 +556,6 @@ def dashboard(db: Session, organization_id: str) -> Dict[str, Any]:
             cust["overdue_amount"] += due
             cust["outstanding_amount"] += due
             cust["invoice_count"] += 1
-        else:
-            current_due += due
-            if inv.due_date and inv.due_date <= today + timedelta(days=7):
-                due_in_7 += due
-            if inv.due_date and inv.due_date <= today + timedelta(days=30):
-                due_in_30 += due
-            if inv.due_date and today <= inv.due_date <= today + timedelta(days=30):
-                upcoming.append(inv)
-
-    invoiced_30d = db.scalar(
-        select(func.coalesce(func.sum(Invoice.total), 0)).where(
-            Invoice.organization_id == organization_id,
-            Invoice.status != InvoiceStatus.DRAFT,
-            Invoice.issue_date >= today - timedelta(days=30),
-        )
-    ) or Decimal("0")
-    collected_30d = db.scalar(
-        select(func.coalesce(func.sum(Invoice.amount_paid), 0)).where(
-            Invoice.organization_id == organization_id,
-            Invoice.status != InvoiceStatus.DRAFT,
-            Invoice.issue_date >= today - timedelta(days=30),
-        )
-    ) or Decimal("0")
-    collection_rate = None
-    if D(invoiced_30d) > 0:
-        collection_rate = money_str(q2(D(collected_30d) / D(invoiced_30d) * 100))
 
     recent_activities = db.scalars(
         select(CollectionActivity)
@@ -543,16 +568,12 @@ def dashboard(db: Session, organization_id: str) -> Dict[str, Any]:
     top_customers = sorted(customer_overdue.values(), key=lambda c: c["overdue_amount"], reverse=True)[:5]
     upcoming_sorted = sorted(upcoming, key=lambda i: i.due_date)[:10]
 
+    selected = next(row for row in kpis_by_currency if row["currency"] == currency)
     return {
-        "kpis": {
-            "total_outstanding": money_str(total_outstanding),
-            "overdue_amount": money_str(overdue_amount),
-            "current_due": money_str(current_due),
-            "due_in_7_days": money_str(due_in_7),
-            "due_in_30_days": money_str(due_in_30),
-            "collection_rate": collection_rate,
-            "overdue_invoice_count": overdue_count,
-        },
+        "currency": currency,
+        "currencies": ordered,
+        "kpis": {k: v for k, v in selected.items() if k != "currency"},
+        "kpis_by_currency": kpis_by_currency,
         "aging_summary": [
             {"bucket": b, "count": v["count"], "amount": money_str(v["amount"])} for b, v in bucket_totals.items()
         ],
@@ -566,6 +587,7 @@ def dashboard(db: Session, organization_id: str) -> Dict[str, Any]:
                 "outstanding_amount": money_str(c["outstanding_amount"]),
                 "overdue_amount": money_str(c["overdue_amount"]),
                 "invoice_count": c["invoice_count"],
+                "currency": currency,
             }
             for c in top_customers
         ],
@@ -576,6 +598,7 @@ def dashboard(db: Session, organization_id: str) -> Dict[str, Any]:
                 "customer": customer_ref(inv.customer),
                 "due_date": inv.due_date,
                 "amount_due": money_str(inv.amount_due),
+                "currency": currency_totals.norm(inv.currency),
             }
             for inv in upcoming_sorted
         ],
