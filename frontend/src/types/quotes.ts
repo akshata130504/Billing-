@@ -92,6 +92,15 @@ export interface QuoteDecision {
   at?: string | null;
 }
 
+/** Server-side GST treatment for an organization -> customer supply (GET /quotes/supply-preview). */
+export interface SupplyPreview {
+  supply_type: 'intra_state' | 'inter_state' | 'export';
+  /** False when no GST is charged: the organization has no GSTIN, or the supply is an export. */
+  charges_gst: boolean;
+  place_of_supply_code?: string | null;
+  place_of_supply_name?: string | null;
+}
+
 export interface Quote {
   id: string;
   quote_number: string;

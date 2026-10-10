@@ -36,6 +36,7 @@ vi.mock('../../services/quoteService', () => ({
     createQuote: vi.fn(),
     updateQuote: vi.fn(),
     sendQuote: vi.fn(),
+    getSupplyPreview: vi.fn(),
   },
 }));
 
@@ -398,5 +399,55 @@ describe('<QuoteFormPage /> archived offerings', () => {
     fireEvent.change(offeringSelects()[0], { target: { value: 'off-b' } });
     await waitFor(() => expect(offeringSelects()[0].value).toBe('off-b'));
     expect(showToast).not.toHaveBeenCalledWith('error', expect.any(String), expect.stringContaining('archived'));
+  });
+});
+
+// BUG-08 / BUG-07: the totals preview follows the server's GST treatment instead of always
+// showing CGST 9% + SGST 9%.
+describe('<QuoteFormPage /> GST preview', () => {
+  // storedQuote(): 2 x 100 + 1 x 111 = 311 at 18% -> 55.98 tax.
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(catalogCpqService.listOfferings).mockResolvedValue({
+      items: [ACTIVE_A, ACTIVE_B],
+      total: 2,
+      page: 1,
+      page_size: 100,
+      total_pages: 1,
+    } as never);
+    vi.mocked(catalogCpqService.getOffering).mockResolvedValue(ARCHIVED);
+    vi.mocked(quoteService.getQuote).mockResolvedValue(storedQuote() as never);
+  });
+
+  it('shows CGST + SGST for an intra-state supply', async () => {
+    vi.mocked(quoteService.getSupplyPreview).mockResolvedValue({ supply_type: 'intra_state', charges_gst: true });
+    renderRoute('/quotes/q1/edit');
+    await waitFor(() => expect(screen.getByText('CGST')).toBeInTheDocument());
+    expect(quoteService.getSupplyPreview).toHaveBeenCalledWith('c1');
+    expect(screen.getByText('SGST')).toBeInTheDocument();
+    expect(screen.queryByText('IGST')).not.toBeInTheDocument();
+    expect(screen.getAllByText('₹28')).toHaveLength(2);
+    expect(screen.getByText('₹367')).toBeInTheDocument();
+  });
+
+  it('shows IGST (not CGST/SGST) when the server resolves an inter-state supply', async () => {
+    vi.mocked(quoteService.getSupplyPreview).mockResolvedValue({ supply_type: 'inter_state', charges_gst: true });
+    renderRoute('/quotes/q1/edit');
+    await waitFor(() => expect(screen.getByText('IGST')).toBeInTheDocument());
+    expect(screen.queryByText('CGST')).not.toBeInTheDocument();
+    expect(screen.queryByText('SGST')).not.toBeInTheDocument();
+    expect(screen.getByText('₹56')).toBeInTheDocument();
+  });
+
+  it('charges no GST and explains why when the organization has no GSTIN', async () => {
+    vi.mocked(quoteService.getSupplyPreview).mockResolvedValue({ supply_type: 'inter_state', charges_gst: false });
+    renderRoute('/quotes/q1/edit');
+    const notice = await screen.findByTestId('no-gst-notice');
+    expect(notice).toHaveTextContent('no GSTIN');
+    expect(within(notice).getByRole('link', { name: /Settings → Organization/ })).toHaveAttribute('href', '/settings/organization');
+    expect(screen.queryByText('IGST')).not.toBeInTheDocument();
+    expect(screen.getByText('₹0')).toBeInTheDocument();
+    // Subtotal and total are equal: no tax added.
+    expect(screen.getAllByText('₹311')).toHaveLength(2);
   });
 });

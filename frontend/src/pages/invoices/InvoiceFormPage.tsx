@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Plus,
   Trash2,
@@ -14,7 +14,9 @@ import { invoiceService } from '../../services/invoiceService';
 import { planPricingService } from '../../services/planPricingService';
 import { catalogCpqService } from '../../services/catalogCpqService';
 import { customerService } from '../../services/customerService';
+import { quoteService } from '../../services/quoteService';
 import type { InvoiceLineItemIn } from '../../types/invoices';
+import type { SupplyPreview } from '../../types/quotes';
 import type { PlanPricingItem } from '../../types/plans_pricing';
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
@@ -74,6 +76,27 @@ export const InvoiceFormPage: React.FC = () => {
     'Payment is due within 30 days of invoice date. Thank you for your business!'
   );
   const [adjustment, setAdjustment] = useState<number>(0);
+
+  // GST treatment as the server will save it; null until known. No GSTIN (or an
+  // export) means the server charges no GST, so the preview must not either.
+  const [supply, setSupply] = useState<SupplyPreview | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setSupply(null);
+    if (!customerId) return;
+    (async () => {
+      try {
+        const res = await quoteService.getSupplyPreview(customerId);
+        if (!cancelled) setSupply(res ?? null);
+      } catch {
+        if (!cancelled) setSupply(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId]);
+  const noGst = supply !== null && !supply.charges_gst;
 
   // Per-row selection counter: a pricing response is applied only if the row's
   // selection has not changed since the request was made.
@@ -387,7 +410,7 @@ export const InvoiceFormPage: React.FC = () => {
     const lineSub = (Number(it.quantity) || 0) * (Number(it.rate) || 0);
     const lineDisc = lineSub * ((Number(it.discount_percentage) || 0) / 100);
     const lineTaxable = lineSub - lineDisc;
-    return acc + lineTaxable * ((Number(it.tax_rate) || 0) / 100);
+    return acc + lineTaxable * ((noGst ? 0 : Number(it.tax_rate) || 0) / 100);
   }, 0);
   const grandTotal = taxableAmount + taxAmount + (Number(adjustment) || 0);
 
@@ -784,7 +807,7 @@ export const InvoiceFormPage: React.FC = () => {
                         {(
                           (Number(item.quantity) || 0) *
                           (Number(item.rate) || 0) *
-                          (1 + (Number(item.tax_rate) || 0) / 100)
+                          (1 + (noGst ? 0 : Number(item.tax_rate) || 0) / 100)
                         ).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                       </span>
                     </div>
@@ -819,6 +842,21 @@ export const InvoiceFormPage: React.FC = () => {
                 <span>Tax</span>
                 <span>+₹{taxAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
               </div>
+              {noGst && (
+                <p className="text-xs text-amber-700" data-testid="no-gst-notice">
+                  {supply?.supply_type === 'export' ? (
+                    'GST is not charged on an export supply.'
+                  ) : (
+                    <>
+                      GST is not charged because your organization has no GSTIN — add it in{' '}
+                      <Link to="/settings/organization" className="underline font-medium">
+                        Settings → Organization
+                      </Link>
+                      .
+                    </>
+                  )}
+                </p>
+              )}
               <div className="flex items-center justify-between text-gray-600 gap-2">
                 <span>Adjustment</span>
                 <input

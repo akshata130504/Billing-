@@ -48,6 +48,7 @@ EDITABLE_FIELDS = NULLABLE_TEXT_FIELDS | REQUIRED_TEXT_FIELDS | INT_FIELDS | PER
 _GSTIN_RE = re.compile(r"^[0-9]{2}[A-Z0-9]{13}$")
 _PAN_RE = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_PREFIX_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9/_-]{0,11}")
 
 
 @lru_cache(maxsize=1)
@@ -126,6 +127,10 @@ def _validate_organization_changes(organization: Organization, changes: Dict[str
             else:  # prefixes
                 if not value or len(value) > 12:
                     errors[field] = "must be 1 to 12 characters"
+                    continue
+                # Printed on documents, PDFs, emails and URLs: no markup (BUG-50).
+                if not _PREFIX_RE.fullmatch(value):
+                    errors[field] = "must start with a letter or digit and contain only letters, digits, '-', '_' or '/'"
                     continue
             cleaned[field] = value
             continue

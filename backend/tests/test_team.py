@@ -146,6 +146,12 @@ def test_patch_organization_updates_and_audits_changed_fields_only(client, db, t
         ({"discount_approval_threshold_pct": "-1"}, "discount_approval_threshold_pct"),
         ({"default_payment_terms_days": -5}, "default_payment_terms_days"),
         ({"invoice_prefix": ""}, "invoice_prefix"),
+        # BUG-50: prefixes are printed on documents and in URLs - no markup or odd characters.
+        ({"invoice_prefix": "<b>X</b>"}, "invoice_prefix"),
+        ({"quote_prefix": "Q\"><"}, "quote_prefix"),
+        ({"payment_prefix": "PAY {x}"}, "payment_prefix"),
+        ({"subscription_prefix": "-SUB"}, "subscription_prefix"),
+        ({"customer_prefix": "C&amp;"}, "customer_prefix"),
         ({"name": None}, "name"),
         ({"timezone": "Mars/Olympus_Mons"}, "timezone"),
         ({"email": "not-an-email"}, "email"),
@@ -157,6 +163,14 @@ def test_patch_organization_validation(client, auth_headers, body, field):
     err = r.json()["error"]
     assert err["code"] == "VALIDATION_ERROR"
     assert field in err["details"]["fields"]
+
+
+def test_patch_organization_accepts_plain_prefixes(client, auth_headers):
+    body = {"invoice_prefix": "INV/2026-", "quote_prefix": "QT_", "payment_prefix": "PAY-",
+            "subscription_prefix": "SUB", "customer_prefix": "c-01"}
+    r = client.patch(f"{API}/organization", json=body, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    assert {k: r.json()[k] for k in body} == body
 
 
 def test_patch_organization_rejects_unknown_and_readonly_fields(client, auth_headers):

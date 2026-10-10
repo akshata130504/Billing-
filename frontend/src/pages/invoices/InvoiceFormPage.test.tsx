@@ -6,6 +6,7 @@ import { InvoiceFormPage } from './InvoiceFormPage';
 import { planPricingService } from '../../services/planPricingService';
 import { catalogCpqService } from '../../services/catalogCpqService';
 import { invoiceService } from '../../services/invoiceService';
+import { quoteService } from '../../services/quoteService';
 
 const { showToast } = vi.hoisted(() => ({ showToast: vi.fn() }));
 
@@ -45,6 +46,12 @@ vi.mock('../../services/invoiceService', () => ({
     createInvoice: vi.fn(),
     updateInvoice: vi.fn(),
     sendInvoice: vi.fn(),
+  },
+}));
+
+vi.mock('../../services/quoteService', () => ({
+  quoteService: {
+    getSupplyPreview: vi.fn(),
   },
 }));
 
@@ -632,5 +639,41 @@ describe('<InvoiceFormPage /> archived offerings', () => {
     });
     await waitFor(() => expect(showToast).toHaveBeenCalledWith('warning', 'Could not calculate price', expect.any(String)));
     expect(lineSelects()[0].value).toBe('plan:p1');
+  });
+});
+
+// BUG-07: an organization without a GSTIN charges no GST; the preview must agree with the server.
+describe('<InvoiceFormPage /> GST preview', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedPricing.getPlans.mockResolvedValue({ items: [plan('p1', 'flat', 100)], total: 1 } as any);
+    mockedPricing.calculatePrice.mockResolvedValue(priceResponse(100, 'flat'));
+  });
+
+  async function pickCustomerAndPlan() {
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByText('pick-customer'));
+    });
+    await selectPlan('p1');
+    await waitFor(() => expect(rateInput().value).toBe('100'));
+    await waitFor(() => expect(quoteService.getSupplyPreview).toHaveBeenCalledWith('cust-1'));
+  }
+
+  it('adds no tax and explains why when the organization has no GSTIN', async () => {
+    vi.mocked(quoteService.getSupplyPreview).mockResolvedValue({ supply_type: 'intra_state', charges_gst: false });
+    await pickCustomerAndPlan();
+    const notice = await screen.findByTestId('no-gst-notice');
+    expect(notice).toHaveTextContent('no GSTIN');
+    expect(within(notice).getByRole('link')).toHaveAttribute('href', '/settings/organization');
+    expect(lineAmount()).toContain('100');
+    expect(lineAmount()).not.toContain('118');
+  });
+
+  it('keeps charging the line tax for a GST-registered organization', async () => {
+    vi.mocked(quoteService.getSupplyPreview).mockResolvedValue({ supply_type: 'intra_state', charges_gst: true });
+    await pickCustomerAndPlan();
+    expect(lineAmount()).toContain('118');
+    expect(screen.queryByTestId('no-gst-notice')).not.toBeInTheDocument();
   });
 });

@@ -4,7 +4,9 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from backend.app.schemas.validators import validate_image_url, validate_redirect_url
 
 
 class CheckoutTemplateCreate(BaseModel):
@@ -22,6 +24,16 @@ class CheckoutTemplateCreate(BaseModel):
     custom_fields: Optional[Dict[str, Any]] = None
     is_default: bool = False
 
+    @field_validator("redirect_url")
+    @classmethod
+    def _redirect_url(cls, v: Optional[str]) -> Optional[str]:
+        return validate_redirect_url(v)
+
+    @field_validator("logo_url")
+    @classmethod
+    def _logo_url(cls, v: Optional[str]) -> Optional[str]:
+        return validate_image_url(v)
+
 
 class CheckoutTemplateUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
@@ -38,6 +50,16 @@ class CheckoutTemplateUpdate(BaseModel):
     custom_fields: Optional[Dict[str, Any]] = None
     is_default: Optional[bool] = None
     is_active: Optional[bool] = None
+
+    @field_validator("redirect_url")
+    @classmethod
+    def _redirect_url(cls, v: Optional[str]) -> Optional[str]:
+        return validate_redirect_url(v)
+
+    @field_validator("logo_url")
+    @classmethod
+    def _logo_url(cls, v: Optional[str]) -> Optional[str]:
+        return validate_image_url(v)
 
 
 class CheckoutTemplateOut(BaseModel):

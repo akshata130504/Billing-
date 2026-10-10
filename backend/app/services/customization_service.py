@@ -57,6 +57,7 @@ from backend.app.schemas.customization import (
     WebTabCreate,
     WebTabUpdate,
 )
+from backend.app.schemas.validators import custom_css_problem
 from backend.app.services import notification_service
 from backend.app.services import org_lifecycle
 from backend.app.services import timezones
@@ -367,6 +368,16 @@ def resolve_preview_logo_src(logo_url: Optional[str]) -> Optional[str]:
     return None
 
 
+_CSS_VALUE_RE = re.compile(r"^[A-Za-z0-9#.,%()\s'\"-]{1,60}$")
+
+
+def _css_value(value: Optional[str], default: str) -> str:
+    """A colour / font-family value safe to interpolate into a CSS declaration."""
+    if value and _CSS_VALUE_RE.match(value) and "url(" not in value.lower():
+        return value
+    return default
+
+
 _PREVIEW_OVERRIDE_FIELDS = (
     "layout_type",
     "primary_color",
@@ -428,14 +439,21 @@ def render_template_preview(
         f"<td>{item['unit_amount']}</td><td>{item['amount']}</td></tr>"
         for item in ctx["line_items"]
     )
+    # Everything below lands inside <style>: re-check at render so CSS stored before
+    # save-time validation existed (or a preview override) cannot break out or fetch
+    # internal URLs (BUG-48).
+    font_family = _css_value(template.font_family, "Helvetica")
+    primary_color = _css_value(template.primary_color, "#1F2937")
+    accent_color = _css_value(template.accent_color, "#3B82F6")
+    custom_css = template.custom_css if not custom_css_problem(template.custom_css) else ""
     rendered_html = f"""<html>
 <head><style>
-body {{ font-family: {template.font_family}, sans-serif; color: {template.primary_color}; }}
-h1 {{ color: {template.primary_color}; }}
-.accent {{ color: {template.accent_color}; }}
+body {{ font-family: {font_family}, sans-serif; color: {primary_color}; }}
+h1 {{ color: {primary_color}; }}
+.accent {{ color: {accent_color}; }}
 table {{ width: 100%; border-collapse: collapse; }}
 td, th {{ border: 1px solid #ddd; padding: 6px; }}
-{template.custom_css or ""}
+{custom_css or ""}
 </style></head>
 <body>
 {logo_html}
@@ -634,6 +652,12 @@ def _prepare_action_configuration(action_type: AutomationActionType, configurati
         url = (config.get("url") or "").strip()
         if not url:
             raise ValidationAppError("Webhook actions require a destination URL.", {"fields": {"url": "required"}})
+        # New webhooks must use TLS: the payload carries billing data and the signature
+        # header (BUG-59). Rows saved earlier with http:// keep their SSRF-checked delivery.
+        if not url.lower().startswith("https://"):
+            raise ValidationAppError(
+                "Webhook URL must use https://.", {"fields": {"url": "https_required"}}
+            )
         config["url"] = assert_webhook_destination_allowed(url)
         config.pop("simulate_failure", None)
         if not (config.get("secret") or "").strip():

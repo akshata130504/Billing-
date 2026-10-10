@@ -153,6 +153,16 @@ class QuoteDecisionOut(BaseModel):
     at: Optional[datetime] = None
 
 
+class SupplyPreviewOut(BaseModel):
+    """The server's GST treatment for this organization -> customer, so form previews
+    split tax exactly the way the saved document will."""
+
+    supply_type: str
+    charges_gst: bool  # False when the organization has no GSTIN (no GST is charged)
+    place_of_supply_code: Optional[str] = None
+    place_of_supply_name: Optional[str] = None
+
+
 class QuoteOut(BaseModel):
     id: str
     quote_number: str

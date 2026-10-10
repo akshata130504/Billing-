@@ -24,6 +24,7 @@ from backend.app.schemas.checkout import (
 )
 from backend.app.schemas.common import PaginatedResponse
 from backend.app.services import checkout_service
+from backend.app.services.email import frontend_url
 from backend.app.services.pagination import PageParams, page_params, paginate
 
 router = APIRouter()
@@ -45,7 +46,8 @@ def create_checkout_session(
         id=session.id,
         organization_id=session.organization_id,
         token=raw_token,
-        checkout_url=f"/checkout/{raw_token}",
+        # Absolute, like every other public link (invoice/quote public_url).
+        checkout_url=frontend_url(f"checkout/{raw_token}"),
         purpose=session.purpose.value,
         status=session.status.value,
         amount=session.amount,

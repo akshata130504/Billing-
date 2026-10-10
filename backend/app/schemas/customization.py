@@ -1,7 +1,7 @@
 """Pydantic schemas for Customization and Automation: number series, document templates, reporting tags, web tabs, workflows, logs, and schedules."""
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 from backend.app.models.customization import (
     AutomationActionType,
@@ -11,6 +11,7 @@ from backend.app.models.customization import (
     ScheduleFrequency,
     TemplateLayoutType,
 )
+from backend.app.schemas.validators import validate_custom_css
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +90,12 @@ class DocumentTemplateBase(BaseModel):
 
 
 class DocumentTemplateCreate(DocumentTemplateBase):
-    pass
+    # Input only (not on the shared base): rows stored before this check must still
+    # serialise; they are sanitised at render instead (BUG-48).
+    @field_validator("custom_css")
+    @classmethod
+    def _custom_css(cls, v: Optional[str]) -> Optional[str]:
+        return validate_custom_css(v)
 
 
 class DocumentTemplateUpdate(BaseModel):
@@ -107,6 +113,11 @@ class DocumentTemplateUpdate(BaseModel):
     custom_css: Optional[str] = None
     show_company_address: Optional[bool] = None
     show_tax_summary: Optional[bool] = None
+
+    @field_validator("custom_css")
+    @classmethod
+    def _custom_css(cls, v: Optional[str]) -> Optional[str]:
+        return validate_custom_css(v)
 
 
 class DocumentTemplateOut(DocumentTemplateBase):
@@ -242,8 +253,22 @@ class AutomationRuleBase(BaseModel):
     is_active: bool = True
 
 
+def _rule_name_not_blank(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return v
+    v = v.strip()
+    if not v:
+        raise ValueError("Name cannot be empty.")
+    return v
+
+
 class AutomationRuleCreate(AutomationRuleBase):
     actions: List[AutomationActionCreate] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def _name_not_blank(cls, v: Optional[str]) -> Optional[str]:
+        return _rule_name_not_blank(v)
 
 
 class AutomationRuleUpdate(BaseModel):
@@ -253,6 +278,11 @@ class AutomationRuleUpdate(BaseModel):
     trigger_event: Optional[AutomationTriggerEvent] = None
     conditions: Optional[Dict[str, Any]] = None
     is_active: Optional[bool] = None
+
+    @field_validator("name")
+    @classmethod
+    def _name_not_blank(cls, v: Optional[str]) -> Optional[str]:
+        return _rule_name_not_blank(v)
 
 
 class AutomationRuleOut(AutomationRuleBase):

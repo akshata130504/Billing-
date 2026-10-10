@@ -44,6 +44,9 @@ def _supply_for(db: Session, organization_id: str, customer: Customer, invoice: 
             place_of_supply_name=invoice.place_of_supply_name,
             customer_gstin=invoice.customer_gstin,
             is_gst_registered=bool(invoice.customer_gstin),
+            # An invoice that charged GST is credited with GST even if the org has
+            # since dropped its GSTIN; one issued without GST is credited without it.
+            supplier_registered=bool(invoice.supplier_gstin) or Decimal(str(invoice.tax_amount or 0)) > 0,
         )
     organization = db.get(Organization, organization_id)
     return gst.resolve_supply(organization, customer)
@@ -133,8 +136,8 @@ def create_credit_note(
             price = (line_amount / qty).quantize(Decimal("0.01"))
         else:
             line_amount = (qty * price).quantize(Decimal("0.01"))
-        if supply.is_export:
-            tax_pct = Decimal("0")  # zero-rated export, same as the invoice side
+        if not supply.charges_gst:
+            tax_pct = Decimal("0")  # zero-rated export or no-GSTIN supplier, same as the invoice side
         line_tax = (line_amount * tax_pct / Decimal("100")).quantize(Decimal("0.01"))
         split = gst.split_tax(line_tax, supply)
 

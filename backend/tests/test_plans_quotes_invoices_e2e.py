@@ -30,6 +30,9 @@ def org_and_user(db: Session):
         slug=f"billing-org-{uid}",
         default_currency="INR",
         country="IN",
+        # GST-registered: without a GSTIN no GST is charged at all (BUG-07).
+        gstin="29AAFCB9900V1Z8",
+        state="Karnataka",
         discount_approval_threshold_pct=Decimal("5.00"),
     )
     db.add(org)
