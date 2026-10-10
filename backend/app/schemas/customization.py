@@ -90,18 +90,13 @@ class DocumentTemplateBase(BaseModel):
     show_tax_summary: bool = True
 
 
-<<<<<<< HEAD
-class DocumentTemplateCreate(DocumentTemplateBase):
+class DocumentTemplateCreate(DocumentTemplateBase, StrictRequest):
     # Input only (not on the shared base): rows stored before this check must still
     # serialise; they are sanitised at render instead (BUG-48).
     @field_validator("custom_css")
     @classmethod
     def _custom_css(cls, v: Optional[str]) -> Optional[str]:
         return validate_custom_css(v)
-=======
-class DocumentTemplateCreate(DocumentTemplateBase, StrictRequest):
-    pass
->>>>>>> fix/p3-backend-validation
 
 
 class DocumentTemplateUpdate(StrictRequest):
@@ -259,7 +254,6 @@ class AutomationRuleBase(BaseModel):
     is_active: bool = True
 
 
-<<<<<<< HEAD
 def _rule_name_not_blank(v: Optional[str]) -> Optional[str]:
     if v is None:
         return v
@@ -269,10 +263,7 @@ def _rule_name_not_blank(v: Optional[str]) -> Optional[str]:
     return v
 
 
-class AutomationRuleCreate(AutomationRuleBase):
-=======
 class AutomationRuleCreate(AutomationRuleBase, StrictRequest):
->>>>>>> fix/p3-backend-validation
     actions: List[AutomationActionCreate] = Field(default_factory=list)
 
     @field_validator("name")
