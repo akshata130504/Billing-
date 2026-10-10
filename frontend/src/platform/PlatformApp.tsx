@@ -3,13 +3,13 @@
  * (/admin). It is a separate entry point (superadmin.html -> platform/main.tsx) of the same build:
  * it shares no router, auth provider, API client or storage with the tenant SPA.
  */
-import type { ReactNode } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { ShieldOff } from 'lucide-react';
 import { EmptyState } from '../components/common/EmptyState';
 import { ToastProvider } from '../components/common/Toast';
 import { PlatformLoginPage } from './PlatformLoginPage';
-import type { PlatformRole } from './platformApi';
+import { setPlatformSessionExpiredHandler, type PlatformRole } from './platformApi';
 import { AccessGrantsPage } from './console/AccessGrantsPage';
 import { AccountPage } from './console/AccountPage';
 import { AuditPage } from './console/AuditPage';
@@ -40,8 +40,28 @@ function RequireRole({ roles, children }: { roles: PlatformRole[]; children: Rea
   return <>{children}</>;
 }
 
+/** When the platform session has expired, go to sign-in and come back here afterwards. */
+function SessionExpiryRedirect() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const here = useRef(location);
+  here.current = location;
+  useEffect(
+    () =>
+      setPlatformSessionExpiredHandler(() => {
+        const { pathname, search } = here.current;
+        if (pathname === '/login') return;
+        navigate(`/login?expired=1&next=${encodeURIComponent(pathname + search)}`, { replace: true });
+      }),
+    [navigate]
+  );
+  return null;
+}
+
 export function PlatformRoutes() {
   return (
+    <>
+    <SessionExpiryRedirect />
     <Routes>
       <Route path="/login" element={<PlatformLoginPage />} />
       <Route element={<ConsoleLayout />}>
@@ -59,6 +79,7 @@ export function PlatformRoutes() {
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   );
 }
 
