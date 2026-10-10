@@ -250,10 +250,11 @@ export function ExpenseFormModal({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               {/* Expense Name */}
               <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label htmlFor="expense-name" className="block text-xs font-semibold text-slate-700 mb-1">
                   Expense Name / Description <span className="text-rose-500">*</span>
                 </label>
                 <input
+                  id="expense-name"
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -265,10 +266,11 @@ export function ExpenseFormModal({
 
               {/* Expense Date */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label htmlFor="expense-expense-date" className="block text-xs font-semibold text-slate-700 mb-1">
                   Expense Date <span className="text-rose-500">*</span>
                 </label>
                 <input
+                  id="expense-expense-date"
                   type="date"
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
@@ -279,10 +281,11 @@ export function ExpenseFormModal({
 
               {/* Category */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label htmlFor="expense-category" className="block text-xs font-semibold text-slate-700 mb-1">
                   Category <span className="text-rose-500">*</span>
                 </label>
                 <select
+                  id="expense-category"
                   value={category}
                   onChange={(e) => setCategory(e.target.value as ExpenseCategory)}
                   className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand-500"
@@ -297,7 +300,7 @@ export function ExpenseFormModal({
 
               {/* Amount */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label htmlFor="expense-amount" className="block text-xs font-semibold text-slate-700 mb-1">
                   Amount <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
@@ -305,6 +308,7 @@ export function ExpenseFormModal({
                     {currency === 'INR' ? '₹' : currency}
                   </span>
                   <input
+                    id="expense-amount"
                     type="number"
                     min="0"
                     step="any"
@@ -319,10 +323,11 @@ export function ExpenseFormModal({
 
               {/* Currency */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label htmlFor="expense-currency" className="block text-xs font-semibold text-slate-700 mb-1">
                   Currency <span className="text-rose-500">*</span>
                 </label>
                 <select
+                  id="expense-currency"
                   value={currency}
                   onChange={(e) => setCurrency(e.target.value)}
                   className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand-500"
@@ -379,10 +384,11 @@ export function ExpenseFormModal({
 
                   {/* Project */}
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label htmlFor="expense-project" className="block text-xs font-semibold text-slate-700 mb-1">
                       Project
                     </label>
                     <select
+                      id="expense-project"
                       value={projectId}
                       disabled={!customerId}
                       onChange={(e) => {
@@ -408,10 +414,11 @@ export function ExpenseFormModal({
 
                   {/* Billable Amount */}
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label htmlFor="expense-billable-amount" className="block text-xs font-semibold text-slate-700 mb-1">
                       Billable Amount (INR) <span className="text-rose-500">*</span>
                     </label>
                     <input
+                      id="expense-billable-amount"
                       type="number"
                       min="0"
                       step="any"
@@ -427,10 +434,11 @@ export function ExpenseFormModal({
 
                   {/* Tax Rate */}
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label htmlFor="expense-tax-gst" className="block text-xs font-semibold text-slate-700 mb-1">
                       Tax (GST %)
                     </label>
                     <select
+                      id="expense-tax-gst"
                       value={taxRate}
                       onChange={(e) => setTaxRate(Number(e.target.value))}
                       className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
@@ -489,10 +497,11 @@ export function ExpenseFormModal({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               {/* Paid By */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label htmlFor="expense-paid-by" className="block text-xs font-semibold text-slate-700 mb-1">
                   Paid By (Employee / Team)
                 </label>
                 <input
+                  id="expense-paid-by"
                   type="text"
                   value={paidBy}
                   onChange={(e) => setPaidBy(e.target.value)}
@@ -503,10 +512,11 @@ export function ExpenseFormModal({
 
               {/* Payment Method */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label htmlFor="expense-payment-method" className="block text-xs font-semibold text-slate-700 mb-1">
                   Payment Method
                 </label>
                 <select
+                  id="expense-payment-method"
                   value={paymentMethod}
                   onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
                   className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand-500"

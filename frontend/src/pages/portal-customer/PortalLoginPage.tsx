@@ -77,7 +77,7 @@ export const PortalLoginPage: React.FC = () => {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <div className="flex justify-between items-center mb-1">
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                <label htmlFor="portal-login-organization-id" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
                   Organization ID <span className="text-slate-400 normal-case font-normal">(optional)</span>
                 </label>
               </div>
@@ -86,6 +86,7 @@ export const PortalLoginPage: React.FC = () => {
                   <Building2 className="w-4 h-4" />
                 </div>
                 <input
+                  id="portal-login-organization-id"
                   type="text"
                   value={organizationId}
                   onChange={(e) => setOrganizationId(e.target.value)}
@@ -96,7 +97,7 @@ export const PortalLoginPage: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
+              <label htmlFor="portal-login-email-address" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
                 Email Address
               </label>
               <div className="relative rounded-lg shadow-2xs">
@@ -104,6 +105,7 @@ export const PortalLoginPage: React.FC = () => {
                   <Mail className="w-4 h-4" />
                 </div>
                 <input
+                  id="portal-login-email-address"
                   type="email"
                   required
                   value={email}
@@ -115,7 +117,7 @@ export const PortalLoginPage: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
+              <label htmlFor="portal-login-password" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
                 Password
               </label>
               <div className="relative rounded-lg shadow-2xs">
@@ -123,6 +125,7 @@ export const PortalLoginPage: React.FC = () => {
                   <Lock className="w-4 h-4" />
                 </div>
                 <input
+                  id="portal-login-password"
                   type="password"
                   required
                   value={password}
