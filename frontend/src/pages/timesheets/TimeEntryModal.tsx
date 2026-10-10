@@ -5,6 +5,7 @@ import { Modal } from '../../components/common/Modal';
 import { customerService } from '../../services/customerService';
 import { validateDescription, validateNonNegativeMoney, parseStrictNumber } from '../../utils/validation';
 import { todayIso } from '../../utils/format';
+import { useCustomerProjects } from '../expenses/useCustomerProjects';
 
 interface TimeEntryModalProps {
   isOpen: boolean;
@@ -24,6 +25,9 @@ export function TimeEntryModal({
   const [customers, setCustomers] = useState<Array<{ id: string; display_name: string; customer_number: string }>>([]);
   const [customerId, setCustomerId] = useState('');
   const [projectTitle, setProjectTitle] = useState('');
+  // A real project of the selected customer; projectTitle is only a free label when none is linked.
+  const [projectId, setProjectId] = useState('');
+  const { projects, loading: projectsLoading } = useCustomerProjects(customerId || undefined);
   const [dateStr, setDateStr] = useState(todayIso());
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
@@ -43,6 +47,7 @@ export function TimeEntryModal({
     if (initialEntry) {
       setCustomerId(initialEntry.customer_id || '');
       setProjectTitle(initialEntry.project_name || '');
+      setProjectId(initialEntry.project_id || '');
       setDateStr(initialEntry.date);
       setStartTime(initialEntry.start_time || '');
       setEndTime(initialEntry.end_time || '');
@@ -53,6 +58,7 @@ export function TimeEntryModal({
     } else {
       setCustomerId('');
       setProjectTitle('');
+      setProjectId('');
       setDateStr(todayIso());
       setStartTime('');
       setEndTime('');
@@ -128,9 +134,12 @@ export function TimeEntryModal({
     }
     setError(null);
 
+    const linkedProject = projectId ? projects.find((p) => p.id === projectId) : undefined;
     const payload: TimeEntryCreate = {
       customer_id: customerId || null,
-      project_name: projectTitle.trim() || null,
+      // '' unlinks a project on edit; a new entry simply has none.
+      project_id: projectId || (initialEntry?.project_id ? '' : null),
+      project_name: linkedProject?.name || projectTitle.trim() || null,
       date: dateStr,
       start_time: startTime || null,
       end_time: endTime || null,
@@ -157,11 +166,12 @@ export function TimeEntryModal({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label htmlFor="time-entry-date" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
               Work Date <span className="text-rose-500">*</span>
             </label>
             <div className="relative">
               <input
+                id="time-entry-date"
                 type="date"
                 required
                 value={dateStr}
@@ -172,12 +182,17 @@ export function TimeEntryModal({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label htmlFor="time-entry-customer" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
               Customer / Account
             </label>
             <select
+              id="time-entry-customer"
               value={customerId}
-              onChange={(e) => setCustomerId(e.target.value)}
+              onChange={(e) => {
+                setCustomerId(e.target.value);
+                // Projects belong to one customer: a new customer means picking its project again.
+                setProjectId('');
+              }}
               className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
             >
               <option value="">No Customer / Internal</option>
@@ -190,11 +205,39 @@ export function TimeEntryModal({
           </div>
         </div>
 
+        {customerId && (
+          <div>
+            <label htmlFor="time-entry-project" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              Project
+            </label>
+            <select
+              id="time-entry-project"
+              value={projectId}
+              onChange={(e) => setProjectId(e.target.value)}
+              disabled={projectsLoading}
+              className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            >
+              <option value="">{projectsLoading ? 'Loading projects...' : 'No linked project'}</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+              {/* A linked project missing from the customer's list (e.g. since moved) stays visible. */}
+              {projectId && !projectsLoading && !projects.some((p) => p.id === projectId) && (
+                <option value={projectId}>{projectTitle || 'Linked project'}</option>
+              )}
+            </select>
+          </div>
+        )}
+
+        {!projectId && (
         <div>
-          <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+          <label htmlFor="time-entry-project-name" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
             Project / Engagement Name
           </label>
           <input
+            id="time-entry-project-name"
             type="text"
             placeholder="e.g. Cloud Migration, Q3 Security Audit, Frontend Sprint"
             value={projectTitle}
@@ -202,13 +245,15 @@ export function TimeEntryModal({
             className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
           />
         </div>
+        )}
 
         <div className="grid grid-cols-3 gap-3">
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label htmlFor="time-entry-start" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
               Start Time
             </label>
             <input
+              id="time-entry-start"
               type="time"
               value={startTime}
               onChange={(e) => setStartTime(e.target.value)}
@@ -216,10 +261,11 @@ export function TimeEntryModal({
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label htmlFor="time-entry-end" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
               End Time
             </label>
             <input
+              id="time-entry-end"
               type="time"
               value={endTime}
               onChange={(e) => setEndTime(e.target.value)}
@@ -227,10 +273,11 @@ export function TimeEntryModal({
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label htmlFor="time-entry-hours" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
               Duration (Hours) <span className="text-rose-500">*</span>
             </label>
             <input
+              id="time-entry-hours"
               type="number"
               // Any 2-decimal value: start/end times auto-fill e.g. 2.5 or 0.33 h. A 0.25 step
               // offset from a 0.1 minimum only allowed 0.1, 0.35, 0.6 ... so the browser blocked
@@ -247,10 +294,11 @@ export function TimeEntryModal({
         </div>
 
         <div>
-          <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+          <label htmlFor="time-entry-description" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
             Work Description <span className="text-rose-500">*</span>
           </label>
           <textarea
+            id="time-entry-description"
             rows={3}
             required
             placeholder="Detailed description of tasks completed, client deliverables, or deliverables achieved..."
@@ -284,10 +332,11 @@ export function TimeEntryModal({
           {billable && (
             <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-200/80">
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
+                <label htmlFor="time-entry-rate" className="block text-xs font-medium text-slate-600 mb-1">
                   Hourly Billing Rate
                 </label>
                 <input
+                  id="time-entry-rate"
                   type="number"
                   step="1"
                   min="0"

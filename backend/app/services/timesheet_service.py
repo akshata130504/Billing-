@@ -93,6 +93,18 @@ def serialize_time_entry(entry: TimeEntry) -> TimeEntryRead:
     )
 
 
+def _tenant_project(db: Session, org_id: str, project_id: str, customer_id: Optional[str]):
+    """The tenant's project `project_id`; it must belong to `customer_id` when both have a customer."""
+    from backend.app.models.projects import Project
+
+    project = db.scalar(select(Project).where(Project.organization_id == org_id, Project.id == project_id))
+    if project is None:
+        raise EntityNotFoundError("Project", project_id)
+    if customer_id and project.customer_id and project.customer_id != customer_id:
+        raise ValidationAppError("The project belongs to a different customer.")
+    return project
+
+
 def create_time_entry(db: Session, data: TimeEntryCreate, ctx: CurrentContext) -> TimeEntryRead:
     """Creates a new time entry with tenant isolation and rate/amount calculation."""
     org_id = ctx.organization.id
@@ -101,13 +113,10 @@ def create_time_entry(db: Session, data: TimeEntryCreate, ctx: CurrentContext) -
     customer_id = data.customer_id
     project_name = data.project_name
     if data.project_id:
-        from backend.app.models.projects import Project
-
-        project = db.scalar(select(Project).where(Project.organization_id == org_id, Project.id == data.project_id))
-        if project is not None:
-            # Hours logged against a project bill to the project's customer.
-            customer_id = customer_id or project.customer_id
-            project_name = project_name or project.name
+        project = _tenant_project(db, org_id, data.project_id, customer_id)
+        # Hours logged against a project bill to the project's customer.
+        customer_id = customer_id or project.customer_id
+        project_name = project_name or project.name
 
     if customer_id:
         cust = db.scalar(select(Customer).where(Customer.organization_id == org_id, Customer.id == customer_id))
@@ -233,6 +242,11 @@ def update_time_entry(db: Session, entry_id: str, data: TimeEntryUpdate, ctx: Cu
 
     if data.project_id is not None:
         entry.project_id = data.project_id or None
+    if entry.project_id and (data.project_id or data.customer_id):
+        # A (re)linked project, or a new customer for a linked one, must still match.
+        project = _tenant_project(db, org_id, entry.project_id, entry.customer_id)
+        if data.project_id and data.project_name is None:
+            entry.project_name = project.name
     if data.project_name is not None:
         entry.project_name = data.project_name or None
     if data.date is not None:
