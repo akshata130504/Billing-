@@ -41,6 +41,7 @@ from backend.app.models import (
 from backend.app.schemas.common_refs import customer_ref, iso_dt, money_str, user_ref
 from backend.app.schemas.invoices import RecordPaymentIn
 from backend.app.schemas.payments import AllocationIn, PaymentCreate, PaymentUpdate
+from backend.app.schemas.validators import is_after_org_today
 from backend.app.services import audit, razorpay_gateway, timezones
 from backend.app.services.invoice_service import (
     SETTLED_PAYMENT_STATUSES,
@@ -452,7 +453,15 @@ def _reload(db: Session, payment: Payment) -> Payment:
 # --- create / update -----------------------------------------------------------------------------------------------------
 
 
+def _reject_future_paid_at(ctx: CurrentContext, paid_at: Optional[datetime]) -> None:
+    # A plain-date paid_at is the organization's calendar date; the schema only rejects dates
+    # that are in the future everywhere.
+    if is_after_org_today(paid_at, ctx.organization):
+        raise ValidationAppError("Payment date cannot be in the future.", {"fields": {"paid_at": "in the future"}})
+
+
 def create_payment(db: Session, ctx: CurrentContext, data: PaymentCreate) -> Payment:
+    _reject_future_paid_at(ctx, data.paid_at)
     customer = get_customer(db, ctx.organization_id, data.customer_id)
     amount = q2(data.amount)
     # Number first (organization lock), then the invoice locks inside validation:
@@ -514,6 +523,7 @@ def create_payment(db: Session, ctx: CurrentContext, data: PaymentCreate) -> Pay
 
 def record_invoice_payment(db: Session, ctx: CurrentContext, invoice: Invoice, data: RecordPaymentIn) -> Payment:
     """POST /invoices/{id}/record-payment: manual payment fully allocated to one invoice."""
+    _reject_future_paid_at(ctx, data.paid_at)
     # Organization (numbering) lock, then the invoice lock, before amount_due is read, so
     # two different payments recorded at once cannot both take the full balance.
     payment_number = next_number(db, ctx.organization_id, "payment")
@@ -563,6 +573,27 @@ def record_invoice_payment(db: Session, ctx: CurrentContext, invoice: Invoice, d
     _emit_payment_event(db, payment, "payment.created")
     db.commit()
     return _reload(db, payment)
+
+
+def duplicate_reference_warnings(db: Session, payment: Payment) -> List[str]:
+    """Non-blocking: the same reference on another payment of the organization (a split or
+    repeated transfer is legitimate, so it is never refused - the user is just told)."""
+    reference = (payment.reference or "").strip()
+    if not reference:
+        return []
+    others = db.scalars(
+        select(Payment.payment_number)
+        .where(
+            Payment.organization_id == payment.organization_id,
+            Payment.id != payment.id,
+            func.lower(Payment.reference) == reference.lower(),
+        )
+        .order_by(Payment.created_at)
+        .limit(3)
+    ).all()
+    if not others:
+        return []
+    return [f"Reference {reference} is also used on {', '.join(others)}. Check this is not a duplicate payment."]
 
 
 def update_payment(db: Session, ctx: CurrentContext, payment: Payment, data: PaymentUpdate) -> Payment:

@@ -12,9 +12,10 @@ from backend.app.models.proration import (
     SubscriptionChangeStatus,
     SubscriptionChangeType,
 )
+from backend.app.schemas.common_refs import StrictRequest
 
 
-class SubscriptionChangePreviewIn(BaseModel):
+class SubscriptionChangePreviewIn(StrictRequest):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     target_plan_id: Optional[str] = None
@@ -53,7 +54,7 @@ class SubscriptionChangePreviewOut(BaseModel):
     explanation: str
 
 
-class SubscriptionChangeApplyIn(BaseModel):
+class SubscriptionChangeApplyIn(StrictRequest):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     target_plan_id: Optional[str] = None

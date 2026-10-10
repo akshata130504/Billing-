@@ -35,8 +35,9 @@ MIN_PARTIAL_PAYMENT = Decimal("1.00")
 
 
 def _razorpay_public_config(db: Session, organization_id: str) -> Dict[str, Any]:
-    if not org_lifecycle.payment_collection_allowed(db, organization_id):
-        return {"enabled": False, "key_id": None, "unavailable_reason": org_lifecycle.CUSTOMER_UNAVAILABLE_MESSAGE}
+    unavailable_reason = org_lifecycle.payment_unavailable_reason(db, organization_id)
+    if unavailable_reason is not None:
+        return {"enabled": False, "key_id": None, "unavailable_reason": unavailable_reason}
     creds = razorpay_gateway.credentials_for(db, organization_id)
     enabled = razorpay_gateway.is_configured(creds)
     return {"enabled": enabled, "key_id": razorpay_gateway.public_key_id(creds) if enabled else None}

@@ -54,7 +54,7 @@ from backend.app.models import (
 from backend.app.models.portal import CustomerPortalSession, CustomerPortalUser
 from backend.app.models.base import utcnow
 from backend.app.models.platform import PlatformAuditLog, PlatformRole, PlatformStaff
-from backend.app.services import org_access, platform_audit
+from backend.app.services import org_access, org_lifecycle, platform_audit
 from backend.app.services.email import frontend_url, send_email
 
 ADMIN = PlatformRole.PLATFORM_ADMINISTRATOR
@@ -282,6 +282,25 @@ def renewals_waiting(db: Session, organization_id: str) -> int:
         )
 
 
+AUTOMATION_LABELS = {
+    "running": "Running",
+    "paused": "Paused",
+    "held_trial": "Held - trial (no approved subscription)",
+}
+
+
+def automation_state(org: Organization) -> Dict[str, Any]:
+    """The effective billing-automation state, matching org_lifecycle.automation_allowed: an
+    ACTIVE, unpaused organization still in its trial has its automation held."""
+    if (org.status or OrganizationStatus.ACTIVE) != OrganizationStatus.ACTIVE or org.jobs_paused:
+        state = "paused"
+    elif org.module_access == org_lifecycle.TRIAL_ACCESS:
+        state = "held_trial"
+    else:
+        state = "running"
+    return {"automation_running": state == "running", "automation_state": state, "automation_label": AUTOMATION_LABELS[state]}
+
+
 def allowed_actions(org: Organization, role: PlatformRole) -> List[str]:
     """What this role may do to this organization right now (the server re-checks every call)."""
     status = org.status or OrganizationStatus.ACTIVE
@@ -383,7 +402,7 @@ def organization_detail(db: Session, organization_id: str, actor: Actor) -> Dict
             ),
             "deletion_scheduled_for": org.deletion_scheduled_for,
             "jobs_paused": bool(org.jobs_paused),
-            "automation_running": status == OrganizationStatus.ACTIVE and not org.jobs_paused,
+            **automation_state(org),
             "renewals_waiting": renewals_waiting(db, org.id),
         },
         "allowed_actions": allowed_actions(org, actor.role),

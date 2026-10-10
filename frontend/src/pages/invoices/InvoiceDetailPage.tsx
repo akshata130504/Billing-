@@ -166,11 +166,12 @@ export const InvoiceDetailPage = () => {
         reference_number: paymentRef,
         notes: paymentNotes,
       };
-      await invoiceService.recordPayment(id, payload);
+      const recorded = await invoiceService.recordPayment(id, payload);
       setShowPaymentModal(false);
       setPaymentRef('');
       setPaymentNotes('');
       showToast('success', 'Payment recorded');
+      if (recorded?.warnings?.length) showToast('warning', 'Possible duplicate', recorded.warnings.join(' '));
       await fetchInvoiceData(id);
     } catch (err) {
       showToast('error', 'Failed to record payment', toApiError(err).message);

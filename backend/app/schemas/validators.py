@@ -2,14 +2,27 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+import unicodedata
+from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Optional
+from typing import Annotated, Optional
 from urllib.parse import urlsplit
 
+from pydantic import Field
+
+# Money inputs map to NUMERIC(14, 2) columns: at most 12 digits before the decimal point
+# and 2 after. Larger or more precise amounts are a 422 - never a database overflow (500)
+# or a silent rounding.
+MAX_MONEY = Decimal("999999999999.99")
+Money = Annotated[Decimal, Field(le=MAX_MONEY, max_digits=14, decimal_places=2)]
+
 # Regex patterns
-_NAME_CHARS_RE = re.compile(r"^[A-Za-z0-9\s.,'&\-\(\)\/]{1,200}$")
-_HAS_LETTER_RE = re.compile(r"[A-Za-z\u00C0-\u024F]")
+# Names may use any script (letters, combining marks, digits) plus common business
+# punctuation. HTML/script characters (< > " `) and '=' stay out, and a name may not
+# start with a spreadsheet-formula trigger (= + @).
+_NAME_PUNCTUATION = frozenset(" .,'&()-_/#+@:")
+_NAME_FORMULA_PREFIXES = ("=", "+", "@")
+_NAME_MAX_LEN = 200
 _PHONE_RE = re.compile(r"^\+?[0-9\s\-().]{7,20}$")
 _URL_RE = re.compile(r"^https?://([a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(:\d+)?([/?#].*)?$")
 _GSTIN_RE = re.compile(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$")
@@ -31,11 +44,19 @@ def validate_sensible_name(value: Optional[str], field_label: str = "Name") -> O
     val = value.strip()
     if not val:
         raise ValueError(f"{field_label} cannot be empty or whitespace-only.")
-    if not _HAS_LETTER_RE.search(val):
+    if not any(ch.isalpha() for ch in val):
         raise ValueError(f"{field_label} cannot be numeric-only and must contain at least one letter.")
-    if not _NAME_CHARS_RE.match(val):
+    if (
+        len(val) > _NAME_MAX_LEN
+        or val.startswith(_NAME_FORMULA_PREFIXES)
+        or not all(_is_name_char(ch) for ch in val)
+    ):
         raise ValueError(f"{field_label} contains invalid characters.")
     return val
+
+
+def _is_name_char(ch: str) -> bool:
+    return ch in _NAME_PUNCTUATION or ch.isspace() or unicodedata.category(ch)[0] in ("L", "M", "N")
 
 
 def validate_phone_number(value: Optional[str]) -> Optional[str]:
@@ -116,14 +137,36 @@ def validate_slug_format(value: Optional[str], field_label: str = "Code") -> Opt
     return val
 
 
+# The furthest ahead of UTC any timezone runs (UTC+14).
+_MAX_TZ_AHEAD = timedelta(hours=14)
+
+
 def reject_future_datetime(value: Optional[datetime], field_label: str = "Date") -> Optional[datetime]:
-    """Rejects a datetime later than today."""
+    """Rejects a datetime later than today.
+
+    An aware value is compared with today in its own timezone. A naive value (a plain date such
+    as "2026-10-10") is a calendar date in the organization's timezone, which is not known here:
+    it is only rejected once it is later than today everywhere (UTC+14), and the service re-checks
+    it against the organization's business day (`is_after_org_today`).
+    """
     if value is None:
         return None
-    now = datetime.now(value.tzinfo) if value.tzinfo else max(datetime.now(), datetime.now(timezone.utc).replace(tzinfo=None))
-    if value.date() > now.date():
+    from backend.app.services import timezones
+
+    now = timezones.utc_now()
+    today = now.astimezone(value.tzinfo).date() if value.tzinfo else (now + _MAX_TZ_AHEAD).date()
+    if value.date() > today:
         raise ValueError(f"{field_label} cannot be in the future.")
     return value
+
+
+def is_after_org_today(value: Optional[datetime], organization) -> bool:
+    """True when a naive (organization-local) datetime falls after the organization's today."""
+    if value is None or value.tzinfo is not None:
+        return False
+    from backend.app.services import timezones
+
+    return value.date() > timezones.org_today(organization)
 
 
 def validate_sku_format(value: Optional[str]) -> Optional[str]:

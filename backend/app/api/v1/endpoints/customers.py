@@ -46,7 +46,7 @@ def create_customer(
     db: Session = Depends(get_db),
 ):
     customer = svc.create_customer(db, ctx, body)
-    return svc.serialize_customer(customer)
+    return {**svc.serialize_customer(customer), "warnings": svc.duplicate_email_warnings(db, customer)}
 
 
 @router.get("/{customer_id}", response_model=CustomerOut, summary="Get a customer with stats")
@@ -68,7 +68,7 @@ def update_customer(
     db: Session = Depends(get_db),
 ):
     customer = svc.update_customer(db, ctx, customer_id, body)
-    return svc.serialize_customer(customer)
+    return {**svc.serialize_customer(customer), "warnings": svc.duplicate_email_warnings(db, customer)}
 
 
 @router.delete("/{customer_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response, summary="Delete a customer")

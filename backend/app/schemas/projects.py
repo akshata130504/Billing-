@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.app.models.projects import BillingMethod, ProjectStatus
+from backend.app.schemas.validators import Money
 
 
 class ProjectBase(BaseModel):
@@ -21,7 +22,7 @@ class ProjectBase(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     billing_method: BillingMethod = BillingMethod.FIXED_PRICE
-    budget: Decimal = Field(default=Decimal("0.00"), ge=Decimal("0.00"))
+    budget: Money = Field(default=Decimal("0.00"), ge=Decimal("0.00"))
     project_manager: Optional[str] = None
     notes: Optional[str] = None
 
@@ -47,7 +48,7 @@ class ProjectUpdate(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     billing_method: Optional[BillingMethod] = None
-    budget: Optional[Decimal] = Field(default=None, ge=Decimal("0.00"))
+    budget: Optional[Money] = Field(default=None, ge=Decimal("0.00"))
     project_manager: Optional[str] = None
     notes: Optional[str] = None
 

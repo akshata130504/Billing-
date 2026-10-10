@@ -6,20 +6,20 @@ from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.app.models import PaymentGateway, PaymentMethod, PaymentStatus, ReconciliationStatus, RefundStatus
-from backend.app.schemas.common_refs import CustomerRef, UserRef
-from backend.app.schemas.validators import reject_future_datetime
+from backend.app.schemas.common_refs import CustomerRef, StrictRequest, UserRef
+from backend.app.schemas.validators import Money, reject_future_datetime
 
 
-class AllocationIn(BaseModel):
+class AllocationIn(StrictRequest):
     invoice_id: str
     amount: Decimal = Field(..., gt=0)
 
 
-class PaymentCreate(BaseModel):
+class PaymentCreate(StrictRequest):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     customer_id: str
-    amount: Decimal = Field(..., gt=0)
+    amount: Money = Field(..., gt=0)
     method: PaymentMethod
     paid_at: Optional[datetime] = None
     reference: Optional[str] = Field(default=None, max_length=120)
@@ -39,19 +39,19 @@ class PaymentCreate(BaseModel):
         return reject_future_datetime(v, "Payment date")
 
 
-class PaymentUpdate(BaseModel):
+class PaymentUpdate(StrictRequest):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     reference: Optional[str] = Field(default=None, max_length=120)
     notes: Optional[str] = None
 
 
-class AllocationsPut(BaseModel):
+class AllocationsPut(StrictRequest):
     allocations: List[AllocationIn]
 
 
-class RefundIn(BaseModel):
-    amount: Decimal = Field(..., gt=0)
+class RefundIn(StrictRequest):
+    amount: Money = Field(..., gt=0)
     reason: Optional[str] = Field(default=None, max_length=500)
 
 
@@ -96,6 +96,8 @@ class PaymentOut(BaseModel):
     recorded_by: Optional[UserRef] = None
     created_at: datetime
     updated_at: datetime
+    # Non-blocking notices about the saved payment (e.g. its reference is used on another payment).
+    warnings: List[str] = []
 
 
 class PaymentsSummary(BaseModel):

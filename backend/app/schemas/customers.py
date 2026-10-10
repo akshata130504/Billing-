@@ -220,6 +220,8 @@ class CustomerOut(BaseModel):
     stats: Optional[CustomerStats] = None
     created_at: datetime
     updated_at: datetime
+    # Non-blocking notices about the saved customer (e.g. its email is used by another customer).
+    warnings: List[str] = []
 
 
 # --- minimal rows for /customers/{id}/invoices | payments | subscriptions ---------------

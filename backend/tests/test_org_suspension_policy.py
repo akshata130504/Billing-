@@ -160,7 +160,7 @@ def test_suspended_public_invoice_viewable_but_no_new_payment(client, db, tenant
     view = client.get(f"{API}/public/invoices/{token}")
     assert view.status_code == 200, view.text
     assert view.json()["razorpay"]["enabled"] is False
-    assert view.json()["razorpay"]["unavailable_reason"]
+    assert "temporarily unavailable" in view.json()["razorpay"]["unavailable_reason"]
 
     order = client.post(f"{API}/public/invoices/{token}/razorpay-order", json={})
     assert order.status_code == 403

@@ -5,10 +5,10 @@ from typing import Any, List, Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.app.models import BillingInterval, SubscriptionStatus
-from backend.app.schemas.common_refs import CustomerRef
+from backend.app.schemas.common_refs import CustomerRef, StrictRequest
 
 
-class SubscriptionCreate(BaseModel):
+class SubscriptionCreate(StrictRequest):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     customer_id: str
@@ -38,7 +38,7 @@ class SubscriptionCreate(BaseModel):
         return self
 
 
-class SubscriptionUpdate(BaseModel):
+class SubscriptionUpdate(StrictRequest):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     quantity: Optional[int] = Field(default=None, ge=1)
@@ -48,7 +48,7 @@ class SubscriptionUpdate(BaseModel):
     billing_frequency: Optional[str] = None
 
 
-class SubscriptionCancelIn(BaseModel):
+class SubscriptionCancelIn(StrictRequest):
     at_period_end: bool = False
     # Immediate cancellation only: issue a credit note for the unused, already-invoiced
     # remainder of the current period.

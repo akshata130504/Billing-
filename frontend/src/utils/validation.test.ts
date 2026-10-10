@@ -79,6 +79,18 @@ describe('validateSensibleName', () => {
     expect(validateSensibleName('Plan 360', 'Name')).toBeNull();
   });
 
+  it('accepts international names and common business punctuation (BUG-09)', () => {
+    for (const name of ['Müller GmbH', 'Société Générale QA', 'شركة الاختبار', '测试公司', 'José Ñúñez', 'QA-Co_1 / Unit #2', 'Acme+Partners @ HQ: Unit 4']) {
+      expect(validateSensibleName(name, 'Legal / company name')).toBeNull();
+    }
+  });
+
+  it('still rejects HTML/script characters and spreadsheet-formula prefixes', () => {
+    for (const name of ['<script>alert(1)</script>', 'Acme "Quoted"', 'Acme `tick`', '=SUM(A1)', '@SUM(A1)', '+Acme', 'Acme = Co']) {
+      expect(validateSensibleName(name, 'Name')).toBe('Name contains invalid characters.');
+    }
+  });
+
   it('accepts short names/initials', () => {
     expect(validateSensibleName('A', 'Name')).toBeNull();
   });

@@ -82,7 +82,7 @@ export function HealthPage() {
           <Section title="Billing scheduler" description="The scheduler is a separate process; this console can observe it but never run it.">
             <dl className="grid gap-3 sm:grid-cols-2">
               <Field label="Status"><StateDot ok={health.scheduler.status === 'ok' ? true : health.scheduler.enabled ? false : null} label={health.scheduler.status} /></Field>
-              <Field label="Enabled">{health.scheduler.enabled ? 'Yes' : 'No'}</Field>
+              <Field label="Running (last run within the expected interval)">{health.scheduler.running ? 'Yes' : 'No'}</Field>
               <Field label="Last finished run">{formatDateTime(health.scheduler.last_finished_at)}</Field>
               <Field label="Interval">{health.scheduler.interval_minutes ? `${health.scheduler.interval_minutes} min` : '-'}</Field>
               <Field label="Errors in last run">{health.scheduler.last_error_count ?? '-'}</Field>

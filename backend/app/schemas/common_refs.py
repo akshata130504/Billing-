@@ -32,6 +32,13 @@ __all__ = [
 ]
 
 
+class StrictRequest(BaseModel):
+    """Base for state-changing request bodies: an unknown (e.g. misspelt) field is a 422 instead of
+    being silently ignored, so `{"effective": ...}` can never apply a change with the defaults."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class CustomerRef(BaseModel):
     id: str
     customer_number: str

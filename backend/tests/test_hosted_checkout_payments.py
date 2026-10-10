@@ -284,6 +284,18 @@ def test_no_gateway_configured_shows_unavailable(client, tenant, auth_headers):
     assert "contact the merchant" in view["gateway_message"].lower()
 
 
+def test_trial_merchant_checkout_says_payments_not_accepted_yet(client, tenant, auth_headers, db):
+    """BUG-15: a merchant in its free trial is not "temporarily unavailable" (suspended wording)."""
+    inv = tenant.invoice(tenant.customer(), amount="100.00")
+    token = _create_session(client, auth_headers, purpose="invoice_payment", invoice_id=inv.id)["token"]
+    tenant.organization.module_access = "trial"
+    db.commit()
+    view = client.get(f"/api/v1/checkout/public/{token}").json()
+    assert view["gateway_available"] is False
+    assert "not accepting online payments yet" in view["gateway_message"]
+    assert "temporarily unavailable" not in view["gateway_message"]
+
+
 def test_session_list_never_exposes_usable_token(client, tenant, auth_headers, db):
     customer = tenant.customer()
     inv = tenant.invoice(customer, amount="100.00")
