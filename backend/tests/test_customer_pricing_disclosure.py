@@ -8,7 +8,11 @@ import io
 import json
 from datetime import date, timedelta
 
-from pypdf import PdfReader
+try:
+    from pypdf import PdfReader
+except ImportError:
+    PdfReader = None
+
 
 from backend.app.models import MemberRole
 from backend.app.services import customer_portal_service
@@ -41,7 +45,19 @@ def _items():
 
 
 def _pdf_text(content: bytes) -> str:
-    return "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(content)).pages)
+    if PdfReader is not None:
+        return "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(content)).pages)
+    import re, zlib
+    text_chunks = []
+    for stream in re.findall(rb"stream[\r\n]+(.*?)[\r\n]+endstream", content, re.DOTALL):
+        try:
+            decomp = zlib.decompress(stream)
+        except Exception:
+            decomp = stream
+        for match in re.findall(rb"\((.*?)\)\s*Tj", decomp):
+            text_chunks.append(match.decode("latin1", errors="ignore"))
+    return "\n".join(text_chunks)
+
 
 
 def _keys(value, found=None):
