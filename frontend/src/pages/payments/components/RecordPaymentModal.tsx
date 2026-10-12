@@ -11,7 +11,7 @@ import {
   UserPlus,
   AlertCircle,
 } from 'lucide-react';
-import { formatMoney, todayIso } from '../../../utils/format';
+import { formatMoney, todayIso, currencySymbol } from '../../../utils/format';
 import { validateDateNotFuture, validatePositiveMoney } from '../../../utils/validation';
 
 interface RecordPaymentModalProps {
@@ -147,6 +147,8 @@ export function RecordPaymentModal({
 
   const selectedCustomer = customers.find((c) => c.id === customerId);
   const outstandingInvoices = selectedCustomer?.outstandingInvoices || [];
+  // The server records a new payment in the customer's billing currency.
+  const receiptCurrency = selectedCustomer?.currency || 'INR';
 
   // Typing in the combobox queries the server, so customers beyond the first
   // preloaded page are findable too.
@@ -340,7 +342,7 @@ export function RecordPaymentModal({
 
     if (paymentType === 'invoice_payment') {
       if (totalApplied - numReceived > CENT_TOLERANCE) {
-        errs.allocation = `Total applied (₹${totalApplied.toLocaleString('en-IN')}) cannot exceed amount received (₹${numReceived.toLocaleString('en-IN')})`;
+        errs.allocation = `Total applied (${formatMoney(totalApplied, receiptCurrency)}) cannot exceed amount received (${formatMoney(numReceived, receiptCurrency)})`;
       }
 
       // Check per-invoice limits
@@ -349,7 +351,7 @@ export function RecordPaymentModal({
           const val = parseFloat(amtStr) || 0;
           const inv = outstandingInvoices.find((i) => i.id === invId);
           if (inv && val - inv.balanceDue > CENT_TOLERANCE) {
-            errs[`inv_${invId}`] = `Cannot exceed balance due of ₹${inv.balanceDue.toLocaleString('en-IN')}`;
+            errs[`inv_${invId}`] = `Cannot exceed balance due of ${formatMoney(inv.balanceDue, inv.currency)}`;
           }
         }
       }
@@ -610,11 +612,11 @@ export function RecordPaymentModal({
             {/* Amount Received */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Amount Received (INR) <span className="text-rose-500">*</span>
+                Amount Received ({receiptCurrency}) <span className="text-rose-500">*</span>
               </label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400">
-                  ₹
+                  {currencySymbol(receiptCurrency)}
                 </span>
                 <input
                   type="number"
@@ -760,15 +762,15 @@ export function RecordPaymentModal({
                             </td>
                             <td className="py-2.5 px-3 text-slate-500">{inv.dueDate}</td>
                             <td className="py-2.5 px-3 text-right font-mono text-slate-600">
-                              {formatMoney(inv.totalAmount)}
+                              {formatMoney(inv.totalAmount, inv.currency)}
                             </td>
                             <td className="py-2.5 px-3 text-right font-mono font-semibold text-slate-900">
-                              {formatMoney(inv.balanceDue)}
+                              {formatMoney(inv.balanceDue, inv.currency)}
                             </td>
                             <td className="py-2.5 px-3 text-right">
                               <div className="relative inline-block w-32">
                                 <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-semibold">
-                                  ₹
+                                  {currencySymbol(receiptCurrency)}
                                 </span>
                                 <input
                                   type="number"
@@ -804,19 +806,19 @@ export function RecordPaymentModal({
                   <div>
                     <span className="text-[11px] text-slate-500 block">Amount Received</span>
                     <span className="font-bold text-slate-900 font-mono text-sm">
-                      {formatMoney(numReceived)}
+                      {formatMoney(numReceived, receiptCurrency)}
                     </span>
                   </div>
                   <div>
                     <span className="text-[11px] text-slate-500 block">Amount Applied</span>
                     <span className="font-bold text-emerald-700 font-mono text-sm">
-                      {formatMoney(totalApplied)}
+                      {formatMoney(totalApplied, receiptCurrency)}
                     </span>
                   </div>
                   <div>
                     <span className="text-[11px] text-slate-500 block">Unapplied Balance</span>
                     <span className="font-bold text-blue-700 font-mono text-sm">
-                      {formatMoney(unappliedBalance)}
+                      {formatMoney(unappliedBalance, receiptCurrency)}
                     </span>
                   </div>
                 </div>
@@ -825,7 +827,7 @@ export function RecordPaymentModal({
                   <div className="flex items-center gap-1.5 text-[11px] text-blue-700 bg-blue-50/70 p-2 rounded-lg border border-blue-100">
                     <Info className="w-3.5 h-3.5 shrink-0" />
                     <span>
-                      The unapplied balance of <strong className="font-mono">{formatMoney(unappliedBalance)}</strong> will be credited to {selectedCustomer?.name} as an available advance credit for future invoices.
+                      The unapplied balance of <strong className="font-mono">{formatMoney(unappliedBalance, receiptCurrency)}</strong> will be credited to {selectedCustomer?.name} as an available advance credit for future invoices.
                     </span>
                   </div>
                 )}
@@ -838,7 +840,7 @@ export function RecordPaymentModal({
                 <span>Customer Advance Deposit</span>
               </div>
               <p className="text-slate-600 leading-relaxed text-[11px]">
-                The full payment of <strong className="font-mono font-bold text-slate-900">{formatMoney(numReceived)}</strong> will be recorded as unapplied customer credit. It can be applied against subsequent billing cycles or milestone invoices.
+                The full payment of <strong className="font-mono font-bold text-slate-900">{formatMoney(numReceived, receiptCurrency)}</strong> will be recorded as unapplied customer credit. It can be applied against subsequent billing cycles or milestone invoices.
               </p>
             </div>
           )}

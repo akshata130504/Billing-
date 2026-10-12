@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { quoteService } from '../../services/quoteService';
 import type { Quote } from '../../types/quotes';
-import { calculateValidityDays, formatQuoteTerms, updateTermsValidity } from '../../utils/format';
+import { calculateValidityDays, formatQuoteTerms, updateTermsValidity, formatMoney } from '../../utils/format';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
 import { Modal } from '../../components/common/Modal';
@@ -527,16 +527,16 @@ export const QuoteDetailPage = () => {
                         </td>
                         <td className="px-4 py-3 text-right text-gray-700">{item.quantity}</td>
                         <td className="px-4 py-3 text-right text-gray-700">
-                          ₹{Number(item.rate || item.unit_price || 0).toLocaleString()}
+                          {formatMoney(Number(item.rate || item.unit_price || 0), quote.currency)}
                         </td>
                         <td className="px-4 py-3 text-right text-gray-700">
-                          {Number(item.discount_amount || 0) > 0 ? `₹${Number(item.discount_amount).toLocaleString()}` : '-'}
+                          {Number(item.discount_amount || 0) > 0 ? formatMoney(Number(item.discount_amount), quote.currency) : '-'}
                         </td>
                         <td className="px-4 py-3 text-right text-gray-700">
-                          {Number(item.tax_amount || 0) > 0 ? `₹${Number(item.tax_amount).toLocaleString()}` : '-'}
+                          {Number(item.tax_amount || 0) > 0 ? formatMoney(Number(item.tax_amount), quote.currency) : '-'}
                         </td>
                         <td className="px-4 py-3 text-right font-medium text-gray-900">
-                          ₹{Number(item.amount || item.total_amount || 0).toLocaleString()}
+                          {formatMoney(Number(item.amount || item.total_amount || 0), quote.currency)}
                         </td>
                       </tr>
                     ))}
@@ -550,30 +550,30 @@ export const QuoteDetailPage = () => {
               <div className="w-full sm:w-72 space-y-2 text-sm">
                 <div className="flex justify-between text-gray-600">
                   <span>Subtotal</span>
-                  <span>₹{Number(quote.subtotal || 0).toLocaleString()}</span>
+                  <span>{formatMoney(Number(quote.subtotal || 0), quote.currency)}</span>
                 </div>
                 {Number(quote.discount_amount || 0) > 0 && (
                   <div className="flex justify-between text-green-600">
                     <span>Discount</span>
-                    <span>-₹{Number(quote.discount_amount || 0).toLocaleString()}</span>
+                    <span>-{formatMoney(Number(quote.discount_amount || 0), quote.currency)}</span>
                   </div>
                 )}
                 {Number(quote.tax_amount || 0) > 0 && (
                   <div className="flex justify-between text-gray-600">
                     <span>Tax</span>
-                    <span>+₹{Number(quote.tax_amount || 0).toLocaleString()}</span>
+                    <span>+{formatMoney(Number(quote.tax_amount || 0), quote.currency)}</span>
                   </div>
                 )}
                 {Number(quote.adjustment || 0) !== 0 && (
                   <div className="flex justify-between text-gray-600">
                     <span>Adjustment</span>
-                    <span>₹{Number(quote.adjustment || 0).toLocaleString()}</span>
+                    <span>{formatMoney(Number(quote.adjustment || 0), quote.currency)}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-base font-bold text-gray-900 border-t border-gray-200 pt-2">
                   <span>Total</span>
                   <span className="text-indigo-600">
-                    ₹{Number(quote.total || quote.total_amount || 0).toLocaleString()}
+                    {formatMoney(Number(quote.total || quote.total_amount || 0), quote.currency)}
                   </span>
                 </div>
               </div>
@@ -679,7 +679,7 @@ export const QuoteDetailPage = () => {
                   <div className="flex justify-between">
                     <span className="text-gray-500">Invoiced Amount</span>
                     <span className="font-semibold text-indigo-600">
-                      ₹{Number(quote.invoiced_amount).toLocaleString()}
+                      {formatMoney(Number(quote.invoiced_amount), quote.currency)}
                     </span>
                   </div>
                 </div>
@@ -795,7 +795,7 @@ export const QuoteDetailPage = () => {
             <div className="flex justify-between">
               <span className="text-gray-500">Total Invoice Amount:</span>
               <span className="font-bold text-indigo-600">
-                ₹{Number(quote.total || quote.total_amount || 0).toLocaleString()}
+                {formatMoney(Number(quote.total || quote.total_amount || 0), quote.currency)}
               </span>
             </div>
           </div>

@@ -221,7 +221,7 @@ export function PaymentDetailsPage() {
                   Amount Received
                 </span>
                 <span className="text-xl font-bold text-slate-900 font-mono tracking-tight">
-                  {formatMoney(payment.amount)}
+                  {formatMoney(payment.amount, payment.currency)}
                 </span>
               </div>
 
@@ -230,7 +230,7 @@ export function PaymentDetailsPage() {
                   Applied to Invoices
                 </span>
                 <span className="text-xl font-bold text-emerald-700 font-mono tracking-tight">
-                  {formatMoney(payment.appliedAmount)}
+                  {formatMoney(payment.appliedAmount, payment.currency)}
                 </span>
               </div>
 
@@ -239,7 +239,7 @@ export function PaymentDetailsPage() {
                   Unapplied / Advance
                 </span>
                 <span className="text-xl font-bold text-blue-700 font-mono tracking-tight">
-                  {formatMoney(payment.unappliedAmount)}
+                  {formatMoney(payment.unappliedAmount, payment.currency)}
                 </span>
               </div>
 
@@ -248,7 +248,7 @@ export function PaymentDetailsPage() {
                   Net Settlement
                 </span>
                 <span className="text-xl font-bold text-slate-900 font-mono tracking-tight">
-                  {formatMoney(netAmount)}
+                  {formatMoney(netAmount, payment.currency)}
                 </span>
               </div>
             </div>
@@ -279,7 +279,7 @@ export function PaymentDetailsPage() {
                           </Link>
                         </td>
                         <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-700">
-                          {formatMoney(alloc.appliedAmount)}
+                          {formatMoney(alloc.appliedAmount, payment.currency)}
                         </td>
                       </tr>
                     ))}
@@ -290,7 +290,7 @@ export function PaymentDetailsPage() {
               <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-100 text-xs text-blue-900 space-y-1">
                 <p className="font-semibold">Customer Advance Credit (Unallocated)</p>
                 <p className="text-slate-600 leading-relaxed text-[11px]">
-                  This payment was recorded as an advance customer credit. The full received amount of {formatMoney(payment.amount)} is preserved as available credit on the customer's account.
+                  This payment was recorded as an advance customer credit. The full received amount of {formatMoney(payment.amount, payment.currency)} is preserved as available credit on the customer's account.
                 </p>
               </div>
             )}
@@ -323,7 +323,7 @@ export function PaymentDetailsPage() {
                         <td className="py-2 px-3 text-slate-700">{ref.reason}</td>
                         <td className="py-2 px-3 text-slate-600">{ref.refundMode}</td>
                         <td className="py-2 px-3 text-right font-mono font-bold text-rose-700">
-                          {formatMoney(ref.amount)}
+                          {formatMoney(ref.amount, payment.currency)}
                         </td>
                       </tr>
                     ))}

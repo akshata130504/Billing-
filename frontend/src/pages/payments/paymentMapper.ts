@@ -138,6 +138,7 @@ export function paymentOutToUi(p: PaymentOut): Payment {
     customerName: p.customer?.display_name || 'Customer',
     customerEmail: p.customer?.email || undefined,
     amount,
+    currency: p.currency || 'INR',
     paymentDate: p.paid_at ? p.paid_at.split('T')[0] : p.created_at.split('T')[0],
     paymentMethod: toUiPaymentMethod(p.method),
     status: toUiPaymentStatus(p.status),
@@ -218,6 +219,7 @@ export function customerToUi(c: CustomerOut, invoices: (InvoiceOut | Invoice)[] 
     .map((inv) => ({
       id: inv.id,
       invoiceNumber: inv.invoice_number,
+      currency: inv.currency || c.currency || 'INR',
       customerId: c.id,
       customerName: c.display_name,
       date: inv.issue_date,
@@ -239,6 +241,7 @@ export function customerToUi(c: CustomerOut, invoices: (InvoiceOut | Invoice)[] 
     companyName: c.company_name || undefined,
     email: c.email || '',
     phone: c.phone || '',
+    currency: c.currency || 'INR',
     outstandingInvoices: openInvoices,
   };
 }

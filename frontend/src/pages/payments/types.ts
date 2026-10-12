@@ -68,6 +68,8 @@ export interface Payment {
   customerName: string;
   customerEmail?: string;
   amount: number;
+  /** ISO currency the payment was recorded in (the customer's or the invoice's). */
+  currency: string;
   paymentDate: string;
   paymentMethod: PaymentMethod;
   status: PaymentStatus;
@@ -93,6 +95,7 @@ export interface OutstandingInvoice {
   customerName: string;
   date: string;
   dueDate: string;
+  currency: string;
   totalAmount: number;
   amountPaid: number;
   balanceDue: number;
@@ -105,6 +108,8 @@ export interface PaymentCustomer {
   companyName?: string;
   email: string;
   phone: string;
+  /** The customer's billing currency: new payments are recorded in it. */
+  currency: string;
   /** Populated by loadCustomerInvoices(); empty until the invoices are fetched. */
   outstandingInvoices: OutstandingInvoice[];
 }

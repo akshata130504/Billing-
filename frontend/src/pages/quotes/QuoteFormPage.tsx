@@ -25,7 +25,7 @@ import { catalogCpqService } from '../../services/catalogCpqService';
 import { planPricingService } from '../../services/planPricingService';
 import type { OfferingOut } from '../../types/catalog_cpq';
 import type { QuoteItemIn, SupplyPreview } from '../../types/quotes';
-import { todayIso, addDays, calculateValidityDays, formatQuoteTerms, updateTermsValidity } from '../../utils/format';
+import { todayIso, addDays, calculateValidityDays, formatQuoteTerms, updateTermsValidity, formatMoney, currencySymbol } from '../../utils/format';
 
 const VALIDITY_PRESETS = [7, 15, 30, 60, 90] as const;
 
@@ -724,9 +724,9 @@ export function QuoteFormPage() {
                   <th className="px-4 py-2.5 w-72">Offering / Product</th>
                   <th className="px-4 py-2.5">Description</th>
                   <th className="px-3 py-2.5 w-24">Qty</th>
-                  <th className="px-3 py-2.5 w-28">Rate (₹)</th>
+                  <th className="px-3 py-2.5 w-28">Rate ({currencySymbol(currency)})</th>
                   <th className="px-3 py-2.5 w-20">GST %</th>
-                  <th className="px-4 py-2.5 w-28 text-right">Amount (₹)</th>
+                  <th className="px-4 py-2.5 w-28 text-right">Amount ({currencySymbol(currency)})</th>
                   <th className="px-3 py-2.5 w-16 text-center"></th>
                 </tr>
               </thead>
@@ -821,7 +821,7 @@ export function QuoteFormPage() {
                     </td>
 
                     <td className="px-4 py-2.5 font-semibold text-slate-900 text-right font-mono">
-                      ₹{Math.round(Number(item.quantity || 1) * Number(item.unit_price || 0)).toLocaleString('en-IN')}
+                      {formatMoney(Number(item.quantity || 1) * Number(item.unit_price || 0), currency)}
                     </td>
 
                     <td className="px-3 py-2.5 text-center">
@@ -885,7 +885,7 @@ export function QuoteFormPage() {
             <div className="space-y-2 text-xs">
               <div className="flex justify-between text-slate-600">
                 <span>Subtotal (Pre-tax)</span>
-                <span className="font-mono font-medium">₹{Math.round(totals.subtotal).toLocaleString('en-IN')}</span>
+                <span className="font-mono font-medium">{formatMoney(totals.subtotal, currency)}</span>
               </div>
 
               <div className="flex items-center justify-between text-slate-600">
@@ -902,7 +902,7 @@ export function QuoteFormPage() {
                   <span>%</span>
                 </div>
                 <span className="font-mono font-medium text-amber-600">
-                  -₹{Math.round(totals.discountAmount).toLocaleString('en-IN')}
+                  -{formatMoney(totals.discountAmount, currency)}
                 </span>
               </div>
 
@@ -910,24 +910,24 @@ export function QuoteFormPage() {
                 <>
                   <div className="flex justify-between text-slate-600 text-[11px] pt-1">
                     <span className="text-slate-500">CGST</span>
-                    <span className="font-mono">₹{Math.round(totals.cgst).toLocaleString('en-IN')}</span>
+                    <span className="font-mono">{formatMoney(totals.cgst, currency)}</span>
                   </div>
                   <div className="flex justify-between text-slate-600 text-[11px]">
                     <span className="text-slate-500">SGST</span>
-                    <span className="font-mono">₹{Math.round(totals.sgst).toLocaleString('en-IN')}</span>
+                    <span className="font-mono">{formatMoney(totals.sgst, currency)}</span>
                   </div>
                 </>
               )}
               {supply?.supply_type === 'inter_state' && supply.charges_gst && (
                 <div className="flex justify-between text-slate-600 text-[11px] pt-1">
                   <span className="text-slate-500">IGST</span>
-                  <span className="font-mono">₹{Math.round(totals.igst).toLocaleString('en-IN')}</span>
+                  <span className="font-mono">{formatMoney(totals.igst, currency)}</span>
                 </div>
               )}
               {(supply === null || !supply.charges_gst) && (
                 <div className="flex justify-between text-slate-600 text-[11px] pt-1">
                   <span className="text-slate-500">GST</span>
-                  <span className="font-mono">₹{Math.round(totals.taxTotal).toLocaleString('en-IN')}</span>
+                  <span className="font-mono">{formatMoney(totals.taxTotal, currency)}</span>
                 </div>
               )}
               {supply !== null && !supply.charges_gst && (
@@ -951,7 +951,7 @@ export function QuoteFormPage() {
               <div className="flex justify-between items-center text-sm font-bold text-slate-900 pt-1">
                 <span>Total Amount ({currency})</span>
                 <span className="text-base font-mono text-emerald-600">
-                  ₹{Math.round(totals.total).toLocaleString('en-IN')}
+                  {formatMoney(totals.total, currency)}
                 </span>
               </div>
             </div>

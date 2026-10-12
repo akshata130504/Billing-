@@ -8,7 +8,7 @@ import {
   EXPENSE_PAYMENT_METHODS,
 } from '../types';
 import { triggerBlobDownload } from '../../../services/download';
-import { todayIso } from '../../../utils/format';
+import { todayIso, formatMoney } from '../../../utils/format';
 
 interface ImportExpenseModalProps {
   isOpen: boolean;
@@ -331,7 +331,7 @@ export function ImportExpenseModal({ isOpen, onClose, onImport }: ImportExpenseM
                         <td className="px-3 py-1.5 text-slate-500">{row.date}</td>
                         <td className="px-3 py-1.5 truncate max-w-[120px]">{row.customer}</td>
                         <td className="px-3 py-1.5 text-right font-semibold text-slate-900">
-                          ₹{row.amount.toLocaleString()}
+                          {formatMoney(row.amount, 'INR')}
                         </td>
                       </tr>
                     ))}

@@ -252,7 +252,7 @@ export function QuotesListPage() {
     ),
     amount: (quote) => (
       <td className="px-4 py-3 font-semibold text-slate-900">
-        ₹{Number(quote.total).toLocaleString('en-IN')}
+        {formatMoney(Number(quote.total), quote.currency)}
         {Number(quote.discount_pct) > 0 && (
           <span className="text-[10px] text-amber-600 block">({quote.discount_pct}% off)</span>
         )}

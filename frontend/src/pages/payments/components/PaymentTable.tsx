@@ -253,7 +253,7 @@ export function PaymentTable({
                     if (col.key === 'amount') {
                       return (
                         <td key="amount" className="py-2.5 px-3 text-right whitespace-nowrap font-bold text-slate-900 font-mono">
-                          {formatMoney(payment.amount)}
+                          {formatMoney(payment.amount, payment.currency)}
                         </td>
                       );
                     }

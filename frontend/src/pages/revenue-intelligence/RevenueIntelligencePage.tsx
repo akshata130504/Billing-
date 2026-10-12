@@ -272,7 +272,7 @@ function buildInsights(input: {
         id: 'mrr-none',
         tone: 'neutral',
         title: 'No subscriptions yet',
-        detail: 'MRR is ₹0 because no subscriptions exist. Recurring revenue will appear here once the first subscription is activated.',
+        detail: 'MRR is zero because no subscriptions exist. Recurring revenue will appear here once the first subscription is activated.',
       });
     } else {
       const parts: string[] = [];
@@ -968,7 +968,7 @@ export function RevenueIntelligencePage() {
                     </div>
                     <SimpleLineChart data={series} height={220} formatPeriod={formatReportPeriod} />
                     {total === 0 && (
-                      <p className="text-[11px] text-slate-400">Every period in this range is ₹0 — no revenue has been recognised yet.</p>
+                      <p className="text-[11px] text-slate-400">Every period in this range is zero — no revenue has been recognised yet.</p>
                     )}
                   </div>
                 );

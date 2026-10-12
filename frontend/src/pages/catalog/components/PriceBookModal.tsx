@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { X, Plus, Trash2, BookOpen, AlertCircle } from 'lucide-react';
 import { Button } from '../../../components/common/Button';
 import type { PriceBookIn, PriceBookOut, OfferingOut } from '../../../types/catalog_cpq';
-import { formatMoney } from '../../../utils/format';
+import { formatMoney, currencySymbol } from '../../../utils/format';
 
 interface PriceBookModalProps {
   isOpen: boolean;
@@ -220,7 +220,7 @@ export const PriceBookModal: React.FC<PriceBookModalProps> = ({
                     </select>
 
                     <div className="flex items-center gap-1">
-                      <span className="text-xs text-slate-400">Fixed ₹</span>
+                      <span className="text-xs text-slate-400">Fixed {currencySymbol(currency)}</span>
                       <input
                         type="number"
                         step="0.01"
