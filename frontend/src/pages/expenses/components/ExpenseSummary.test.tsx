@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { ExpensesProvider } from '../ExpensesContext';
 import { ExpenseSummary } from './ExpenseSummary';
 import { expenseService } from '../../../services/expenseService';
@@ -64,5 +64,33 @@ describe('<ExpenseSummary />', () => {
     expect(kpiValue('Incurred This Month')).toBe('₹3,541.20');
     // Totals keep paise (BUG-29): 3 x 1180.40 + 500 + 700.
     expect(kpiValue('Total Expenses')).toBe('₹4,741.20');
+  });
+});
+
+describe('<ExpenseSummary /> with several currencies (BUG-11)', () => {
+  beforeEach(() => {
+    vi.mocked(expenseService.listRecurring).mockResolvedValue([]);
+  });
+
+  it('shows one figure per currency and never adds currencies together', async () => {
+    vi.mocked(expenseService.list).mockResolvedValue([
+      expense({ id: 'a', amount: 2360.8 }),
+      expense({ id: 'b', amount: 25.5, currency: 'USD', billable: true }),
+      expense({ id: 'c', amount: 1180.4, currency: 'AED' }),
+    ]);
+    render(
+      <ExpensesProvider>
+        <ExpenseSummary />
+      </ExpensesProvider>
+    );
+    await screen.findByText('Total Expenses');
+    await waitFor(() => expect(kpiValue('Total Expenses')).toContain('$25.50'));
+    const total = kpiValue('Total Expenses') ?? '';
+    expect(total).toContain('₹2,360.80');
+    expect(total).toMatch(/AED\s?1,180\.40/);
+    // The pre-fix page showed ₹3,566.70: the three amounts summed as rupees.
+    expect(total).not.toContain('3,566.70');
+    expect(kpiValue('Billable Expenses')).toBe('$25.50');
+    expect(kpiValue('Incurred This Month')).toContain('₹2,360.80');
   });
 });

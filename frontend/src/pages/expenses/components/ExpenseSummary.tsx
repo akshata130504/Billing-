@@ -1,7 +1,13 @@
 import { useExpenses } from '../ExpensesContext';
 import { formatINR } from '../format';
+import { formatPerCurrency } from '../../../services/dashboardSummaryService';
+import type { CurrencyAmounts } from '../ExpensesContext';
 import { Receipt, CheckCircle, Wallet, Clock } from 'lucide-react';
 import { usePageSpec } from '../../../appUi/usePageSpec';
+
+/** "₹2,360.80 · $25.50": one figure per currency, never summed across currencies. */
+const perCurrency = (rows: CurrencyAmounts) =>
+  formatPerCurrency(rows, (r) => String(r.amount), (amount, currency) => formatINR(Number(amount), currency), 'INR');
 
 export function ExpenseSummary() {
   const ui = usePageSpec('expenses');
@@ -21,7 +27,7 @@ export function ExpenseSummary() {
                   {item.label}
                 </span>
                 <span className="text-base font-bold text-slate-900 tracking-tight">
-                  {formatINR(summary.total)}
+                  {perCurrency(summary.total)}
                 </span>
               </div>
             </div>
@@ -36,7 +42,7 @@ export function ExpenseSummary() {
                   {item.label}
                 </span>
                 <span className="text-base font-bold text-emerald-900 tracking-tight">
-                  {formatINR(summary.billable)}
+                  {perCurrency(summary.billable)}
                 </span>
               </div>
             </div>
@@ -51,7 +57,7 @@ export function ExpenseSummary() {
                   {item.label}
                 </span>
                 <span className="text-base font-bold text-slate-800 tracking-tight">
-                  {formatINR(summary.nonBillable)}
+                  {perCurrency(summary.nonBillable)}
                 </span>
               </div>
             </div>
@@ -66,7 +72,7 @@ export function ExpenseSummary() {
                   {item.label}
                 </span>
                 <span className="text-base font-bold text-amber-900 tracking-tight">
-                  {formatINR(summary.thisMonth)}
+                  {perCurrency(summary.thisMonth)}
                 </span>
               </div>
             </div>

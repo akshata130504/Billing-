@@ -25,6 +25,7 @@ import { OfferingModal } from './components/OfferingModal';
 import { PriceBookModal } from './components/PriceBookModal';
 import { usePageSpec } from '../../appUi/usePageSpec';
 import { useCreateDeepLink } from '../../hooks/useCreateDeepLink';
+import { formatMoney } from '../../utils/format';
 
 const PAGE_SIZE = 25;
 
@@ -568,7 +569,7 @@ export function CatalogPage() {
                       if (col.key === 'pricing') {
                         return (
                           <td key="pricing" className="px-4 py-3 font-semibold text-slate-900">
-                            ₹{item.base_price}
+                            {formatMoney(item.base_price, item.currency || 'INR')}
                             <span className="text-[10px] text-slate-400 font-normal ml-1">/ {item.unit}</span>
                           </td>
                         );

@@ -153,3 +153,31 @@ describe('<CatalogPage /> quick-action deep link (BUG-51)', () => {
     expect(screen.queryByText('offering-modal-open')).toBeNull();
   });
 });
+
+describe('<CatalogPage /> prices in the offering currency (BUG-10)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(catalogCpqService.listOfferings).mockResolvedValue({
+      items: [
+        { ...offering('inr', 'Rupee Plan', true), currency: 'INR', base_price: '1234.50' },
+        { ...offering('usd', 'Dollar Service', true), currency: 'USD', base_price: '100.00' },
+        { ...offering('aed', 'Dirham Plan', true), currency: 'AED', base_price: '367.25' },
+      ],
+      total: 3,
+    } as any);
+    vi.mocked(catalogCpqService.listPriceBooks).mockResolvedValue({ items: [], total: 0 } as any);
+    vi.mocked(dashboardSummaryService.catalog).mockResolvedValue({ offerings: { total: 3, active: 3, by_type: {} } } as any);
+  });
+
+  it('shows each price with its own currency, never a hard-coded rupee', async () => {
+    renderCatalog();
+    const row = async (name: string) => (await screen.findByText(name)).closest('tr')!.textContent ?? '';
+    expect(await row('Rupee Plan')).toContain('₹1,234.50');
+    const usd = await row('Dollar Service');
+    expect(usd).toContain('$100.00');
+    expect(usd).not.toContain('₹');
+    const aed = await row('Dirham Plan');
+    expect(aed).toMatch(/AED\s?367\.25/);
+    expect(aed).not.toContain('₹');
+  });
+});
