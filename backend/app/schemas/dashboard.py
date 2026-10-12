@@ -10,7 +10,17 @@ from backend.app.schemas.payments import PaymentOut
 DashboardRange = Literal["today", "7_days", "30_days", "3_months", "12_months"]
 
 
+class CurrencyMetrics(BaseModel):
+    currency: str
+    total_revenue: str
+    outstanding_amount: str
+    outstanding_count: int
+    at_risk_amount: str
+
+
 class DashboardMetrics(BaseModel):
+    # Money fields are in DashboardSummary.currency (the org's base currency) only;
+    # amounts are never summed across currencies - see by_currency for the others.
     total_revenue: str
     revenue_change_pct: Optional[str] = None
     outstanding_amount: str
@@ -20,13 +30,22 @@ class DashboardMetrics(BaseModel):
     new_customers: int
     at_risk_amount: str
     at_risk_count: int
+    by_currency: List[CurrencyMetrics] = []
+
+
+class TrendCurrencyPoint(BaseModel):
+    currency: str
+    revenue: str
+    invoiced: str
 
 
 class TrendPoint(BaseModel):
     label: str
     period_start: date
+    # Base currency only; by_currency has the month's figures for every currency.
     revenue: str
     invoiced: str
+    by_currency: List[TrendCurrencyPoint] = []
 
 
 class RevenueBlock(BaseModel):
@@ -40,9 +59,17 @@ class RevenueBlock(BaseModel):
     trend: List[TrendPoint]
 
 
-class PipelineBucket(BaseModel):
+class CurrencyCountAmount(BaseModel):
+    currency: str
     count: int
     amount: str
+
+
+class PipelineBucket(BaseModel):
+    # count: every currency; amount: base currency only; by_currency: each currency.
+    count: int
+    amount: str
+    by_currency: List[CurrencyCountAmount] = []
 
 
 class Pipeline(BaseModel):
@@ -65,11 +92,18 @@ class CustomerHealth(BaseModel):
     churn_rate: Optional[str] = None
 
 
+class CurrencyRecovery(BaseModel):
+    currency: str
+    failed_amount: str
+    recovered_amount: str
+
+
 class Recovery(BaseModel):
     failed_payments: int
     failed_amount: str
     recovered_amount: str
     reminders_sent: int
+    by_currency: List[CurrencyRecovery] = []
 
 
 ActivityCategory = Literal["billing", "customers", "payments", "system"]

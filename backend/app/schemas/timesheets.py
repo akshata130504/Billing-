@@ -15,6 +15,9 @@ _MAX_FUTURE_DAYS = 1
 # The furthest ahead of UTC any timezone runs (UTC+14): no organization's local date can
 # be later than the UTC date at now+14h.
 _MAX_TZ_AHEAD = timedelta(hours=14)
+# billable_amount = rate x hours lands in a NUMERIC(14, 2) column, so the hourly rate is
+# capped at 10 digits before the decimal point: a full 24-hour day still fits.
+_MAX_BILLING_RATE = Decimal("9999999999.99")
 
 
 def latest_local_date_anywhere() -> date:
@@ -43,7 +46,9 @@ class TimeEntryBase(BaseModel):
     duration_hours: Decimal = Field(..., gt=Decimal("0.00"), le=Decimal("24.00"))
     description: str = Field(..., min_length=1)
     billable: bool = True
-    billing_rate: Decimal = Field(default=Decimal("0.00"), ge=Decimal("0.00"))
+    billing_rate: Decimal = Field(
+        default=Decimal("0.00"), ge=Decimal("0.00"), le=_MAX_BILLING_RATE, max_digits=12, decimal_places=2
+    )
 
     @field_validator("date")
     @classmethod
@@ -80,7 +85,9 @@ class TimeEntryUpdate(BaseModel):
     duration_hours: Optional[Decimal] = Field(default=None, gt=Decimal("0.00"), le=Decimal("24.00"))
     description: Optional[str] = Field(default=None, min_length=1)
     billable: Optional[bool] = None
-    billing_rate: Optional[Decimal] = Field(default=None, ge=Decimal("0.00"))
+    billing_rate: Optional[Decimal] = Field(
+        default=None, ge=Decimal("0.00"), le=_MAX_BILLING_RATE, max_digits=12, decimal_places=2
+    )
 
     @field_validator("date")
     @classmethod

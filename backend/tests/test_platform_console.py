@@ -253,6 +253,24 @@ def test_detail_is_metadata_only_and_audited(admin, db, tenant):
     assert rows and rows[-1].platform_staff_id == admin.id and rows[-1].organization_name_snapshot == tenant.organization.name
 
 
+def test_detail_shows_automation_held_for_a_trial_org(admin, db, tenant):
+    """BUG-17: a trial org's billing automation is held (org_lifecycle refuses it), so the
+    console must not say "Running"."""
+    org = _org(db, tenant.organization.id)
+    org.module_access = org_lifecycle.TRIAL_ACCESS
+    db.commit()
+    assert org_lifecycle.automation_allowed(db, org.id) is False
+    life = admin.get(f"/organizations/{org.id}").json()["lifecycle"]
+    assert life["automation_running"] is False
+    assert life["automation_state"] == "held_trial"
+    assert life["automation_label"] == "Held - trial (no approved subscription)"
+
+    org.module_access = "entitled"
+    db.commit()
+    life = admin.get(f"/organizations/{org.id}").json()["lifecycle"]
+    assert (life["automation_running"], life["automation_state"], life["automation_label"]) == (True, "running", "Running")
+
+
 def test_detail_unknown_org_404(admin):
     assert admin.get(f"/organizations/{uuid.uuid4()}").status_code == 404
 
@@ -635,6 +653,26 @@ def test_health_exposes_no_secrets_or_connection_details(admin):
     for secret in (settings.SECRET_KEY, settings.PLATFORM_JWT_SECRET, settings.DATABASE_URL or "unused-url"):
         assert secret not in resp.text
     assert "url" not in _keys(body) and "dialect" not in _keys(body)
+
+
+@pytest.mark.parametrize(
+    "beat, running",
+    [
+        ({"seconds_since_last_run": 60, "last_finished_at": "2026-10-10T00:00:00+00:00"}, True),
+        ({"seconds_since_last_run": 7 * 86400, "last_finished_at": "2026-10-01T00:00:00+00:00"}, False),
+        (None, False),
+    ],
+)
+def test_health_scheduler_reports_the_real_scheduler_not_the_api_flag(admin, monkeypatch, beat, running):
+    """BUG-33: the API process runs with SCHEDULER_ENABLED=false while a separate scheduler process
+    runs the jobs; health derives "running" from the scheduler's own heartbeat."""
+    from backend.app.services import platform_overview_service
+
+    monkeypatch.setattr(settings, "SCHEDULER_ENABLED", False)
+    monkeypatch.setattr(platform_overview_service, "get_scheduler_heartbeat", lambda db: beat)
+    scheduler = admin.get("/health").json()["scheduler"]
+    assert scheduler["running"] is running
+    assert scheduler["enabled"] is running
 
 
 @pytest.mark.skipif(engine.dialect.name != "postgresql", reason="row locks are PostgreSQL behaviour")

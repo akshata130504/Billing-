@@ -73,7 +73,17 @@ def test_portal_invitation_permissions(client: TestClient, db: Session):
     assert data["customer_id"] == customer.id
     assert data["email"] == "client@example.com"
     assert data["status"] == "pending"
-    assert "token=" in data["invite_url"]
+    # Email is not configured in tests: finance may invite but never receives the customer's
+    # activation link; only admin+ get it to share by hand (BUG-06).
+    assert data["email_delivered"] is False
+    assert data["invite_url"] is None
+    res = client.post(
+        f"/api/v1/customers/{customer.id}/portal-invite",
+        headers=tenant.headers_for_role(MemberRole.ADMIN),
+        json={},
+    )
+    assert res.status_code == 200
+    assert "token=" in res.json()["invite_url"]
 
 
 def test_customer_portal_access_lifecycle_and_states(client: TestClient, db: Session):
@@ -91,7 +101,7 @@ def test_customer_portal_access_lifecycle_and_states(client: TestClient, db: Ses
     # 2. Invite customer -> Invitation Pending
     res = client.post(
         f"/api/v1/customers/{customer.id}/portal-invite",
-        headers=finance_headers,
+        headers=tenant.headers_for_role(MemberRole.ADMIN),  # the link is only returned to admin+
         json={},
     )
     assert res.status_code == 200
@@ -153,7 +163,7 @@ def test_token_validation_and_security(client: TestClient, db: Session):
     # 1. Create invitation
     res = client.post(
         f"/api/v1/customers/{customer.id}/portal-invite",
-        headers=finance_headers,
+        headers=tenant.headers_for_role(MemberRole.ADMIN),  # the link is only returned to admin+
         json={},
     )
     raw_token = res.json()["invite_url"].split("token=")[1]
@@ -206,7 +216,7 @@ def test_expired_and_revoked_token_rejection(client: TestClient, db: Session):
     # 1. Test Revoked Token
     res = client.post(
         f"/api/v1/customers/{customer.id}/portal-invite",
-        headers=finance_headers,
+        headers=tenant.headers_for_role(MemberRole.ADMIN),  # the link is only returned to admin+
         json={},
     )
     raw_token1 = res.json()["invite_url"].split("token=")[1]
@@ -220,7 +230,7 @@ def test_expired_and_revoked_token_rejection(client: TestClient, db: Session):
     # 2. Test Expired Token
     res = client.post(
         f"/api/v1/customers/{customer.id}/portal-invite",
-        headers=finance_headers,
+        headers=tenant.headers_for_role(MemberRole.ADMIN),  # the link is only returned to admin+
         json={},
     )
     raw_token2 = res.json()["invite_url"].split("token=")[1]
@@ -252,7 +262,7 @@ def test_portal_login_without_org_uuid(client: TestClient, db: Session):
     # Invite and activate
     res = client.post(
         f"/api/v1/customers/{customer.id}/portal-invite",
-        headers=finance_headers,
+        headers=tenant.headers_for_role(MemberRole.ADMIN),  # the link is only returned to admin+
         json={},
     )
     raw_token = res.json()["invite_url"].split("token=")[1]
@@ -323,7 +333,7 @@ def test_customer_portal_profile_self_service(client: TestClient, db: Session):
     # 1. Invite and activate customer
     res = client.post(
         f"/api/v1/customers/{customer.id}/portal-invite",
-        headers=finance_headers,
+        headers=tenant.headers_for_role(MemberRole.ADMIN),  # the link is only returned to admin+
         json={},
     )
     token = res.json()["invite_url"].split("token=")[1]
@@ -376,7 +386,7 @@ def test_customer_portal_payment_methods_self_service(client: TestClient, db: Se
     # 1. Invite and activate
     res = client.post(
         f"/api/v1/customers/{customer.id}/portal-invite",
-        headers=finance_headers,
+        headers=tenant.headers_for_role(MemberRole.ADMIN),  # the link is only returned to admin+
         json={},
     )
     token = res.json()["invite_url"].split("token=")[1]
@@ -436,7 +446,7 @@ def test_customer_portal_payment_methods_self_service(client: TestClient, db: Se
 def _activated_portal_headers(client: TestClient, tenant: Tenant, customer) -> dict:
     res = client.post(
         f"/api/v1/customers/{customer.id}/portal-invite",
-        headers=tenant.headers_for_role(MemberRole.FINANCE),
+        headers=tenant.headers_for_role(MemberRole.ADMIN),  # the link is only returned to admin+
         json={},
     )
     token = res.json()["invite_url"].split("token=")[1]

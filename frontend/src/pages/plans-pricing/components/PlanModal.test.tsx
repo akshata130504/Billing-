@@ -130,3 +130,24 @@ describe('<PlanModal /> Currency Display and Dynamic Formatting', () => {
     );
   });
 });
+
+describe('<PlanModal /> labels (BUG-22)', () => {
+  it('associates every field, including tier and preview number inputs, with a label', () => {
+    const tieredPlan = {
+      id: 'plan-t', name: 'Tiered', code: 'TIER', sku: 'TIER', description: '', category: 'Subscriptions', unit: 'seat',
+      currency: 'INR', pricing_model: 'tiered', base_price: 100, tax_rate_pct: 18, billing_frequency: 'monthly',
+      status: 'active', is_active: true, pricing_tiers: [{ min_qty: 1, max_qty: 10, unit_price: 90 }],
+      created_at: '', updated_at: '',
+    } as unknown as PlanPricingItem;
+    render(<PlanModal isOpen={true} onClose={vi.fn()} onSave={vi.fn()} initialData={tieredPlan} />);
+    for (const label of [/^Plan Name/, /^Plan Code/, /^Description/, /^Category/, /^Status/, /^Billing Frequency/, /^Unit of Measure/, /^Currency/, /Base Rate|Flat Rate/, /^Applicable GST/]) {
+      expect(screen.getByLabelText(label)).toBeInTheDocument();
+    }
+    expect(screen.getByLabelText('Tier 1 minimum quantity')).toHaveValue(1);
+    expect(screen.getByLabelText('Tier 1 maximum quantity')).toHaveValue(10);
+    expect(screen.getByLabelText('Tier 1 rate per unit')).toHaveValue(90);
+    expect(screen.getByLabelText('Simulate quantity')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove tier 1' })).toBeInTheDocument();
+  });
+});
+

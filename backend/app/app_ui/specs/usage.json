@@ -29,7 +29,7 @@
       "label": "Recorded events panel",
       "fields": [
         { "name": "title", "label": "Heading", "kind": "heading", "default": "Recorded usage events" },
-        { "name": "description", "label": "Description", "kind": "body", "default": "Confirmations for events posted from this page. The API does not list historical events." },
+        { "name": "description", "label": "Description", "kind": "body", "default": "Usage events recorded for this organisation, newest first." },
         { "name": "empty_title", "label": "Empty: title", "kind": "heading", "default": "No usage recorded yet" },
         { "name": "empty", "label": "Empty: description", "kind": "body", "default": "Use Record usage for a single event or Batch import to load a CSV/JSON file. Each accepted event will be listed here." }
       ]
@@ -65,7 +65,7 @@
         { "key": "code", "label": "Code" },
         { "key": "unit", "label": "Unit" },
         { "key": "aggregation", "label": "Aggregation" },
-        { "key": "session_usage", "label": "Session Usage" },
+        { "key": "session_usage", "label": "Recorded Usage" },
         { "key": "status", "label": "Status" },
         { "key": "created", "label": "Created" },
         { "key": "actions", "label": "Actions" }

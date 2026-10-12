@@ -186,12 +186,24 @@ class CustomerUpdate(_CustomerFields):
         return validate_sensible_name(v, "Customer name")
 
 
-class CustomerStats(BaseModel):
+class CustomerCurrencyStats(BaseModel):
+    currency: str
     open_invoice_count: int
     outstanding_amount: str
     total_billed: str
     total_paid: str
+
+
+class CustomerStats(BaseModel):
+    open_invoice_count: int
+    # Money fields are in `currency` (the customer's billing currency) only; invoices in
+    # other currencies are listed in by_currency, never summed in.
+    currency: str = "INR"
+    outstanding_amount: str
+    total_billed: str
+    total_paid: str
     active_subscriptions: int
+    by_currency: List[CustomerCurrencyStats] = []
 
 
 class CustomerOut(BaseModel):
@@ -220,6 +232,8 @@ class CustomerOut(BaseModel):
     stats: Optional[CustomerStats] = None
     created_at: datetime
     updated_at: datetime
+    # Non-blocking notices about the saved customer (e.g. its email is used by another customer).
+    warnings: List[str] = []
 
 
 # --- minimal rows for /customers/{id}/invoices | payments | subscriptions ---------------

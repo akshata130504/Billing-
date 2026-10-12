@@ -9,8 +9,10 @@ import { isValidPhoneNumber, parsePhoneNumber, type Country } from 'react-phone-
 
 export type ValidationResult = string | null;
 
-const NAME_CHARS_RE = /^[A-Za-z0-9\s.,'&\-()/]{1,200}$/;
-const HAS_LETTER_RE = /[A-Za-zÀ-ɏ]/;
+// Any script's letters/marks/digits plus common business punctuation; no HTML/script
+// characters or '=', and no leading spreadsheet-formula trigger (= + @).
+const NAME_CHARS_RE = /^(?![=+@])[\p{L}\p{M}\p{N}\s.,'&\-()/_#+@:]{1,200}$/u;
+const HAS_LETTER_RE = /\p{L}/u;
 const PHONE_RE = /^\+?[0-9\s\-().]{7,20}$/;
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const URL_RE = /^https?:\/\/([a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(:\d+)?([/?#].*)?$/;

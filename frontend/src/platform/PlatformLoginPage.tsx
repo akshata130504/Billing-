@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
 import { PlatformApiError, platformApi } from './platformApi';
@@ -8,8 +8,17 @@ import { PlatformApiError, platformApi } from './platformApi';
  * Rooman platform staff sign-in: email + password.
  * Separate from the tenant /login page; not linked from the tenant app.
  */
+/** A console path to return to after sign-in; anything else (other sites, //host) goes home. */
+function safeReturnPath(next: string | null): string {
+  if (!next || !next.startsWith('/') || next.startsWith('//') || next.startsWith('/\\') || next.startsWith('/login')) return '/';
+  return next;
+}
+
 export function PlatformLoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const expired = searchParams.get('expired') === '1';
+  const returnTo = safeReturnPath(searchParams.get('next'));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -21,7 +30,7 @@ export function PlatformLoginPage() {
     setBusy(true);
     try {
       await platformApi.login(email.trim(), password);
-      navigate('/', { replace: true });
+      navigate(returnTo, { replace: true });
     } catch (err) {
       setError(err instanceof PlatformApiError ? err.message : 'Sign-in failed. Please try again.');
       setPassword('');
@@ -36,6 +45,12 @@ export function PlatformLoginPage() {
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Rooman Billing</p>
         <h1 className="mt-1 text-xl font-bold text-slate-900">Platform staff sign-in</h1>
         <p className="mt-1 text-sm text-slate-500">For Rooman platform staff only. Customers sign in at the main login page.</p>
+
+        {expired && !error && (
+          <div role="status" className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Your session has expired. Please sign in again.
+          </div>
+        )}
 
         {error && (
           <div role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">

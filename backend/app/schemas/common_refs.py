@@ -32,6 +32,13 @@ __all__ = [
 ]
 
 
+class StrictRequest(BaseModel):
+    """Base for state-changing request bodies: an unknown (e.g. misspelt) field is a 422 instead of
+    being silently ignored, so `{"effective": ...}` can never apply a change with the defaults."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class CustomerRef(BaseModel):
     id: str
     customer_number: str
@@ -73,6 +80,26 @@ class LineItemIn(BaseModel):
         if value == "":
             return None
         return value
+
+
+class PublicLineItemOut(BaseModel):
+    """A line item as the customer sees it (hosted quote/invoice pages). Deliberately has no
+    `pricing_explanation`: that holds internal workings (catalog base price, price-book adjustment)."""
+
+    id: str
+    description: str
+    quantity: str
+    unit_price: str
+    tax_rate_pct: str
+    amount: str
+    cgst_amount: str = "0.00"
+    sgst_amount: str = "0.00"
+    igst_amount: str = "0.00"
+    cgst_rate_pct: str = "0.00"
+    sgst_rate_pct: str = "0.00"
+    igst_rate_pct: str = "0.00"
+    hsn_sac_code: Optional[str] = None
+    position: int
 
 
 class LineItemOut(BaseModel):

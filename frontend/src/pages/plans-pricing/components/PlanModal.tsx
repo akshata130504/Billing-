@@ -205,10 +205,11 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label htmlFor="plan-name" className="block text-xs font-semibold text-slate-700 mb-1">
                   Plan Name <span className="text-red-500">*</span>
                 </label>
                 <input
+                  id="plan-name"
                   type="text"
                   required
                   value={name}
@@ -219,10 +220,11 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label htmlFor="plan-code-sku" className="block text-xs font-semibold text-slate-700 mb-1">
                   Plan Code / SKU
                 </label>
                 <input
+                  id="plan-code-sku"
                   type="text"
                   value={code}
                   onChange={(e) => setCode(e.target.value.toUpperCase())}
@@ -232,10 +234,11 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
               </div>
 
               <div className="md:col-span-2">
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label htmlFor="plan-description" className="block text-xs font-semibold text-slate-700 mb-1">
                   Description
                 </label>
                 <textarea
+                  id="plan-description"
                   rows={2}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
@@ -245,8 +248,9 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Category</label>
+                <label htmlFor="plan-category" className="block text-xs font-semibold text-slate-700 mb-1">Category</label>
                 <input
+                  id="plan-category"
                   type="text"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
@@ -256,8 +260,9 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Status</label>
+                <label htmlFor="plan-status" className="block text-xs font-semibold text-slate-700 mb-1">Status</label>
                 <select
+                  id="plan-status"
                   value={status}
                   onChange={(e: any) => setStatus(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-hidden focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800"
@@ -279,10 +284,11 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label htmlFor="plan-billing-frequency" className="block text-xs font-semibold text-slate-700 mb-1">
                   Billing Frequency
                 </label>
                 <select
+                  id="plan-billing-frequency"
                   value={billingFrequency}
                   onChange={(e: any) => setBillingFrequency(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-hidden focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800"
@@ -296,8 +302,9 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Unit of Measure</label>
+                <label htmlFor="plan-unit-of-measure" className="block text-xs font-semibold text-slate-700 mb-1">Unit of Measure</label>
                 <input
+                  id="plan-unit-of-measure"
                   type="text"
                   value={unit}
                   onChange={(e) => setUnit(e.target.value)}
@@ -307,8 +314,9 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Currency</label>
+                <label htmlFor="plan-currency" className="block text-xs font-semibold text-slate-700 mb-1">Currency</label>
                 <select
+                  id="plan-currency"
                   value={currency}
                   onChange={(e) => setCurrency(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-hidden focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800"
@@ -351,10 +359,11 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label htmlFor="plan-catalog-base-rate" className="block text-xs font-semibold text-slate-700 mb-1">
                   {pricingModel === 'flat' ? `Fixed Flat Rate (${sym})` : `Catalog Base Rate (${sym})`}
                 </label>
                 <input
+                  id="plan-catalog-base-rate"
                   type="number"
                   min="0"
                   max={MAX_PLAN_PRICE}
@@ -372,10 +381,11 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label htmlFor="plan-tax-rate" className="block text-xs font-semibold text-slate-700 mb-1">
                   Applicable GST / Tax Rate (%)
                 </label>
                 <input
+                  id="plan-tax-rate"
                   type="number"
                   min="0"
                   max="100"
@@ -429,6 +439,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
                               <input
                                 type="number"
                                 min="1"
+                                aria-label={`Package ${idx + 1} quantity`}
                                 value={t.package_qty ?? ''}
                                 onChange={(e) => handleUpdateTier(idx, 'package_qty', e.target.value)}
                                 className="w-24 max-w-full px-2 py-1 rounded border border-slate-200 font-semibold"
@@ -442,6 +453,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
                                 min="0"
                                 max={MAX_PLAN_PRICE}
                                 step="0.01"
+                                aria-label={`Package ${idx + 1} price`}
                                 value={t.package_price ?? ''}
                                 onChange={(e) => handleUpdateTier(idx, 'package_price', e.target.value)}
                                 className="w-28 max-w-full px-2 py-1 rounded border border-slate-200 font-semibold text-slate-900"
@@ -457,6 +469,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
                               <input
                                 type="number"
                                 min="0"
+                                aria-label={`Tier ${idx + 1} minimum quantity`}
                                 value={t.min_qty ?? ''}
                                 onChange={(e) => handleUpdateTier(idx, 'min_qty', e.target.value)}
                                 className="w-20 max-w-full px-2 py-1 rounded border border-slate-200 font-semibold"
@@ -468,6 +481,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
                               <input
                                 type="number"
                                 min="0"
+                                aria-label={`Tier ${idx + 1} maximum quantity`}
                                 value={t.max_qty ?? ''}
                                 onChange={(e) => handleUpdateTier(idx, 'max_qty', e.target.value)}
                                 className="w-20 max-w-full px-2 py-1 rounded border border-slate-200 font-semibold"
@@ -481,6 +495,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
                                 min="0"
                                 max={MAX_PLAN_PRICE}
                                 step="0.01"
+                                aria-label={`Tier ${idx + 1} rate per unit`}
                                 value={t.unit_price ?? ''}
                                 onChange={(e) => handleUpdateTier(idx, 'unit_price', e.target.value)}
                                 className="w-24 max-w-full px-2 py-1 rounded border border-slate-200 font-semibold text-slate-900 text-right"
@@ -492,6 +507,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
                         <button
                           type="button"
                           onClick={() => handleRemoveTier(idx)}
+                          aria-label={`Remove ${pricingModel === 'package' ? 'package' : 'tier'} ${idx + 1}`}
                           className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -520,6 +536,7 @@ export function PlanModal({ isOpen, onClose, onSave, initialData }: PlanModalPro
                 <input
                   type="number"
                   min="1"
+                  aria-label="Simulate quantity"
                   value={previewQty}
                   max={MAX_SIMULATOR_QUANTITY}
                   onChange={(e) => setPreviewQty(clampSimulatorQuantity(e.target.value).value)}

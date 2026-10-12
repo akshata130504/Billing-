@@ -187,7 +187,7 @@ export function ExpenseTable({
                 </div>
 
                 <span className="text-base font-bold text-slate-900 shrink-0">
-                  {formatINR(expense.amount)}
+                  {formatINR(expense.amount, expense.currency)}
                 </span>
               </div>
 
@@ -372,7 +372,7 @@ export function ExpenseTable({
                     if (col.key === 'amount') {
                       return (
                         <td key="amount" className="py-2.5 px-3 text-right whitespace-nowrap font-bold text-slate-900 font-mono">
-                          {formatINR(expense.amount)}
+                          {formatINR(expense.amount, expense.currency)}
                         </td>
                       );
                     }

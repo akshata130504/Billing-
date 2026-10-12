@@ -193,6 +193,13 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
         pendingProcessing: Number(totals.pending_amount),
         totalRefunded: Number(totals.total_refunded),
         unappliedCredit: Number(totals.unallocated_amount),
+        byCurrency: (totals.by_currency ?? []).map((row) => ({
+          currency: row.currency,
+          totalCollected: row.total_collected,
+          pendingProcessing: row.pending_amount,
+          totalRefunded: row.total_refunded,
+          unappliedCredit: row.unallocated_amount,
+        })),
       });
     } catch {
       setSummary(EMPTY_SUMMARY);
@@ -289,6 +296,7 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
           'Payment recorded',
           `${createdUi.id} for ${createdUi.customerName} was saved.`
         );
+        if (createdOut.warnings?.length) showToast('warning', 'Possible duplicate', createdOut.warnings.join(' '));
         // Re-read from the server so totals, allocations and invoice states are authoritative.
         await loadPayments();
         return createdUi;
@@ -337,6 +345,7 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
         const mapped = paymentOutToUi(updated);
         setPayments((prev) => prev.map((p) => (p.backendId === mapped.backendId ? mapped : p)));
         showToast('success', 'Payment updated', 'Reference and notes were saved.');
+        if (updated.warnings?.length) showToast('warning', 'Possible duplicate', updated.warnings.join(' '));
       } catch (err) {
         // The server rejected the change, so the UI must not pretend it stuck.
         const apiErr = toApiError(err);

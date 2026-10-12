@@ -287,6 +287,22 @@ def test_request_validation_roles_and_single_open_request(client, db):
     assert _request(client, owner).status_code == 201
 
 
+def test_subscription_request_events_record_the_tenant_actor(client, db):
+    """BUG-16: tenant-originated platform audit events name the tenant user, not "unknown"."""
+    org = _org(db)
+    owner = Member(db, org, MemberRole.OWNER)
+    with patch(SEND, return_value=True):
+        req_id = _request(client, owner).json()["id"]
+        assert client.post(f"{API}/subscription-requests/{req_id}/withdraw", headers=owner.headers).status_code == 200
+    for action in (platform_audit.SUBSCRIPTION_REQUEST_SUBMITTED, platform_audit.SUBSCRIPTION_REQUEST_WITHDRAWN):
+        row = db.scalars(select(PlatformAuditLog).where(
+            PlatformAuditLog.action == action, PlatformAuditLog.organization_id == org.id)).one()
+        assert row.platform_staff_id is None
+        assert row.staff_email_snapshot == owner.user.email
+        assert row.staff_role_snapshot == "tenant_owner"
+        assert row.details["actor_user_id"] == owner.user.id
+
+
 def test_active_unrestricted_org_cannot_request(client, db, tenant, auth_headers):
     r = client.post(f"{API}/subscription-requests", json={"modules": [], "seats": 5, "billing_cycle": "monthly"},
                     headers=auth_headers)

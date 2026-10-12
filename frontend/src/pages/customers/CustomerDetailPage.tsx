@@ -31,6 +31,7 @@ import type { CustomerPortalAccessStatusOut } from '../../types/portal';
 import type {
   ContactIn,
   CustomerOut,
+  CustomerStats,
   InvoiceOut,
   Paginated,
   PaymentOut,
@@ -53,6 +54,7 @@ import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { cn } from '../../utils/cn';
 import { formatDate, formatDateTime, formatMoney, humanize, statusVariant } from '../../utils/format';
+import { formatPerCurrency } from '../../services/dashboardSummaryService';
 import { validateSensibleName, validateEmail, validatePhone } from '../../utils/validation';
 
 const TABS: { key: CustomerDetailTab; label: string; icon: ReactNode }[] = [
@@ -126,6 +128,20 @@ function usePagedResource<T>(
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
+
+type CustomerCurrencyStat = Pick<CustomerStats, 'outstanding_amount' | 'total_billed' | 'total_paid'> & { currency: string };
+
+/** A customer stat in every currency they were invoiced in ("₹5,509.20 · AED 333.36"), never summed. */
+function statPerCurrency(
+  stats: CustomerStats,
+  pick: (row: CustomerCurrencyStat) => string,
+  currency: string,
+): string {
+  const rows: CustomerCurrencyStat[] = stats.by_currency?.length
+    ? stats.by_currency
+    : [{ ...stats, currency: stats.currency || currency }];
+  return formatPerCurrency(rows, pick, (amount, cur) => formatMoney(amount, cur), currency);
+}
 
 export function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -289,17 +305,17 @@ export function CustomerDetailPage() {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <StatCard
           title="Outstanding"
-          value={stats ? formatMoney(stats.outstanding_amount, customer.currency) : '—'}
+          value={stats ? statPerCurrency(stats, (r) => r.outstanding_amount, customer.currency) : '—'}
           icon={<Wallet className="w-4 h-4" />}
         />
         <StatCard
           title="Total billed"
-          value={stats ? formatMoney(stats.total_billed, customer.currency) : '—'}
+          value={stats ? statPerCurrency(stats, (r) => r.total_billed, customer.currency) : '—'}
           icon={<FileText className="w-4 h-4" />}
         />
         <StatCard
           title="Total paid"
-          value={stats ? formatMoney(stats.total_paid, customer.currency) : '—'}
+          value={stats ? statPerCurrency(stats, (r) => r.total_paid, customer.currency) : '—'}
           icon={<Receipt className="w-4 h-4" />}
         />
         <StatCard
@@ -436,10 +452,20 @@ function OverviewTab({ customer, canWrite }: { customer: CustomerOut; canWrite: 
     setActionLoading(true);
     try {
       const inv = await customerService.inviteToPortal(customer.id, inviteEmail.trim() || undefined);
-      showToast('success', 'Customer portal invitation sent successfully.');
-      if (inv.invite_url) {
-        setLastInviteUrl(inv.invite_url);
+      // The activation link is a customer credential: the API returns it only when the email
+      // could not be delivered, and only to admins, so they can share it by hand.
+      if (inv.email_delivered === false) {
+        showToast(
+          'warning',
+          'Invitation Created (Action Required)',
+          inv.invite_url
+            ? `Email could not be delivered to ${inv.email}. Share the activation link shown below with the customer.`
+            : `Email could not be delivered to ${inv.email}. Ask an admin to resend the invitation and share the link.`
+        );
+      } else {
+        showToast('success', 'Customer portal invitation sent successfully.');
       }
+      setLastInviteUrl(inv.invite_url || null);
       setInviteDialogOpen(false);
       await loadPortalAccess();
     } catch (err: any) {
@@ -691,7 +717,7 @@ function OverviewTab({ customer, canWrite }: { customer: CustomerOut; canWrite: 
                     {lastInviteUrl && (
                       <div className="p-2.5 bg-indigo-50/60 border border-indigo-100 rounded-lg space-y-1.5">
                         <div className="flex items-center justify-between text-[11px] font-semibold text-indigo-900">
-                          <span>Activation Link</span>
+                          <span>Activation link (email not delivered: share it with the customer)</span>
                           <button
                             type="button"
                             onClick={() => copyActivationLink(lastInviteUrl)}
@@ -766,7 +792,7 @@ function OverviewTab({ customer, canWrite }: { customer: CustomerOut; canWrite: 
                     {lastInviteUrl && (
                       <div className="p-2.5 bg-indigo-50/60 border border-indigo-100 rounded-lg space-y-1.5">
                         <div className="flex items-center justify-between text-[11px] font-semibold text-indigo-900">
-                          <span>New Activation Link</span>
+                          <span>New activation link (email not delivered: share it with the customer)</span>
                           <button
                             type="button"
                             onClick={() => copyActivationLink(lastInviteUrl)}

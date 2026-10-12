@@ -100,8 +100,11 @@ class CustomerPortalInvitationOut(BaseModel):
     expires_at: datetime
     created_at: datetime
     invited_by_name: Optional[str] = None
+    # Only on the invite response, only when the email was not delivered, and only for admin+.
     invite_url: Optional[str] = None
     status: str
+    # Set on the invite response: False means staff must share the activation link themselves.
+    email_delivered: Optional[bool] = None
 
 
 class CustomerPortalAccessStatusOut(BaseModel):
@@ -138,7 +141,11 @@ class PortalDashboardOut(BaseModel):
     customer_email: Optional[str] = None
     active_subscriptions_count: int
     open_invoices_count: int
+    # The customer's billing currency. total_outstanding_amount covers invoices in that
+    # currency only; outstanding_by_currency has one balance per currency (never summed).
+    currency: str = "INR"
     total_outstanding_amount: Decimal
+    outstanding_by_currency: List[Dict[str, Any]] = Field(default_factory=list)
     recent_invoices: List[Dict[str, Any]] = Field(default_factory=list)
     subscriptions: List[Dict[str, Any]] = Field(default_factory=list)
     saved_payment_methods: List[Dict[str, Any]] = Field(default_factory=list)

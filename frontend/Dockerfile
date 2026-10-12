@@ -38,6 +38,7 @@ COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 COPY docker/security-headers.conf /etc/nginx/snippets/security-headers.conf
 COPY docker/platform-security-headers.conf /etc/nginx/snippets/platform-security-headers.conf
 COPY docker/platform-preview-security-headers.conf /etc/nginx/snippets/platform-preview-security-headers.conf
+COPY docker/upstream-header-dedup.conf /etc/nginx/snippets/upstream-header-dedup.conf
 
 COPY --from=build /src/dist /usr/share/nginx/html
 

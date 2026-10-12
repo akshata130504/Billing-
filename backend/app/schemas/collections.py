@@ -70,6 +70,7 @@ class CollectionInvoiceOut(BaseModel):
     total: str
     amount_paid: str
     amount_due: str
+    currency: str = "INR"
     days_overdue: int
     aging_bucket: str
     collection_status: CollectionStatus
@@ -99,6 +100,7 @@ class TopOverdueCustomer(BaseModel):
     outstanding_amount: str
     overdue_amount: str
     invoice_count: int
+    currency: str
 
 
 class UpcomingDueInvoice(BaseModel):
@@ -107,6 +109,7 @@ class UpcomingDueInvoice(BaseModel):
     customer: CustomerRef
     due_date: date
     amount_due: str
+    currency: str
 
 
 class CollectionsKPIs(BaseModel):
@@ -115,12 +118,23 @@ class CollectionsKPIs(BaseModel):
     current_due: str
     due_in_7_days: str
     due_in_30_days: str
+    # currency_totals.collection_rate: net cash collected / invoiced over the last 30 days.
     collection_rate: Optional[str] = None
     overdue_invoice_count: int
 
 
+class CurrencyCollectionsKPIs(CollectionsKPIs):
+    currency: str
+
+
 class CollectionsDashboardOut(BaseModel):
+    # `kpis`, `aging_summary`, `pipeline` and `top_overdue_customers` are in `currency`
+    # (default: the organization's base currency); amounts are never summed across
+    # currencies. `kpis_by_currency` has the KPIs for every currency in `currencies`.
+    currency: str
+    currencies: List[str] = []
     kpis: CollectionsKPIs
+    kpis_by_currency: List[CurrencyCollectionsKPIs] = []
     aging_summary: List[AgingBucketOut]
     pipeline: List[CollectionPipelineEntry]
     recent_activities: List[CollectionActivityOut]

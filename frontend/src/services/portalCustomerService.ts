@@ -17,7 +17,11 @@ export interface PortalDashboardData {
   customer_email: string | null;
   active_subscriptions_count: number;
   open_invoices_count: number;
+  /** The customer's billing currency; `total_outstanding_amount` covers only that currency. */
+  currency?: string;
   total_outstanding_amount: number | string;
+  /** One balance per currency (never summed across currencies), billing currency first. */
+  outstanding_by_currency?: Array<{ currency: string; amount_due: string; open_count: number }>;
   recent_invoices: Array<{
     id: string;
     invoice_number: string;
@@ -25,6 +29,7 @@ export interface PortalDashboardData {
     due_date: string;
     total: string;
     amount_due: string;
+    currency?: string;
     status: string;
     public_token: string;
   }>;
@@ -53,6 +58,7 @@ export interface PortalInvoice {
   total: string;
   amount_paid: string;
   amount_due: string;
+  currency: string;
   status: string;
   public_token: string;
 }

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -19,6 +20,8 @@ import { ErrorState } from '../../components/common/ErrorState';
 import { EmptyState } from '../../components/common/EmptyState';
 import { PageHeader } from '../../components/common/PageHeader';
 import { collectionsService } from '../../services/collectionsService';
+import { formatPerCurrency } from '../../services/dashboardSummaryService';
+import { Select } from '../../components/common/Select';
 import { toApiError } from '../../services/apiClient';
 import { queryKeys } from '../../hooks/queries';
 import { formatDate, formatMoney, formatRelative, parseMoney } from '../../utils/format';
@@ -28,9 +31,11 @@ import { usePageSpec } from '../../appUi/usePageSpec';
 
 export function CollectionsDashboardPage() {
   const ui = usePageSpec('collections');
+  // '' = the organization's base currency. Amounts are never summed across currencies.
+  const [currency, setCurrency] = useState('');
   const dashboardQuery = useQuery({
-    queryKey: queryKeys.collections.dashboard(),
-    queryFn: collectionsService.dashboard,
+    queryKey: queryKeys.collections.dashboard(currency),
+    queryFn: () => collectionsService.dashboard(currency || undefined),
   });
 
   if (dashboardQuery.isPending) {
@@ -48,6 +53,18 @@ export function CollectionsDashboardPage() {
 
   const data = dashboardQuery.data;
   const kpis = data.kpis;
+  const cur = data.currency;
+  const kpiRows = data.kpis_by_currency?.length ? data.kpis_by_currency : [{ ...kpis, currency: cur }];
+  // One figure per currency, base first ("₹4,509.20 · AED 333.36").
+  const perCurrency = (pick: (row: (typeof kpiRows)[number]) => string) =>
+    formatPerCurrency(kpiRows, pick, (amount, c) => formatMoney(amount, c), cur);
+  const rated = kpiRows.filter((r) => r.collection_rate !== null);
+  const rateLabel =
+    rated.length === 0
+      ? 'N/A'
+      : rated.length === 1
+        ? `${Number(rated[0].collection_rate).toFixed(1)}%`
+        : rated.map((r) => `${r.currency} ${Number(r.collection_rate).toFixed(1)}%`).join(' · ');
   const maxAgingAmount = Math.max(1, ...data.aging_summary.map((b) => parseMoney(b.amount) || 0));
   const maxPipelineAmount = Math.max(1, ...data.pipeline.map((p) => parseMoney(p.amount) || 0));
 
@@ -61,6 +78,20 @@ export function CollectionsDashboardPage() {
         />
       </div>
 
+      {data.currencies?.length > 1 && (
+        <div className="flex items-center justify-end gap-2">
+          <span className="text-xs text-slate-500">Aging, pipeline and top customers in</span>
+          <div className="w-28">
+            <Select
+              aria-label="Collections currency"
+              value={currency || cur}
+              onChange={(e) => setCurrency(e.target.value)}
+              options={data.currencies.map((c) => ({ value: c, label: c }))}
+            />
+          </div>
+        </div>
+      )}
+
       {/* KPI tiles */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4" {...ui.edit('kpis')}>
         {ui.render('kpis', {
@@ -68,7 +99,7 @@ export function CollectionsDashboardPage() {
             <div key="outstanding" {...edit}>
               <StatCard
                 title={item.label}
-                value={formatMoney(kpis.total_outstanding)}
+                value={perCurrency((r) => r.total_outstanding)}
                 icon={<Wallet className="w-4 h-4" />}
               />
             </div>
@@ -77,7 +108,7 @@ export function CollectionsDashboardPage() {
             <div key="overdue" {...edit}>
               <StatCard
                 title={item.label}
-                value={formatMoney(kpis.overdue_amount)}
+                value={perCurrency((r) => r.overdue_amount)}
                 icon={<Clock3 className="w-4 h-4" />}
               />
             </div>
@@ -86,7 +117,7 @@ export function CollectionsDashboardPage() {
             <div key="current" {...edit}>
               <StatCard
                 title={item.label}
-                value={formatMoney(kpis.current_due)}
+                value={perCurrency((r) => r.current_due)}
                 icon={<ReceiptText className="w-4 h-4" />}
               />
             </div>
@@ -95,7 +126,7 @@ export function CollectionsDashboardPage() {
             <div key="due_7d" {...edit}>
               <StatCard
                 title={item.label}
-                value={formatMoney(kpis.due_in_7_days)}
+                value={perCurrency((r) => r.due_in_7_days)}
                 icon={<CalendarClock className="w-4 h-4" />}
               />
             </div>
@@ -104,7 +135,7 @@ export function CollectionsDashboardPage() {
             <div key="due_30d" {...edit}>
               <StatCard
                 title={item.label}
-                value={formatMoney(kpis.due_in_30_days)}
+                value={perCurrency((r) => r.due_in_30_days)}
                 icon={<CalendarClock className="w-4 h-4" />}
               />
             </div>
@@ -113,8 +144,8 @@ export function CollectionsDashboardPage() {
             <div key="rate" {...edit}>
               <StatCard
                 title={item.label}
-                value={kpis.collection_rate === null ? 'N/A' : `${Number(kpis.collection_rate).toFixed(1)}%`}
-                comparisonText={kpis.collection_rate === null ? 'Nothing invoiced in the last 30 days' : 'Last 30 days'}
+                value={rateLabel}
+                comparisonText={rated.length === 0 ? 'Nothing invoiced in the last 30 days' : 'Cash collected / invoiced, last 30 days'}
                 icon={<TrendingUp className="w-4 h-4" />}
               />
             </div>
@@ -123,7 +154,7 @@ export function CollectionsDashboardPage() {
             <div key="invoice_count" {...edit}>
               <StatCard
                 title={item.label}
-                value={kpis.overdue_invoice_count}
+                value={kpiRows.reduce((n, r) => n + r.overdue_invoice_count, 0)}
                 icon={<ListChecks className="w-4 h-4" />}
               />
             </div>
@@ -152,7 +183,7 @@ export function CollectionsDashboardPage() {
                     <div className="flex items-center justify-between text-xs mb-1">
                       <span className="font-medium text-slate-700">{AGING_BUCKET_LABELS[bucket.bucket]}</span>
                       <span className="text-slate-500">
-                        <span className="font-semibold text-slate-900">{formatMoney(bucket.amount)}</span>{' '}
+                        <span className="font-semibold text-slate-900">{formatMoney(bucket.amount, cur)}</span>{' '}
                         &middot; {bucket.count} invoice{bucket.count === 1 ? '' : 's'}
                       </span>
                     </div>
@@ -188,7 +219,7 @@ export function CollectionsDashboardPage() {
                         {COLLECTION_STATUS_LABELS[entry.status]}
                       </Badge>
                       <span className="text-slate-500">
-                        <span className="font-semibold text-slate-900">{formatMoney(entry.amount)}</span>{' '}
+                        <span className="font-semibold text-slate-900">{formatMoney(entry.amount, cur)}</span>{' '}
                         &middot; {entry.count} invoice{entry.count === 1 ? '' : 's'}
                       </span>
                     </div>
@@ -236,8 +267,8 @@ export function CollectionsDashboardPage() {
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-xs font-bold text-rose-600 tabular-nums">{formatMoney(row.overdue_amount)}</p>
-                      <p className="text-[11px] text-slate-400 tabular-nums">{formatMoney(row.outstanding_amount)} total</p>
+                      <p className="text-xs font-bold text-rose-600 tabular-nums">{formatMoney(row.overdue_amount, row.currency)}</p>
+                      <p className="text-[11px] text-slate-400 tabular-nums">{formatMoney(row.outstanding_amount, row.currency)} total</p>
                     </div>
                   </Link>
                 ))}
@@ -273,7 +304,7 @@ export function CollectionsDashboardPage() {
                       <p className="text-[11px] text-slate-500 truncate">{row.customer.display_name}</p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-xs font-bold text-slate-900 tabular-nums">{formatMoney(row.amount_due)}</p>
+                      <p className="text-xs font-bold text-slate-900 tabular-nums">{formatMoney(row.amount_due, row.currency)}</p>
                       <p className="text-[11px] text-slate-400">Due {formatDate(row.due_date)}</p>
                     </div>
                   </Link>

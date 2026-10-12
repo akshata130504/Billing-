@@ -387,15 +387,19 @@ export function CustomerFormPage() {
       const payload = toPayload(values);
       const contacts = toContacts(values.contacts);
       let saved: CustomerOut;
+      let warnings: string[] = [];
       if (isEdit && id) {
         saved = await customerService.update(id, payload);
+        warnings = saved.warnings ?? [];
         // PATCH /customers/{id} ignores contacts; they have their own endpoint.
         saved = await customerService.setContacts(id, contacts);
         showToast('success', 'Customer updated', `${saved.display_name} has been saved.`);
       } else {
         saved = await customerService.create({ ...payload, contacts });
+        warnings = saved.warnings ?? [];
         showToast('success', 'Customer created', `${saved.display_name} is ready for quotes and invoices.`);
       }
+      if (warnings.length) showToast('warning', 'Possible duplicate', warnings.join(' '));
       navigate(`/customers/${saved.id}`);
     } catch (err: any) {
       const fields: Record<string, string> | undefined = err?.details?.fields;

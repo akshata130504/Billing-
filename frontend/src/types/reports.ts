@@ -14,6 +14,18 @@ export interface ReportRangeParams {
   range: ReportRangeKey;
   start?: string;
   end?: string;
+  /** Reporting currency (ISO-4217); omitted = the organization's base currency. */
+  currency?: string;
+}
+
+/**
+ * Every money figure of a report response is in `currency`; `currencies` lists every
+ * currency the organization has invoices or payments in. There is no FX conversion, so
+ * amounts in different currencies are never added together.
+ */
+export interface CurrencyScopedReport {
+  currency: string;
+  currencies: string[];
 }
 
 export type ReportExportSection =
@@ -28,7 +40,8 @@ export type ReportExportSection =
 
 export type AgingBucket = 'current' | '1_30' | '31_60' | '61_90' | '90_plus';
 
-export interface ReportKPIs {
+export interface CurrencyKPIs {
+  currency: string;
   total_revenue: string;
   net_revenue: string;
   total_invoiced: string;
@@ -37,6 +50,12 @@ export interface ReportKPIs {
   overdue_receivables: string;
   collection_rate: string | null;
   average_invoice_value: string | null;
+  invoice_count: number;
+}
+
+export interface ReportKPIs extends CurrencyKPIs, CurrencyScopedReport {
+  /** The same KPIs for every currency (base first). */
+  by_currency: CurrencyKPIs[];
 }
 
 export interface TimeSeriesPoint {
@@ -53,6 +72,7 @@ export interface InvoicedVsCollectedPoint {
 export interface CustomerAmount {
   customer: CustomerRef;
   amount: string;
+  currency: string;
 }
 
 export interface NamedAmount {
@@ -60,9 +80,10 @@ export interface NamedAmount {
   name: string;
   revenue: string;
   quantity: string;
+  currency: string;
 }
 
-export interface RevenueAnalyticsOut {
+export interface RevenueAnalyticsOut extends CurrencyScopedReport {
   granularity: 'day' | 'month';
   revenue_over_time: TimeSeriesPoint[];
   invoiced_vs_collected: InvoicedVsCollectedPoint[];
@@ -82,7 +103,7 @@ export interface CollectionRatePoint {
   rate: string | null;
 }
 
-export interface ReceivablesAnalyticsOut {
+export interface ReceivablesAnalyticsOut extends CurrencyScopedReport {
   outstanding_by_aging: AgingBucketOut[];
   /**
    * Currently-overdue invoices grouped by the period their due date falls in.
@@ -100,7 +121,7 @@ export interface InvoiceStatusBreakdown {
   amount: string;
 }
 
-export interface InvoiceAnalyticsOut {
+export interface InvoiceAnalyticsOut extends CurrencyScopedReport {
   by_status: Record<string, InvoiceStatusBreakdown>;
   total_count: number;
   average_invoice_amount: string | null;
@@ -109,9 +130,10 @@ export interface InvoiceAnalyticsOut {
 export interface MethodAmount {
   method: string;
   amount: string;
+  currency: string;
 }
 
-export interface PaymentAnalyticsOut {
+export interface PaymentAnalyticsOut extends CurrencyScopedReport {
   total_payments: string;
   payment_count: number;
   method_breakdown: MethodAmount[];
@@ -120,7 +142,7 @@ export interface PaymentAnalyticsOut {
   net_collected: string;
 }
 
-export interface CustomerAnalyticsOut {
+export interface CustomerAnalyticsOut extends CurrencyScopedReport {
   total_customers: number;
   active_customers: number;
   customers_with_outstanding_balance: number;
@@ -131,6 +153,7 @@ export interface CustomerAnalyticsOut {
 export interface PricingModelAmount {
   pricing_model: string;
   amount: string;
+  currency: string;
 }
 
 export interface QuantitySold {
@@ -139,7 +162,7 @@ export interface QuantitySold {
   quantity: string;
 }
 
-export interface ProductAnalyticsOut {
+export interface ProductAnalyticsOut extends CurrencyScopedReport {
   best_selling: NamedAmount[];
   revenue_by_offering: NamedAmount[];
   revenue_by_pricing_model: PricingModelAmount[];

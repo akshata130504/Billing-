@@ -411,6 +411,9 @@ def _primary_snapshot_meta(subscription: Subscription) -> Dict[str, Any]:
     return {}
 
 
+_ENDED_STATUSES = (SubscriptionStatus.CANCELLED, SubscriptionStatus.EXPIRED, SubscriptionStatus.TRIAL_EXPIRED)
+
+
 def serialize_subscription(subscription: Subscription) -> Dict[str, Any]:
     plan = subscription.plan
     qty = int(subscription.quantity or 1)
@@ -474,7 +477,10 @@ def serialize_subscription(subscription: Subscription) -> Dict[str, Any]:
         "paused_at": iso_dt(subscription.paused_at),
         "ended_at": iso_dt(subscription.ended_at),
         "notes": subscription.notes,
-        "mrr": money_str(compute_mrr(plan, qty, unit_price)),
+        # An ended subscription contributes no recurring revenue (dashboards already say 0).
+        "mrr": money_str(Decimal("0") if subscription.status in _ENDED_STATUSES else compute_mrr(plan, qty, unit_price)),
+        # Mirrors the POST /renew guard, so the UI offers a manual renewal only when it is due.
+        "renewal_due": subscription.status == SubscriptionStatus.ACTIVE and is_renewal_due(subscription),
         "created_at": iso_dt(subscription.created_at),
         "updated_at": iso_dt(subscription.updated_at),
     }
@@ -912,6 +918,22 @@ def create_subscription(db: Session, ctx: CurrentContext, data: SubscriptionCrea
         if not plan.is_active:
             raise ValidationAppError("This plan is inactive.", {"fields": {"plan_id": "inactive plan"}})
         terms = legacy_item_terms(plan, qty)
+    # The subscription is invoiced in the plan's currency. Billing a customer in a currency
+    # other than their own billing currency must be an explicit choice, never silent.
+    plan_currency = (terms.plan.currency or "INR").upper()
+    customer_currency = (customer.currency or "INR").upper()
+    currency_override = plan_currency != customer_currency
+    if currency_override and not data.allow_currency_mismatch:
+        raise ValidationAppError(
+            f"This plan is priced in {plan_currency} but the customer is billed in {customer_currency}. "
+            f"Choose a {customer_currency} plan, or confirm billing this customer in {plan_currency}.",
+            {
+                "reason": "CURRENCY_MISMATCH",
+                "fields": {"offering_id" if data.offering_id else "plan_id": "currency mismatch"},
+                "plan_currency": plan_currency,
+                "customer_currency": customer_currency,
+            },
+        )
     subscription = build_subscription(
         db,
         ctx,
@@ -924,6 +946,7 @@ def create_subscription(db: Session, ctx: CurrentContext, data: SubscriptionCrea
         notes=data.notes,
         billing_frequency=data.billing_frequency,
         generate_first_invoice=data.generate_first_invoice,
+        audit_extra={"currency_mismatch_override": f"{customer_currency}->{plan_currency}"} if currency_override else None,
     )
     db.commit()
     return get_subscription(db, ctx.organization_id, subscription.id)
@@ -1332,6 +1355,7 @@ def _end_now(subscription: Subscription, reason: Optional[str] = None) -> None:
     subscription.ended_at = now
     subscription.next_billing_date = None
     subscription.cancel_at_period_end = False
+    subscription.auto_renewal = False  # an ended subscription never renews
     subscription.updated_at = now
 
 

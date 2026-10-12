@@ -251,6 +251,10 @@ def convert_trial_to_live(
     subscription.current_period_end = period_end_for(today, subscription.plan, today.day)
     subscription.next_billing_date = subscription.current_period_end
     subscription.updated_at = utcnow()
+    if subscription.trial_end is not None and subscription.trial_end > today:
+        # Converted early: the trial ended today, not on its originally scheduled date.
+        subscription.trial_end = today
+        tp.trial_end_date = today
 
     tp.status = TrialPeriodStatus.CONVERTED
     tp.converted_at = utcnow()

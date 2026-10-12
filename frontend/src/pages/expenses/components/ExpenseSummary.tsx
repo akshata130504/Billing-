@@ -66,7 +66,7 @@ export function ExpenseSummary() {
                   {item.label}
                 </span>
                 <span className="text-base font-bold text-amber-900 tracking-tight">
-                  {formatINR(summary.pending)}
+                  {formatINR(summary.thisMonth)}
                 </span>
               </div>
             </div>

@@ -199,6 +199,40 @@ def test_expired_otp_rejected(client, db):
     assert "expired" in r.text.lower()
 
 
+def test_expired_otp_keeps_saying_expired_after_retry_and_purge(client, db):
+    """BUG-31: an expired code says so, also on a second try and after the scheduler's purge,
+    instead of "No pending signup found"; a fresh code can still be requested."""
+    from backend.app.services.auth_service import purge_expired_pending_signups
+
+    email = f"{unique('user')}@example.com"
+    with patch("backend.app.services.auth_service.send_email", return_value=True):
+        client.post(
+            f"{API}/auth/signup/request-verification",
+            json={"organization_name": "Expired Org", "full_name": "Dave Expired", "email": email, "password": PASSWORD},
+        )
+    pending = db.scalars(select(PendingSignup).where(PendingSignup.email == email)).first()
+    pending.expires_at = utcnow() - timedelta(minutes=1)
+    pending.last_sent_at = utcnow() - timedelta(minutes=11)
+    db.commit()
+
+    for _ in range(2):
+        r = client.post(f"{API}/auth/signup/verify-otp", json={"email": email, "otp": "123456", "password": PASSWORD})
+        assert r.status_code == 422
+        assert r.json()["error"]["message"] == "This code has expired. Request a new code."
+        assert r.json()["error"]["details"]["fields"]["otp"] == "expired"
+    purge_expired_pending_signups(db)
+    r = client.post(f"{API}/auth/signup/verify-otp", json={"email": email, "otp": "123456", "password": PASSWORD})
+    assert r.json()["error"]["details"]["fields"]["otp"] == "expired"
+
+    with patch("backend.app.services.auth_service.send_email", return_value=True):
+        assert client.post(f"{API}/auth/signup/resend-otp", json={"email": email}).status_code == 200
+
+    # An email nobody requested a code for still gets the unchanged "not found" answer.
+    r = client.post(f"{API}/auth/signup/verify-otp",
+                    json={"email": f"{unique('nobody')}@example.com", "otp": "123456", "password": PASSWORD})
+    assert r.json()["error"]["details"]["fields"]["otp"] == "not_found"
+
+
 def test_otp_cannot_be_reused(client, db):
     email = f"{unique('user')}@example.com"
     captured_otp = None
@@ -462,12 +496,17 @@ def test_purge_expired_pending_signups(db):
     now = utcnow()
     live = PendingSignup(email=f"{unique('live')}@example.com", organization_name="L", full_name="L", hashed_password="x",
                          otp_hash="x", expires_at=now + timedelta(minutes=5), attempts=0, last_sent_at=now, created_at=now)
+    # Expired more than the retention window ago -> purged.
     dead = PendingSignup(email=f"{unique('dead')}@example.com", organization_name="D", full_name="D", hashed_password="x",
-                         otp_hash="x", expires_at=now - timedelta(minutes=5), attempts=0, last_sent_at=now, created_at=now)
-    db.add_all([live, dead])
+                         otp_hash="x", expires_at=now - timedelta(hours=25), attempts=0, last_sent_at=now, created_at=now)
+    # Recently expired -> kept so a late code entry is told "expired" (BUG-31).
+    recent = PendingSignup(email=f"{unique('recent')}@example.com", organization_name="R", full_name="R",
+                           hashed_password="x", otp_hash="x", expires_at=now - timedelta(minutes=5), attempts=0,
+                           last_sent_at=now, created_at=now)
+    db.add_all([live, dead, recent])
     db.commit()
-    live_email, dead_email = live.email, dead.email
+    live_email, dead_email, recent_email = live.email, dead.email, recent.email
     assert purge_expired_pending_signups(db) >= 1
     db.expire_all()
     emails = set(db.scalars(select(PendingSignup.email)).all())
-    assert live_email in emails and dead_email not in emails
+    assert live_email in emails and recent_email in emails and dead_email not in emails

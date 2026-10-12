@@ -532,7 +532,8 @@ def get_public_checkout_view(db: Session, token: str) -> PublicCheckoutView:
     amount = session.amount
     if session.purpose == CheckoutSessionPurpose.INVOICE_PAYMENT and session.invoice is not None and session.status != CheckoutSessionStatus.SUCCESSFUL:
         amount = session.invoice.amount_due
-    merchant_available = org_lifecycle.payment_collection_allowed(db, session.organization_id)
+    merchant_unavailable_reason = org_lifecycle.payment_unavailable_reason(db, session.organization_id)
+    merchant_available = merchant_unavailable_reason is None
     if merchant_available and not is_expired and session.status not in (
         CheckoutSessionStatus.EXPIRED,
         CheckoutSessionStatus.SUCCESSFUL,
@@ -547,7 +548,7 @@ def get_public_checkout_view(db: Session, token: str) -> PublicCheckoutView:
     gateway_message = None
     if not gateway_available and D(amount) > 0 and session.status not in (CheckoutSessionStatus.SUCCESSFUL,) and not is_expired:
         gateway_message = (
-            org_lifecycle.CUSTOMER_UNAVAILABLE_MESSAGE
+            merchant_unavailable_reason
             if not merchant_available
             else "Online payment is currently unavailable for this link. Please contact the merchant to complete your payment."
         )

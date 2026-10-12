@@ -53,6 +53,13 @@ def list_payments(
     return page.to_response(payment_service.serialize_payment)
 
 
+def _payment_out(db: Session, payment) -> dict:
+    """A saved payment plus non-blocking warnings (e.g. a reference already used elsewhere)."""
+    out = PaymentOut.model_validate(payment_service.serialize_payment(payment))
+    out.warnings = payment_service.duplicate_reference_warnings(db, payment)
+    return out.model_dump(mode="json")
+
+
 @router.post("", response_model=PaymentOut, status_code=status.HTTP_201_CREATED, summary="Record a payment")
 def create_payment(
     body: PaymentCreate,
@@ -69,9 +76,7 @@ def create_payment(
         request_path="/payments",
         request_method="POST",
         params={"path": "/payments", "body": body.model_dump(mode="json")},
-        handler=lambda: PaymentOut.model_validate(
-            payment_service.serialize_payment(payment_service.create_payment(db, ctx, body))
-        ).model_dump(mode="json"),
+        handler=lambda: _payment_out(db, payment_service.create_payment(db, ctx, body)),
         status_code=status.HTTP_201_CREATED,
     )
     return JSONResponse(status_code=status_code, content=out)
@@ -131,7 +136,7 @@ def update_payment(
     db: Session = Depends(get_db),
 ):
     payment = payment_service.get_payment(db, ctx.organization_id, payment_id)
-    return payment_service.serialize_payment(payment_service.update_payment(db, ctx, payment, body))
+    return _payment_out(db, payment_service.update_payment(db, ctx, payment, body))
 
 
 @router.put("/{payment_id}/allocations", response_model=PaymentOut, summary="Replace the payment's invoice allocations")

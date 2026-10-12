@@ -91,6 +91,9 @@ OTP_MAX_ATTEMPTS = 5
 OTP_RESEND_COOLDOWN_SECONDS = 60
 # How long a verified mailbox may take to choose a password and finish creating the organization.
 SIGNUP_COMPLETION_MINUTES = 15
+# An expired pending signup is kept this long (it can no longer be used) so a late code entry is
+# told "expired" rather than "no pending signup", and a new code can be resent to it.
+EXPIRED_PENDING_SIGNUP_RETENTION = timedelta(hours=24)
 
 
 # --- helpers -------------------------------------------------------------------------
@@ -415,10 +418,11 @@ def _ensure_email_claimable(db: Session, email: str) -> Optional[User]:
 
 
 def purge_expired_pending_signups(db: Session) -> int:
-    """Delete pending signups whose OTP has expired. Commits; returns the number removed."""
+    """Delete pending signups that expired more than EXPIRED_PENDING_SIGNUP_RETENTION ago.
+    Commits; returns the number removed."""
     result = db.execute(
         delete(PendingSignup)
-        .where(PendingSignup.expires_at <= utcnow())
+        .where(PendingSignup.expires_at <= utcnow() - EXPIRED_PENDING_SIGNUP_RETENTION)
         .execution_options(synchronize_session=False)
     )
     db.commit()
@@ -600,8 +604,9 @@ def resend_signup_otp(db: Session, email: str) -> Tuple[str, int, int]:
 
 
 def _pending_for_otp(db: Session, email: str, now: datetime) -> PendingSignup:
-    """The live pending signup for `email`; a missing, expired or attempt-locked one is rejected
-    (and removed when it can never be used again)."""
+    """The live pending signup for `email`; a missing, expired or attempt-locked one is rejected.
+    An attempt-locked one is removed; an expired one is kept (until the purge) so retries keep
+    saying "expired" and a new code can be resent."""
     pending = db.scalars(select(PendingSignup).where(PendingSignup.email == email)).first()
     if pending is None:
         raise ValidationAppError(
@@ -611,10 +616,8 @@ def _pending_for_otp(db: Session, email: str, now: datetime) -> PendingSignup:
 
     expires_at = aware(pending.expires_at)
     if expires_at is None or expires_at <= now:
-        db.delete(pending)
-        _commit(db)
         raise ValidationAppError(
-            "Verification code has expired. Please request a new code.",
+            "This code has expired. Request a new code.",
             {"fields": {"otp": "expired"}},
         )
 
@@ -843,6 +846,8 @@ def _create_verified_signup(
         action=platform_audit.ORGANIZATION_CREATED,
         result=platform_audit.SUCCESS,
         staff=None,
+        tenant_actor=user,
+        tenant_role=membership.role,
         session_id=None,
         ip_address=ip,
         user_agent=user_agent,
@@ -860,6 +865,8 @@ def _create_verified_signup(
         db,
         action=platform_audit.ORGANIZATION_TRIAL_STARTED,
         result=platform_audit.SUCCESS,
+        tenant_actor=user,
+        tenant_role=membership.role,
         ip_address=ip,
         user_agent=user_agent,
         organization=organization,
@@ -1490,7 +1497,7 @@ def accept_invitation(
 
         platform_audit.record(
             db, action=platform_audit.TENANT_ADMIN_ACTIVATED, result=platform_audit.SUCCESS,
-            ip_address=ip, user_agent=user_agent, organization=organization, target_type="membership",
+            tenant_actor=user, tenant_role=membership.role, ip_address=ip, user_agent=user_agent, organization=organization, target_type="membership",
             target_id=membership.id, details={"user_id": user.id, "admin_email": user.email, "role": membership.role.value},
         )
     _commit(db)

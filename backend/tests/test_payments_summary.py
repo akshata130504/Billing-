@@ -19,6 +19,8 @@ def test_summary_is_zero_for_a_new_organization(client, tenant):
         "pending_amount": "0.00",
         "total_refunded": "0.00",
         "unallocated_amount": "0.00",
+        "currency": "INR",
+        "by_currency": [],
     }
 
 

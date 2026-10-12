@@ -280,6 +280,14 @@ export function VisualEditorPage() {
               <span>{VIEWPORTS[viewport]}px</span>
             </div>
             <div style={{ height: 720 * scale }}>
+              {/* Both sandbox tokens are required (BUG-36, reviewed): the preview is our own
+                  SPA, so it needs scripts; without allow-same-origin it gets an opaque origin, and
+                  then (1) its crossorigin module scripts become CORS requests the static server does
+                  not answer with Access-Control-Allow-Origin, (2) localStorage throws, and (3) the
+                  origin-checked postMessage protocol (protocol.ts) can no longer target or verify
+                  it. The frame only ever loads PREVIEW_PATH (trusted first-party code, sample data
+                  via an in-memory adapter, editor content rendered as text), so the sandbox is
+                  defence in depth here, not the isolation boundary. */}
               <iframe
                 ref={frameRef}
                 title="Application preview"

@@ -365,10 +365,20 @@ export interface ContactOut {
 
 export interface CustomerStats {
   open_invoice_count: number;
+  /** Money fields are in `currency` (the customer's billing currency) only. */
+  currency?: string;
   outstanding_amount: string;
   total_billed: string;
   total_paid: string;
   active_subscriptions: number;
+  /** Every currency the customer was invoiced in (never summed across currencies). */
+  by_currency?: {
+    currency: string;
+    open_invoice_count: number;
+    outstanding_amount: string;
+    total_billed: string;
+    total_paid: string;
+  }[];
 }
 
 export interface CustomerOut {
@@ -398,6 +408,8 @@ export interface CustomerOut {
   stats?: CustomerStats;
   created_at: string;
   updated_at: string;
+  /** Non-blocking notices on create/update (e.g. the email is used by another customer). */
+  warnings?: string[];
 }
 
 export interface CustomerIn {
@@ -634,6 +646,8 @@ export interface SubscriptionOut {
   notes: string | null;
   /** Monthly-normalised recurring amount. */
   mrr: string;
+  /** POST /renew would accept a manual renewal now (active and next billing date reached). */
+  renewal_due?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -840,6 +854,8 @@ export interface PaymentOut {
   recorded_by: UserRef | null;
   created_at: string;
   updated_at: string;
+  /** Non-blocking notices on create/update (e.g. the reference is used on another payment). */
+  warnings?: string[];
 }
 
 export interface PaymentIn {
@@ -874,12 +890,24 @@ export interface RefundRequest {
 }
 
 /** Money totals across every payment matching the current filters (GET /payments/summary). */
-export interface PaymentsSummary {
+export interface PaymentCurrencyTotals {
+  currency: string;
   count: number;
   total_collected: string;
   pending_amount: string;
   total_refunded: string;
   unallocated_amount: string;
+}
+
+/** Money fields are in `currency` (the base currency) only; `by_currency` has every currency. */
+export interface PaymentsSummary {
+  count: number;
+  currency?: string;
+  total_collected: string;
+  pending_amount: string;
+  total_refunded: string;
+  unallocated_amount: string;
+  by_currency?: PaymentCurrencyTotals[];
 }
 
 export interface ReconciliationSummary {
@@ -1000,6 +1028,8 @@ export interface RazorpayVerifyResponse {
 // §10 Control Center
 // ---------------------------------------------------------------------------
 
+/** Dashboard money fields are in DashboardSummary.currency (the base currency) only;
+ * `by_currency` lists every currency. Amounts are never summed across currencies. */
 export interface DashboardMetrics {
   total_revenue: string;
   revenue_change_pct: string | null;
@@ -1010,14 +1040,24 @@ export interface DashboardMetrics {
   new_customers: number;
   at_risk_amount: string;
   at_risk_count: number;
+  by_currency?: {
+    currency: string;
+    total_revenue: string;
+    outstanding_amount: string;
+    outstanding_count: number;
+    at_risk_amount: string;
+  }[];
 }
 
 export interface RevenueTrendPoint {
   /** e.g. "Sep 2026" */
   label: string;
   period_start: string;
+  /** Base currency only. */
   revenue: string;
   invoiced: string;
+  /** The month's figures in every currency. */
+  by_currency?: { currency: string; revenue: string; invoiced: string }[];
 }
 
 export interface DashboardRevenue {
@@ -1033,8 +1073,11 @@ export interface DashboardRevenue {
 }
 
 export interface PipelineBucket {
+  /** Every currency. */
   count: number;
+  /** Base currency only. */
   amount: string;
+  by_currency?: { currency: string; count: number; amount: string }[];
 }
 
 export interface DashboardPipeline {
@@ -1063,6 +1106,7 @@ export interface DashboardRecovery {
   failed_amount: string;
   recovered_amount: string;
   reminders_sent: number;
+  by_currency?: { currency: string; failed_amount: string; recovered_amount: string }[];
 }
 
 export interface DashboardSummary {

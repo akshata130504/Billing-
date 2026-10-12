@@ -293,16 +293,25 @@ def test_finalize_usage_uses_meter_price_and_explicit_override(client, tenant, a
     # the meter's price applies: 4 * 7.50
     assert Decimal(resp.json()[0]["rated_amount"]) == Decimal("30.00")
 
-    # An explicit caller-supplied price still overrides everything.
+    # An explicit caller-supplied price still overrides everything (on a cycle not yet
+    # finalized - re-finalizing a finalized cycle is idempotent, BUG-43).
     class _Ctx:
         organization_id = tenant.organization.id
         user_id = tenant.owner.id
 
+    _, plan2 = tenant.product_with_plan(unit_amount="12.00")
+    sub2_id = _subscription(client, auth_headers, customer, plan2)
+    client.post(
+        "/api/v1/meters/events",
+        json=_event("api_units", customer.id, sub2_id, 4, "override-evt-2"),
+        headers=auth_headers,
+    )
+    cycle2 = _open_cycle(db, tenant, sub2_id)
     aggs = meter_service.finalize_usage_for_cycle(
         db,
         ctx=_Ctx(),
-        subscription_id=sub_id,
-        billing_cycle_id=cycle.id,
+        subscription_id=sub2_id,
+        billing_cycle_id=cycle2.id,
         unit_price=Decimal("2.00"),
     )
     assert Decimal(str(aggs[0].rated_amount)) == Decimal("8.00")
@@ -788,3 +797,207 @@ def test_meter_price_can_be_updated(client, tenant, auth_headers):
     resp = client.patch(f"/api/v1/meters/{meter['id']}", json={"unit_price": "0.2500"}, headers=auth_headers)
     assert resp.status_code == 200, resp.text
     assert Decimal(str(resp.json()["unit_price"])) == Decimal("0.25")
+
+
+# ---------------------------------------------------------------------------
+# BUG-43: re-finalizing a finalized cycle deleted the draft usage invoice and
+# raised a new one, consuming an invoice number on every call.
+# ---------------------------------------------------------------------------
+
+def _finalized_usage_setup(client, auth_headers, db, tenant, key):
+    customer = tenant.customer()
+    _, plan = tenant.product_with_plan(unit_amount="10.00")
+    sub_id = _subscription(client, auth_headers, customer, plan)
+    _make_meter(client, auth_headers, f"idem_{key}", "Idem Units", "unit", unit_price="0.50")
+    r = client.post("/api/v1/meters/events", json=_event(f"idem_{key}", customer.id, sub_id, 150, key), headers=auth_headers)
+    assert r.status_code == 201, r.text
+    return sub_id, _current_cycle(db, sub_id)
+
+
+def _invoice_counter(db, tenant):
+    from backend.app.models.identity import Organization
+
+    db.expire_all()
+    return db.get(Organization, tenant.organization.id).invoice_next_number
+
+
+def test_refinalizing_a_finalized_cycle_is_idempotent(client, tenant, auth_headers, db):
+    from backend.app.models.invoices import Invoice
+
+    sub_id, cycle = _finalized_usage_setup(client, auth_headers, db, tenant, "idem-1")
+    url = f"/api/v1/meters/subscriptions/{sub_id}/billing-cycles/{cycle.id}/finalize-usage"
+    first = client.post(url, headers=auth_headers)
+    assert first.status_code == 200, first.text
+    first_agg = first.json()[0]
+    invoice = db.get(Invoice, first_agg["invoice_id"])
+    number = invoice.invoice_number
+    counter = _invoice_counter(db, tenant)
+
+    for _ in range(2):
+        again = client.post(url, headers=auth_headers)
+        assert again.status_code == 200, again.text
+        assert again.json() == [first_agg]
+
+    db.expire_all()
+    still = db.get(Invoice, first_agg["invoice_id"])
+    assert still is not None and still.invoice_number == number  # never deleted
+    assert _invoice_counter(db, tenant) == counter  # no number consumed on retry
+    assert db.query(Invoice).filter(Invoice.subscription_id == sub_id, Invoice.notes.like("Metered usage%")).count() == 1
+    assert client.get(f"/api/v1/invoices/{first_agg['invoice_id']}", headers=auth_headers).status_code == 200
+
+
+def test_scheduler_usage_finalization_is_idempotent(client, tenant, auth_headers, db):
+    """The scheduler path must not rebuild a cycle whose usage was already finalized,
+    even when the cycle's status was moved on (e.g. invoiced) in between."""
+    from backend.app.models.invoices import Invoice
+    from backend.app.models.subscriptions import Subscription
+    from backend.app.services.scheduler import _finalize_usage_before_renewal
+
+    sub_id, cycle = _finalized_usage_setup(client, auth_headers, db, tenant, "idem-2")
+    sub = db.get(Subscription, sub_id)
+    assert _finalize_usage_before_renewal(db, sub) is True
+    db.expire_all()
+    cycle = db.get(BillingCycle, cycle.id)
+    usage_invoices = db.query(Invoice).filter(Invoice.subscription_id == sub_id, Invoice.notes.like("Metered usage%")).all()
+    assert len(usage_invoices) == 1
+    counter = _invoice_counter(db, tenant)
+
+    cycle = db.get(BillingCycle, cycle.id)
+    cycle.status = BillingCycleStatus.INVOICED
+    db.commit()
+    sub = db.get(Subscription, sub_id)
+    _finalize_usage_before_renewal(db, sub)
+    db.expire_all()
+    again = db.query(Invoice).filter(Invoice.subscription_id == sub_id, Invoice.notes.like("Metered usage%")).all()
+    assert [i.id for i in again] == [usage_invoices[0].id]
+    assert _invoice_counter(db, tenant) == counter
+
+
+def test_concurrent_finalize_produces_exactly_one_invoice(client, tenant, auth_headers, db):
+    import threading
+
+    from backend.app.core.database import SessionLocal, engine
+    from backend.app.core.tenant_context import tenant_context
+    from backend.app.models.invoices import Invoice
+    from backend.app.services import meter_service
+
+    if engine.dialect.name != "postgresql":
+        pytest.skip("row locking needs PostgreSQL")
+    sub_id, cycle = _finalized_usage_setup(client, auth_headers, db, tenant, "idem-3")
+    counter = _invoice_counter(db, tenant)
+    org_id = tenant.organization.id
+    barrier = threading.Barrier(2)
+    results, errors = [], []
+
+    def run():
+        session = SessionLocal()
+        try:
+            with tenant_context(org_id):  # context vars do not cross into threads
+                barrier.wait()
+                aggs = meter_service.finalize_usage_for_cycle_system(
+                    session, organization_id=org_id, subscription_id=sub_id, billing_cycle_id=cycle.id
+                )
+                results.append([a.invoice_id for a in aggs])
+        except Exception as exc:  # pragma: no cover - surfaced by the assertion below
+            errors.append(exc)
+        finally:
+            session.close()
+
+    threads = [threading.Thread(target=run) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    assert not errors, errors
+    assert len(results) == 2 and results[0] == results[1]
+    db.expire_all()
+    assert db.query(Invoice).filter(Invoice.subscription_id == sub_id, Invoice.notes.like("Metered usage%")).count() == 1
+    assert _invoice_counter(db, tenant) == counter + 1
+
+
+def test_failed_finalization_rolls_back_without_consuming_a_number(client, tenant, auth_headers, db, monkeypatch):
+    from backend.app.models.invoices import Invoice
+    from backend.app.services import meter_service
+
+    sub_id, cycle = _finalized_usage_setup(client, auth_headers, db, tenant, "idem-4")
+    counter = _invoice_counter(db, tenant)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("simulated failure after numbering")
+
+    original = meter_service._link_metered_item
+    monkeypatch.setattr(meter_service, "_link_metered_item", boom)
+    with pytest.raises(RuntimeError):
+        meter_service.finalize_usage_for_cycle_system(
+            db, organization_id=tenant.organization.id, subscription_id=sub_id, billing_cycle_id=cycle.id
+        )
+    monkeypatch.setattr(meter_service, "_link_metered_item", original)
+    assert _invoice_counter(db, tenant) == counter
+    db.expire_all()
+    assert db.get(BillingCycle, cycle.id).status != BillingCycleStatus.FINALIZED
+    assert db.query(Invoice).filter(Invoice.subscription_id == sub_id, Invoice.notes.like("Metered usage%")).count() == 0
+
+
+# ---------------------------------------------------------------------------
+# BUG-44: recorded usage must be listable after a reload (history + totals).
+# ---------------------------------------------------------------------------
+
+def test_usage_event_history_and_meter_totals(client, tenant, auth_headers):
+    from backend.app.core.entitlements import module_for_path
+    from backend.app.models import MemberRole
+
+    customer = tenant.customer()
+    _, plan = tenant.product_with_plan(unit_amount="10.00")
+    sub_id = _subscription(client, auth_headers, customer, plan)
+    _make_meter(client, auth_headers, "hist_calls", "Hist Calls", "call", unit_price="1.00")
+    _make_meter(client, auth_headers, "hist_gb", "Hist GB", "gb")
+    for code, qty, key, ts in (
+        ("hist_calls", 5, "h-1", "2026-03-01T10:00:00+00:00"),
+        ("hist_calls", 7, "h-2", "2026-03-02T10:00:00+00:00"),
+        ("hist_gb", 2, "h-3", "2026-04-01T10:00:00+00:00"),
+    ):
+        r = client.post("/api/v1/meters/events", json=_event(code, customer.id, sub_id, qty, key, ts), headers=auth_headers)
+        assert r.status_code == 201, r.text
+
+    page = client.get("/api/v1/meters/events?page_size=2", headers=auth_headers)
+    assert page.status_code == 200, page.text
+    body = page.json()
+    assert body["total"] == 3 and len(body["items"]) == 2 and body["total_pages"] == 2
+    assert body["items"][0]["idempotency_key"] == "h-3"  # newest first
+    assert body["items"][0]["customer_name"] == customer.display_name
+    assert body["items"][0]["subscription_number"]
+
+    by_meter = client.get("/api/v1/meters/events?meter_id=hist_calls&subscription_id=" + sub_id, headers=auth_headers).json()
+    assert {e["idempotency_key"] for e in by_meter["items"]} == {"h-1", "h-2"}
+    dated = client.get("/api/v1/meters/events?date_from=2026-03-02&date_to=2026-03-31", headers=auth_headers).json()
+    assert [e["idempotency_key"] for e in dated["items"]] == ["h-2"]
+    assert client.get(f"/api/v1/meters/events?customer_id={customer.id}", headers=auth_headers).json()["total"] == 3
+
+    summary = client.get("/api/v1/meters/usage-summary?date_from=2026-03-01&date_to=2026-03-31", headers=auth_headers)
+    assert summary.status_code == 200, summary.text
+    rows = {r["meter_code"]: r for r in summary.json()}
+    assert Decimal(rows["hist_calls"]["total_quantity"]) == Decimal("12") and rows["hist_calls"]["event_count"] == 2
+    assert rows["hist_gb"]["event_count"] == 0 and Decimal(rows["hist_gb"]["total_quantity"]) == 0
+
+    # Viewers can read history; it is gated by the same module as the other meter routes.
+    viewer = tenant.headers_for_role(MemberRole.VIEWER)
+    assert client.get("/api/v1/meters/events", headers=viewer).status_code == 200
+    assert module_for_path("/meters/events") == module_for_path("/meters/usage-summary") == "subscriptions"
+
+
+def test_usage_history_is_tenant_scoped(client, tenant, auth_headers, db):
+    from backend.tests.conftest import Tenant
+
+    customer = tenant.customer()
+    _, plan = tenant.product_with_plan(unit_amount="10.00")
+    sub_id = _subscription(client, auth_headers, customer, plan)
+    _make_meter(client, auth_headers, "scoped_calls", "Scoped Calls", "call")
+    r = client.post("/api/v1/meters/events", json=_event("scoped_calls", customer.id, sub_id, 3, "sc-1"), headers=auth_headers)
+    assert r.status_code == 201, r.text
+
+    other = Tenant(db, "o" + tenant.suffix)
+    other_headers = other.headers()
+    assert client.get("/api/v1/meters/events", headers=other_headers).json()["total"] == 0
+    assert client.get(f"/api/v1/meters/events?subscription_id={sub_id}", headers=other_headers).json()["total"] == 0
+    assert client.get("/api/v1/meters/usage-summary", headers=other_headers).json() == []
+    assert client.get("/api/v1/meters/events?meter_id=scoped_calls", headers=other_headers).status_code == 404

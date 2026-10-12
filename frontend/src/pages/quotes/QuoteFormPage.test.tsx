@@ -36,6 +36,7 @@ vi.mock('../../services/quoteService', () => ({
     createQuote: vi.fn(),
     updateQuote: vi.fn(),
     sendQuote: vi.fn(),
+    getSupplyPreview: vi.fn(),
   },
 }));
 
@@ -248,6 +249,7 @@ function renderRoute(path: string, state?: unknown) {
 
 const offeringSelects = () =>
   screen.getAllByRole('combobox').filter((s) => within(s).queryByText('Custom Item')) as HTMLSelectElement[];
+const priceInputs = () => Array.from(document.querySelectorAll('input[type="number"][step="0.01"]')) as HTMLInputElement[];
 const quantityInputs = () => Array.from(document.querySelectorAll('input[type="number"][min="1"]')) as HTMLInputElement[];
 
 type SavedItem = { id?: string; offering_id?: string; quantity?: number; unit_price?: number };
@@ -287,12 +289,14 @@ describe('<QuoteFormPage /> archived offerings', () => {
     expect(offeringSelects()[0].value).toBe('off-a');
   });
 
-  it('adds new lines using an active offering', async () => {
+  it('adds new lines as a blank Custom Item that offers only active offerings', async () => {
     renderRoute('/quotes/new');
     await waitFor(() => expect(offeringSelects().length).toBe(1));
     fireEvent.click(screen.getByRole('button', { name: /Add Item/i }));
     await waitFor(() => expect(offeringSelects().length).toBe(2));
-    expect(offeringSelects()[1].value).toBe('off-a');
+    // BUG-13: the new line must not inherit an offering (or its price).
+    expect(offeringSelects()[1].value).toBe('');
+    expect(priceInputs()[1].value).toBe('');
     expect(within(offeringSelects()[1]).queryByText(/Old Plan/)).toBeNull();
   });
 
@@ -327,6 +331,9 @@ describe('<QuoteFormPage /> archived offerings', () => {
     await waitFor(() => expect(offeringSelects().length).toBe(2));
     fireEvent.click(screen.getByRole('button', { name: /Add Item/i }));
     await waitFor(() => expect(offeringSelects().length).toBe(3));
+    // A new line is a blank custom item: give it the description and price it needs to save.
+    fireEvent.change(screen.getAllByPlaceholderText('Item description...')[2], { target: { value: 'Extra' } });
+    fireEvent.change(priceInputs()[2], { target: { value: '10' } });
     fireEvent.click(screen.getByRole('button', { name: /Save Draft/i }));
     await waitFor(() => expect(quoteService.updateQuote).toHaveBeenCalled());
     const items = savedItems(quoteService.updateQuote);
@@ -398,5 +405,127 @@ describe('<QuoteFormPage /> archived offerings', () => {
     fireEvent.change(offeringSelects()[0], { target: { value: 'off-b' } });
     await waitFor(() => expect(offeringSelects()[0].value).toBe('off-b'));
     expect(showToast).not.toHaveBeenCalledWith('error', expect.any(String), expect.stringContaining('archived'));
+  });
+});
+
+// BUG-08 / BUG-07: the totals preview follows the server's GST treatment instead of always
+// showing CGST 9% + SGST 9%.
+describe('<QuoteFormPage /> GST preview', () => {
+  // storedQuote(): 2 x 100 + 1 x 111 = 311 at 18% -> 55.98 tax.
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(catalogCpqService.listOfferings).mockResolvedValue({
+      items: [ACTIVE_A, ACTIVE_B],
+      total: 2,
+      page: 1,
+      page_size: 100,
+      total_pages: 1,
+    } as never);
+    vi.mocked(catalogCpqService.getOffering).mockResolvedValue(ARCHIVED);
+    vi.mocked(quoteService.getQuote).mockResolvedValue(storedQuote() as never);
+  });
+
+  it('shows CGST + SGST for an intra-state supply', async () => {
+    vi.mocked(quoteService.getSupplyPreview).mockResolvedValue({ supply_type: 'intra_state', charges_gst: true });
+    renderRoute('/quotes/q1/edit');
+    await waitFor(() => expect(screen.getByText('CGST')).toBeInTheDocument());
+    expect(quoteService.getSupplyPreview).toHaveBeenCalledWith('c1');
+    expect(screen.getByText('SGST')).toBeInTheDocument();
+    expect(screen.queryByText('IGST')).not.toBeInTheDocument();
+    expect(screen.getAllByText('₹28')).toHaveLength(2);
+    expect(screen.getByText('₹367')).toBeInTheDocument();
+  });
+
+  it('shows IGST (not CGST/SGST) when the server resolves an inter-state supply', async () => {
+    vi.mocked(quoteService.getSupplyPreview).mockResolvedValue({ supply_type: 'inter_state', charges_gst: true });
+    renderRoute('/quotes/q1/edit');
+    await waitFor(() => expect(screen.getByText('IGST')).toBeInTheDocument());
+    expect(screen.queryByText('CGST')).not.toBeInTheDocument();
+    expect(screen.queryByText('SGST')).not.toBeInTheDocument();
+    expect(screen.getByText('₹56')).toBeInTheDocument();
+  });
+
+  it('charges no GST and explains why when the organization has no GSTIN', async () => {
+    vi.mocked(quoteService.getSupplyPreview).mockResolvedValue({ supply_type: 'inter_state', charges_gst: false });
+    renderRoute('/quotes/q1/edit');
+    const notice = await screen.findByTestId('no-gst-notice');
+    expect(notice).toHaveTextContent('no GSTIN');
+    expect(within(notice).getByRole('link', { name: /Settings → Organization/ })).toHaveAttribute('href', '/settings/organization');
+    expect(screen.queryByText('IGST')).not.toBeInTheDocument();
+    expect(screen.getByText('₹0')).toBeInTheDocument();
+    // Subtotal and total are equal: no tax added.
+    expect(screen.getAllByText('₹311')).toHaveLength(2);
+  });
+});
+
+describe('<QuoteFormPage /> line prices (BUG-13)', () => {
+  const prefilled = {
+    prefilledCustomer: 'c1',
+    prefilledItem: { offering_id: 'off-a', name: 'Alpha', sku: 'ALP', quantity: 1, unit_price: 111, tax_rate_pct: 18 },
+  };
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(catalogCpqService.listOfferings).mockResolvedValue({
+      items: [ACTIVE_A, ACTIVE_B],
+      total: 2,
+      page: 1,
+      page_size: 100,
+      total_pages: 1,
+    } as never);
+    vi.mocked(quoteService.createQuote).mockResolvedValue({ id: 'q2' } as never);
+    vi.mocked(planPricingService.simulatePricing).mockResolvedValue({ effective_unit_price: '1234.50', explanation: {} } as never);
+  });
+
+  it('saves a custom line added after an offering line with the typed values, not the offering', async () => {
+    renderRoute('/quotes/new', prefilled);
+    await waitFor(() => expect(offeringSelects().length).toBe(1));
+    fireEvent.click(screen.getByRole('button', { name: /Add Item/i }));
+    await waitFor(() => expect(offeringSelects().length).toBe(2));
+    fireEvent.change(screen.getAllByPlaceholderText('Item description...')[1], { target: { value: 'Onsite support' } });
+    fireEvent.change(quantityInputs()[1], { target: { value: '2.5' } });
+    fireEvent.change(priceInputs()[1], { target: { value: '999.99' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save Draft/i }));
+    await waitFor(() => expect(quoteService.createQuote).toHaveBeenCalled());
+    const items = savedItems(quoteService.createQuote, 0);
+    expect(items[1]).toEqual(expect.objectContaining({ quantity: 2.5, unit_price: 999.99 }));
+    expect(items[1].offering_id).toBeUndefined();
+  });
+
+  it('keeps a typed price on an offering line when the quantity changes', async () => {
+    renderRoute('/quotes/new', prefilled);
+    await waitFor(() => expect(offeringSelects().length).toBe(1));
+    fireEvent.change(priceInputs()[0], { target: { value: '999.99' } });
+    fireEvent.change(quantityInputs()[0], { target: { value: '3' } });
+    await waitFor(() => expect(quantityInputs()[0].value).toBe('3'));
+    expect(planPricingService.simulatePricing).not.toHaveBeenCalled();
+    expect(priceInputs()[0].value).toBe('999.99');
+    fireEvent.click(screen.getByRole('button', { name: /Save Draft/i }));
+    await waitFor(() => expect(quoteService.createQuote).toHaveBeenCalled());
+    expect(savedItems(quoteService.createQuote, 0)[0]).toEqual(
+      expect.objectContaining({ offering_id: 'off-a', quantity: 3, unit_price: 999.99 })
+    );
+  });
+
+  it('re-prices an untouched offering line on a quantity change and again when an offering is re-selected', async () => {
+    renderRoute('/quotes/new', prefilled);
+    await waitFor(() => expect(offeringSelects().length).toBe(1));
+    fireEvent.change(quantityInputs()[0], { target: { value: '2' } });
+    await waitFor(() => expect(priceInputs()[0].value).toBe('1234.5'));
+    fireEvent.change(priceInputs()[0], { target: { value: '50' } });
+    fireEvent.change(offeringSelects()[0], { target: { value: 'off-b' } });
+    await waitFor(() => expect(offeringSelects()[0].value).toBe('off-b'));
+    expect(priceInputs()[0].value).toBe('1234.5');
+  });
+
+  it('refuses to save a custom line without a price', async () => {
+    renderRoute('/quotes/new', prefilled);
+    await waitFor(() => expect(offeringSelects().length).toBe(1));
+    fireEvent.click(screen.getByRole('button', { name: /Add Item/i }));
+    await waitFor(() => expect(offeringSelects().length).toBe(2));
+    fireEvent.change(screen.getAllByPlaceholderText('Item description...')[1], { target: { value: 'Onsite support' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save Draft/i }));
+    expect(await screen.findByText(/unit price is required/i)).toBeInTheDocument();
+    expect(quoteService.createQuote).not.toHaveBeenCalled();
   });
 });

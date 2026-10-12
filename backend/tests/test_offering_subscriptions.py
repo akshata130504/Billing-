@@ -342,3 +342,32 @@ def test_legacy_subscription_unchanged(client, tenant, auth_headers, db):
     assert item.price_snapshot.metadata_ is None
     assert item.price_snapshot.unit_amount == Decimal("1000.00")
     assert _sub_invoices(db, body["id"])[0].total == Decimal("2360.00")
+
+
+def test_plan_options_feed_offering_upgrade_and_downgrade(client, tenant, auth_headers):
+    """BUG-42: the proration picker reads /subscriptions/plan-options; changes between
+    two Plans & Pricing offerings go through target_offering_id in both directions."""
+    customer = tenant.customer()
+    mid = _offering(client, auth_headers, base_price="1500.00")
+    low = _offering(client, auth_headers, base_price="900.00")
+    high = _offering(client, auth_headers, base_price="2500.00")
+    sub_id = _subscribe(client, auth_headers, customer.id, offering_id=mid["id"]).json()["id"]
+
+    options = {o["offering_id"]: o for o in client.get(f"{SUBS}/plan-options", headers=auth_headers).json() if o["source"] == "offering"}
+    for off in (mid, low, high):
+        opt = options[off["id"]]
+        assert (opt["currency"], opt["billing_interval"], opt["interval_count"]) == ("INR", "monthly", 1)
+    assert Decimal(options[high["id"]]["unit_amount"]) > Decimal(options[mid["id"]]["unit_amount"]) > Decimal(options[low["id"]]["unit_amount"])
+
+    preview = client.post(f"{SUBS}/{sub_id}/changes/preview", json={"target_offering_id": high["id"]}, headers=auth_headers)
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["change_type"] == "upgrade"
+    up = client.post(f"{SUBS}/{sub_id}/changes", json={"target_offering_id": high["id"], "effective_type": "immediate"}, headers=auth_headers)
+    assert up.status_code == 201, up.text
+    assert client.get(f"{SUBS}/{sub_id}", headers=auth_headers).json()["plan"]["offering_id"] == high["id"]
+
+    down = client.post(f"{SUBS}/{sub_id}/changes", json={"target_offering_id": low["id"], "effective_type": "immediate"}, headers=auth_headers)
+    assert down.status_code == 201, down.text
+    assert down.json()["change_type"] == "downgrade"
+    body = client.get(f"{SUBS}/{sub_id}", headers=auth_headers).json()
+    assert body["plan"]["offering_id"] == low["id"] and body["unit_price"] == "900.00"

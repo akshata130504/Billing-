@@ -1,6 +1,14 @@
 import { usePayments } from '../PaymentsContext';
 import { CheckCircle2, Clock, RotateCcw, CreditCard } from 'lucide-react';
 import { formatMoney } from '../../../utils/format';
+import { formatPerCurrency } from '../../../services/dashboardSummaryService';
+import type { PaymentsSummary, PaymentsSummaryByCurrency } from '../types';
+
+/** One figure per currency (base first); falls back to the single base-currency figure. */
+function perCurrency(summary: PaymentsSummary, key: keyof Omit<PaymentsSummaryByCurrency, 'currency'>): string {
+  if (!summary.byCurrency?.length) return formatMoney(summary[key]);
+  return formatPerCurrency(summary.byCurrency, (r) => r[key], (amount, cur) => formatMoney(amount, cur), 'INR');
+}
 import { usePageSpec } from '../../../appUi/usePageSpec';
 
 export function PaymentSummaryCards() {
@@ -35,7 +43,7 @@ export function PaymentSummaryCards() {
                   {item.label}
                 </span>
                 <span className="text-base font-bold text-slate-900 tracking-tight">
-                  {formatMoney(summary.totalCollected)}
+                  {perCurrency(summary, 'totalCollected')}
                 </span>
                 {item.caption && <span className="text-[10px] text-slate-400 block">{item.caption}</span>}
               </div>
@@ -51,7 +59,7 @@ export function PaymentSummaryCards() {
                   {item.label}
                 </span>
                 <span className="text-base font-bold text-amber-900 tracking-tight">
-                  {formatMoney(summary.pendingProcessing)}
+                  {perCurrency(summary, 'pendingProcessing')}
                 </span>
                 {item.caption && <span className="text-[10px] text-slate-400 block">{item.caption}</span>}
               </div>
@@ -67,7 +75,7 @@ export function PaymentSummaryCards() {
                   {item.label}
                 </span>
                 <span className="text-base font-bold text-slate-800 tracking-tight">
-                  {formatMoney(summary.totalRefunded)}
+                  {perCurrency(summary, 'totalRefunded')}
                 </span>
                 {item.caption && <span className="text-[10px] text-slate-400 block">{item.caption}</span>}
               </div>
@@ -83,7 +91,7 @@ export function PaymentSummaryCards() {
                   {item.label}
                 </span>
                 <span className="text-base font-bold text-blue-900 tracking-tight">
-                  {formatMoney(summary.unappliedCredit)}
+                  {perCurrency(summary, 'unappliedCredit')}
                 </span>
                 {item.caption && <span className="text-[10px] text-slate-400 block">{item.caption}</span>}
               </div>

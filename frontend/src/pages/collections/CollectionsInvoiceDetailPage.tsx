@@ -195,9 +195,9 @@ export function CollectionsInvoiceDetailPage() {
                   value={invoice.days_overdue > 0 ? String(invoice.days_overdue) : '—'}
                   emphasize={invoice.days_overdue > 0 ? 'danger' : undefined}
                 />
-                <SummaryField label="Invoice Total" value={formatMoney(invoice.total)} />
-                <SummaryField label="Amount Paid" value={formatMoney(invoice.amount_paid)} emphasize="success" />
-                <SummaryField label="Outstanding" value={formatMoney(invoice.amount_due)} emphasize="danger" />
+                <SummaryField label="Invoice Total" value={formatMoney(invoice.total, invoice.currency)} />
+                <SummaryField label="Amount Paid" value={formatMoney(invoice.amount_paid, invoice.currency)} emphasize="success" />
+                <SummaryField label="Outstanding" value={formatMoney(invoice.amount_due, invoice.currency)} emphasize="danger" />
                 <SummaryField label="Last Contact" value={formatDate(invoice.last_contact_at)} />
                 <SummaryField label="Next Follow-up" value={formatDate(invoice.next_follow_up_at)} />
               </div>
@@ -296,7 +296,7 @@ export function CollectionsInvoiceDetailPage() {
                     <div key={promise.id} className="px-5 py-3.5 space-y-2">
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-bold text-slate-900 tabular-nums">
-                          {formatMoney(promise.promised_amount)}
+                          {formatMoney(promise.promised_amount, invoice.currency)}
                         </span>
                         <Badge variant={PROMISE_STATUS_VARIANTS[promise.status]} size="sm">
                           {PROMISE_STATUS_LABELS[promise.status]}

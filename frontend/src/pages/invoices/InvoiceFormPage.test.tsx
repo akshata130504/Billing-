@@ -6,6 +6,7 @@ import { InvoiceFormPage } from './InvoiceFormPage';
 import { planPricingService } from '../../services/planPricingService';
 import { catalogCpqService } from '../../services/catalogCpqService';
 import { invoiceService } from '../../services/invoiceService';
+import { quoteService } from '../../services/quoteService';
 
 const { showToast } = vi.hoisted(() => ({ showToast: vi.fn() }));
 
@@ -45,6 +46,12 @@ vi.mock('../../services/invoiceService', () => ({
     createInvoice: vi.fn(),
     updateInvoice: vi.fn(),
     sendInvoice: vi.fn(),
+  },
+}));
+
+vi.mock('../../services/quoteService', () => ({
+  quoteService: {
+    getSupplyPreview: vi.fn(),
   },
 }));
 
@@ -178,6 +185,42 @@ describe('<InvoiceFormPage /> line item quantity editing', () => {
 
     expect(qtyInput().value).toBe('4');
     expect(rateInput().value).toBe('50');
+  });
+
+  it('keeps a typed rate when the quantity of a tiered line changes (BUG-13)', async () => {
+    mockedPricing.getPlans.mockResolvedValue({ items: [plan('p4', 'tiered', 100)], total: 1 } as any);
+    mockedPricing.calculatePrice.mockResolvedValue(priceResponse(100));
+    renderPage();
+    await selectPlan('p4');
+    await waitFor(() => expect(rateInput().value).toBe('100'));
+
+    await act(async () => {
+      fireEvent.change(rateInput(), { target: { value: '75.5' } });
+    });
+    mockedPricing.calculatePrice.mockResolvedValue(priceResponse(80));
+    await act(async () => {
+      fireEvent.change(qtyInput(), { target: { value: '10' } });
+    });
+
+    expect(qtyInput().value).toBe('10');
+    expect(rateInput().value).toBe('75.5');
+    expect(mockedPricing.calculatePrice).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts an added line as a blank custom item', async () => {
+    mockedPricing.getPlans.mockResolvedValue({ items: [plan('p5', 'flat', 100)], total: 1 } as any);
+    mockedPricing.calculatePrice.mockResolvedValue(priceResponse(100, 'flat'));
+    renderPage();
+    await selectPlan('p5');
+    await waitFor(() => expect(rateInput().value).toBe('100'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Add (Another )?(Line|Item|Row)/i }));
+    });
+    const selects = screen
+      .getAllByRole('combobox')
+      .filter((el) => el.tagName === 'SELECT' && (el as HTMLSelectElement).options[0]?.text.startsWith('-- Choose')) as HTMLSelectElement[];
+    expect(selects).toHaveLength(2);
+    expect(selects[1].value).toBe('');
   });
 });
 
@@ -632,5 +675,41 @@ describe('<InvoiceFormPage /> archived offerings', () => {
     });
     await waitFor(() => expect(showToast).toHaveBeenCalledWith('warning', 'Could not calculate price', expect.any(String)));
     expect(lineSelects()[0].value).toBe('plan:p1');
+  });
+});
+
+// BUG-07: an organization without a GSTIN charges no GST; the preview must agree with the server.
+describe('<InvoiceFormPage /> GST preview', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedPricing.getPlans.mockResolvedValue({ items: [plan('p1', 'flat', 100)], total: 1 } as any);
+    mockedPricing.calculatePrice.mockResolvedValue(priceResponse(100, 'flat'));
+  });
+
+  async function pickCustomerAndPlan() {
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByText('pick-customer'));
+    });
+    await selectPlan('p1');
+    await waitFor(() => expect(rateInput().value).toBe('100'));
+    await waitFor(() => expect(quoteService.getSupplyPreview).toHaveBeenCalledWith('cust-1'));
+  }
+
+  it('adds no tax and explains why when the organization has no GSTIN', async () => {
+    vi.mocked(quoteService.getSupplyPreview).mockResolvedValue({ supply_type: 'intra_state', charges_gst: false });
+    await pickCustomerAndPlan();
+    const notice = await screen.findByTestId('no-gst-notice');
+    expect(notice).toHaveTextContent('no GSTIN');
+    expect(within(notice).getByRole('link')).toHaveAttribute('href', '/settings/organization');
+    expect(lineAmount()).toContain('100');
+    expect(lineAmount()).not.toContain('118');
+  });
+
+  it('keeps charging the line tax for a GST-registered organization', async () => {
+    vi.mocked(quoteService.getSupplyPreview).mockResolvedValue({ supply_type: 'intra_state', charges_gst: true });
+    await pickCustomerAndPlan();
+    expect(lineAmount()).toContain('118');
+    expect(screen.queryByTestId('no-gst-notice')).not.toBeInTheDocument();
   });
 });

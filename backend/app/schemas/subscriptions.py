@@ -5,10 +5,10 @@ from typing import Any, List, Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.app.models import BillingInterval, SubscriptionStatus
-from backend.app.schemas.common_refs import CustomerRef
+from backend.app.schemas.common_refs import CustomerRef, StrictRequest
 
 
-class SubscriptionCreate(BaseModel):
+class SubscriptionCreate(StrictRequest):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     customer_id: str
@@ -28,6 +28,10 @@ class SubscriptionCreate(BaseModel):
     status: Optional[SubscriptionStatus] = None
     # Default: True when the subscription does not start with a trial.
     generate_first_invoice: Optional[bool] = None
+    # The subscription is invoiced in the plan's currency. When that differs from the
+    # customer's billing currency the request is rejected (422, details.reason CURRENCY_MISMATCH) unless
+    # this is true: an explicit, audited decision to bill the customer in the plan's currency.
+    allow_currency_mismatch: bool = False
 
     @model_validator(mode="after")
     def _one_plan_source(self):
@@ -38,7 +42,7 @@ class SubscriptionCreate(BaseModel):
         return self
 
 
-class SubscriptionUpdate(BaseModel):
+class SubscriptionUpdate(StrictRequest):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     quantity: Optional[int] = Field(default=None, ge=1)
@@ -48,7 +52,7 @@ class SubscriptionUpdate(BaseModel):
     billing_frequency: Optional[str] = None
 
 
-class SubscriptionCancelIn(BaseModel):
+class SubscriptionCancelIn(StrictRequest):
     at_period_end: bool = False
     # Immediate cancellation only: issue a credit note for the unused, already-invoiced
     # remainder of the current period.
@@ -101,6 +105,8 @@ class SubscriptionOut(BaseModel):
     ended_at: Optional[datetime] = None
     notes: Optional[str] = None
     mrr: str
+    # True when POST /renew would accept a manual renewal now (active and next billing date reached).
+    renewal_due: bool = False
     created_at: datetime
     updated_at: datetime
 

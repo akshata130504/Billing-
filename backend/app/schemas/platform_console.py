@@ -76,6 +76,8 @@ class LifecycleStateOut(BaseModel):
     deletion_scheduled_for: Optional[UTCDateTime] = None
     jobs_paused: bool
     automation_running: bool
+    automation_state: Literal["running", "paused", "held_trial"] = "running"
+    automation_label: str = "Running"
     renewals_waiting: int
 
 
@@ -228,6 +230,7 @@ class StaffActionOut(StaffSummaryOut):
 
 class SchedulerStatusOut(BaseModel):
     enabled: bool
+    running: bool = False  # from the scheduler's own heartbeat, not this API process's flag
     status: str
     interval_minutes: Optional[int] = None
     last_finished_at: Optional[UTCDateTime] = None

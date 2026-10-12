@@ -91,7 +91,8 @@ def test_invoice_checkout_verified_confirm_saves_real_card(client, tenant, auth_
     inv = tenant.invoice(customer, amount="2000.00")
     session = _create_session(client, auth_headers, purpose="invoice_payment", invoice_id=inv.id, save_payment_method=True)
     token = session["token"]
-    assert session["checkout_url"] == f"/checkout/{token}"
+    # BUG-60: absolute, on the configured frontend origin (was the relative "/checkout/<token>").
+    assert session["checkout_url"] == f"{settings.FRONTEND_URL.rstrip('/')}/checkout/{token}"
 
     view = client.get(f"/api/v1/checkout/public/{token}").json()
     assert view["gateway_available"] is True
@@ -281,6 +282,18 @@ def test_no_gateway_configured_shows_unavailable(client, tenant, auth_headers):
     view = client.get(f"/api/v1/checkout/public/{token}").json()
     assert view["gateway_available"] is False
     assert "contact the merchant" in view["gateway_message"].lower()
+
+
+def test_trial_merchant_checkout_says_payments_not_accepted_yet(client, tenant, auth_headers, db):
+    """BUG-15: a merchant in its free trial is not "temporarily unavailable" (suspended wording)."""
+    inv = tenant.invoice(tenant.customer(), amount="100.00")
+    token = _create_session(client, auth_headers, purpose="invoice_payment", invoice_id=inv.id)["token"]
+    tenant.organization.module_access = "trial"
+    db.commit()
+    view = client.get(f"/api/v1/checkout/public/{token}").json()
+    assert view["gateway_available"] is False
+    assert "not accepting online payments yet" in view["gateway_message"]
+    assert "temporarily unavailable" not in view["gateway_message"]
 
 
 def test_session_list_never_exposes_usable_token(client, tenant, auth_headers, db):

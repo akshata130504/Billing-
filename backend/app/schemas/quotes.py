@@ -6,13 +6,13 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from backend.app.schemas.common_refs import CustomerRef, LineItemIn, LineItemOut, UserRef
+from backend.app.schemas.common_refs import CustomerRef, LineItemIn, LineItemOut, PublicLineItemOut, StrictRequest, UserRef
 
 # Technical ceiling only (abuse/overflow prevention) — the business rules define no cap.
 _MAX_TEXT_LENGTH = 10000
 
 
-class QuoteLineItemIn(LineItemIn):
+class QuoteLineItemIn(LineItemIn, StrictRequest):
     """A quote line as posted by the client. ``id`` is the stored id of an existing line of THIS
     quote that the client is keeping (it lets the server tell a retained line from a removed and
     re-added one); omit it on new lines. Quote-specific so the shared LineItemIn contract used by
@@ -37,7 +37,7 @@ def _accept_shared_line_items(value):
     return value
 
 
-class QuoteCreate(BaseModel):
+class QuoteCreate(StrictRequest):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     customer_id: str
@@ -79,7 +79,7 @@ class QuoteCreate(BaseModel):
         return self
 
 
-class QuoteUpdate(BaseModel):
+class QuoteUpdate(StrictRequest):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     customer_id: Optional[str] = None
@@ -109,11 +109,11 @@ class QuoteUpdate(BaseModel):
         return self
 
 
-class QuoteDeclineIn(BaseModel):
+class QuoteDeclineIn(StrictRequest):
     reason: Optional[str] = Field(None, max_length=500)
 
 
-class QuoteOverrideIn(BaseModel):
+class QuoteOverrideIn(StrictRequest):
     """Admin override that records the customer's decision on their behalf (e.g. a signed PDF or
     a phone call). The reason is mandatory so the audit trail says why staff, not the customer,
     moved the quote."""
@@ -123,12 +123,12 @@ class QuoteOverrideIn(BaseModel):
     reason: str = Field(..., min_length=3, max_length=500)
 
 
-class QuoteConvertIn(BaseModel):
+class QuoteConvertIn(StrictRequest):
     issue_date: Optional[date] = None
     due_date: Optional[date] = None
 
 
-class QuoteToSubscriptionIn(BaseModel):
+class QuoteToSubscriptionIn(StrictRequest):
     """POST /quotes/{id}/convert-to-subscription."""
 
     start_date: Optional[date] = None
@@ -151,6 +151,16 @@ class QuoteDecisionOut(BaseModel):
     name: Optional[str] = None  # the name the customer signed with, or the staff user
     reason: Optional[str] = None
     at: Optional[datetime] = None
+
+
+class SupplyPreviewOut(BaseModel):
+    """The server's GST treatment for this organization -> customer, so form previews
+    split tax exactly the way the saved document will."""
+
+    supply_type: str
+    charges_gst: bool  # False when the organization has no GSTIN (no GST is charged)
+    place_of_supply_code: Optional[str] = None
+    place_of_supply_name: Optional[str] = None
 
 
 class QuoteOut(BaseModel):
@@ -286,7 +296,7 @@ class PublicQuote(BaseModel):
     total: str
     notes: Optional[str] = None
     terms: Optional[str] = None
-    items: List[LineItemOut]
+    items: List[PublicLineItemOut]
     sent_at: Optional[datetime] = None
     accepted_at: Optional[datetime] = None
     declined_at: Optional[datetime] = None
@@ -296,13 +306,13 @@ class PublicQuote(BaseModel):
     actions_unavailable_reason: Optional[str] = None
 
 
-class PublicQuoteAcceptIn(BaseModel):
+class PublicQuoteAcceptIn(StrictRequest):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     accepted_by_name: str = Field(..., min_length=1, max_length=200)
 
 
-class PublicQuoteDeclineIn(BaseModel):
+class PublicQuoteDeclineIn(StrictRequest):
     reason: Optional[str] = Field(None, max_length=500)
 
 

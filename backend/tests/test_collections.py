@@ -36,8 +36,13 @@ from backend.app.models import (
 from backend.app.schemas.collections import CollectionActivityIn, PromiseToPayIn
 from backend.app.schemas.common_refs import LineItemIn
 from backend.app.schemas.invoices import InvoiceCreate, RecordPaymentIn
-from backend.app.services import collection_service, invoice_service, payment_service
+from backend.app.services import collection_service, invoice_service, payment_service, timezones
 from backend.app.services.pagination import PageParams
+
+
+def _today():
+    """The test organizations' business day (Asia/Kolkata): the services compare against it, not the UTC date."""
+    return timezones.org_today("Asia/Kolkata")
 
 BASE = "/api/v1/collections"
 INVOICES = "/api/v1/invoices"
@@ -86,8 +91,8 @@ def _make_invoice(db, ctx, customer, *, due_in_days, amount="1000.00", tax_rate=
         ctx,
         InvoiceCreate(
             customer_id=customer.id,
-            issue_date=date.today() - timedelta(days=60),
-            due_date=date.today() + timedelta(days=due_in_days),
+            issue_date=_today() - timedelta(days=60),
+            due_date=_today() + timedelta(days=due_in_days),
             currency="INR",
             items=[
                 LineItemIn(
@@ -208,7 +213,7 @@ def test_promise_to_pay_create_sets_manual_status_and_activity(db: Session, org_
         db,
         ctx,
         invoice.id,
-        PromiseToPayIn(promised_amount=Decimal("1000.00"), promised_date=date.today() + timedelta(days=7), note="Will pay next week."),
+        PromiseToPayIn(promised_amount=Decimal("1000.00"), promised_date=_today() + timedelta(days=7), note="Will pay next week."),
     )
 
     assert promise.status == PromiseToPayStatus.PENDING
@@ -240,7 +245,7 @@ def test_promise_to_pay_kept_clears_override_and_cannot_be_redecided(db: Session
     org, user, customer, ctx = org_ctx
     invoice = _make_invoice(db, ctx, customer, due_in_days=-5)
     promise = collection_service.create_promise(
-        db, ctx, invoice.id, PromiseToPayIn(promised_amount=Decimal("1000.00"), promised_date=date.today() + timedelta(days=7))
+        db, ctx, invoice.id, PromiseToPayIn(promised_amount=Decimal("1000.00"), promised_date=_today() + timedelta(days=7))
     )
 
     updated = collection_service.update_promise_status(db, ctx, promise.id, PromiseToPayStatus.KEPT)
@@ -264,7 +269,7 @@ def test_promise_to_pay_broken_sets_overdue_when_invoice_still_overdue(db: Sessi
     org, user, customer, ctx = org_ctx
     invoice = _make_invoice(db, ctx, customer, due_in_days=-20)
     promise = collection_service.create_promise(
-        db, ctx, invoice.id, PromiseToPayIn(promised_amount=Decimal("1000.00"), promised_date=date.today() - timedelta(days=1))
+        db, ctx, invoice.id, PromiseToPayIn(promised_amount=Decimal("1000.00"), promised_date=_today() - timedelta(days=1))
     )
 
     updated = collection_service.update_promise_status(db, ctx, promise.id, PromiseToPayStatus.BROKEN)
@@ -280,7 +285,7 @@ def test_promise_to_pay_broken_clears_override_when_invoice_not_overdue(db: Sess
     # due in the future -> not overdue right now
     invoice = _make_invoice(db, ctx, customer, due_in_days=20)
     promise = collection_service.create_promise(
-        db, ctx, invoice.id, PromiseToPayIn(promised_amount=Decimal("1000.00"), promised_date=date.today() + timedelta(days=1))
+        db, ctx, invoice.id, PromiseToPayIn(promised_amount=Decimal("1000.00"), promised_date=_today() + timedelta(days=1))
     )
     collection = collection_service.get_or_create_collection(db, org.id, invoice.id)
     assert collection.manual_status == CollectionStatus.PROMISE_TO_PAY
@@ -298,7 +303,7 @@ def test_promise_to_pay_cancelled_leaves_manual_status_untouched(db: Session, or
     org, user, customer, ctx = org_ctx
     invoice = _make_invoice(db, ctx, customer, due_in_days=-5)
     promise = collection_service.create_promise(
-        db, ctx, invoice.id, PromiseToPayIn(promised_amount=Decimal("500.00"), promised_date=date.today() + timedelta(days=3))
+        db, ctx, invoice.id, PromiseToPayIn(promised_amount=Decimal("500.00"), promised_date=_today() + timedelta(days=3))
     )
 
     updated = collection_service.update_promise_status(db, ctx, promise.id, PromiseToPayStatus.CANCELLED)
@@ -416,8 +421,8 @@ def test_draft_and_void_invoices_are_excluded_from_collections(db: Session, org_
         ctx,
         InvoiceCreate(
             customer_id=customer.id,
-            issue_date=date.today(),
-            due_date=date.today() + timedelta(days=10),
+            issue_date=_today(),
+            due_date=_today() + timedelta(days=10),
             currency="INR",
             items=[LineItemIn(description="Draft item", quantity=Decimal("1"), unit_price=Decimal("100.00"))],
         ),
@@ -436,8 +441,8 @@ def _http_create_and_send_invoice(client, headers, customer_id, *, due_in_days=-
         INVOICES,
         json={
             "customer_id": customer_id,
-            "issue_date": (date.today() - timedelta(days=30)).isoformat(),
-            "due_date": (date.today() + timedelta(days=due_in_days)).isoformat(),
+            "issue_date": (_today() - timedelta(days=30)).isoformat(),
+            "due_date": (_today() + timedelta(days=due_in_days)).isoformat(),
             "currency": "INR",
             "items": [{"description": "HTTP invoice", "quantity": "1", "unit_price": amount, "tax_rate_pct": "0"}],
         },
@@ -468,7 +473,7 @@ def test_viewer_is_blocked_from_mutating_endpoints(client, tenant, auth_headers)
     ).status_code == 403
     assert client.post(
         f"{BASE}/invoices/{invoice['id']}/promises",
-        json={"promised_amount": "100.00", "promised_date": date.today().isoformat()},
+        json={"promised_amount": "100.00", "promised_date": _today().isoformat()},
         headers=viewer_headers,
     ).status_code == 403
     assert client.patch(
@@ -480,7 +485,7 @@ def test_viewer_is_blocked_from_mutating_endpoints(client, tenant, auth_headers)
     finance_headers = tenant.headers_for_role(MemberRole.FINANCE)
     add_resp = client.post(
         f"{BASE}/invoices/{invoice['id']}/promises",
-        json={"promised_amount": "100.00", "promised_date": date.today().isoformat()},
+        json={"promised_amount": "100.00", "promised_date": _today().isoformat()},
         headers=finance_headers,
     )
     assert add_resp.status_code == 200, add_resp.text
@@ -522,7 +527,7 @@ def test_tenant_isolation_over_http(client, tenant, auth_headers, db):
     assert client.get(f"{BASE}/invoices/{invoice['id']}/activities", headers=other_headers).status_code == 404
     assert client.post(
         f"{BASE}/invoices/{invoice['id']}/promises",
-        json={"promised_amount": "10.00", "promised_date": date.today().isoformat()},
+        json={"promised_amount": "10.00", "promised_date": _today().isoformat()},
         headers=other_headers,
     ).status_code == 404
     assert client.patch(
@@ -532,7 +537,7 @@ def test_tenant_isolation_over_http(client, tenant, auth_headers, db):
     # a promise created under org A cannot be updated using org B's token
     promise_resp = client.post(
         f"{BASE}/invoices/{invoice['id']}/promises",
-        json={"promised_amount": "50.00", "promised_date": date.today().isoformat()},
+        json={"promised_amount": "50.00", "promised_date": _today().isoformat()},
         headers=auth_headers,
     )
     assert promise_resp.status_code == 200

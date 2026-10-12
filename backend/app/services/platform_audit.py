@@ -110,13 +110,23 @@ def record(
     target_id: Optional[str] = None,
     reason: Optional[str] = None,
     ticket_ref: Optional[str] = None,
+    tenant_actor: Optional[Any] = None,
+    tenant_role: Optional[Any] = None,
 ) -> PlatformAuditLog:
     """Add a platform audit row to the current transaction (the caller commits).
 
     `staff` is always the ACTING staff member (or the subject of an authentication event).
+    `tenant_actor` is the TENANT user who caused an event (signup, subscription request): their
+    email and "tenant_<role>" fill the actor snapshot columns and their id goes into details;
+    no platform_staff_id is set.
     `organization` fills the plain organization_id / name snapshot columns (no foreign key).
     """
     role = getattr(getattr(staff, "role", None), "value", None)
+    if staff is None and tenant_actor is not None:
+        email = email or tenant_actor.email
+        tenant_role_value = getattr(tenant_role, "value", tenant_role)
+        role = f"tenant_{tenant_role_value}" if tenant_role_value else "tenant_user"
+        details = {**(details or {}), "actor_user_id": tenant_actor.id}
     entry = PlatformAuditLog(
         platform_staff_id=staff.id if staff is not None else None,
         staff_email_snapshot=((staff.email if staff is not None else email) or None),

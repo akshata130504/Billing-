@@ -4,10 +4,13 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from backend.app.schemas.common_refs import StrictRequest
+from backend.app.schemas.validators import Money, validate_image_url, validate_redirect_url
 
 
-class CheckoutTemplateCreate(BaseModel):
+class CheckoutTemplateCreate(StrictRequest):
     name: str = Field(..., max_length=100)
     template_type: str = Field("single_page", description="single_page or multi_page")
     primary_color: str = Field("#2563eb", max_length=20)
@@ -22,8 +25,18 @@ class CheckoutTemplateCreate(BaseModel):
     custom_fields: Optional[Dict[str, Any]] = None
     is_default: bool = False
 
+    @field_validator("redirect_url")
+    @classmethod
+    def _redirect_url(cls, v: Optional[str]) -> Optional[str]:
+        return validate_redirect_url(v)
 
-class CheckoutTemplateUpdate(BaseModel):
+    @field_validator("logo_url")
+    @classmethod
+    def _logo_url(cls, v: Optional[str]) -> Optional[str]:
+        return validate_image_url(v)
+
+
+class CheckoutTemplateUpdate(StrictRequest):
     name: Optional[str] = Field(None, max_length=100)
     template_type: Optional[str] = None
     primary_color: Optional[str] = None
@@ -38,6 +51,16 @@ class CheckoutTemplateUpdate(BaseModel):
     custom_fields: Optional[Dict[str, Any]] = None
     is_default: Optional[bool] = None
     is_active: Optional[bool] = None
+
+    @field_validator("redirect_url")
+    @classmethod
+    def _redirect_url(cls, v: Optional[str]) -> Optional[str]:
+        return validate_redirect_url(v)
+
+    @field_validator("logo_url")
+    @classmethod
+    def _logo_url(cls, v: Optional[str]) -> Optional[str]:
+        return validate_image_url(v)
 
 
 class CheckoutTemplateOut(BaseModel):
@@ -63,7 +86,7 @@ class CheckoutTemplateOut(BaseModel):
     updated_at: datetime
 
 
-class CheckoutSessionCreate(BaseModel):
+class CheckoutSessionCreate(StrictRequest):
     purpose: str = Field(
         "invoice_payment",
         description="invoice_payment, new_subscription, update_subscription, update_card, one_time_addon, add_payment_method",
@@ -73,7 +96,7 @@ class CheckoutSessionCreate(BaseModel):
     invoice_id: Optional[str] = None
     subscription_id: Optional[str] = None
     plan_id: Optional[str] = None
-    amount: Optional[Decimal] = None
+    amount: Optional[Money] = None
     currency: Optional[str] = "INR"
     expires_in_hours: int = Field(1, ge=1, le=168, description="Session validity duration in hours")
     save_payment_method: bool = False

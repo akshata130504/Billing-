@@ -48,6 +48,9 @@ export interface OrganizationDetail extends OrganizationSummary {
     deletion_scheduled_for: string | null;
     jobs_paused: boolean;
     automation_running: boolean;
+    /** Effective state: a trial organization's automation is held until its subscription is approved. */
+    automation_state?: 'running' | 'paused' | 'held_trial';
+    automation_label?: string;
     renewals_waiting: number;
   };
   allowed_actions: LifecycleAction[];
@@ -126,6 +129,8 @@ export interface StaffDetail extends StaffSummary {
 
 export interface SchedulerStatus {
   enabled: boolean;
+  /** From the scheduler's own heartbeat (it runs as a separate process from this API). */
+  running?: boolean;
   status: string;
   interval_minutes?: number | null;
   last_finished_at?: string | null;

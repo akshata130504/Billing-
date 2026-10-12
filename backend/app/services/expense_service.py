@@ -21,7 +21,7 @@ from backend.app.models.expenses import (
     RecurringExpenseStatus,
 )
 from backend.app.models.projects import Project
-from backend.app.services import timezones
+from backend.app.services import currency_totals, timezones
 from backend.app.services.money import D, q2
 from backend.app.schemas.expenses import (
     ExpenseCreate,
@@ -521,38 +521,26 @@ def get_receipt_file(db: Session, organization_id: str, expense_id: str):
 
 
 def get_summary_kpis(db: Session, organization_id: str) -> ExpenseSummaryKPIs:
-    total = db.scalar(
-        select(func.coalesce(func.sum(Expense.amount), Decimal("0.00"))).where(
-            Expense.organization_id == organization_id
-        )
-    ) or Decimal("0.00")
-
-    billable = db.scalar(
-        select(func.coalesce(func.sum(Expense.amount), Decimal("0.00"))).where(
-            Expense.organization_id == organization_id,
-            Expense.billable.is_(True),
-        )
-    ) or Decimal("0.00")
-
-    non_billable = db.scalar(
-        select(func.coalesce(func.sum(Expense.amount), Decimal("0.00"))).where(
-            Expense.organization_id == organization_id,
-            Expense.billable.is_(False),
-        )
-    ) or Decimal("0.00")
-
-    pending = db.scalar(
-        select(func.coalesce(func.sum(Expense.amount), Decimal("0.00"))).where(
-            Expense.organization_id == organization_id,
-            Expense.status.in_([ExpenseStatus.RECORDED, ExpenseStatus.BILLABLE]),
-        )
-    ) or Decimal("0.00")
-
+    """Expense totals per currency (never summed across currencies). The scalar fields are
+    the organization's base currency only, labelled by `currency`."""
+    org = Expense.organization_id == organization_id
+    sums = {
+        "total": currency_totals.sums_by_currency(db, Expense.currency, Expense.amount, org),
+        "billable": currency_totals.sums_by_currency(db, Expense.currency, Expense.amount, org, Expense.billable.is_(True)),
+        "non_billable": currency_totals.sums_by_currency(db, Expense.currency, Expense.amount, org, Expense.billable.is_(False)),
+        "pending": currency_totals.sums_by_currency(
+            db, Expense.currency, Expense.amount, org, Expense.status.in_([ExpenseStatus.RECORDED, ExpenseStatus.BILLABLE])
+        ),
+    }
+    base = currency_totals.org_base_currency(db, organization_id)
+    zero = Decimal("0.00")
     return ExpenseSummaryKPIs(
-        total=total,
-        billable=billable,
-        non_billable=non_billable,
-        pending=pending,
+        currency=base,
+        **{key: values.get(base, zero) for key, values in sums.items()},
+        by_currency=[
+            {"currency": cur, **{key: values.get(cur, zero) for key, values in sums.items()}}
+            for cur in currency_totals.order_currencies(sums["total"], base)
+        ],
     )
 
 
@@ -668,20 +656,15 @@ def get_recurring_summary_kpis(db: Session, organization_id: str) -> RecurringEx
         )
     ) or 0
 
-    monthly_recurring = db.scalar(
-        select(func.coalesce(func.sum(RecurringExpense.amount), Decimal("0.00"))).where(
-            RecurringExpense.organization_id == organization_id,
-            RecurringExpense.status == RecurringExpenseStatus.ACTIVE,
-        )
-    ) or Decimal("0.00")
-
-    billable_recurring = db.scalar(
-        select(func.coalesce(func.sum(RecurringExpense.amount), Decimal("0.00"))).where(
-            RecurringExpense.organization_id == organization_id,
-            RecurringExpense.status == RecurringExpenseStatus.ACTIVE,
-            RecurringExpense.billable.is_(True),
-        )
-    ) or Decimal("0.00")
+    # Per currency (never summed across currencies); the scalars are the base currency only.
+    active = (RecurringExpense.organization_id == organization_id, RecurringExpense.status == RecurringExpenseStatus.ACTIVE)
+    monthly_by_cur = currency_totals.sums_by_currency(db, RecurringExpense.currency, RecurringExpense.amount, *active)
+    billable_by_cur = currency_totals.sums_by_currency(
+        db, RecurringExpense.currency, RecurringExpense.amount, *active, RecurringExpense.billable.is_(True)
+    )
+    base = currency_totals.org_base_currency(db, organization_id)
+    monthly_recurring = monthly_by_cur.get(base, Decimal("0.00"))
+    billable_recurring = billable_by_cur.get(base, Decimal("0.00"))
 
     next_date = db.scalar(
         select(RecurringExpense.next_run)
@@ -696,8 +679,17 @@ def get_recurring_summary_kpis(db: Session, organization_id: str) -> RecurringEx
 
     return RecurringExpenseSummaryKPIs(
         active_profiles=active_profiles,
+        currency=base,
         monthly_recurring=monthly_recurring,
         billable_recurring=billable_recurring,
+        by_currency=[
+            {
+                "currency": cur,
+                "monthly_recurring": monthly_by_cur.get(cur, Decimal("0.00")),
+                "billable_recurring": billable_by_cur.get(cur, Decimal("0.00")),
+            }
+            for cur in currency_totals.order_currencies(monthly_by_cur, base)
+        ],
         next_run=str(next_date) if next_date else None,
     )
 

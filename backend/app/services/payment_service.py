@@ -41,7 +41,8 @@ from backend.app.models import (
 from backend.app.schemas.common_refs import customer_ref, iso_dt, money_str, user_ref
 from backend.app.schemas.invoices import RecordPaymentIn
 from backend.app.schemas.payments import AllocationIn, PaymentCreate, PaymentUpdate
-from backend.app.services import audit, razorpay_gateway, timezones
+from backend.app.schemas.validators import is_after_org_today
+from backend.app.services import audit, currency_totals, razorpay_gateway, timezones
 from backend.app.services.invoice_service import (
     SETTLED_PAYMENT_STATUSES,
     get_customer,
@@ -317,29 +318,42 @@ def payments_summary(db: Session, organization_id: str, **filters) -> Dict[str, 
     ).subquery()
     matching = select(ids_stmt.c.id)
 
-    def _sum(column, *conditions):
-        stmt = select(func.coalesce(func.sum(column), 0)).where(Payment.id.in_(matching))
-        for condition in conditions:
-            stmt = stmt.where(condition)
-        return D(db.scalar(stmt))
+    def _sums(column, *conditions) -> Dict[str, Decimal]:
+        return currency_totals.sums_by_currency(db, Payment.currency, column, Payment.id.in_(matching), *conditions)
 
-    collected = _sum(Payment.amount - Payment.amount_refunded, Payment.status.in_(SETTLED_PAYMENT_STATUSES))
-    pending = _sum(Payment.amount, Payment.status == PaymentStatus.PENDING)
-    refunded = _sum(Payment.amount_refunded)
-    allocated = D(
-        db.scalar(
-            select(func.coalesce(func.sum(PaymentAllocation.amount), 0))
-            .join(Payment, Payment.id == PaymentAllocation.payment_id)
-            .where(Payment.id.in_(matching), Payment.status.in_(SETTLED_PAYMENT_STATUSES))
-        )
+    collected = _sums(Payment.amount - Payment.amount_refunded, Payment.status.in_(SETTLED_PAYMENT_STATUSES))
+    pending = _sums(Payment.amount, Payment.status == PaymentStatus.PENDING)
+    refunded = _sums(Payment.amount_refunded)
+    allocated = _sums(
+        PaymentAllocation.amount, PaymentAllocation.payment_id == Payment.id, Payment.status.in_(SETTLED_PAYMENT_STATUSES)
     )
-    count = db.scalar(select(func.count()).select_from(ids_stmt)) or 0
+    counts: Dict[str, int] = {}
+    for cur, n in db.execute(select(Payment.currency, func.count()).where(Payment.id.in_(matching)).group_by(Payment.currency)).all():
+        counts[currency_totals.norm(cur)] = counts.get(currency_totals.norm(cur), 0) + int(n)
+
+    base = currency_totals.org_base_currency(db, organization_id)
+    zero = Decimal("0")
+
+    def _row(cur: str) -> Dict[str, Any]:
+        return {
+            "currency": cur,
+            "count": counts.get(cur, 0),
+            "total_collected": money_str(collected.get(cur, zero)),
+            "pending_amount": money_str(pending.get(cur, zero)),
+            "total_refunded": money_str(refunded.get(cur, zero)),
+            "unallocated_amount": money_str(max(zero, collected.get(cur, zero) - allocated.get(cur, zero))),
+        }
+
+    base_row = _row(base)
+    # Money fields are the base currency only (labelled by `currency`); never summed across currencies.
     return {
-        "count": int(count),
-        "total_collected": money_str(collected),
-        "pending_amount": money_str(pending),
-        "total_refunded": money_str(refunded),
-        "unallocated_amount": money_str(max(Decimal("0"), collected - allocated)),
+        "count": sum(counts.values()),
+        "currency": base,
+        "total_collected": base_row["total_collected"],
+        "pending_amount": base_row["pending_amount"],
+        "total_refunded": base_row["total_refunded"],
+        "unallocated_amount": base_row["unallocated_amount"],
+        "by_currency": [_row(cur) for cur in currency_totals.order_currencies(counts, base)],
     }
 
 
@@ -369,24 +383,30 @@ def reconciliation_summary(db: Session, organization_id: str) -> Dict[str, Any]:
     for status_value, count in db.execute(base.group_by(Payment.reconciliation_status)).all():
         key = status_value.value if hasattr(status_value, "value") else str(status_value)
         counts[key] = int(count)
-    received = db.scalar(
-        select(func.coalesce(func.sum(Payment.amount - Payment.amount_refunded), 0)).where(
-            Payment.organization_id == organization_id, Payment.status.in_(SETTLED_PAYMENT_STATUSES)
-        )
+    settled = (Payment.organization_id == organization_id, Payment.status.in_(SETTLED_PAYMENT_STATUSES))
+    received = currency_totals.sums_by_currency(db, Payment.currency, Payment.amount - Payment.amount_refunded, *settled)
+    allocated = currency_totals.sums_by_currency(
+        db, Payment.currency, PaymentAllocation.amount, PaymentAllocation.payment_id == Payment.id, *settled
     )
-    allocated = db.scalar(
-        select(func.coalesce(func.sum(PaymentAllocation.amount), 0))
-        .join(Payment, Payment.id == PaymentAllocation.payment_id)
-        .where(Payment.organization_id == organization_id, Payment.status.in_(SETTLED_PAYMENT_STATUSES))
-    )
+    base = currency_totals.org_base_currency(db, organization_id)
+    unallocated = {cur: max(Decimal("0"), received[cur] - allocated.get(cur, Decimal("0"))) for cur in received}
     return {
         **counts,
         "total": sum(counts.values()),
-        "unallocated_amount": money_str(max(Decimal("0"), D(received) - D(allocated))),
+        # Base currency only (labelled); other currencies in unallocated_by_currency.
+        "currency": base,
+        "unallocated_amount": money_str(unallocated.get(base, Decimal("0"))),
+        "unallocated_by_currency": [
+            {"currency": cur, "amount": money_str(unallocated[cur])} for cur in currency_totals.order_currencies(unallocated, base)
+        ],
     }
 
 
 # --- allocation validation ---------------------------------------------------------------------------------------------
+
+
+def _currency(code: Optional[str]) -> str:
+    return (code or "INR").upper()
 
 
 def _validate_allocations(
@@ -395,9 +415,14 @@ def _validate_allocations(
     payment_amount: Decimal,
     allocations: Sequence[AllocationIn],
     *,
+    customer_id: str,
+    currency: str,
     own_existing: Optional[Dict[str, Decimal]] = None,
 ) -> List[tuple[Invoice, Decimal]]:
-    """Return (invoice, amount) pairs or raise 422. `own_existing` = this payment's current allocation per invoice."""
+    """Return (invoice, amount) pairs or raise 422. `own_existing` = this payment's current allocation per invoice.
+
+    A payment can only settle invoices of the customer who paid it, in the payment's own currency:
+    there is no conversion, so 5 INR must never become 5 USD paid."""
     own_existing = own_existing or {}
     seen: Set[str] = set()
     total = Decimal("0")
@@ -411,6 +436,14 @@ def _validate_allocations(
         invoice = get_invoice(db, organization_id, alloc.invoice_id)  # 404 for other tenants
         lock_invoice(db, invoice)  # serialise with concurrent allocations before reading amount_due
         amount = q2(alloc.amount)
+        if invoice.customer_id != customer_id:
+            fields[f"allocations.{idx}.invoice_id"] = f"invoice {invoice.invoice_number} belongs to a different customer"
+            continue
+        if _currency(invoice.currency) != _currency(currency):
+            fields[f"allocations.{idx}.invoice_id"] = (
+                f"invoice {invoice.invoice_number} is in {_currency(invoice.currency)}; this payment is in {_currency(currency)}"
+            )
+            continue
         if invoice.status not in OPEN_INVOICE_STATUSES:
             fields[f"allocations.{idx}.invoice_id"] = f"invoice {invoice.invoice_number} is {invoice.status.value}, not open"
             continue
@@ -435,20 +468,31 @@ def _reload(db: Session, payment: Payment) -> Payment:
 # --- create / update -----------------------------------------------------------------------------------------------------
 
 
+def _reject_future_paid_at(ctx: CurrentContext, paid_at: Optional[datetime]) -> None:
+    # A plain-date paid_at is the organization's calendar date; the schema only rejects dates
+    # that are in the future everywhere.
+    if is_after_org_today(paid_at, ctx.organization):
+        raise ValidationAppError("Payment date cannot be in the future.", {"fields": {"paid_at": "in the future"}})
+
+
 def create_payment(db: Session, ctx: CurrentContext, data: PaymentCreate) -> Payment:
+    _reject_future_paid_at(ctx, data.paid_at)
     customer = get_customer(db, ctx.organization_id, data.customer_id)
     amount = q2(data.amount)
     # Number first (organization lock), then the invoice locks inside validation:
     # the same org -> invoice order every other allocation path uses. A validation
     # failure rolls the reserved number back with the transaction.
     payment_number = next_number(db, ctx.organization_id, "payment")
-    pairs = _validate_allocations(db, ctx.organization_id, amount, data.allocations or [])
+    currency = customer.currency or ctx.organization.default_currency or "INR"
+    pairs = _validate_allocations(
+        db, ctx.organization_id, amount, data.allocations or [], customer_id=customer.id, currency=currency
+    )
     payment = Payment(
         organization_id=ctx.organization_id,
         payment_number=payment_number,
         customer_id=customer.id,
         amount=amount,
-        currency=customer.currency or ctx.organization.default_currency or "INR",
+        currency=currency,
         method=data.method,
         gateway=PaymentGateway.MANUAL,
         status=PaymentStatus.SUCCEEDED,
@@ -494,6 +538,7 @@ def create_payment(db: Session, ctx: CurrentContext, data: PaymentCreate) -> Pay
 
 def record_invoice_payment(db: Session, ctx: CurrentContext, invoice: Invoice, data: RecordPaymentIn) -> Payment:
     """POST /invoices/{id}/record-payment: manual payment fully allocated to one invoice."""
+    _reject_future_paid_at(ctx, data.paid_at)
     # Organization (numbering) lock, then the invoice lock, before amount_due is read, so
     # two different payments recorded at once cannot both take the full balance.
     payment_number = next_number(db, ctx.organization_id, "payment")
@@ -545,6 +590,27 @@ def record_invoice_payment(db: Session, ctx: CurrentContext, invoice: Invoice, d
     return _reload(db, payment)
 
 
+def duplicate_reference_warnings(db: Session, payment: Payment) -> List[str]:
+    """Non-blocking: the same reference on another payment of the organization (a split or
+    repeated transfer is legitimate, so it is never refused - the user is just told)."""
+    reference = (payment.reference or "").strip()
+    if not reference:
+        return []
+    others = db.scalars(
+        select(Payment.payment_number)
+        .where(
+            Payment.organization_id == payment.organization_id,
+            Payment.id != payment.id,
+            func.lower(Payment.reference) == reference.lower(),
+        )
+        .order_by(Payment.created_at)
+        .limit(3)
+    ).all()
+    if not others:
+        return []
+    return [f"Reference {reference} is also used on {', '.join(others)}. Check this is not a duplicate payment."]
+
+
 def update_payment(db: Session, ctx: CurrentContext, payment: Payment, data: PaymentUpdate) -> Payment:
     before = snapshot(payment)
     changes = data.model_dump(exclude_unset=True)
@@ -571,10 +637,21 @@ def update_payment(db: Session, ctx: CurrentContext, payment: Payment, data: Pay
 def set_allocations(db: Session, ctx: CurrentContext, payment: Payment, allocations: Sequence[AllocationIn]) -> Payment:
     if payment.status not in (PaymentStatus.SUCCEEDED, PaymentStatus.PARTIALLY_REFUNDED):
         raise InvalidStateError(f"Allocations can only be changed on settled payments; this payment is {payment.status.value}.")
+    # Serialise concurrent re-allocations of the same payment (payment row, then invoice rows,
+    # the order the refund paths use) so two requests cannot both read the old allocations.
+    payment = lock_payment(db, payment)
     own_existing: Dict[str, Decimal] = {}
     for a in payment.allocations:
         own_existing[a.invoice_id] = own_existing.get(a.invoice_id, Decimal("0")) + D(a.amount)
-    pairs = _validate_allocations(db, ctx.organization_id, effective_amount(payment), allocations, own_existing=own_existing)
+    pairs = _validate_allocations(
+        db,
+        ctx.organization_id,
+        effective_amount(payment),
+        allocations,
+        customer_id=payment.customer_id,
+        currency=payment.currency,
+        own_existing=own_existing,
+    )
     before = {**snapshot(payment), "allocations": [{"invoice_id": a.invoice_id, "amount": a.amount} for a in payment.allocations]}
 
     affected: Dict[str, Invoice] = {}
@@ -965,6 +1042,8 @@ def allocate_captured_payment(db: Session, payment: Payment, invoice: Invoice, *
         return payment
     if any(a.invoice_id == invoice.id for a in payment.allocations):
         return payment
+    if invoice.customer_id != payment.customer_id or _currency(invoice.currency) != _currency(payment.currency):
+        return payment  # never settle another customer's invoice or convert currencies implicitly
     headroom = q2(effective_amount(payment) - allocated_amount(payment))
     alloc_amount = min(headroom, q2(invoice.amount_due)) if invoice.status in OPEN_INVOICE_STATUSES else Decimal("0")
     if alloc_amount > 0:

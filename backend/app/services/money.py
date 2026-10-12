@@ -11,6 +11,20 @@ ZERO = Decimal("0.00")
 # supported by the split today, which is why the default is False).
 ZERO_RATE_EXPORTS_WITH_TAX = False
 
+# ISO-4217 codes the product supports (plans, customers, organization settings, expenses;
+# the frontend offers the same list). There is no FX conversion between them.
+SUPPORTED_CURRENCIES = ("INR", "USD", "EUR", "GBP", "AED", "SGD", "AUD", "CAD")
+
+
+def supported_currency(value):
+    """Pydantic validator body: upper-case a currency code and reject unsupported ones."""
+    if not isinstance(value, str):
+        return value
+    code = value.strip().upper()
+    if code not in SUPPORTED_CURRENCIES:
+        raise ValueError(f"Unsupported currency '{value}'. Use one of: {', '.join(SUPPORTED_CURRENCIES)}.")
+    return code
+
 
 def D(value) -> Decimal:
     """Coerce str/int/float/Decimal/None to a Decimal (None -> 0)."""
@@ -121,6 +135,9 @@ def compute_totals(lines: Iterable[LineInput], discount_pct=0, supply=None) -> T
         if supply is not None and getattr(supply, "is_export", False) and not ZERO_RATE_EXPORTS_WITH_TAX:
             # Exports are zero-rated (supply under LUT): no GST is charged, so the
             # document total and its (empty) CGST/SGST/IGST heads always agree.
+            rate = Decimal("0")
+        if supply is not None and not getattr(supply, "supplier_registered", True):
+            # No GSTIN, no GST: an unregistered supplier charges no tax at all.
             rate = Decimal("0")
         line_tax = q2(taxable * rate / 100)
         tax_total += line_tax

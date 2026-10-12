@@ -107,6 +107,13 @@ def test_signup_creates_active_trial_org(client, db):
     ).first()
     assert audit_row is not None
     assert audit_row.details["owner_email"] == email
+    # Tenant-originated: the signing-up owner is the actor, not "unknown" (BUG-16).
+    founder = db.scalars(select(User).where(User.email == email)).one()
+    for row in (audit_row, trial_row):
+        assert row.platform_staff_id is None
+        assert row.staff_email_snapshot == email
+        assert row.staff_role_snapshot == "tenant_owner"
+        assert row.details["actor_user_id"] == founder.id
 
 
 def test_pending_org_blocks_tenant_endpoints_and_allows_auth_me(client, db):

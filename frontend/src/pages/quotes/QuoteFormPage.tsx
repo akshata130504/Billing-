@@ -24,13 +24,17 @@ import { customerService } from '../../services/customerService';
 import { catalogCpqService } from '../../services/catalogCpqService';
 import { planPricingService } from '../../services/planPricingService';
 import type { OfferingOut } from '../../types/catalog_cpq';
-import type { QuoteItemIn } from '../../types/quotes';
+import type { QuoteItemIn, SupplyPreview } from '../../types/quotes';
 import { todayIso, addDays, calculateValidityDays, formatQuoteTerms, updateTermsValidity } from '../../utils/format';
 
 const VALIDITY_PRESETS = [7, 15, 30, 60, 90] as const;
 
-interface FormLineItem extends QuoteItemIn {
+interface FormLineItem extends Omit<QuoteItemIn, 'unit_price'> {
   id?: string;
+  /** '' while a new custom line has no price yet. */
+  unit_price: number | '';
+  /** The user typed this line's price: re-pricing on a quantity change must not overwrite it. */
+  price_overridden?: boolean;
   name?: string;
   sku?: string;
   pricing_model?: string;
@@ -124,6 +128,26 @@ export function QuoteFormPage() {
 
   const [items, setItems] = useState<FormLineItem[]>([]);
 
+  // GST treatment as the server will save it (org GSTIN/state vs the customer's place of
+  // supply). Null until a customer is picked or when it cannot be fetched.
+  const [supply, setSupply] = useState<SupplyPreview | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setSupply(null);
+    if (!customerId) return;
+    (async () => {
+      try {
+        const res = await quoteService.getSupplyPreview(customerId);
+        if (!cancelled) setSupply(res ?? null);
+      } catch {
+        if (!cancelled) setSupply(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId]);
+
   const handleQuickCreateCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCustName.trim()) return;
@@ -184,6 +208,8 @@ export function QuoteFormPage() {
               unit_price: Number(it.unit_price || 0),
               tax_rate_pct: Number(it.tax_rate_pct || 18),
               pricing_explanation: it.pricing_explanation,
+              // An offering line saved without the engine's explanation carries a typed price.
+              price_overridden: Boolean(it.offering_id) && !it.pricing_explanation,
             }))
           );
 
@@ -246,6 +272,23 @@ export function QuoteFormPage() {
 
   // Recalculate line pricing when offering or quantity changes
   const handleSelectOffering = async (index: number, offeringId: string) => {
+    if (!offeringId) {
+      // Back to "Custom Item": drop the offering link (and its pricing), keep what the user typed.
+      const updated = [...items];
+      updated[index] = {
+        ...updated[index],
+        id: undefined,
+        offering_id: undefined,
+        name: undefined,
+        sku: undefined,
+        pricing_model: undefined,
+        pricing_explanation: undefined,
+        price_overridden: undefined,
+        is_custom: true,
+      };
+      setItems(updated);
+      return;
+    }
     const off = offerings.find((o) => o.id === offeringId);
     if (!off) return;
 
@@ -270,6 +313,8 @@ export function QuoteFormPage() {
         tax_rate_pct: Number(off.tax_rate_pct || 18),
         pricing_model: off.pricing_model,
         pricing_explanation: JSON.stringify(sim.explanation),
+        price_overridden: undefined,
+        is_custom: undefined,
       };
       setItems(updated);
     } catch (err) {
@@ -291,6 +336,8 @@ export function QuoteFormPage() {
         unit_price: Number(off.base_price || 0),
         tax_rate_pct: Number(off.tax_rate_pct || 18),
         pricing_model: off.pricing_model,
+        price_overridden: undefined,
+        is_custom: undefined,
       };
       setItems(updated);
     }
@@ -301,8 +348,8 @@ export function QuoteFormPage() {
     const newQty = Math.max(1, qty);
 
     // A retained archived line keeps its stored price: archived offerings cannot be priced, and
-    // only its quantity is editable.
-    if (item.offering_id && !archivedIds.has(item.offering_id)) {
+    // only its quantity is editable. A price the user typed is kept too.
+    if (item.offering_id && !archivedIds.has(item.offering_id) && !item.price_overridden) {
       try {
         const sim = await planPricingService.simulatePricing({
           offering_id: item.offering_id,
@@ -329,34 +376,18 @@ export function QuoteFormPage() {
     setItems(updated);
   };
 
+  // A new line is a blank "Custom Item": it never inherits another line's offering or price.
   const handleAddItem = () => {
-    if (offerings.length > 0) {
-      const firstOff = offerings[0];
-      setItems([
-        ...items,
-        {
-          offering_id: firstOff.id,
-          name: firstOff.name,
-          sku: firstOff.sku,
-          description: `${firstOff.name} (${firstOff.sku})`,
-          quantity: 1,
-          unit_price: Number(firstOff.base_price || 0),
-          tax_rate_pct: Number(firstOff.tax_rate_pct || 18),
-          pricing_model: firstOff.pricing_model,
-        },
-      ]);
-    } else {
-      setItems([
-        ...items,
-        {
-          description: 'Consulting & Engineering Services',
-          quantity: 1,
-          unit_price: 5000,
-          tax_rate_pct: 18,
-          is_custom: true,
-        },
-      ]);
-    }
+    setItems([
+      ...items,
+      {
+        description: '',
+        quantity: 1,
+        unit_price: '',
+        tax_rate_pct: 18,
+        is_custom: true,
+      },
+    ]);
   };
 
   const handleDuplicateItem = (index: number) => {
@@ -375,11 +406,13 @@ export function QuoteFormPage() {
     let taxTotal = 0;
 
     const disc = Math.max(0, Math.min(100, Number(discountPct) || 0));
+    // Same rule as the server: no GST without a GSTIN, and exports are zero-rated.
+    const noGst = supply !== null && !supply.charges_gst;
 
     for (const item of items) {
       const qty = Number(item.quantity || 1);
       const price = Number(item.unit_price || 0);
-      const taxRate = Number(item.tax_rate_pct || 0);
+      const taxRate = noGst ? 0 : Number(item.tax_rate_pct || 0);
 
       const amount = qty * price;
       const taxable = amount - (amount * disc) / 100;
@@ -391,16 +424,18 @@ export function QuoteFormPage() {
 
     const discountAmount = (subtotal * disc) / 100;
     const total = subtotal - discountAmount + taxTotal;
+    const intra = supply?.supply_type === 'intra_state';
 
     return {
       subtotal,
       discountAmount,
       taxTotal,
       total,
-      cgst: taxTotal / 2,
-      sgst: taxTotal / 2,
+      cgst: intra ? taxTotal / 2 : 0,
+      sgst: intra ? taxTotal / 2 : 0,
+      igst: supply?.supply_type === 'inter_state' ? taxTotal : 0,
     };
-  }, [items, discountPct]);
+  }, [items, discountPct, supply]);
 
   const handleSubmit = async (shouldSend = false) => {
     if (!customerId) {
@@ -440,7 +475,7 @@ export function QuoteFormPage() {
         setError(qtyError);
         return;
       }
-      const priceError = validateNonNegativeMoney(it.unit_price, `${label} unit price`);
+      const priceError = validateNonNegativeMoney(it.unit_price, `${label} unit price`, { required: true });
       if (priceError) {
         setError(priceError);
         return;
@@ -757,7 +792,13 @@ export function QuoteFormPage() {
                         value={item.unit_price}
                         onChange={(e) => {
                           const updated = [...items];
-                          updated[idx] = { ...item, unit_price: Number(e.target.value) };
+                          updated[idx] = {
+                            ...item,
+                            unit_price: e.target.value === '' ? '' : Number(e.target.value),
+                            price_overridden: true,
+                            // A typed price is no longer the engine's: its explanation would be wrong.
+                            pricing_explanation: undefined,
+                          };
                           setItems(updated);
                         }}
                         className="w-full px-2 py-1.5 text-xs font-semibold rounded border border-slate-200 text-right font-mono"
@@ -865,15 +906,45 @@ export function QuoteFormPage() {
                 </span>
               </div>
 
-              <div className="flex justify-between text-slate-600 text-[11px] pt-1">
-                <span className="text-slate-500">CGST (9%)</span>
-                <span className="font-mono">₹{Math.round(totals.cgst).toLocaleString('en-IN')}</span>
-              </div>
-
-              <div className="flex justify-between text-slate-600 text-[11px]">
-                <span className="text-slate-500">SGST (9%)</span>
-                <span className="font-mono">₹{Math.round(totals.sgst).toLocaleString('en-IN')}</span>
-              </div>
+              {supply?.supply_type === 'intra_state' && supply.charges_gst && (
+                <>
+                  <div className="flex justify-between text-slate-600 text-[11px] pt-1">
+                    <span className="text-slate-500">CGST</span>
+                    <span className="font-mono">₹{Math.round(totals.cgst).toLocaleString('en-IN')}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600 text-[11px]">
+                    <span className="text-slate-500">SGST</span>
+                    <span className="font-mono">₹{Math.round(totals.sgst).toLocaleString('en-IN')}</span>
+                  </div>
+                </>
+              )}
+              {supply?.supply_type === 'inter_state' && supply.charges_gst && (
+                <div className="flex justify-between text-slate-600 text-[11px] pt-1">
+                  <span className="text-slate-500">IGST</span>
+                  <span className="font-mono">₹{Math.round(totals.igst).toLocaleString('en-IN')}</span>
+                </div>
+              )}
+              {(supply === null || !supply.charges_gst) && (
+                <div className="flex justify-between text-slate-600 text-[11px] pt-1">
+                  <span className="text-slate-500">GST</span>
+                  <span className="font-mono">₹{Math.round(totals.taxTotal).toLocaleString('en-IN')}</span>
+                </div>
+              )}
+              {supply !== null && !supply.charges_gst && (
+                <p className="text-[11px] text-amber-700" data-testid="no-gst-notice">
+                  {supply.supply_type === 'export' ? (
+                    'GST is not charged on an export supply.'
+                  ) : (
+                    <>
+                      GST is not charged because your organization has no GSTIN — add it in{' '}
+                      <Link to="/settings/organization" className="underline font-medium">
+                        Settings → Organization
+                      </Link>
+                      .
+                    </>
+                  )}
+                </p>
+              )}
 
               <hr className="border-slate-200" />
 

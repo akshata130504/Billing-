@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.orm import Session
@@ -35,7 +35,7 @@ from backend.app.schemas.lifecycle import (
     LifecycleKPIs,
     TimelineEvent,
 )
-from backend.app.services import audit
+from backend.app.services import audit, currency_totals
 from backend.app.services.money import D, q2
 
 
@@ -260,6 +260,18 @@ def list_customer_lifecycles(
         .group_by(Invoice.customer_id)
     ).all()
     invoice_map = {row.customer_id: row for row in invoice_rows}
+    # Paid / due per (customer, currency): money is never summed across currencies.
+    money_by_customer: Dict[str, Dict[str, Tuple[Decimal, Decimal]]] = {}
+    for cid, cur, paid, due in db.execute(
+        select(Invoice.customer_id, Invoice.currency, func.sum(Invoice.amount_paid), func.sum(Invoice.amount_due))
+        .where(
+            Invoice.organization_id == org_id,
+            Invoice.customer_id.in_(customer_ids),
+            Invoice.status.not_in(BILLED_INVOICE_EXCLUDED_STATUSES),
+        )
+        .group_by(Invoice.customer_id, Invoice.currency)
+    ).all():
+        money_by_customer.setdefault(cid, {})[currency_totals.norm(cur)] = (q2(D(paid or 0)), q2(D(due or 0)))
 
     # Batch count active subscriptions
     sub_rows = db.execute(
@@ -338,8 +350,11 @@ def list_customer_lifecycles(
         if health and lc.health_status != health:
             continue
 
-        total_paid = q2(D(inv_stat.total_paid) if inv_stat and inv_stat.total_paid else Decimal("0.00"))
-        amount_due = q2(D(inv_stat.total_due) if inv_stat and inv_stat.total_due else Decimal("0.00"))
+        # total_spent / amount_due: the customer's billing currency only (labelled);
+        # totals_by_currency lists every currency the customer was invoiced in.
+        currency = currency_totals.norm(c.currency)
+        money = money_by_customer.get(c.id, {})
+        total_paid, amount_due = money.get(currency, (Decimal("0.00"), Decimal("0.00")))
         active_subs_count = sub_map.get(c.id, 0)
         invoices_count = inv_stat.invoice_count if inv_stat else 0
         quotes_count = quote_map.get(c.id, 0)
@@ -359,8 +374,13 @@ def list_customer_lifecycles(
             next_action=lc.next_action,
             next_action_due=lc.next_action_due,
             notes=lc.notes,
+            currency=currency,
             total_spent=total_paid,
             amount_due=amount_due,
+            totals_by_currency=[
+                {"currency": cur, "total_spent": money[cur][0], "amount_due": money[cur][1]}
+                for cur in currency_totals.order_currencies(money, currency)
+            ],
             active_subscriptions_count=active_subs_count,
             total_invoices_count=invoices_count,
             total_quotes_count=quotes_count,

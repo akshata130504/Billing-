@@ -4,6 +4,8 @@ Everything is computed with SQL aggregates scoped to the organization; the only
 Python loops are over the small "recent" lists.
 
 Documented approximations
+- Money is never summed across currencies: every amount is the org's base currency
+  (`currency` in the response) and `by_currency` breakdowns list every currency.
 - revenue = Σ (amount - amount_refunded) of settled payments by paid_at.
 - pipeline amounts: draft/paid use `total`, open buckets use `amount_due`.
 - MRR (compute_mrr) = sum over ACTIVE + PAST_DUE subscriptions of the subscription's own
@@ -28,7 +30,7 @@ from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app.models.billing_cycles import SubscriptionItem, SubscriptionItemStatus, SubscriptionItemType
-from backend.app.services import timezones
+from backend.app.services import currency_totals, timezones
 
 from backend.app.core.exceptions import ValidationAppError
 from backend.app.models import (
@@ -110,30 +112,36 @@ def _month_label(value: date) -> str:
 # --- aggregate building blocks -----------------------------------------------------------------------------
 
 
-def _revenue_between(db: Session, org_id: str, start: date, end: date, tz: Any = None) -> Decimal:
+def _revenue_between(db: Session, org_id: str, start: date, end: date, tz: Any = None) -> Dict[str, Decimal]:
+    """{currency: net settled payments} for [start, end]."""
     lo, hi = _bounds(start, end, tz if tz is not None else timezones.org_tz_for_id(db, org_id))
-    value = db.scalar(
-        select(func.coalesce(func.sum(Payment.amount - Payment.amount_refunded), 0)).where(
-            Payment.organization_id == org_id,
-            Payment.status.in_(SETTLED_PAYMENT_STATUSES),
-            Payment.paid_at >= lo,
-            Payment.paid_at < hi,
-        )
+    return currency_totals.sums_by_currency(
+        db,
+        Payment.currency,
+        Payment.amount - Payment.amount_refunded,
+        Payment.organization_id == org_id,
+        Payment.status.in_(SETTLED_PAYMENT_STATUSES),
+        Payment.paid_at >= lo,
+        Payment.paid_at < hi,
     )
-    return _dec(value)
 
 
-def _invoiced_between(db: Session, org_id: str, start: date, end: date, tz: Any = None) -> Decimal:
+def _invoiced_between(db: Session, org_id: str, start: date, end: date, tz: Any = None) -> Dict[str, Decimal]:
+    """{currency: invoiced total} for invoices sent in [start, end]."""
     lo, hi = _bounds(start, end, tz if tz is not None else timezones.org_tz_for_id(db, org_id))
-    value = db.scalar(
-        select(func.coalesce(func.sum(Invoice.total), 0)).where(
-            Invoice.organization_id == org_id,
-            Invoice.status != InvoiceStatus.VOID,
-            Invoice.sent_at >= lo,
-            Invoice.sent_at < hi,
-        )
+    return currency_totals.sums_by_currency(
+        db,
+        Invoice.currency,
+        Invoice.total,
+        Invoice.organization_id == org_id,
+        Invoice.status != InvoiceStatus.VOID,
+        Invoice.sent_at >= lo,
+        Invoice.sent_at < hi,
     )
-    return _dec(value)
+
+
+def _in(amounts: Dict[str, Decimal], currency: str) -> Decimal:
+    return _dec(amounts.get(currency, 0))
 
 
 # Statuses whose subscriptions bill today. PAST_DUE still bills (the renewal is unpaid,
@@ -326,13 +334,33 @@ def logo_churn(db: Session, org_id: str, lo: datetime, hi: datetime) -> Tuple[in
     return churned, len(start_customers), rate
 
 
-def _bucket(db: Session, org_id: str, statuses, amount_column) -> Dict[str, Any]:
-    row = db.execute(
-        select(func.count(), func.coalesce(func.sum(amount_column), 0)).where(
-            Invoice.organization_id == org_id, Invoice.status.in_(list(statuses))
-        )
-    ).one()
-    return {"count": int(row[0] or 0), "amount": money_str(_dec(row[1]))}
+def _count_amount_by_currency(db: Session, currency_column, amount_column, *where: Any) -> Dict[str, Tuple[int, Decimal]]:
+    out: Dict[str, Tuple[int, Decimal]] = {}
+    for cur, count, amount in db.execute(
+        select(currency_column, func.count(), func.coalesce(func.sum(amount_column), 0)).where(*where).group_by(currency_column)
+    ).all():
+        n, total = out.get(currency_totals.norm(cur), (0, Decimal("0")))
+        out[currency_totals.norm(cur)] = (n + int(count or 0), total + D(amount))
+    return out
+
+
+def _bucket_out(rows: Dict[str, Tuple[int, Decimal]], base: str) -> Dict[str, Any]:
+    """count = every currency; amount = base currency only; by_currency = each currency."""
+    return {
+        "count": sum(n for n, _ in rows.values()),
+        "amount": money_str(_dec(rows.get(base, (0, 0))[1])),
+        "by_currency": [
+            {"currency": cur, "count": rows[cur][0], "amount": money_str(_dec(rows[cur][1]))}
+            for cur in currency_totals.order_currencies(rows, base)
+        ],
+    }
+
+
+def _bucket(db: Session, org_id: str, statuses, amount_column, base: str) -> Dict[str, Any]:
+    rows = _count_amount_by_currency(
+        db, Invoice.currency, amount_column, Invoice.organization_id == org_id, Invoice.status.in_(list(statuses))
+    )
+    return _bucket_out(rows, base)
 
 
 # --- dashboard summary ------------------------------------------------------------------------------------------
@@ -345,23 +373,29 @@ def dashboard_summary(db: Session, organization, range_key: str = "30_days") -> 
     start, end, prev_start, prev_end = resolve_range(range_key, today)
     lo, hi = _bounds(start, end, tz)
 
-    # --- metrics
-    revenue = _revenue_between(db, org_id, start, end, tz)
-    prev_revenue = _revenue_between(db, org_id, prev_start, prev_end, tz)
-    outstanding = db.execute(
-        select(func.count(), func.coalesce(func.sum(Invoice.amount_due), 0)).where(
-            Invoice.organization_id == org_id, Invoice.status.in_(list(OPEN_INVOICE_STATUSES))
-        )
-    ).one()
-    overdue = db.execute(
-        select(func.count(), func.coalesce(func.sum(Invoice.amount_due), 0)).where(
-            Invoice.organization_id == org_id,
-            or_(
-                Invoice.status == InvoiceStatus.OVERDUE,
-                and_(Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIALLY_PAID]), Invoice.due_date < today),
-            ),
-        )
-    ).one()
+    # --- metrics (money in the base currency; by_currency lists every currency)
+    base_currency = (organization.default_currency or "INR").upper()
+    revenue_by_cur = _revenue_between(db, org_id, start, end, tz)
+    revenue = _in(revenue_by_cur, base_currency)
+    prev_revenue = _in(_revenue_between(db, org_id, prev_start, prev_end, tz), base_currency)
+    outstanding_rows = _count_amount_by_currency(
+        db, Invoice.currency, Invoice.amount_due, Invoice.organization_id == org_id, Invoice.status.in_(list(OPEN_INVOICE_STATUSES))
+    )
+    overdue_rows = _count_amount_by_currency(
+        db,
+        Invoice.currency,
+        Invoice.amount_due,
+        Invoice.organization_id == org_id,
+        or_(
+            Invoice.status == InvoiceStatus.OVERDUE,
+            and_(Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIALLY_PAID]), Invoice.due_date < today),
+        ),
+    )
+    outstanding = _bucket_out(outstanding_rows, base_currency)
+    overdue = _bucket_out(overdue_rows, base_currency)
+    metric_currencies = currency_totals.order_currencies(
+        set(revenue_by_cur) | set(outstanding_rows) | set(overdue_rows) | {base_currency}, base_currency
+    )
     active_customers = db.scalar(
         select(func.count()).select_from(Customer).where(Customer.organization_id == org_id, Customer.status == CustomerStatus.ACTIVE)
     )
@@ -375,7 +409,6 @@ def dashboard_summary(db: Session, organization, range_key: str = "30_days") -> 
     )
 
     # --- revenue block
-    base_currency = (organization.default_currency or "INR").upper()
     mrr_now = compute_mrr(db, org_id, base_currency=base_currency)
     mrr = mrr_now["mrr"]
     prev_month_start = timezones.day_start_utc(add_months(today.replace(day=1), -1), tz)
@@ -386,27 +419,37 @@ def dashboard_summary(db: Session, organization, range_key: str = "30_days") -> 
     for offset in range(11, -1, -1):
         month_start = add_months(first_of_month, -offset)
         month_end = add_months(month_start, 1) - timedelta(days=1)
+        month_revenue = _revenue_between(db, org_id, month_start, month_end, tz)
+        month_invoiced = _invoiced_between(db, org_id, month_start, month_end, tz)
         trend.append(
             {
                 "label": _month_label(month_start),
                 "period_start": month_start,
-                "revenue": money_str(_revenue_between(db, org_id, month_start, month_end, tz)),
-                "invoiced": money_str(_invoiced_between(db, org_id, month_start, month_end, tz)),
+                "revenue": money_str(_in(month_revenue, base_currency)),
+                "invoiced": money_str(_in(month_invoiced, base_currency)),
+                "by_currency": [
+                    {"currency": cur, "revenue": money_str(_in(month_revenue, cur)), "invoiced": money_str(_in(month_invoiced, cur))}
+                    for cur in currency_totals.order_currencies(set(month_revenue) | set(month_invoiced), base_currency)
+                ],
             }
         )
 
     # --- pipeline
-    paid_row = db.execute(
-        select(func.count(), func.coalesce(func.sum(Invoice.total), 0)).where(
-            Invoice.organization_id == org_id, Invoice.status == InvoiceStatus.PAID, Invoice.paid_at >= lo, Invoice.paid_at < hi
-        )
-    ).one()
+    paid_rows = _count_amount_by_currency(
+        db,
+        Invoice.currency,
+        Invoice.total,
+        Invoice.organization_id == org_id,
+        Invoice.status == InvoiceStatus.PAID,
+        Invoice.paid_at >= lo,
+        Invoice.paid_at < hi,
+    )
     pipeline = {
-        "draft": _bucket(db, org_id, [InvoiceStatus.DRAFT], Invoice.total),
-        "sent": _bucket(db, org_id, [InvoiceStatus.SENT], Invoice.amount_due),
-        "partially_paid": _bucket(db, org_id, [InvoiceStatus.PARTIALLY_PAID], Invoice.amount_due),
-        "overdue": _bucket(db, org_id, [InvoiceStatus.OVERDUE], Invoice.amount_due),
-        "paid_this_period": {"count": int(paid_row[0] or 0), "amount": money_str(_dec(paid_row[1]))},
+        "draft": _bucket(db, org_id, [InvoiceStatus.DRAFT], Invoice.total, base_currency),
+        "sent": _bucket(db, org_id, [InvoiceStatus.SENT], Invoice.amount_due, base_currency),
+        "partially_paid": _bucket(db, org_id, [InvoiceStatus.PARTIALLY_PAID], Invoice.amount_due, base_currency),
+        "overdue": _bucket(db, org_id, [InvoiceStatus.OVERDUE], Invoice.amount_due, base_currency),
+        "paid_this_period": _bucket_out(paid_rows, base_currency),
     }
 
     # --- customer health (subscription statuses)
@@ -426,11 +469,15 @@ def dashboard_summary(db: Session, organization, range_key: str = "30_days") -> 
     )
 
     # --- recovery
-    failed_row = db.execute(
-        select(func.count(), func.coalesce(func.sum(Payment.amount), 0)).where(
-            Payment.organization_id == org_id, Payment.status == PaymentStatus.FAILED, Payment.created_at >= lo, Payment.created_at < hi
-        )
-    ).one()
+    failed_rows = _count_amount_by_currency(
+        db,
+        Payment.currency,
+        Payment.amount,
+        Payment.organization_id == org_id,
+        Payment.status == PaymentStatus.FAILED,
+        Payment.created_at >= lo,
+        Payment.created_at < hi,
+    )
     failed_customers = (
         select(Payment.customer_id)
         .where(
@@ -442,14 +489,15 @@ def dashboard_summary(db: Session, organization, range_key: str = "30_days") -> 
         )
         .distinct()
     )
-    recovered = db.scalar(
-        select(func.coalesce(func.sum(Payment.amount - Payment.amount_refunded), 0)).where(
-            Payment.organization_id == org_id,
-            Payment.status.in_(SETTLED_PAYMENT_STATUSES),
-            Payment.paid_at >= lo,
-            Payment.paid_at < hi,
-            Payment.customer_id.in_(failed_customers),
-        )
+    recovered = currency_totals.sums_by_currency(
+        db,
+        Payment.currency,
+        Payment.amount - Payment.amount_refunded,
+        Payment.organization_id == org_id,
+        Payment.status.in_(SETTLED_PAYMENT_STATUSES),
+        Payment.paid_at >= lo,
+        Payment.paid_at < hi,
+        Payment.customer_id.in_(failed_customers),
     )
     reminders_sent = db.scalar(
         select(func.count()).select_from(AuditLog).where(
@@ -476,21 +524,32 @@ def dashboard_summary(db: Session, organization, range_key: str = "30_days") -> 
         select(AuditLog).where(AuditLog.organization_id == org_id).order_by(AuditLog.created_at.desc()).limit(10)
     ).all()
 
+    failed = _bucket_out(failed_rows, base_currency)
     return {
-        "currency": organization.default_currency or "INR",
+        "currency": base_currency,
         "range": range_key,
         "period_start": start,
         "period_end": end,
         "metrics": {
             "total_revenue": money_str(revenue),
             "revenue_change_pct": _pct_change(revenue, prev_revenue),
-            "outstanding_amount": money_str(_dec(outstanding[1])),
-            "outstanding_count": int(outstanding[0] or 0),
-            "overdue_count": int(overdue[0] or 0),
+            "outstanding_amount": outstanding["amount"],
+            "outstanding_count": outstanding["count"],
+            "overdue_count": overdue["count"],
             "active_customers": int(active_customers or 0),
             "new_customers": int(new_customers or 0),
-            "at_risk_amount": money_str(_dec(overdue[1])),
-            "at_risk_count": int(overdue[0] or 0) + int(past_due_subs or 0),
+            "at_risk_amount": overdue["amount"],
+            "at_risk_count": overdue["count"] + int(past_due_subs or 0),
+            "by_currency": [
+                {
+                    "currency": cur,
+                    "total_revenue": money_str(_in(revenue_by_cur, cur)),
+                    "outstanding_amount": money_str(_dec(outstanding_rows.get(cur, (0, 0))[1])),
+                    "outstanding_count": outstanding_rows.get(cur, (0, 0))[0],
+                    "at_risk_amount": money_str(_dec(overdue_rows.get(cur, (0, 0))[1])),
+                }
+                for cur in metric_currencies
+            ],
         },
         "revenue": {
             "mrr": money_str(mrr),
@@ -512,10 +571,18 @@ def dashboard_summary(db: Session, organization, range_key: str = "30_days") -> 
             "churn_rate": churn_rate,
         },
         "recovery": {
-            "failed_payments": int(failed_row[0] or 0),
-            "failed_amount": money_str(_dec(failed_row[1])),
-            "recovered_amount": money_str(_dec(recovered)),
+            "failed_payments": failed["count"],
+            "failed_amount": failed["amount"],
+            "recovered_amount": money_str(_in(recovered, base_currency)),
             "reminders_sent": int(reminders_sent or 0),
+            "by_currency": [
+                {
+                    "currency": cur,
+                    "failed_amount": money_str(_dec(failed_rows.get(cur, (0, 0))[1])),
+                    "recovered_amount": money_str(_in(recovered, cur)),
+                }
+                for cur in currency_totals.order_currencies(set(failed_rows) | set(recovered), base_currency)
+            ],
         },
         "recent_transactions": [serialize_payment(p) for p in recent_payments],
         "activity": [activity_item(row) for row in recent_audit],

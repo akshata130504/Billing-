@@ -21,7 +21,7 @@ from backend.app.core.exceptions import ConflictAppError, NotFoundAppError, Unau
 from backend.app.core.security import hash_password, validate_password_strength, verify_password
 from backend.app.models.base import utcnow
 from backend.app.models.customers import Customer, CustomerContact
-from backend.app.models.identity import Organization, User
+from backend.app.models.identity import MemberRole, Organization, User
 from backend.app.models.invoices import OPEN_INVOICE_STATUSES, Invoice, InvoiceStatus
 from backend.app.models.payments import CustomerPaymentMethod, CustomerPaymentMethodStatus
 from backend.app.models.portal import (
@@ -43,7 +43,7 @@ from backend.app.schemas.portal import (
     PortalSignupIn,
     PortalUserOut,
 )
-from backend.app.services import audit
+from backend.app.services import audit, currency_totals
 from backend.app.services.email import resolve_smtp_config, send_email
 
 
@@ -432,7 +432,7 @@ def create_customer_portal_invitation(
     invite_url = f"{settings.FRONTEND_URL.rstrip('/')}/portal/activate?token={raw_token}"
     org_name = ctx.organization.name if ctx.organization else "our organization"
 
-    _send_portal_invitation_email(db, ctx.organization_id, target_email, invite_url, org_name, ctx.user.full_name)
+    delivered = _send_portal_invitation_email(db, ctx.organization_id, target_email, invite_url, org_name, ctx.user.full_name)
 
     audit.record(
         db,
@@ -444,10 +444,17 @@ def create_customer_portal_invitation(
         after={
             "email": target_email,
             "expires_at": expires_at.isoformat(),
+            "email_delivered": delivered,
         },
     )
 
-    return serialize_portal_invitation(invitation, raw_token=raw_token)
+    # The link carries the customer's single-use activation credential. Like team invitations it
+    # is only handed back when the email could not be delivered, and only to admins and owners,
+    # so they can pass it on by hand; GET portal-access never returns it (only the hash is stored).
+    share_link = not delivered and ctx.has_role(MemberRole.ADMIN)
+    out = serialize_portal_invitation(invitation, raw_token=raw_token if share_link else None)
+    out.email_delivered = delivered
+    return out
 
 
 def revoke_customer_portal_access(
@@ -752,7 +759,15 @@ def get_customer_dashboard(db: Session, portal_user: CustomerPortalUser) -> Port
         ).all()
     )
     open_invoices = [inv for inv in invoices if inv.status in OPEN_INVOICE_STATUSES]
-    total_due = sum((inv.amount_due or Decimal("0.00")) for inv in open_invoices)
+    # Balances per currency - an INR and an AED invoice are two balances, never one sum.
+    # total_outstanding_amount keeps only the customer's billing currency (labelled).
+    currency = currency_totals.norm(customer.currency)
+    due_by_currency: Dict[str, Dict[str, Any]] = {}
+    for inv in open_invoices:
+        entry = due_by_currency.setdefault(currency_totals.norm(inv.currency), {"amount_due": Decimal("0.00"), "open_count": 0})
+        entry["amount_due"] += inv.amount_due or Decimal("0.00")
+        entry["open_count"] += 1
+    total_due = due_by_currency.get(currency, {}).get("amount_due", Decimal("0.00"))
 
     # Payment methods scoped to tenant AND customer
     methods = list(
@@ -778,7 +793,12 @@ def get_customer_dashboard(db: Session, portal_user: CustomerPortalUser) -> Port
         customer_email=customer.email,
         active_subscriptions_count=active_subs_count,
         open_invoices_count=len(open_invoices),
+        currency=currency,
         total_outstanding_amount=total_due,
+        outstanding_by_currency=[
+            {"currency": cur, "amount_due": str(due_by_currency[cur]["amount_due"]), "open_count": due_by_currency[cur]["open_count"]}
+            for cur in currency_totals.order_currencies(due_by_currency, currency)
+        ],
         recent_invoices=[
             {
                 "id": inv.id,
@@ -787,6 +807,7 @@ def get_customer_dashboard(db: Session, portal_user: CustomerPortalUser) -> Port
                 "due_date": str(inv.due_date),
                 "total": str(inv.total),
                 "amount_due": str(inv.amount_due),
+                "currency": currency_totals.norm(inv.currency),
                 "status": inv.status.value,
                 "public_token": inv.public_token,
             }

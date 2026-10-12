@@ -16,6 +16,7 @@ from backend.app.schemas.quotes import (
     QuoteOverrideIn,
     QuoteToSubscriptionIn,
     QuoteUpdate,
+    SupplyPreviewOut,
 )
 from backend.app.schemas.subscriptions import SubscriptionOut
 from sqlalchemy import select
@@ -63,6 +64,19 @@ def create_quote(
     return svc.serialize_quote_full(db, quote)
 
 
+@router.get(
+    "/supply-preview",
+    response_model=SupplyPreviewOut,
+    summary="GST treatment (CGST/SGST vs IGST, or none) a quote/invoice for this customer will be saved with",
+)
+def supply_preview(
+    customer_id: str = Query(...),
+    ctx: CurrentContext = Depends(require_viewer),
+    db: Session = Depends(get_db),
+):
+    return svc.supply_preview(db, ctx, customer_id)
+
+
 @router.get("/{quote_id}", response_model=QuoteOut, summary="Get a quote")
 def get_quote(
     quote_id: str,
@@ -88,12 +102,14 @@ def quote_pdf(
     quote = svc.get_quote(db, ctx, quote_id)
     template = None
     if template_id:
-        from backend.app.models.customization import DocumentTemplate
+        from backend.app.models.customization import DocumentTemplate, DocumentType
 
+        # Only a quote template applies to a quote (BUG-49).
         template = db.scalars(
             select(DocumentTemplate).where(
                 DocumentTemplate.id == template_id,
                 DocumentTemplate.organization_id == ctx.organization_id,
+                DocumentTemplate.document_type == DocumentType.QUOTE,
             )
         ).first()
     pdf = render_quote_pdf(quote, ctx.organization, template=template)

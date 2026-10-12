@@ -736,6 +736,10 @@ def convert_deal_to_quote(db: Session, ctx: CurrentContext, deal_id: str) -> Quo
     quote_number = next_number(db, ctx.organization_id, "quote")
     supply = gst.resolve_supply(ctx.organization, deal.customer)
     quote_split = gst.split_tax(deal.tax_amount, supply)
+    # No GSTIN, no GST: an unregistered supplier's quote carries no tax at all.
+    no_gst = not supply.supplier_registered
+    quote_tax = Decimal("0.00") if no_gst else deal.tax_amount
+    quote_total = (deal.total - deal.tax_amount) if no_gst else deal.total
 
     quote = Quote(
         organization_id=ctx.organization_id,
@@ -747,14 +751,14 @@ def convert_deal_to_quote(db: Session, ctx: CurrentContext, deal_id: str) -> Quo
         subtotal=deal.subtotal,
         discount_pct=deal.discount_pct,
         discount_amount=deal.discount_amount,
-        tax_amount=deal.tax_amount,
+        tax_amount=quote_tax,
         cgst_amount=quote_split.cgst,
         sgst_amount=quote_split.sgst,
         igst_amount=quote_split.igst,
         supply_type=supply.supply_type,
         place_of_supply_code=supply.place_of_supply_code,
         place_of_supply_name=supply.place_of_supply_name,
-        total=deal.total,
+        total=quote_total,
         title=deal.title,
         notes=deal.notes,
         terms=deal.terms,
@@ -773,7 +777,7 @@ def convert_deal_to_quote(db: Session, ctx: CurrentContext, deal_id: str) -> Quo
             description=d_item.description,
             quantity=d_item.quantity,
             unit_price=d_item.unit_price,
-            tax_rate_pct=d_item.tax_rate_pct,
+            tax_rate_pct=Decimal("0") if no_gst else d_item.tax_rate_pct,
             amount=round_money(d_item.quantity * d_item.unit_price),
             cgst_amount=item_tax_split.cgst,
             sgst_amount=item_tax_split.sgst,

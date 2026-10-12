@@ -18,7 +18,7 @@ from backend.app.models.payments import Payment, PaymentAllocation
 from backend.app.schemas.quotes import QuoteCreate, QuoteConvertIn
 from backend.app.schemas.invoices import InvoiceCreate, RecordPaymentIn
 from backend.app.schemas.common_refs import LineItemIn
-from backend.app.services import quote_service, invoice_service, payment_service
+from backend.app.services import quote_service, invoice_service, payment_service, timezones
 from backend.app.services.pricing_engine import calculate_line_item_pricing
 
 
@@ -30,6 +30,9 @@ def org_and_user(db: Session):
         slug=f"billing-org-{uid}",
         default_currency="INR",
         country="IN",
+        # GST-registered: without a GSTIN no GST is charged at all (BUG-07).
+        gstin="29AAFCB9900V1Z8",
+        state="Karnataka",
         discount_approval_threshold_pct=Decimal("5.00"),
     )
     db.add(org)
@@ -236,8 +239,8 @@ def test_6_to_8_quote_lifecycle_and_conversion_to_invoice(db: Session, org_and_u
     quote_create = QuoteCreate(
         customer_id=customer.id,
         title="Enterprise SaaS Quote",
-        issue_date=date.today(),
-        expiry_date=date.today() + timedelta(days=30),
+        issue_date=timezones.org_today(org),
+        expiry_date=timezones.org_today(org) + timedelta(days=30),
         currency="INR",
         discount_pct=Decimal("10.00"),
         items=[
@@ -301,8 +304,8 @@ def test_6_to_8_quote_lifecycle_and_conversion_to_invoice(db: Session, org_and_u
 
     # TEST 8: Convert Quote to Invoice
     conv_data = QuoteConvertIn(
-        issue_date=date.today(),
-        due_date=date.today() + timedelta(days=30),
+        issue_date=timezones.org_today(org),
+        due_date=timezones.org_today(org) + timedelta(days=30),
     )
     inv_out = quote_service.convert_to_invoice(db, ctx, quote.id, conv_data)
     db.refresh(quote)
@@ -333,8 +336,8 @@ def test_9_to_11_invoice_lifecycle_payments_and_overdue(db: Session, org_and_use
     # Create Invoice directly
     inv_create = InvoiceCreate(
         customer_id=customer.id,
-        issue_date=date.today() - timedelta(days=40),
-        due_date=date.today() - timedelta(days=10),
+        issue_date=timezones.org_today(org) - timedelta(days=40),
+        due_date=timezones.org_today(org) - timedelta(days=10),
         currency="INR",
         items=[
             LineItemIn(
@@ -360,7 +363,8 @@ def test_9_to_11_invoice_lifecycle_payments_and_overdue(db: Session, org_and_use
     # TEST 10: Partial Payment (Pay ₹2,000)
     pay_in = RecordPaymentIn(
         amount=Decimal("2000.00"),
-        paid_at=date.today(),
+        # Payment dates are checked against the server (UTC) date, invoice dates against the org's day.
+        paid_at=timezones.utc_today(),
         method="bank_transfer",
         reference="TXN-PARTIAL-01",
     )
@@ -373,7 +377,7 @@ def test_9_to_11_invoice_lifecycle_payments_and_overdue(db: Session, org_and_use
     # TEST 9: Full Payment (Pay remaining ₹3,900)
     pay_full = RecordPaymentIn(
         amount=Decimal("3900.00"),
-        paid_at=date.today(),
+        paid_at=timezones.utc_today(),
         method="upi",
         reference="TXN-FULL-02",
     )
@@ -386,8 +390,8 @@ def test_9_to_11_invoice_lifecycle_payments_and_overdue(db: Session, org_and_use
     # TEST 11: Past due unpaid invoice calculation
     overdue_create = InvoiceCreate(
         customer_id=customer.id,
-        issue_date=date.today() - timedelta(days=30),
-        due_date=date.today() - timedelta(days=5),
+        issue_date=timezones.org_today(org) - timedelta(days=30),
+        due_date=timezones.org_today(org) - timedelta(days=5),
         currency="INR",
         items=[
             LineItemIn(
@@ -435,8 +439,8 @@ def test_12_and_13_historical_pricing_snapshot_preservation(db: Session, org_and
         QuoteCreate(
             customer_id=customer.id,
             title="Historical Price Quote",
-            issue_date=date.today(),
-            expiry_date=date.today() + timedelta(days=30),
+            issue_date=timezones.org_today(org),
+            expiry_date=timezones.org_today(org) + timedelta(days=30),
             currency="INR",
             discount_pct=Decimal("0.00"),
             items=[
@@ -458,8 +462,8 @@ def test_12_and_13_historical_pricing_snapshot_preservation(db: Session, org_and
         ctx,
         InvoiceCreate(
             customer_id=customer.id,
-            issue_date=date.today(),
-            due_date=date.today() + timedelta(days=30),
+            issue_date=timezones.org_today(org),
+            due_date=timezones.org_today(org) + timedelta(days=30),
             currency="INR",
             items=[
                 LineItemIn(

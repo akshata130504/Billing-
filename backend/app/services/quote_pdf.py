@@ -67,24 +67,8 @@ def render_quote_pdf(quote, organization, template=None) -> bytes:
                             DocumentTemplate.is_active.is_(True),
                         )
                     )
-                # 3. Fallback: Default Invoice template
-                if template is None:
-                    template = sess.scalar(
-                        select(DocumentTemplate).where(
-                            DocumentTemplate.organization_id == organization.id,
-                            DocumentTemplate.document_type == DocumentType.INVOICE,
-                            DocumentTemplate.is_default.is_(True),
-                        )
-                    )
-                # 4. Fallback: Any active Invoice template
-                if template is None:
-                    template = sess.scalar(
-                        select(DocumentTemplate).where(
-                            DocumentTemplate.organization_id == organization.id,
-                            DocumentTemplate.document_type == DocumentType.INVOICE,
-                            DocumentTemplate.is_active.is_(True),
-                        )
-                    )
+                # Never an invoice template: a template applies only to its own
+                # document type (BUG-49). No quote template -> built-in styling.
         except Exception as exc:
             logger.warning("Could not resolve document template for quote %s: %s", getattr(quote, "id", None), exc)
             template = None
@@ -247,10 +231,9 @@ def render_quote_pdf(quote, organization, template=None) -> bytes:
         _p("Amount", right_bold),
     ]]
     for idx, item in enumerate(sorted(quote.items, key=lambda i: getattr(i, "position", 0) or 0), start=1):
-        desc_parts = [item.description]
-        if getattr(item, "pricing_explanation", None):
-            desc_parts.append(f"<font color='{MUTED.hexval()}'>({item.pricing_explanation})</font>")
-        desc_para = _p("<br/>".join(desc_parts), base)
+        # Customer document: the description only. pricing_explanation is internal (catalog base
+        # price, price-book adjustment) and _p escapes markup, so it must never be appended here.
+        desc_para = _p(item.description, base)
 
         rows.append(
             [
