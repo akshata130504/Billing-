@@ -41,8 +41,8 @@ Totals below include the continuation on 9–10 Oct (section 24). Each bug is co
 | Critical (P0) | 0 | 0 | **0** |
 | High (P1) | 3 | 3 | **6** |
 | Medium (P2) | 10 | 3 | **13** |
-| Low (P3) | 12 | 9 | **21** |
-| Cosmetic/enhancement (P4) | 13 | 6 | **19** |
+| Low (P3) | 13 | 9 | **22** |
+| Cosmetic/enhancement (P4) | 12 | 6 | **18** |
 | **Bugs total** | 38 | 21 | **59** |
 | Passed checks | 65 | 33 | **98** |
 | Partial | 0 | 1 | **1** |
@@ -448,7 +448,9 @@ Remaining cleanup (post-audit task):
 
 ## 23. Evidence
 
-Kept in the audit scratch folder:
+**Evidence files are not in this repository.** Screenshots, PDFs, CSV exports and logs can contain customer-like data, session details and personal QA addresses, so they are kept in the QA team's private audit archive and are not committed. File names in this document (for example in the "Evidence" columns of sections 5 and 24) identify files in that archive; they are not links. Ask the QA owner for access.
+
+Archive contents:
 - 155 screenshots (public pages, 92 tenant route captures, console pages, editor preview, portal, quote/invoice/payment states)
 - `inv1.pdf` (invoice PDF)
 - `netlog.jsonl` (redacted network/console log, 3,917 API calls)
@@ -466,6 +468,8 @@ Areas not in Org A's plan (Reconciliation, Automation, Reports) were tested in O
 **Tester error, disclosed:** while inspecting dialogs, a "Cancel" button lookup also matched "Confirm Cancellation", and **SUB-000001** (QA, AED) was cancelled immediately. That result is used as the immediate-cancel test (C-A7).
 
 ### 24.1 Checks run
+
+File names in the Evidence column refer to the private audit archive (section 23), not to files in this repository.
 
 | ID | Area / page | Org | Steps and result | Status | Evidence |
 |---|---|---|---|---|---|

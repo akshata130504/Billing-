@@ -40,6 +40,8 @@ If XSS happened, an attacker could:
 
 **Recommendation:** option B now, with a named owner and a date for option A.
 
+A proposed pilot risk-acceptance record (owner, 15-minute access-token mitigation, review date, cookie remediation plan, closure criteria) is in [bug-21-pilot-risk-acceptance.md](bug-21-pilot-risk-acceptance.md).
+
 **Decision record:**
 - Decision (A / B):
 - Owner:

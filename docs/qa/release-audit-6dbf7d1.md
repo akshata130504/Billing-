@@ -135,7 +135,7 @@ The release notes for #38 attribute fixes to BUG-10, 11, 23, 24, 27, 29, 34, 36 
 
 | Change | Detail |
 |---|---|
-| Org A temporary plan change, **approved by owner** | +Expenses, Reports, Automation, Reconciliation; seats 4 unchanged → tested → **restored**. Before/after identical (`planA_before.json`, `planA_after.json`). 4 platform + tenant audit entries with reason "QA audit" and ticket "QA-AUDIT-2026-10-12". |
+| Org A temporary plan change, **approved by owner** | +Expenses, Reports, Automation, Reconciliation; seats 4 unchanged → tested → **restored**. Before/after identical (`planA_before.json`, `planA_after.json`; kept in the private audit archive, not in this repository). 4 platform + tenant audit entries with reason "QA audit" and ticket "QA-AUDIT-2026-10-12". |
 | Org A synthetic records | Customers "Müller GmbH QA", Arabic name, "José Ñúñez QA", "QA-Co_1 / Unit #2", "QA dup email check", "QA extra field"; invoice INV-000015 (draft); advance payments PAY-000005 (₹10) and PAY-000006 (₹1); checkout session (1 h); USD expense "QA v10 USD expense" ($25.50, now hidden with the module) |
 | Org B | Subscription request submitted and withdrawn (BUG-16 evidence) |
 | Not changed | No real customer data, no email or payment actions, no configuration, no deletions. SUB-000001 left as is. |
