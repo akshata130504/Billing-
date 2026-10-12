@@ -15,8 +15,8 @@ Labels used below: **[V]** verified fact (evidence given) · **[A]** assumption 
 | Security | **[V]** Display-only change; no new inputs, endpoints or rendering of HTML. |
 | CI | **[V]** All 4 checks pass on head `78af0a0`. CI log: frontend **884 passed (91 files)**, tsc OK, vite build OK; backend **2,020 passed, 34 skipped**; Docker build; gitleaks. Matches the locally reported results. |
 | Regression tests | **[V]** 2 new cases (catalog list INR/USD/AED; mixed-currency expense summary). Both fail on `6dbf7d1` and pass with the fix. |
-| Test gaps | **[V]** No tests for the offering picker, the price-book picker, or the recurring-expense summary per currency. |
-| Design limits | **[V]** "INR first" ordering and a "₹0.00" empty state are hard-coded. An organization whose base currency is not INR would see INR ordering. Minor. |
+| Test gaps | **[V]** Closed in `d84ccc9`: tests for the offering (bundle) picker, the price-book picker and the per-currency recurring-expense summary. All three fail against `main` and pass on the branch. |
+| Design limits | **[V]** Expense summaries list INR first and show "₹0.00" when empty. An organization whose base currency is not INR would see that order and empty state. Invoices and Quotes already use the server's `base_currency`. **[R]** Cosmetic only, with no wrong amount and no mixing; does not block. Follow-up: pass the org `default_currency` into `byCurrency`/`formatPerCurrency` for Expenses. |
 | Reviews / protection | **[V]** No reviews. GitHub reports no branch protection on `main`, so approval is not enforced by GitHub. |
 | **Readiness** | **[R] Ready for approval as scoped** (BUG-10 catalog list and pickers, BUG-11 expenses). It does **not** close the wider currency-display problem (NEW-01). |
 
@@ -26,7 +26,7 @@ Invoice and quote detail pages show **₹ for non-INR documents**.
 - **[V]** AED invoice INV-000002 shows rate "₹367.25", IGST "₹66.11", total and balance "₹433.36".
 - **[V]** Code: hard-coded "₹" in `InvoiceDetailPage.tsx` (17 places), `QuoteDetailPage.tsx` (9), `QuoteFormPage.tsx` (8), `CPQPage.tsx` (13; includes catalog base prices in offering cards), `QuotesListPage.tsx`, `ReceiptModal.tsx`, `ImportExpenseModal.tsx`, `PlansPricingPage.tsx` (KPI).
 - Public pages use the document currency correctly.
-- **[R]** Separate PR: replace these with `formatMoney(…, document.currency)`, plus tests on an AED invoice, a USD quote and CPQ offering cards.
+- **Fix prepared: PR #41** (stacked on #39). It uses `formatMoney(…, record currency)` everywhere listed above, plus payments (table, details, refund and record-payment modals). Tests cover AED, USD and INR, including tax lines and totals. Not deployed.
 
 ## 2. PR #40: audit documentation
 
@@ -36,10 +36,10 @@ Invoice and quote detail pages show **₹ for non-INR documents**.
 | CI | **[V]** All 4 checks pass (head `d4a4b1b`) |
 | Sensitive data | **[V]** No tokens, passwords, OTPs or secrets. Personal QA addresses and the platform-admin login replaced with placeholders. Repository is **private**. Docs describe open weaknesses (BUG-21, BUG-36, BUG-46); acceptable in a private repo. |
 | Accuracy | **[V]** Release-audit statuses match the production evidence (37 PASS · 3 PARTIAL · 10 FAIL · 4 NOT VERIFIED · 2 BLOCKED · 3 EXCLUDED = 59). Email and payment paths are marked EXCLUDED, not passed. Blocked checks are listed separately. |
-| Defect 1 | **[V]** `production-qa-audit-2026-10-09.md` section 2 still shows **P3 21 / P4 19**. Correct is **P3 22 / P4 18** (BUG-26 is P3); `release-audit-6dbf7d1.md` already uses 22/18. |
-| Defect 2 | **[V]** References to screenshots and logs (`evidence/...`) point to files that are not in the repository. |
+| Defect 1 | **Fixed in `843369a`:** P3 22 / P4 18 (original-audit column 13 / 12). |
+| Defect 2 | **Fixed in `843369a`:** evidence file names are marked as references to the private audit archive (deliberately not committed). |
 | Missing | NEW-01 (above) is not in #40. |
-| **Readiness** | **[R] Approve after a one-line correction** of the P3/P4 counts and a note that evidence files are retained outside the repo. |
+| **Readiness** | **[R] Ready for approval** after the corrections. It also adds the proposed BUG-21 pilot risk-acceptance record. |
 
 ## 3. Org A paused billing automation (read-only investigation)
 
@@ -105,13 +105,13 @@ Rules: dedicated QA addresses only, passwords via stdin (never on the command li
 
 | # | Item | Severity | Owner | Next action |
 |---|---|---|---|---|
-| 1 | NEW-01: ₹ on non-INR invoice/quote/CPQ screens | P2 | Engineering | New PR (scope above) |
+| 1 | NEW-01: ₹ on non-INR invoice/quote/CPQ/payment screens | P2 | Product owner | Review and approve PR #41 after #39 |
 | 2 | Approve and deploy #39 (BUG-10/11), then production retest | P2 | Product owner | Review, approve, merge, deploy (your approval) |
-| 3 | BUG-21 decision | P3 | Product owner | Option A or B and complete the record |
+| 3 | BUG-21 decision | P3 | Product owner | Sign `docs/qa/bug-21-pilot-risk-acceptance.md` (in #40) or choose option A |
 | 4 | Viewer / Operations / Support verification | Coverage | Product + server owner | Approve accounts per section 5 |
 | 5 | Remaining failing P3/P4: BUG-23, 24, 27, 29, 34, 36, 46 | P3/P4 | Engineering | Fix or formally accept each |
 | 6 | Partial / not-verified items: BUG-15, 22, 32, 35, 38, 55, 56 | — | QA | Targeted checks once accounts and orgs allow |
-| 7 | #40 count correction (P3 22 / P4 18) | Docs | Engineering | One-line fix, then approve |
+| 7 | #40 corrections | Docs | Product owner | Done; approve |
 | 8 | BUG-03 payment gateway | Excluded | Office | Approval outside this scope |
 | 9 | Org A automation paused | Info | Product owner | Keep paused, or resume when testing renewals |
 
