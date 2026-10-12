@@ -63,3 +63,41 @@ describe('OfferingModal pricing tiers', () => {
     expect(offering.pricing_tiers![1].unit_price).toBe(8);
   });
 });
+
+describe('OfferingModal bundle component picker (BUG-10)', () => {
+  it('lists each component offering at its own currency', () => {
+    const offer = (id: string, name: string, base_price: string, currency: string): OfferingOut => ({
+      ...makeOffering(),
+      id,
+      name,
+      sku: id.toUpperCase(),
+      pricing_model: 'per_unit',
+      pricing_tiers: [],
+      base_price,
+      currency,
+    });
+    const available = [
+      offer('o-aed', 'Gulf Support', '367.25', 'AED'),
+      offer('o-usd', 'US Licence', '1000.00', 'USD'),
+      offer('o-inr', 'India Setup', '1234.50', 'INR'),
+    ];
+    const bundle: OfferingOut = {
+      ...makeOffering(),
+      id: 'bundle-1',
+      type: 'bundle',
+      pricing_model: 'per_unit',
+      pricing_tiers: [],
+      bundle_components: [
+        { component_offering_id: 'o-aed', is_required: true, default_quantity: 1, discount_pct: 0 },
+      ] as OfferingOut['bundle_components'],
+    };
+    render(<OfferingModal isOpen onClose={vi.fn()} onSave={vi.fn()} initialData={bundle} availableOfferings={available} />);
+
+    const option = (name: string) => screen.getByRole('option', { name: new RegExp(name) }).textContent ?? '';
+    expect(option('Gulf Support')).toMatch(/AED\s?367\.25/);
+    expect(option('US Licence')).toContain('$1,000.00');
+    expect(option('India Setup')).toContain('₹1,234.50');
+    expect(option('Gulf Support')).not.toContain('₹');
+    expect(option('US Licence')).not.toContain('₹');
+  });
+});
