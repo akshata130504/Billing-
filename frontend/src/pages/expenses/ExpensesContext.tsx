@@ -12,19 +12,29 @@ function errorMessage(err: unknown, fallback: string): string {
   return message || fallback;
 }
 
+/** One figure per currency, base currency (INR) first. Amounts in different currencies are
+ *  never added together: there is no exchange-rate policy to convert them. */
+export type CurrencyAmounts = Array<{ currency: string; amount: number }>;
+
 export interface ExpensesSummary {
-  total: number;
-  billable: number;
-  nonBillable: number;
-  pending: number;
+  total: CurrencyAmounts;
+  billable: CurrencyAmounts;
+  nonBillable: CurrencyAmounts;
+  pending: CurrencyAmounts;
   /** Expenses (not cancelled) dated in the current local calendar month. */
-  thisMonth: number;
+  thisMonth: CurrencyAmounts;
+}
+
+function byCurrency(totals: Map<string, number>): CurrencyAmounts {
+  return [...totals.entries()]
+    .map(([currency, amount]) => ({ currency, amount: Math.round(amount * 100) / 100 }))
+    .sort((a, b) => (a.currency === 'INR' ? -1 : b.currency === 'INR' ? 1 : a.currency.localeCompare(b.currency)));
 }
 
 export interface RecurringSummary {
   activeProfiles: number;
-  monthlyRecurring: number;
-  billableRecurring: number;
+  monthlyRecurring: CurrencyAmounts;
+  billableRecurring: CurrencyAmounts;
   nextRun: string;
 }
 
@@ -93,39 +103,47 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
 
   // Compute horizontal summary metrics
   const summary: ExpensesSummary = useMemo(() => {
-    let total = 0;
-    let billable = 0;
-    let nonBillable = 0;
-    let pending = 0;
-    let thisMonth = 0;
+    const total = new Map<string, number>();
+    const billable = new Map<string, number>();
+    const nonBillable = new Map<string, number>();
+    const pending = new Map<string, number>();
+    const thisMonth = new Map<string, number>();
+    const add = (m: Map<string, number>, currency: string, amount: number) => m.set(currency, (m.get(currency) ?? 0) + amount);
     // Expense dates are plain YYYY-MM-DD calendar dates: compare against the local month.
     const monthPrefix = todayIso().slice(0, 7);
 
     for (const exp of expenses) {
-      total += exp.amount;
+      const currency = (exp.currency || 'INR').toUpperCase();
+      add(total, currency, exp.amount);
       if (exp.billable) {
-        billable += exp.amount;
+        add(billable, currency, exp.amount);
       } else {
-        nonBillable += exp.amount;
+        add(nonBillable, currency, exp.amount);
       }
 
       if (exp.billable && exp.status !== 'invoiced' && exp.status !== 'cancelled') {
-        pending += exp.amount;
+        add(pending, currency, exp.amount);
       }
 
       if (exp.status !== 'cancelled' && (exp.date || '').slice(0, 7) === monthPrefix) {
-        thisMonth += exp.amount;
+        add(thisMonth, currency, exp.amount);
       }
     }
 
-    return { total, billable, nonBillable, pending, thisMonth };
+    return {
+      total: byCurrency(total),
+      billable: byCurrency(billable),
+      nonBillable: byCurrency(nonBillable),
+      pending: byCurrency(pending),
+      thisMonth: byCurrency(thisMonth),
+    };
   }, [expenses]);
 
   // Compute recurring summary metrics
   const recurringSummary: RecurringSummary = useMemo(() => {
     const activeProfiles = recurringExpenses.filter((r) => r.status === 'active').length;
-    let monthlyRecurring = 0;
-    let billableRecurring = 0;
+    const monthlyRecurring = new Map<string, number>();
+    const billableRecurring = new Map<string, number>();
 
     for (const r of recurringExpenses) {
       if (r.status === 'active') {
@@ -138,9 +156,10 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
             ? r.amount / 12
             : r.amount;
 
-        monthlyRecurring += monthlyEq;
+        const currency = (r.currency || 'INR').toUpperCase();
+        monthlyRecurring.set(currency, (monthlyRecurring.get(currency) ?? 0) + monthlyEq);
         if (r.billable) {
-          billableRecurring += monthlyEq;
+          billableRecurring.set(currency, (billableRecurring.get(currency) ?? 0) + monthlyEq);
         }
       }
     }
@@ -154,8 +173,8 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
 
     return {
       activeProfiles,
-      monthlyRecurring: Math.round(monthlyRecurring * 100) / 100,
-      billableRecurring: Math.round(billableRecurring * 100) / 100,
+      monthlyRecurring: byCurrency(monthlyRecurring),
+      billableRecurring: byCurrency(billableRecurring),
       nextRun,
     };
   }, [recurringExpenses]);

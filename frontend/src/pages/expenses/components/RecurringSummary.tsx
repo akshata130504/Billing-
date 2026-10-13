@@ -1,6 +1,7 @@
 import { useExpenses } from '../ExpensesContext';
 import { formatINR } from '../format';
 import { Repeat, Calendar, CheckCircle2, IndianRupee } from 'lucide-react';
+import { formatPerCurrency } from '../../../services/dashboardSummaryService';
 
 export function RecurringSummary() {
   const { recurringSummary } = useExpenses();
@@ -33,7 +34,7 @@ export function RecurringSummary() {
               Monthly Recurring Cost
             </span>
             <span className="text-base font-bold text-slate-900 tracking-tight">
-              {formatINR(recurringSummary.monthlyRecurring)}
+              {formatPerCurrency(recurringSummary.monthlyRecurring, (r) => String(r.amount), (amount, currency) => formatINR(Number(amount), currency), 'INR')}
             </span>
           </div>
         </div>
@@ -48,7 +49,7 @@ export function RecurringSummary() {
               Billable Recurring
             </span>
             <span className="text-base font-bold text-emerald-900 tracking-tight">
-              {formatINR(recurringSummary.billableRecurring)}
+              {formatPerCurrency(recurringSummary.billableRecurring, (r) => String(r.amount), (amount, currency) => formatINR(Number(amount), currency), 'INR')}
             </span>
           </div>
         </div>

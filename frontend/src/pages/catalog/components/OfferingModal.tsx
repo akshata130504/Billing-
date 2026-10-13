@@ -5,6 +5,7 @@ import { Button } from '../../../components/common/Button';
 import { ModalShell } from '../../../components/common/Modal';
 import { validateSensibleName, validateSku, validatePercentage, validateNonNegativeMoney, parseStrictNumber } from '../../../utils/validation';
 import type { OfferingIn, OfferingOut, OfferingType, OfferingPricingModel, PricingTier, BundleComponent } from '../../../types/catalog_cpq';
+import { formatMoney } from '../../../utils/format';
 
 interface OfferingModalProps {
   isOpen: boolean;
@@ -373,7 +374,7 @@ export const OfferingModal: React.FC<OfferingModalProps> = ({
                     >
                       {availableOfferings.map((o) => (
                         <option key={o.id} value={o.id}>
-                          {o.name} ({o.sku}) - ₹{o.base_price}
+                          {o.name} ({o.sku}) - {formatMoney(o.base_price, o.currency || 'INR')}
                         </option>
                       ))}
                     </select>
