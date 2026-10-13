@@ -147,9 +147,15 @@ export function RecordPaymentModal({
 
   const selectedCustomer = customers.find((c) => c.id === customerId);
   const outstandingInvoices = selectedCustomer?.outstandingInvoices || [];
-  // The server records a new payment in the customer's billing currency.
-  // The backend records the payment in the customer's currency; never guess one here.
+  // The server records a new payment in the customer's billing currency; never guess one here.
   const receiptCurrency = selectedCustomer?.currency ?? null;
+  // No currency until a customer is chosen; after that, the customer's (or "currency unknown").
+  const amountCurrencyLabel = selectedCustomer ? ` (${receiptCurrency ?? UNKNOWN_CURRENCY_LABEL})` : '';
+  /** Receipt-side amounts: plain numbers until a customer (and so a currency) is chosen. */
+  const receiptMoney = (n: number) =>
+    selectedCustomer
+      ? formatRecordMoney(n, receiptCurrency)
+      : n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   // Typing in the combobox queries the server, so customers beyond the first
   // preloaded page are findable too.
@@ -343,7 +349,7 @@ export function RecordPaymentModal({
 
     if (paymentType === 'invoice_payment') {
       if (totalApplied - numReceived > CENT_TOLERANCE) {
-        errs.allocation = `Total applied (${formatRecordMoney(totalApplied, receiptCurrency)}) cannot exceed amount received (${formatRecordMoney(numReceived, receiptCurrency)})`;
+        errs.allocation = `Total applied (${receiptMoney(totalApplied)}) cannot exceed amount received (${receiptMoney(numReceived)})`;
       }
 
       // Check per-invoice limits
@@ -613,12 +619,14 @@ export function RecordPaymentModal({
             {/* Amount Received */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Amount Received ({receiptCurrency ?? UNKNOWN_CURRENCY_LABEL}) <span className="text-rose-500">*</span>
+                Amount Received{amountCurrencyLabel} <span className="text-rose-500">*</span>
               </label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400">
-                  {recordCurrencySymbol(receiptCurrency)}
-                </span>
+                {selectedCustomer && (
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400">
+                    {recordCurrencySymbol(receiptCurrency)}
+                  </span>
+                )}
                 <input
                   type="number"
                   min="0"
@@ -807,19 +815,19 @@ export function RecordPaymentModal({
                   <div>
                     <span className="text-[11px] text-slate-500 block">Amount Received</span>
                     <span className="font-bold text-slate-900 font-mono text-sm">
-                      {formatRecordMoney(numReceived, receiptCurrency)}
+                      {receiptMoney(numReceived)}
                     </span>
                   </div>
                   <div>
                     <span className="text-[11px] text-slate-500 block">Amount Applied</span>
                     <span className="font-bold text-emerald-700 font-mono text-sm">
-                      {formatRecordMoney(totalApplied, receiptCurrency)}
+                      {receiptMoney(totalApplied)}
                     </span>
                   </div>
                   <div>
                     <span className="text-[11px] text-slate-500 block">Unapplied Balance</span>
                     <span className="font-bold text-blue-700 font-mono text-sm">
-                      {formatRecordMoney(unappliedBalance, receiptCurrency)}
+                      {receiptMoney(unappliedBalance)}
                     </span>
                   </div>
                 </div>
@@ -828,7 +836,7 @@ export function RecordPaymentModal({
                   <div className="flex items-center gap-1.5 text-[11px] text-blue-700 bg-blue-50/70 p-2 rounded-lg border border-blue-100">
                     <Info className="w-3.5 h-3.5 shrink-0" />
                     <span>
-                      The unapplied balance of <strong className="font-mono">{formatRecordMoney(unappliedBalance, receiptCurrency)}</strong> will be credited to {selectedCustomer?.name} as an available advance credit for future invoices.
+                      The unapplied balance of <strong className="font-mono">{receiptMoney(unappliedBalance)}</strong> will be credited to {selectedCustomer?.name} as an available advance credit for future invoices.
                     </span>
                   </div>
                 )}
@@ -841,7 +849,7 @@ export function RecordPaymentModal({
                 <span>Customer Advance Deposit</span>
               </div>
               <p className="text-slate-600 leading-relaxed text-[11px]">
-                The full payment of <strong className="font-mono font-bold text-slate-900">{formatRecordMoney(numReceived, receiptCurrency)}</strong> will be recorded as unapplied customer credit. It can be applied against subsequent billing cycles or milestone invoices.
+                The full payment of <strong className="font-mono font-bold text-slate-900">{receiptMoney(numReceived)}</strong> will be recorded as unapplied customer credit. It can be applied against subsequent billing cycles or milestone invoices.
               </p>
             </div>
           )}
