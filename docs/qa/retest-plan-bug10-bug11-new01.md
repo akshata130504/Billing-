@@ -40,7 +40,7 @@
 
 | ID | Screen | Expected | Fails if |
 |---|---|---|---|
-| E1 | Expenses summary cards | One figure per currency, e.g. "₹2,360.80 · $25.50 · AED 1,180.40". Compare each figure with a hand sum of the list, per currency. | A single ₹ figure combining currencies (the pre-fix value was "₹3,566.70") |
+| E1 | Expenses summary cards, Org A | Org A's existing expenses (audit 2026-10-12): ₹2,360.80, $25.50 ("QA v10 USD expense") and a legacy 1,180.40 recorded in currency "XYZ" (accepted before BUG-11's validation fix). Expected Total: **"₹2,360.80 · $25.50 · XYZ 1,180.40"** (INR first, then alphabetical). Compare each figure with a hand sum of the list, per currency. | "₹3,566.70" (the pre-fix sum), or the XYZ amount added into ₹ |
 | E2 | Recurring expenses summary | Monthly and billable recurring per currency | Summed figure |
 | E3 | Org with only INR expenses | Single ₹ figure, unchanged from before | Changed amount |
 
