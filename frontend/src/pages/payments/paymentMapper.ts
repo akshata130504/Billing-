@@ -20,7 +20,7 @@ import type {
   OutstandingInvoice,
 } from './types';
 import type { RecordPaymentInput } from './PaymentsContext';
-import { paidAtForLocalDate } from '../../utils/format';
+import { paidAtForLocalDate, normalizeCurrency } from '../../utils/format';
 
 /**
  * Maps frontend UI PaymentMethod to backend ManualPaymentMethod.
@@ -138,6 +138,8 @@ export function paymentOutToUi(p: PaymentOut): Payment {
     customerName: p.customer?.display_name || 'Customer',
     customerEmail: p.customer?.email || undefined,
     amount,
+    // No INR default: the API always sends the currency, so a missing one is shown as unknown.
+    currency: normalizeCurrency(p.currency),
     paymentDate: p.paid_at ? p.paid_at.split('T')[0] : p.created_at.split('T')[0],
     paymentMethod: toUiPaymentMethod(p.method),
     status: toUiPaymentStatus(p.status),
@@ -218,6 +220,7 @@ export function customerToUi(c: CustomerOut, invoices: (InvoiceOut | Invoice)[] 
     .map((inv) => ({
       id: inv.id,
       invoiceNumber: inv.invoice_number,
+      currency: normalizeCurrency(inv.currency),
       customerId: c.id,
       customerName: c.display_name,
       date: inv.issue_date,
@@ -239,6 +242,7 @@ export function customerToUi(c: CustomerOut, invoices: (InvoiceOut | Invoice)[] 
     companyName: c.company_name || undefined,
     email: c.email || '',
     phone: c.phone || '',
+    currency: normalizeCurrency(c.currency),
     outstandingInvoices: openInvoices,
   };
 }

@@ -514,3 +514,40 @@ describe('customerToUi', () => {
     expect(statuses).toEqual(['unpaid', 'partially_paid', 'overdue']);
   });
 });
+
+// NEW-01: a payment's currency comes from the API. A missing or malformed code is "unknown",
+// never silently INR (the backend may have used the organization's default currency).
+describe('payment currency mapping', () => {
+  it('keeps the currency the API sent, upper-cased', () => {
+    expect(paymentOutToUi(makePayment({ currency: 'AED' })).currency).toBe('AED');
+    expect(paymentOutToUi(makePayment({ currency: 'usd' })).currency).toBe('USD');
+    expect(paymentOutToUi(makePayment({ currency: 'INR' })).currency).toBe('INR');
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['null', null],
+    ['empty', ''],
+    ['too long', 'RUPEES'],
+    ['symbol', '₹'],
+    ['digits', '123'],
+  ])('maps a %s payment currency to unknown (null), not INR', (_label, value) => {
+    const ui = paymentOutToUi(makePayment({ currency: value as unknown as string }));
+    expect(ui.currency).toBeNull();
+  });
+
+  it('takes outstanding-invoice currency from the invoice only, unknown when invalid', () => {
+    const ui = customerToUi(makeCustomer({ currency: 'AED' } as Partial<CustomerOut>), [
+      makeInvoice({ id: 'i_aed', status: 'sent', currency: 'AED' } as Partial<InvoiceOut>),
+      makeInvoice({ id: 'i_none', status: 'sent', currency: undefined } as unknown as Partial<InvoiceOut>),
+      makeInvoice({ id: 'i_bad', status: 'sent', currency: 'XX' } as Partial<InvoiceOut>),
+    ]);
+    expect(ui.currency).toBe('AED');
+    expect(ui.outstandingInvoices.map((i) => i.currency)).toEqual(['AED', null, null]);
+  });
+
+  it('maps a missing or invalid customer currency to unknown', () => {
+    expect(customerToUi(makeCustomer({ currency: undefined } as unknown as Partial<CustomerOut>)).currency).toBeNull();
+    expect(customerToUi(makeCustomer({ currency: 'dirham' } as Partial<CustomerOut>)).currency).toBeNull();
+  });
+});

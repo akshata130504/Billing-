@@ -68,6 +68,8 @@ export interface Payment {
   customerName: string;
   customerEmail?: string;
   amount: number;
+  /** ISO currency the payment was recorded in; null if the API sent none or an invalid code. */
+  currency: string | null;
   paymentDate: string;
   paymentMethod: PaymentMethod;
   status: PaymentStatus;
@@ -93,6 +95,8 @@ export interface OutstandingInvoice {
   customerName: string;
   date: string;
   dueDate: string;
+  /** The invoice's currency; null if missing or invalid (shown as "currency unknown"). */
+  currency: string | null;
   totalAmount: number;
   amountPaid: number;
   balanceDue: number;
@@ -105,6 +109,8 @@ export interface PaymentCustomer {
   companyName?: string;
   email: string;
   phone: string;
+  /** The customer's billing currency: new payments are recorded in it. Null if missing or invalid. */
+  currency: string | null;
   /** Populated by loadCustomerInvoices(); empty until the invoices are fetched. */
   outstandingInvoices: OutstandingInvoice[];
 }

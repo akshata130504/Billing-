@@ -58,6 +58,30 @@ export function formatMoney(
   return currencyFormatter(currency).format(n);
 }
 
+/** Upper-case ISO 4217 code, or null when the value is missing or is not a three-letter code.
+ *  Callers show null as "currency unknown" rather than guessing a currency. */
+export function normalizeCurrency(code: unknown): string | null {
+  if (typeof code !== 'string') return null;
+  const c = code.trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(c) ? c : null;
+}
+
+export const UNKNOWN_CURRENCY_LABEL = 'currency unknown';
+
+/** formatMoney for a record whose currency may be unknown: then the bare amount is shown,
+ *  marked "(currency unknown)", never with a guessed symbol. */
+export function formatRecordMoney(amount: string | number | null | undefined, currency: string | null): string {
+  if (currency) return formatMoney(amount, currency);
+  const n = parseMoney(amount);
+  if (Number.isNaN(n)) return '—';
+  return `${currencyFormatter('', 2).format(n)} (${UNKNOWN_CURRENCY_LABEL})`;
+}
+
+/** Symbol for an input prefix; "?" when the record's currency is unknown. */
+export function recordCurrencySymbol(currency: string | null): string {
+  return currency ? currencySymbol(currency) : '?';
+}
+
 // Where en-IN Intl output differs from the backend's display convention
 // (pricing_engine._CURRENCY_SYMBOLS), use the backend's symbol so both sides agree.
 const SYMBOL_OVERRIDES: Record<string, string> = { SGD: 'S$', CAD: 'C$' };

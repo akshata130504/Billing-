@@ -28,7 +28,7 @@ import { validateDateNotFuture } from '../../utils/validation';
 import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { toApiError } from '../../services/apiClient';
-import { todayIso } from '../../utils/format';
+import { todayIso, formatMoney, currencySymbol } from '../../utils/format';
 
 export const InvoiceDetailPage = () => {
   const { id } = useParams<{ id: string }>();
@@ -461,20 +461,20 @@ export const InvoiceDetailPage = () => {
                         </td>
                         <td className="px-4 py-3 text-right text-gray-700">{item.quantity}</td>
                         <td className="px-4 py-3 text-right text-gray-700">
-                          ₹{Number(item.rate || item.unit_price || 0).toLocaleString()}
+                          {formatMoney(Number(item.rate || item.unit_price || 0), invoice.currency)}
                         </td>
                         <td className="px-4 py-3 text-right text-gray-700">
                           {Number(item.discount_amount || 0) > 0
-                            ? `₹${Number(item.discount_amount).toLocaleString()}`
+                            ? formatMoney(Number(item.discount_amount), invoice.currency)
                             : '-'}
                         </td>
                         <td className="px-4 py-3 text-right text-gray-700">
                           {Number(item.tax_amount || 0) > 0
-                            ? `₹${Number(item.tax_amount).toLocaleString()}`
+                            ? formatMoney(Number(item.tax_amount), invoice.currency)
                             : '-'}
                         </td>
                         <td className="px-4 py-3 text-right font-medium text-gray-900">
-                          ₹{Number(item.amount || item.total_amount || 0).toLocaleString()}
+                          {formatMoney(Number(item.amount || item.total_amount || 0), invoice.currency)}
                         </td>
                       </tr>
                     ))}
@@ -488,12 +488,12 @@ export const InvoiceDetailPage = () => {
               <div className="w-full sm:w-80 space-y-2 text-sm">
                 <div className="flex justify-between text-gray-600">
                   <span>Subtotal</span>
-                  <span>₹{Number(invoice.subtotal || 0).toLocaleString()}</span>
+                  <span>{formatMoney(Number(invoice.subtotal || 0), invoice.currency)}</span>
                 </div>
                 {Number(invoice.discount_amount || 0) > 0 && (
                   <div className="flex justify-between text-emerald-600">
                     <span>Discount</span>
-                    <span>-₹{Number(invoice.discount_amount || 0).toLocaleString()}</span>
+                    <span>-{formatMoney(Number(invoice.discount_amount || 0), invoice.currency)}</span>
                   </div>
                 )}
                 {/* GST heads, matching the tax invoice PDF. Falls back to a single
@@ -502,41 +502,41 @@ export const InvoiceDetailPage = () => {
                   <>
                     <div className="flex justify-between text-gray-600">
                       <span>CGST</span>
-                      <span>+₹{Number(invoice.cgst_amount || 0).toLocaleString()}</span>
+                      <span>+{formatMoney(Number(invoice.cgst_amount || 0), invoice.currency)}</span>
                     </div>
                     <div className="flex justify-between text-gray-600">
                       <span>SGST/UTGST</span>
-                      <span>+₹{Number(invoice.sgst_amount || 0).toLocaleString()}</span>
+                      <span>+{formatMoney(Number(invoice.sgst_amount || 0), invoice.currency)}</span>
                     </div>
                   </>
                 ) : Number(invoice.igst_amount || 0) > 0 ? (
                   <div className="flex justify-between text-gray-600">
                     <span>IGST</span>
-                    <span>+₹{Number(invoice.igst_amount || 0).toLocaleString()}</span>
+                    <span>+{formatMoney(Number(invoice.igst_amount || 0), invoice.currency)}</span>
                   </div>
                 ) : Number(invoice.tax_amount || 0) > 0 ? (
                   <div className="flex justify-between text-gray-600">
                     <span>Tax</span>
-                    <span>+₹{Number(invoice.tax_amount || 0).toLocaleString()}</span>
+                    <span>+{formatMoney(Number(invoice.tax_amount || 0), invoice.currency)}</span>
                   </div>
                 ) : null}
                 {Number(invoice.adjustment || 0) !== 0 && (
                   <div className="flex justify-between text-gray-600">
                     <span>Adjustment</span>
-                    <span>₹{Number(invoice.adjustment || 0).toLocaleString()}</span>
+                    <span>{formatMoney(Number(invoice.adjustment || 0), invoice.currency)}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-base font-bold text-gray-900 border-t border-gray-200 pt-2">
                   <span>Total Amount</span>
-                  <span>₹{Number(invoice.total || invoice.total_amount || 0).toLocaleString()}</span>
+                  <span>{formatMoney(Number(invoice.total || invoice.total_amount || 0), invoice.currency)}</span>
                 </div>
                 <div className="flex justify-between text-sm text-emerald-600 font-semibold">
                   <span>Paid to Date</span>
-                  <span>₹{Number(invoice.amount_paid || invoice.paid_amount || 0).toLocaleString()}</span>
+                  <span>{formatMoney(Number(invoice.amount_paid || invoice.paid_amount || 0), invoice.currency)}</span>
                 </div>
                 <div className="flex justify-between text-lg font-extrabold text-indigo-700 border-t border-gray-100 pt-2">
                   <span>Balance Due</span>
-                  <span>₹{balanceDue.toLocaleString()}</span>
+                  <span>{formatMoney(balanceDue, invoice.currency)}</span>
                 </div>
               </div>
             </div>
@@ -599,7 +599,7 @@ export const InvoiceDetailPage = () => {
                     className="p-3.5 bg-emerald-50/60 border border-emerald-100 rounded-lg text-sm space-y-1"
                   >
                     <div className="flex justify-between items-center font-bold text-emerald-900">
-                      <span>₹{Number(p.amount || 0).toLocaleString()}</span>
+                      <span>{formatMoney(Number(p.amount || 0), invoice.currency)}</span>
                       <span className="text-xs px-2 py-0.5 bg-emerald-200/60 text-emerald-800 rounded font-semibold">
                         {p.payment_method || p.method || 'BANK'}
                       </span>
@@ -625,18 +625,18 @@ export const InvoiceDetailPage = () => {
               <div className="flex justify-between py-1.5 border-b border-gray-100">
                 <span className="text-gray-500">Total Invoiced</span>
                 <span className="font-semibold text-gray-900">
-                  ₹{Number(invoice.total || invoice.total_amount || 0).toLocaleString()}
+                  {formatMoney(Number(invoice.total || invoice.total_amount || 0), invoice.currency)}
                 </span>
               </div>
               <div className="flex justify-between py-1.5 border-b border-gray-100 text-emerald-600">
                 <span>Amount Paid</span>
                 <span className="font-semibold">
-                  ₹{Number(invoice.amount_paid || invoice.paid_amount || 0).toLocaleString()}
+                  {formatMoney(Number(invoice.amount_paid || invoice.paid_amount || 0), invoice.currency)}
                 </span>
               </div>
               <div className="flex justify-between py-1.5 text-indigo-700 font-bold">
                 <span>Remaining Balance</span>
-                <span>₹{balanceDue.toLocaleString()}</span>
+                <span>{formatMoney(balanceDue, invoice.currency)}</span>
               </div>
             </div>
           </div>
@@ -686,7 +686,7 @@ export const InvoiceDetailPage = () => {
         <form onSubmit={handleRecordPayment} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Payment Amount (₹) <span className="text-red-500">*</span>
+              Payment Amount ({currencySymbol(invoice.currency)}) <span className="text-red-500">*</span>
             </label>
             <input
               type="number"
@@ -698,7 +698,7 @@ export const InvoiceDetailPage = () => {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-semibold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Max balance payable: ₹{balanceDue.toLocaleString()}
+              Max balance payable: {formatMoney(balanceDue, invoice.currency)}
             </p>
           </div>
 

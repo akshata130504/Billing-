@@ -76,3 +76,52 @@ describe('<InvoiceDetailPage /> pricing explanation (BUG-05)', () => {
     expect(container.textContent).not.toContain('{"');
   });
 });
+
+// NEW-01: the detail page printed "₹" for every amount, whatever the invoice currency
+// (production: AED invoice INV-000002 showed "₹367.25", IGST "₹66.11", total "₹433.36").
+describe('<InvoiceDetailPage /> amounts in the invoice currency (NEW-01)', () => {
+  function renderInvoice(over: Partial<Invoice>) {
+    vi.mocked(invoiceService.getInvoice).mockResolvedValue({ ...makeInvoice(), ...over } as Invoice);
+    vi.mocked(invoiceService.getInvoicePayments).mockResolvedValue([]);
+    return render(
+      <MemoryRouter initialEntries={['/invoices/inv-1']}>
+        <Routes>
+          <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+  }
+  const aed = {
+    currency: 'AED', subtotal: '367.25', tax_amount: '66.11', igst_amount: '66.11', total: '433.36',
+    amount_due: '433.36', supply_type: 'inter_state',
+    items: [{ id: 'li-1', description: 'QA Plan AED', quantity: '1', unit_price: '367.25', tax_rate_pct: '18', amount: '367.25', position: 0 }],
+  } as unknown as Partial<Invoice>;
+
+  it('shows rate, tax line, total and balance in AED, never in rupees', async () => {
+    const { container } = renderInvoice(aed);
+    await screen.findByText('QA Plan AED');
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('₹');
+    expect(text).toMatch(/AED\s?367\.25/);
+    expect(text).toMatch(/AED\s?66\.11/);
+    expect(text).toMatch(/AED\s?433\.36/);
+  });
+
+  it('shows USD amounts with the dollar sign', async () => {
+    const { container } = renderInvoice({ ...aed, currency: 'USD' });
+    await screen.findByText('QA Plan AED');
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('₹');
+    expect(text).toContain('$433.36');
+  });
+
+  it('keeps rupees for INR invoices, now with paise', async () => {
+    const { container } = renderInvoice({ subtotal: '1234.50', total: '1456.71', amount_due: '1456.71', tax_amount: '222.21',
+      items: [{ id: 'li-1', description: 'Rupee line', quantity: '1', unit_price: '1234.50', tax_rate_pct: '18', amount: '1234.50', position: 0 }] } as unknown as Partial<Invoice>);
+    await screen.findByText('Rupee line');
+    const text = container.textContent ?? '';
+    expect(text).toContain('₹1,234.50');
+    expect(text).toContain('₹1,456.71');
+    expect(text).not.toMatch(/₹1,234\.5(?!0)/);
+  });
+});

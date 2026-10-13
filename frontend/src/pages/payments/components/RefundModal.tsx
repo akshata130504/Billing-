@@ -3,7 +3,7 @@ import { Payment } from '../types';
 import { usePayments, RefundPaymentInput } from '../PaymentsContext';
 import { useAuth } from '../../../hooks/useAuth';
 import { X, RotateCcw, AlertTriangle } from 'lucide-react';
-import { formatMoney } from '../../../utils/format';
+import { formatRecordMoney, recordCurrencySymbol } from '../../../utils/format';
 import { validatePositiveMoney, parseStrictNumber } from '../../../utils/validation';
 
 interface RefundModalProps {
@@ -73,7 +73,7 @@ export function RefundModal({ isOpen, onClose, payment }: RefundModalProps) {
     const numRefund = parseStrictNumber(refundAmount) ?? 0;
 
     if (numRefund - maxRefundable > 0.005) {
-      setError(`Refund amount cannot exceed the refundable amount (${formatMoney(maxRefundable)})`);
+      setError(`Refund amount cannot exceed the refundable amount (${formatRecordMoney(maxRefundable, payment.currency)})`);
       return;
     }
 
@@ -132,18 +132,18 @@ export function RefundModal({ isOpen, onClose, payment }: RefundModalProps) {
             </div>
             <div className="flex justify-between items-center text-slate-600">
               <span>Original Payment Amount:</span>
-              <span className="font-mono font-bold text-slate-900">{formatMoney(payment.amount)}</span>
+              <span className="font-mono font-bold text-slate-900">{formatRecordMoney(payment.amount, payment.currency)}</span>
             </div>
             {alreadyRefunded > 0 && (
               <div className="flex justify-between items-center text-rose-600">
                 <span>Previously Refunded:</span>
-                <span className="font-mono font-semibold">{formatMoney(alreadyRefunded)}</span>
+                <span className="font-mono font-semibold">{formatRecordMoney(alreadyRefunded, payment.currency)}</span>
               </div>
             )}
             <div className="pt-2 border-t border-slate-200/60 flex justify-between items-center text-emerald-800 font-medium">
               <span>Remaining Refundable:</span>
               <span className="font-mono font-bold text-emerald-700 text-sm">
-                {formatMoney(maxRefundable)}
+                {formatRecordMoney(maxRefundable, payment.currency)}
               </span>
             </div>
           </div>
@@ -159,12 +159,12 @@ export function RefundModal({ isOpen, onClose, payment }: RefundModalProps) {
                 onClick={handleFullRefundClick}
                 className="text-[11px] font-semibold text-brand-600 hover:text-brand-700 hover:underline"
               >
-                Refund Full Balance ({formatMoney(maxRefundable)})
+                Refund Full Balance ({formatRecordMoney(maxRefundable, payment.currency)})
               </button>
             </div>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400">
-                ₹
+                {recordCurrencySymbol(payment.currency)}
               </span>
               <input
                 type="number"

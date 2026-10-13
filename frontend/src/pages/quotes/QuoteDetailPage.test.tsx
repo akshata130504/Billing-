@@ -246,3 +246,30 @@ describe('<QuoteDetailPage /> pricing explanation (BUG-05)', () => {
     expect(await screen.findByText('Base Catalog Price')).toBeInTheDocument();
   });
 });
+
+// NEW-01: amounts in the quote's own currency, never a hard-coded rupee.
+describe('<QuoteDetailPage /> amounts in the quote currency (NEW-01)', () => {
+  it('shows USD line, tax and total amounts with the dollar sign', async () => {
+    getQuote().mockResolvedValue(makeQuote({
+      currency: 'USD', subtotal: '1000.00', tax_amount: '180.00', total: '1180.00',
+      items: [{ id: 'li-1', description: 'Implementation', quantity: '1', unit_price: '1000.00', tax_rate_pct: '18', amount: '1000.00', position: 0 }],
+    } as unknown as Partial<Quote>));
+    const { container } = renderPage();
+    await screen.findAllByText('Implementation');
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('₹');
+    expect(text).toContain('$1,000.00');
+    expect(text).toContain('$180.00');
+    expect(text).toContain('$1,180.00');
+  });
+
+  it('shows AED amounts with the dirham code', async () => {
+    getQuote().mockResolvedValue(makeQuote({ currency: 'AED', subtotal: '367.25', tax_amount: '66.11', total: '433.36' } as unknown as Partial<Quote>));
+    const { container } = renderPage();
+    await screen.findAllByText('Implementation');
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('₹');
+    expect(text).toMatch(/AED\s?433\.36/);
+    expect(text).toMatch(/AED\s?66\.11/);
+  });
+});

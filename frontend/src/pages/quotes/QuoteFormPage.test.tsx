@@ -411,7 +411,7 @@ describe('<QuoteFormPage /> archived offerings', () => {
 // BUG-08 / BUG-07: the totals preview follows the server's GST treatment instead of always
 // showing CGST 9% + SGST 9%.
 describe('<QuoteFormPage /> GST preview', () => {
-  // storedQuote(): 2 x 100 + 1 x 111 = 311 at 18% -> 55.98 tax.
+  // storedQuote(): 2 x 100 + 1 x 111 = 311 at 18% -> 55.98 tax. Shown to the paisa (no rounding to rupees).
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(catalogCpqService.listOfferings).mockResolvedValue({
@@ -432,8 +432,8 @@ describe('<QuoteFormPage /> GST preview', () => {
     expect(quoteService.getSupplyPreview).toHaveBeenCalledWith('c1');
     expect(screen.getByText('SGST')).toBeInTheDocument();
     expect(screen.queryByText('IGST')).not.toBeInTheDocument();
-    expect(screen.getAllByText('₹28')).toHaveLength(2);
-    expect(screen.getByText('₹367')).toBeInTheDocument();
+    expect(screen.getAllByText('₹27.99')).toHaveLength(2);
+    expect(screen.getByText('₹366.98')).toBeInTheDocument();
   });
 
   it('shows IGST (not CGST/SGST) when the server resolves an inter-state supply', async () => {
@@ -442,7 +442,7 @@ describe('<QuoteFormPage /> GST preview', () => {
     await waitFor(() => expect(screen.getByText('IGST')).toBeInTheDocument());
     expect(screen.queryByText('CGST')).not.toBeInTheDocument();
     expect(screen.queryByText('SGST')).not.toBeInTheDocument();
-    expect(screen.getByText('₹56')).toBeInTheDocument();
+    expect(screen.getByText('₹55.98')).toBeInTheDocument();
   });
 
   it('charges no GST and explains why when the organization has no GSTIN', async () => {
@@ -452,9 +452,9 @@ describe('<QuoteFormPage /> GST preview', () => {
     expect(notice).toHaveTextContent('no GSTIN');
     expect(within(notice).getByRole('link', { name: /Settings → Organization/ })).toHaveAttribute('href', '/settings/organization');
     expect(screen.queryByText('IGST')).not.toBeInTheDocument();
-    expect(screen.getByText('₹0')).toBeInTheDocument();
+    expect(screen.getByText('₹0.00')).toBeInTheDocument();
     // Subtotal and total are equal: no tax added.
-    expect(screen.getAllByText('₹311')).toHaveLength(2);
+    expect(screen.getAllByText('₹311.00')).toHaveLength(2);
   });
 });
 

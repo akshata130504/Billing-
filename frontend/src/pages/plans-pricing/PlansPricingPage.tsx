@@ -23,9 +23,10 @@ import { useAuth } from '../../hooks/useAuth';
 import { toApiError } from '../../services/apiClient';
 import { PlanModal } from './components/PlanModal';
 import { planPricingService } from '../../services/planPricingService';
-import { currencySymbol } from '../../utils/format';
+import { currencySymbol, formatMoney } from '../../utils/format';
 import type { PlanPricingItem, CreatePlanPricingInput } from '../../types/plans_pricing';
 import { usePageSpec } from '../../appUi/usePageSpec';
+import { formatPerCurrency } from '../../services/dashboardSummaryService';
 
 const PAGE_SIZE = 25;
 
@@ -91,8 +92,15 @@ export function PlansPricingPage() {
   // Dashboard KPIs
   const kpis = useMemo(() => {
     const draft = plans.filter((p) => p.status === 'draft').length;
-    const prices = plans.map((p) => Number(p.base_price || 0));
-    const avgPrice = prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : 0;
+    // Average per currency: plans priced in different currencies are never averaged together.
+    const byCurrency = new Map<string, number[]>();
+    for (const p of plans) {
+      const cur = (p.currency || 'INR').toUpperCase();
+      byCurrency.set(cur, [...(byCurrency.get(cur) ?? []), Number(p.base_price || 0)]);
+    }
+    const avgPrice = [...byCurrency.entries()]
+      .map(([currency, prices]) => ({ currency, amount: String(prices.reduce((a, b) => a + b, 0) / prices.length) }))
+      .sort((a, b) => (a.currency === 'INR' ? -1 : b.currency === 'INR' ? 1 : a.currency.localeCompare(b.currency)));
     return { active: counts.active, draft, archived: counts.archived, avgPrice };
   }, [plans, counts]);
 
@@ -247,7 +255,7 @@ export function PlansPricingPage() {
           avg_rate: (item, edit) => (
             <div className="min-w-0 bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs" {...edit}>
               <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{item.label}</p>
-              <p className="text-2xl font-bold text-slate-900 mt-1 min-w-0 break-all tabular-nums">₹{Math.round(kpis.avgPrice).toLocaleString('en-IN')}</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1 min-w-0 break-all tabular-nums">{formatPerCurrency(kpis.avgPrice, (r) => r.amount, (amount, currency) => formatMoney(amount, currency), 'INR')}</p>
               {item.caption && <p className="text-[11px] text-slate-500 mt-0.5">{item.caption}</p>}
             </div>
           ),

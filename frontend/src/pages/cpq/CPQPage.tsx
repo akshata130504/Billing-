@@ -28,6 +28,7 @@ import { customerService } from '../../services/customerService';
 import type { CPQDealOut, OfferingOut, PriceBookOut, PriceSimulationResponse } from '../../types/catalog_cpq';
 import type { CustomerOut } from '../../types/api';
 import { usePageSpec } from '../../appUi/usePageSpec';
+import { formatMoney } from '../../utils/format';
 
 const PAGE_SIZE = 20;
 
@@ -387,7 +388,7 @@ export function CPQPage() {
                       if (col.key === 'total') {
                         return (
                           <td key="total" className="px-4 py-3 font-semibold text-slate-900">
-                            ₹{deal.total}
+                            {formatMoney(deal.total, deal.currency)}
                           </td>
                         );
                       }
@@ -679,7 +680,7 @@ export function CPQPage() {
                           <div>
                             <p className="text-xs font-bold text-slate-900">{o.name}</p>
                             <p className="text-[10px] text-slate-400 font-mono">{o.sku} • {o.type}</p>
-                            <p className="text-xs font-semibold text-emerald-600 mt-1">₹{o.base_price}</p>
+                            <p className="text-xs font-semibold text-emerald-600 mt-1">{formatMoney(o.base_price, o.currency || 'INR')}</p>
                           </div>
                           {isSelected ? (
                             <button
@@ -714,7 +715,7 @@ export function CPQPage() {
                         <div key={idx} className="p-3 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-4">
                           <div className="min-w-[180px]">
                             <p className="text-xs font-bold text-slate-900">{off?.name}</p>
-                            <p className="text-[10px] text-slate-400">Base: ₹{off?.base_price} ({off?.pricing_model})</p>
+                            <p className="text-[10px] text-slate-400">Base: {formatMoney(off?.base_price, off?.currency || 'INR')} ({off?.pricing_model})</p>
                           </div>
 
                           <div className="flex items-center gap-2">
@@ -791,7 +792,7 @@ export function CPQPage() {
                           <div>
                             <span className="font-semibold">{rec.name}</span>: {rec.reason}
                           </div>
-                          <span className="font-semibold text-purple-700">₹{rec.base_price}</span>
+                          <span className="font-semibold text-purple-700">{formatMoney(rec.base_price, simulation.currency)}</span>
                         </div>
                       ))}
                     </div>
@@ -815,21 +816,21 @@ export function CPQPage() {
                           <div key={item.offering_id} className="bg-white p-3 rounded-lg border border-slate-200 text-xs space-y-1">
                             <div className="flex items-center justify-between font-bold text-slate-800">
                               <span>{item.offering_name} (× {item.quantity})</span>
-                              <span className="text-emerald-700">₹{item.line_total} (incl. tax)</span>
+                              <span className="text-emerald-700">{formatMoney(item.line_total, simulation.currency)} (incl. tax)</span>
                             </div>
                             <div className="text-[11px] text-slate-500 space-y-0.5">
-                              <p>• Base Price: ₹{item.catalog_base_price} ({item.pricing_model})</p>
+                              <p>• Base Price: {formatMoney(item.catalog_base_price, simulation.currency)} ({item.pricing_model})</p>
                               {item.price_book_name && (
                                 <p className="text-blue-600">• Price Book Layer: {item.price_book_adjusted_unit_price}</p>
                               )}
                               {item.volume_tier_applied && (
                                 <p className="text-purple-600">• {item.volume_tier_applied}</p>
                               )}
-                              <p>• Effective Unit Price: ₹{item.effective_unit_price}</p>
+                              <p>• Effective Unit Price: {formatMoney(item.effective_unit_price, simulation.currency)}</p>
                               {Number(item.discount_amount) > 0 && (
-                                <p className="text-red-600">• Line Discount ({item.discount_pct}%): -₹{item.discount_amount}</p>
+                                <p className="text-red-600">• Line Discount ({item.discount_pct}%): -{formatMoney(item.discount_amount, simulation.currency)}</p>
                               )}
-                              <p>• GST {item.tax_rate_pct}%: +₹{item.tax_amount}</p>
+                              <p>• GST {item.tax_rate_pct}%: +{formatMoney(item.tax_amount, simulation.currency)}</p>
                             </div>
                           </div>
                         ))}
@@ -841,7 +842,7 @@ export function CPQPage() {
                   <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-2 text-xs">
                     <div className="flex justify-between text-slate-600">
                       <span>Subtotal:</span>
-                      <span className="font-semibold">₹{simulation.subtotal}</span>
+                      <span className="font-semibold">{formatMoney(simulation.subtotal, simulation.currency)}</span>
                     </div>
                     {Number(simulation.discount_amount) > 0 && (() => {
                       const subtotalNum = Number(simulation.subtotal) || 0;
@@ -853,17 +854,17 @@ export function CPQPage() {
                       return (
                         <div className="flex justify-between text-red-600 font-medium">
                           <span>Total Discounts ({displayPct}%):</span>
-                          <span>-₹{simulation.discount_amount}</span>
+                          <span>-{formatMoney(simulation.discount_amount, simulation.currency)}</span>
                         </div>
                       );
                     })()}
                     <div className="flex justify-between text-slate-600">
                       <span>Tax (GST):</span>
-                      <span className="font-semibold">+₹{simulation.tax_amount}</span>
+                      <span className="font-semibold">+{formatMoney(simulation.tax_amount, simulation.currency)}</span>
                     </div>
                     <div className="flex justify-between text-sm font-bold text-slate-900 pt-2 border-t border-slate-100">
                       <span>Final Net Deal Total:</span>
-                      <span className="text-brand-700">₹{simulation.total}</span>
+                      <span className="text-brand-700">{formatMoney(simulation.total, simulation.currency)}</span>
                     </div>
                   </div>
                 </div>

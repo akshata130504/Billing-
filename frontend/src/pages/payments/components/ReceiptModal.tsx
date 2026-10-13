@@ -2,7 +2,7 @@ import { Payment } from '../types';
 import { X, Download, Mail, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { useToast } from '../../../components/common/Toast';
 import { RoomanLogo } from '../../../components/common/RoomanLogo';
-import { formatMoney } from '../../../utils/format';
+import { formatRecordMoney } from '../../../utils/format';
 import { useAuth } from '../../../hooks/useAuth';
 
 interface ReceiptModalProps {
@@ -136,7 +136,7 @@ export function ReceiptModal({ isOpen, onClose, payment }: ReceiptModalProps) {
                 Amount Received
               </span>
               <span className="text-2xl font-bold font-mono text-emerald-900">
-                {formatMoney(payment.amount)}
+                {formatRecordMoney(payment.amount, payment.currency)}
               </span>
             </div>
             <div className="text-right flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-white px-3 py-1.5 rounded-lg border border-emerald-200">
@@ -167,7 +167,7 @@ export function ReceiptModal({ isOpen, onClose, payment }: ReceiptModalProps) {
                           {alloc.invoiceNumber}
                         </td>
                         <td className="py-2 px-3 text-right font-mono font-bold text-emerald-700">
-                          {formatMoney(alloc.appliedAmount)}
+                          {formatRecordMoney(alloc.appliedAmount, payment.currency)}
                         </td>
                       </tr>
                     ))}
@@ -178,7 +178,7 @@ export function ReceiptModal({ isOpen, onClose, payment }: ReceiptModalProps) {
               <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-100 text-xs text-blue-900">
                 <p className="font-semibold">Customer Advance Credit</p>
                 <p className="text-[11px] text-slate-600 mt-0.5">
-                  Full amount of {formatMoney(payment.amount)} credited to customer account for upcoming billing cycles.
+                  Full amount of {formatRecordMoney(payment.amount, payment.currency)} credited to customer account for upcoming billing cycles.
                 </p>
               </div>
             )}
@@ -189,7 +189,7 @@ export function ReceiptModal({ isOpen, onClose, payment }: ReceiptModalProps) {
             <div className="p-3 bg-rose-50 rounded-xl border border-rose-100 text-xs text-rose-800">
               <span className="font-bold block">Refund Notice:</span>
               <span>
-                ₹{payment.refundedAmount.toLocaleString('en-IN')} has been refunded against this payment. Net settled amount: {formatMoney(payment.amount - payment.refundedAmount)}.
+                {formatRecordMoney(payment.refundedAmount, payment.currency)} has been refunded against this payment. Net settled amount: {formatRecordMoney(payment.amount - payment.refundedAmount, payment.currency)}.
               </span>
             </div>
           )}
