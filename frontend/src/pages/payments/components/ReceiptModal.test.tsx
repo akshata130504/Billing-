@@ -33,3 +33,14 @@ describe('<ReceiptModal /> amounts in the payment currency (NEW-01)', () => {
     expect(container.ownerDocument.body.textContent).toContain('₹1,180.40');
   });
 });
+
+describe('<ReceiptModal /> with an unknown payment currency (NEW-01)', () => {
+  it('shows the bare amount marked "currency unknown", never a guessed ₹', () => {
+    const { container } = render(<ReceiptModal isOpen onClose={() => {}} payment={payment({ currency: null })} />);
+    const text = container.ownerDocument.body.textContent ?? '';
+    expect(text).not.toContain('₹');
+    expect(text).not.toContain('$');
+    expect(text).toContain('250.00 (currency unknown)');
+    expect(text).toContain('40.00 (currency unknown)');
+  });
+});
