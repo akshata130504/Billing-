@@ -178,3 +178,42 @@ Criteria not yet met:
 **BUG-21:** risk assessment in `bug-21-token-storage-risk.md`.
 
 **Viewer / Operations / Support accounts:** procedure in `test-accounts-process.md`.
+
+## 9. Post-audit update: 2026-10-13
+
+Sections 1–8 record production as audited on 2026-10-12 (release `6dbf7d1`). This section records what changed afterwards. Every check below was **read-only**, done as the Org A Owner on the live site, with no write requests sent.
+
+### Releases
+
+| Order | PR | Merged (UTC) | Merge commit | CI on `main` | Deploy workflow (run) | Served on production |
+|---|---|---|---|---|---|---|
+| 1 | #39 BUG-10/11 currency display | 2026-10-13 05:58 | `b792b300e9a01db9c3439043293cc0ec275020e4` | success | success 06:26:57 (38356659346) | bundle `main-lb7TCJpO.js`, built by CI for `b792b30` (web build 06:24:40–06:25:49; Last-Modified 06:25:42) |
+| 2 | #41 NEW-01 record-currency amounts | 2026-10-13 07:15 | `5d4ea518afe927b0686beae432fc7a0290517b06` | success | success 07:42:55 (38364358068) | bundle `main-Bt7bJzeI.js`, built by CI for `5d4ea51` (web build 07:40:53–07:42:02; Last-Modified 07:41:52) |
+
+Production runs **`5d4ea51`**: `6dbf7d1` plus #39 and #41. Both are frontend-only changes with no migrations. Re-checked 2026-10-14 04:20 UTC: the site still serves `main-Bt7bJzeI.js`, and `main` has had no newer merges.
+
+**Deployed is not the same as verified.** An item is PASS below only if its behaviour was checked on the live site. Code that is deployed but not checked there is marked BLOCKED or NOT VERIFIED.
+
+### Status changes
+
+| Item | Was (section 3) | Now | Production evidence (2026-10-13) |
+|---|---|---|---|
+| BUG-10 | FAIL | **PASS** | Catalog list, bundle-component picker and price-book picker match the API for all 8 offerings: QA-AED "AED 367.25", QA-USD "$100.00", INR rows in ₹. Dialogs closed with Cancel. |
+| BUG-11 | FAIL (partial) | **BLOCKED**: code deployed in `b792b30`, behaviour **not verified on production** | No authorised QA organisation has Expenses enabled; Org A's plan was deliberately not changed. Expected Org A total once testable: "₹2,360.80 · $25.50 · XYZ 1,180.40". |
+| **NEW-01** (P2, found 2026-10-12) | FAIL (₹ on the AED invoice) | **PASS** | INV-000002: rate **AED 367.25**, IGST **AED 66.11**, total and balance **AED 433.36**, equal to the API (before #41: ₹367.25 / ₹66.11 / ₹433.36). The INR invoice INV-000004 is unchanged (₹50.00 / ₹9.00 / ₹59.00). The CPQ offering cards, the price-book "Fixed" label (₹ / $ / €), the Plans & Pricing figure ("₹2,000.00 · AED 367.25") and the Record Payment invoice rows are all in their own currencies. A missing payment currency was simulated in the browser only and showed "(currency unknown)", not ₹. |
+| NEW-01 coverage gaps | — | — | Production has no non-INR quotes, deals or payments, so those paths are covered by automated tests only. |
+
+### New finding (P4, introduced by #41, fix not yet merged)
+Before a customer is chosen, the Record Payment dialog shows "Amount Received (currency unknown)", and its summary rows show "0.00 (currency unknown)". Amounts and payment processing are unaffected. The fix is in a separate PR: plain label and amounts until a customer is selected.
+
+### Updated totals for the original 59
+PASS 38 · PARTIAL 3 · FAIL 8 · NOT VERIFIED 4 · BLOCKED 3 · EXCLUDED 3 = 59. BUG-10 moved from FAIL to PASS, and BUG-11 from FAIL to BLOCKED. NEW-01 is counted separately.
+
+### Unchanged
+- Org A billing automation is still paused.
+- Org A's plan and entitlements are unchanged.
+- No accounts were created; no production settings were changed.
+- The BUG-21 risk record is unsigned and the 15-minute token change is not applied.
+- Still failing (8): BUG-21 (decision pending), 23, 24, 27, 29, 34, 36, 46.
+- Release recommendation (section 7): still **CONDITIONALLY READY (limited pilot)**. The two P2 currency defects in it are now fixed on production apart from verifying BUG-11.
+
