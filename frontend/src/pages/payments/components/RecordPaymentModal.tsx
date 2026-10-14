@@ -147,7 +147,8 @@ export function RecordPaymentModal({
 
   const selectedCustomer = customers.find((c) => c.id === customerId);
   const outstandingInvoices = selectedCustomer?.outstandingInvoices || [];
-  // The server records a new payment in the customer's billing currency; never guess one here.
+  // The server records a new payment in the customer's billing currency.
+  // The backend records the payment in the customer's currency; never guess one here.
   const receiptCurrency = selectedCustomer?.currency ?? null;
   // No currency until a customer is chosen; after that, the customer's (or "currency unknown").
   const amountCurrencyLabel = selectedCustomer ? ` (${receiptCurrency ?? UNKNOWN_CURRENCY_LABEL})` : '';
