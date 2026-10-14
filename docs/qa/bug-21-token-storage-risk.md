@@ -1,7 +1,7 @@
 # BUG-21: sign-in tokens in browser storage
 
 **Severity:** P3 (production QA, 2026-10-09; re-verified on release `6dbf7d1`, 2026-10-12)
-**Status:** open. Needs a product-owner decision: fix now, or accept the risk for the pilot with the record in section 5.
+**Status:** open. Needs a product-owner decision: fix now, or accept the risk for the pilot with the pilot risk-acceptance record below.
 
 ## Finding
 
