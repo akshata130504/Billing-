@@ -203,8 +203,8 @@ Production runs **`5d4ea51`**: `6dbf7d1` plus #39 and #41. Both are frontend-onl
 | **NEW-01** (P2, found 2026-10-12) | FAIL (₹ on the AED invoice) | **PASS** | INV-000002: rate **AED 367.25**, IGST **AED 66.11**, total and balance **AED 433.36**, equal to the API (before #41: ₹367.25 / ₹66.11 / ₹433.36). The INR invoice INV-000004 is unchanged (₹50.00 / ₹9.00 / ₹59.00). The CPQ offering cards, the price-book "Fixed" label (₹ / $ / €), the Plans & Pricing figure ("₹2,000.00 · AED 367.25") and the Record Payment invoice rows are all in their own currencies. A missing payment currency was simulated in the browser only and showed "(currency unknown)", not ₹. |
 | NEW-01 coverage gaps | — | — | Production has no non-INR quotes, deals or payments, so those paths are covered by automated tests only. |
 
-### New finding (P4, introduced by #41, fix not yet merged)
-Before a customer is chosen, the Record Payment dialog shows "Amount Received (currency unknown)", and its summary rows show "0.00 (currency unknown)". Amounts and payment processing are unaffected. The fix is in a separate PR: plain label and amounts until a customer is selected.
+### New finding (P4, introduced by #41, fixed by #42)
+Before a customer is chosen, the Record Payment dialog shows "Amount Received (currency unknown)", and its summary rows show "0.00 (currency unknown)". Amounts and payment processing are unaffected. Fixed by PR #42, merged at `380e51d`: plain label and amounts until a customer is selected. Verified on production on 2026-10-14 for the no-customer and INR (`CUS-000001`) cases. AED and USD are not tested, because Org A has no AED or USD customers.
 
 ### Updated totals for the original 59
 PASS 38 · PARTIAL 3 · FAIL 8 · NOT VERIFIED 4 · BLOCKED 3 · EXCLUDED 3 = 59. BUG-10 moved from FAIL to PASS, and BUG-11 from FAIL to BLOCKED. NEW-01 is counted separately.
