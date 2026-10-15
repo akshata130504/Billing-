@@ -156,11 +156,14 @@ def test_draft_and_void_invoices_are_refused(client, db, tenant):
     assert _state(db, tenant, pay, a, b) == before
 
 
-def test_other_tenants_payment_and_invoice_are_not_found(client, db, tenant, request):
+def test_other_tenants_payment_and_invoice_are_not_found(client, db, tenant):
+    import uuid
+
     from backend.tests.conftest import Tenant
 
     _cust, a, b, pay = _partly_allocated(client, tenant, "L5 Tenant A")
-    other = Tenant(db, f"l5b-{request.node.name[-6:]}")
+    # Plain hex suffix: other tests search organizations for literal "%" and "_".
+    other = Tenant(db, uuid.uuid4().hex[:8])
     res = _add(client, tenant, pay, b, "5.00", headers=other.headers())
     assert res.status_code == 404, res.text
     assert _invoice(db, tenant, b) == ("sent", Decimal("0.00"), Decimal("50.00"))
