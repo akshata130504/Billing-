@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import AbstractSet, Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import desc, func, select, update
 from sqlalchemy.orm import Session, joinedload
@@ -44,7 +44,7 @@ from backend.app.schemas.ai import (
     AIWritingRequest,
     AIWritingResponse,
 )
-from backend.app.services import audit, credit_service, timezones
+from backend.app.services import audit, credit_service, org_access, timezones
 
 DRAFT_TTL_MINUTES = 30
 
@@ -206,7 +206,10 @@ def _tool_overdue_beyond_average_cycle(
     return answer, data, sources
 
 
-def _classify_and_answer(db: Session, organization_id: str, prompt: str) -> Tuple[str, str, Dict[str, Any], List[Dict[str, Any]]]:
+def _classify_and_answer(
+    db: Session, organization_id: str, prompt: str, modules: Optional[AbstractSet[str]] = None
+) -> Tuple[str, str, Dict[str, Any], List[Dict[str, Any]]]:
+    """`modules`: the organization's entitled module keys; None means no restriction."""
     lowered = prompt.lower()
 
     if "overdue" in lowered and ("average" in lowered or "cycle" in lowered):
@@ -218,6 +221,11 @@ def _classify_and_answer(db: Session, organization_id: str, prompt: str) -> Tupl
     elif "overdue" in lowered:
         tool_name = "overdue_invoice_count"
         answer, data, sources = _tool_overdue_invoice_count(db, organization_id)
+    elif ("mrr" in lowered or "recurring revenue" in lowered) and modules is not None and "subscriptions" not in modules:
+        # MRR is computed from subscriptions, an optional module this organization is not entitled to.
+        tool_name = "unsupported"
+        answer = "MRR comes from Subscriptions, which is not included in your organization's plan."
+        data, sources = {}, []
     elif "mrr" in lowered or "recurring revenue" in lowered:
         tool_name = "mrr_summary"
         answer, data, sources = _tool_mrr_summary(db, organization_id)
@@ -248,7 +256,9 @@ def answer_query(db: Session, ctx: CurrentContext, data: AIQueryRequest) -> AIQu
     db.add(request)
     db.flush()
 
-    tool_name, answer, result_data, sources = _classify_and_answer(db, ctx.organization_id, data.prompt)
+    tool_name, answer, result_data, sources = _classify_and_answer(
+        db, ctx.organization_id, data.prompt, org_access.entitled_modules(db, ctx.organization)
+    )
 
     db.add(
         AIToolInvocation(

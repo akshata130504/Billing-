@@ -1,5 +1,6 @@
 import ipaddress
 import json
+import re
 import secrets
 import warnings
 from pathlib import Path
@@ -14,6 +15,15 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 # uvicorn/pytest/alembic are launched from.
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 _REPO_ROOT = _BACKEND_DIR.parent
+
+# A Razorpay API key id: rzp_test_<id> (Test Mode) or rzp_live_<id>.
+_RAZORPAY_KEY_ID = re.compile(r"^rzp_(test|live)_[A-Za-z0-9]+$")
+
+# A plain sender address (local@domain.tld); and the reserved / placeholder domains that can never be a real
+# sender in production (RFC 2606 / RFC 6761: example.*, *.example, *.test, *.invalid, *.localhost; plus .local).
+_SENDER_ADDRESS = re.compile(r"^[^@\s<>\"]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$")
+_PLACEHOLDER_SENDER_DOMAINS = {"example.com", "example.net", "example.org", "localhost", "localhost.localdomain"}
+_PLACEHOLDER_SENDER_SUFFIXES = (".example", ".test", ".invalid", ".localhost", ".local")
 
 _INSECURE_SECRET_KEYS = {
     "",
@@ -368,6 +378,44 @@ class Settings(BaseSettings):
     def razorpay_enabled(self) -> bool:
         return bool(self.RAZORPAY_KEY_ID and self.RAZORPAY_KEY_SECRET)
 
+    # --- Payments: Rooman's own Razorpay account -------------------------------
+    # The merchant account Rooman Billing itself is paid into when an organization buys a Rooman
+    # plan (core/plan_catalog.json). Server-side only, and NEVER used for a tenant's payments: those
+    # use the tenant's connected account (Settings -> Integrations) or the RAZORPAY_* keys above.
+    # Set both or neither; empty = no platform payments (nothing uses these until checkout exists).
+    PLATFORM_RAZORPAY_KEY_ID: str = ""
+    PLATFORM_RAZORPAY_KEY_SECRET: str = ""
+    # Webhook secret of the Razorpay webhook for Rooman's own account (/api/v1/webhooks/razorpay-platform).
+    # Optional: while empty that endpoint refuses every event (503) and processes nothing. Never the API
+    # secret, never the tenant RAZORPAY_WEBHOOK_SECRET.
+    PLATFORM_RAZORPAY_WEBHOOK_SECRET: str = ""
+
+    @property
+    def platform_razorpay_enabled(self) -> bool:
+        return bool(self.PLATFORM_RAZORPAY_KEY_ID.strip() and self.PLATFORM_RAZORPAY_KEY_SECRET.strip())
+
+    # Plan checkout with Rooman's account (services/platform_checkout_service.py).
+    # How long a started checkout can be completed (Razorpay `expire_by`); an unfinished one blocks
+    # starting a different plan until then.
+    PLATFORM_CHECKOUT_EXPIRY_MINUTES: int = 30
+    # Billing cycles a Razorpay Subscription is created for (`total_count`; 120 monthly = 10 years).
+    PLATFORM_SUBSCRIPTION_TOTAL_COUNT: int = 120
+    # Live Mode keys are refused for plan checkout until live selling is approved.
+    PLATFORM_CHECKOUT_ALLOW_LIVE: bool = False
+    # Sandbox test plans (plan_catalog.json status "sandbox"): off by default. Even when true they are
+    # usable only with ENVIRONMENT development/test and Test Mode keys (rzp_test_...); production, staging
+    # and Live Mode keys refuse them whatever this says (platform_razorpay.sandbox_readiness).
+    PLATFORM_SANDBOX_PLANS_ENABLED: bool = False
+    # Per-request timeout for calls to Razorpay with Rooman's account (seconds).
+    PLATFORM_RAZORPAY_TIMEOUT_SECONDS: int = 15
+    # Reconciliation (services/platform_reconciliation_service.py): how often the scheduler re-reads open
+    # checkouts and paid subscriptions from Razorpay so a missed or late webhook is recovered, and how many
+    # checkouts / subscriptions one run looks at (each costs one or two Razorpay reads).
+    PLATFORM_RECONCILE_INTERVAL_MINUTES: int = 15
+    PLATFORM_RECONCILE_BATCH_SIZE: int = 200
+    # How often (seconds) queued Rooman subscription lifecycle emails (platform_notifications) are sent.
+    PLATFORM_NOTIFICATION_CHECK_SECONDS: int = 60
+
     # --- Email (SMTP) -------------------------------------------------------------
     # Leave SMTP_HOST empty to disable outbound email (development only: production refuses
     # to start without it). Password-reset links are never returned in API responses; in
@@ -420,6 +468,10 @@ class Settings(BaseSettings):
     # only for trials that ended within this many minutes (so a first run after an outage or a
     # deploy never mails organizations whose trial ended long ago).
     TRIAL_EXPIRY_EMAIL_WINDOW_MINUTES: int = 1440
+    # Paid plans (services/platform_subscription_service.py): how long a subscription whose renewal
+    # was not paid keeps working (past_due) before it expires and the organization becomes read-only.
+    # Provisional default pending a commercial decision; Razorpay retries a failed renewal for 3 days.
+    PLATFORM_SUBSCRIPTION_GRACE_DAYS: int = 7
 
     # --- AI / Roomi Assistant -----------------------------------------------------------
     # Optional external LLM integration (Google Gemini). When omitted, Roomi operates
@@ -443,6 +495,12 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         env = (self.ENVIRONMENT or "").strip().lower()
         return env in {"production", "prod", "staging", "stage"}
+
+    @property
+    def is_live_environment(self) -> bool:
+        """Real customers and real money: production only. Staging is production-like (is_production) but may use
+        Razorpay Test Mode keys for its rehearsals."""
+        return (self.ENVIRONMENT or "").strip().lower() in {"production", "prod"}
 
     @property
     def platform_auth_enabled(self) -> bool:
@@ -500,10 +558,45 @@ class Settings(BaseSettings):
             ("PLATFORM_LOGIN_CHALLENGE_MINUTES", 1, 15),
             ("PLATFORM_STEP_UP_MINUTES", 1, 15),
             ("PLATFORM_DELETION_WAITING_DAYS", 7, 365),
+            ("PLATFORM_SUBSCRIPTION_GRACE_DAYS", 0, 60),
+            ("PLATFORM_CHECKOUT_EXPIRY_MINUTES", 5, 1440),
+            ("PLATFORM_SUBSCRIPTION_TOTAL_COUNT", 1, 1200),
+            ("PLATFORM_RAZORPAY_TIMEOUT_SECONDS", 2, 60),
+            ("PLATFORM_RECONCILE_INTERVAL_MINUTES", 1, 1440),
+            ("PLATFORM_RECONCILE_BATCH_SIZE", 1, 5000),
+            ("PLATFORM_NOTIFICATION_CHECK_SECONDS", 10, 3600),
         ):
             value = getattr(self, name)
             if not low <= value <= high:
                 raise ValueError(f"{name} must be between {low} and {high}")
+        return self
+
+    @model_validator(mode="after")
+    def validate_platform_razorpay(self) -> "Settings":
+        """Rooman's own Razorpay keys (any env): complete, well-formed and never the tenant keys.
+
+        The RAZORPAY_* keys are what tenant payments fall back to when an organization has not
+        connected its own account; the same account there would silently pay tenants' customers'
+        money into Rooman's account. Messages never include the values.
+        """
+        key_id = (self.PLATFORM_RAZORPAY_KEY_ID or "").strip()
+        key_secret = (self.PLATFORM_RAZORPAY_KEY_SECRET or "").strip()
+        webhook_secret = (self.PLATFORM_RAZORPAY_WEBHOOK_SECRET or "").strip()
+        if webhook_secret and webhook_secret in (key_secret, (self.RAZORPAY_WEBHOOK_SECRET or "").strip(),
+                                                 (self.RAZORPAY_KEY_SECRET or "").strip()):
+            raise ValueError("PLATFORM_RAZORPAY_WEBHOOK_SECRET must be its own value, not an API secret or the "
+                             "tenant webhook secret")
+        if not key_id and not key_secret:
+            return self
+        if not (key_id and key_secret):
+            raise ValueError("PLATFORM_RAZORPAY_KEY_ID and PLATFORM_RAZORPAY_KEY_SECRET must be set together")
+        if not _RAZORPAY_KEY_ID.match(key_id):
+            raise ValueError("PLATFORM_RAZORPAY_KEY_ID must be a Razorpay key id (rzp_test_... or rzp_live_...)")
+        if key_id == (self.RAZORPAY_KEY_ID or "").strip() or key_secret == (self.RAZORPAY_KEY_SECRET or "").strip():
+            raise ValueError(
+                "PLATFORM_RAZORPAY_KEY_ID/SECRET must be Rooman's own account, different from RAZORPAY_KEY_ID/SECRET "
+                "(the keys tenant payments use)"
+            )
         return self
 
     @model_validator(mode="after")
@@ -577,6 +670,11 @@ class Settings(BaseSettings):
                 # Without it every webhook is rejected, so payments whose customer closes the
                 # browser before /verify (and refunds, disputes...) are never recorded.
                 problems.append("RAZORPAY_WEBHOOK_SECRET must be set when RAZORPAY_KEY_ID/RAZORPAY_KEY_SECRET are set")
+            problems.extend(self._platform_billing_problems())
+            problems.extend(self._email_sender_problems())
+            if any(ipaddress.ip_network(item, strict=False).prefixlen == 0 for item in self.TRUSTED_PROXIES):
+                # X-Real-IP would be believed from anyone: rate limits, lockouts and audit IPs become spoofable.
+                problems.append("TRUSTED_PROXIES must not trust every address (0.0.0.0/0 or ::/0)")
             problems.extend(self._database_tls_problems())
             if problems:
                 raise ValueError(
@@ -584,6 +682,41 @@ class Settings(BaseSettings):
                     % (self.ENVIRONMENT, "; ".join(problems))
                 )
         return self
+
+    def _platform_billing_problems(self) -> List[str]:
+        """Rooman's OWN plan billing (PLATFORM_RAZORPAY_*), production / staging. Never the tenant RAZORPAY_* keys.
+        Billing stays fail-safe when it is intentionally off (no platform keys, PLATFORM_CHECKOUT_ALLOW_LIVE false).
+        Messages name settings only, never values."""
+        problems: List[str] = []
+        key_id = (self.PLATFORM_RAZORPAY_KEY_ID or "").strip()
+        if self.platform_razorpay_enabled:
+            if not (self.PLATFORM_RAZORPAY_WEBHOOK_SECRET or "").strip():
+                # Without it the platform webhook refuses every event: a purchase whose browser never came back,
+                # renewals, failed payments and cancellations would wait for the reconciliation job.
+                problems.append("PLATFORM_RAZORPAY_WEBHOOK_SECRET must be set when PLATFORM_RAZORPAY_KEY_ID/"
+                                "PLATFORM_RAZORPAY_KEY_SECRET are set")
+            if self.is_live_environment and key_id.startswith("rzp_test_"):
+                problems.append("PLATFORM_RAZORPAY_KEY_ID must be a Live Mode key (rzp_live_...) in production; "
+                                "Test Mode keys are for development, test and staging")
+        elif self.PLATFORM_CHECKOUT_ALLOW_LIVE:
+            problems.append("PLATFORM_CHECKOUT_ALLOW_LIVE=true needs PLATFORM_RAZORPAY_KEY_ID, "
+                            "PLATFORM_RAZORPAY_KEY_SECRET and PLATFORM_RAZORPAY_WEBHOOK_SECRET")
+        return problems
+
+    def _email_sender_problems(self) -> List[str]:
+        """Production / staging with email enabled (SMTP_HOST set): EMAIL_FROM_ADDRESS must be a well-formed address
+        on a real domain, not the shipped placeholder. The value itself is never echoed."""
+        if not (self.SMTP_HOST or "").strip():
+            return []
+        sender = (self.EMAIL_FROM_ADDRESS or "").strip().lower()
+        if not _SENDER_ADDRESS.match(sender):
+            return ["EMAIL_FROM_ADDRESS must be a valid email address when SMTP_HOST is set"]
+        domain = sender.rpartition("@")[2]
+        if domain in _PLACEHOLDER_SENDER_DOMAINS or domain.endswith(_PLACEHOLDER_SENDER_SUFFIXES) \
+                or domain.startswith("example."):
+            return ["EMAIL_FROM_ADDRESS must be a real sender address on your mail domain, not a placeholder such as "
+                    "billing@example.com"]
+        return []
 
     def _database_tls_problems(self) -> List[str]:
         """Remote (non-private) database hosts must authenticate the server certificate."""
@@ -626,6 +759,8 @@ class Settings(BaseSettings):
             "POSTGRES_PASSWORD",
             "RAZORPAY_KEY_SECRET",
             "RAZORPAY_WEBHOOK_SECRET",
+            "PLATFORM_RAZORPAY_KEY_SECRET",
+            "PLATFORM_RAZORPAY_WEBHOOK_SECRET",
             "SMTP_PASSWORD",
             "GEMINI_API_KEY",
             "REDIS_URL",

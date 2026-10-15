@@ -28,6 +28,7 @@ VALID_PROD = {
     "ALLOWED_ORIGINS": ["https://billing.example.com"],
     "FRONTEND_URL": "https://billing.example.com",
     "SMTP_HOST": "smtp.example.com",
+    "EMAIL_FROM_ADDRESS": "billing@rooman-billing.in",  # production refuses placeholder senders
 }
 
 

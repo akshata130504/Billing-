@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import CurrentContext, get_db, require_viewer
 from backend.app.schemas.search import SearchResponse
-from backend.app.services import search_service as svc
+from backend.app.services import org_access, search_service as svc
 
 router = APIRouter()
 
@@ -16,4 +16,5 @@ def global_search(
     ctx: CurrentContext = Depends(require_viewer),
     db: Session = Depends(get_db),
 ):
-    return {"results": svc.search(db, ctx.organization_id, q, limit)}
+    modules = org_access.entitled_modules(db, ctx.organization)
+    return {"results": svc.search(db, ctx.organization_id, q, limit, modules=modules)}

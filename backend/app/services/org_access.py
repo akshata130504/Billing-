@@ -12,6 +12,7 @@ organization_entitlements rows - never from the Visual Editor or anything the br
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Dict, FrozenSet, List, Optional
 
 from sqlalchemy import func, select
@@ -68,6 +69,27 @@ def entitled_modules(db: Session, org: Organization, now: Optional[datetime] = N
             select(OrganizationEntitlement.module_key).where(OrganizationEntitlement.organization_id == org.id)
         ).all()
     return reg.base_keys | (frozenset(rows) & reg.optional_keys)
+
+
+def module_entitled(db: Session, organization_id: Optional[str], module_key: str,
+                    now: Optional[datetime] = None) -> bool:
+    """Whether the organization may use `module_key` right now (base modules always).
+
+    For unattended work (scheduler, outbox, inbound webhooks) that has no request context: reads the
+    organization's current columns from the database, never a possibly stale identity-map object."""
+    if module_key in registry().base_keys:
+        return True
+    if not organization_id:
+        return False
+    row = db.execute(
+        select(Organization.status, Organization.module_access, Organization.trial_ends_at)
+        .where(Organization.id == organization_id)
+    ).first()
+    if row is None:
+        return False
+    probe = SimpleNamespace(id=organization_id, status=row.status, module_access=row.module_access,
+                            trial_ends_at=row.trial_ends_at)
+    return module_key in entitled_modules(db, probe, now)  # type: ignore[arg-type]
 
 
 def seats_used(db: Session, organization_id: str) -> int:

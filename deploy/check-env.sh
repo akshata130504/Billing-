@@ -23,6 +23,22 @@ raw() {  # value of KEY without surrounding quotes/spaces - used for format chec
     line=$(grep -E "^[[:space:]]*$1[[:space:]]*=" "$ENV_FILE" | tail -n 1 || true)
     printf '%s' "${line#*=}" | sed -e 's/^[[:space:]"'"'"']*//' -e 's/[[:space:]"'"'"']*$//'
 }
+real_email() {  # a mailbox on a real domain - not example.*, *.test, *.invalid, ... (mirrors backend/app/core/config.py)
+    a=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+    case "$a" in
+        *@example.com|*@example.net|*@example.org|*@example.*|*@*.example|*@*.test|*@*.invalid|*@*.localhost|*@*.local|*@localhost) return 1;;
+        ?*@?*.?*) return 0;;
+        *) return 1;;
+    esac
+}
+no_catch_all_proxy() {  # no entry may trust every address (/0, e.g. 0.0.0.0/0 or ::/0) - mirrors core/config.py
+    for item in $(printf '%s' "$1" | tr ',[]"' '    '); do
+        case "$item" in
+            */*) case "${item##*/}" in 0|00|000) return 1;; esac;;
+        esac
+    done
+    return 0
+}
 rule() {  # rule <REQUIRED|optional> <description> <shell test...>
     level=$1; desc=$2; shift 2
     if "$@"; then
@@ -63,6 +79,11 @@ rule REQUIRED "SECRET_KEY is at least 32 characters" sh -c '[ "${#1}" -ge 32 ]' 
 rule REQUIRED "APP_POSTGRES_USER differs from POSTGRES_USER" sh -c '[ -n "$1" ] && [ "$1" != "$2" ]' _ "$(raw APP_POSTGRES_USER)" "$(raw POSTGRES_USER)"
 rule REQUIRED "APP_POSTGRES_PASSWORD is at least 16 characters" sh -c '[ "${#1}" -ge 16 ]' _ "$(raw APP_POSTGRES_PASSWORD)"
 rule REQUIRED "DEBUG is not true" sh -c 'case "$1" in [Tt]rue|1|[Yy]es) exit 1;; *) exit 0;; esac' _ "$(raw DEBUG)"
+if value_set TRUSTED_PROXIES; then
+    # The API refuses to start when an entry trusts every address: X-Real-IP (rate limits, lockouts, audit IPs)
+    # would be spoofable by anyone. Specific addresses and CIDR ranges are fine.
+    rule REQUIRED "TRUSTED_PROXIES has no catch-all (/0) entry" no_catch_all_proxy "$(raw TRUSTED_PROXIES)"
+fi
 # A bare https origin: scheme://host[:port], no path / query / fragment / trailing slash, no localhost.
 is_prod_origin() {
     case "$1" in
@@ -81,18 +102,36 @@ rule REQUIRED "FRONTEND_URL is a bare https origin (not localhost)" is_prod_orig
 if value_set DOMAIN; then
     rule REQUIRED "DOMAIN (Caddy) is the host of FRONTEND_URL" sh -c \
         '[ "$1" = "$2" ]' _ "$(raw DOMAIN)" "$(origin_host "$(raw FRONTEND_URL)")"
+    # DOMAIN is only used by the Caddy overlay (docker-compose.caddy.yml), which needs the Let's Encrypt contact:
+    # compose refuses to start without it, and an empty value is invalid Caddyfile syntax (Caddy would crash-loop).
+    rule REQUIRED "ACME_EMAIL is a real mailbox (Caddy overlay: DOMAIN is set)" real_email "$(raw ACME_EMAIL)"
 fi
 # Left over from the retired separate-platform-domain layout: ignored, but should be removed.
 rule optional "no PLATFORM_APP_ORIGIN/PLATFORM_DOMAIN/TENANT_APP_ORIGIN" sh -c \
     '[ -z "$1$2$3" ]' _ "$(raw PLATFORM_APP_ORIGIN)" "$(raw PLATFORM_DOMAIN)" "$(raw TENANT_APP_ORIGIN)"
 rule REQUIRED "PLATFORM_JWT_SECRET is at least 32 characters" sh -c '[ "${#1}" -ge 32 ]' _ "$(raw PLATFORM_JWT_SECRET)"
 rule REQUIRED "PLATFORM_JWT_SECRET differs from SECRET_KEY" sh -c '[ -n "$1" ] && [ "$1" != "$2" ]' _ "$(raw PLATFORM_JWT_SECRET)" "$(raw SECRET_KEY)"
+# The API refuses to start with a placeholder sender (billing@example.com, *.test, ...) once SMTP_HOST is set.
+rule REQUIRED "EMAIL_FROM_ADDRESS is a real sender (not a placeholder)" real_email "$(raw EMAIL_FROM_ADDRESS)"
 echo "== payments (required before taking online payments)"
 check optional RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET RAZORPAY_WEBHOOK_SECRET
 if value_set RAZORPAY_KEY_ID; then
     # The API refuses to start with Razorpay keys but no webhook secret (payments would be lost).
     rule REQUIRED "Razorpay webhook secret set with the API keys" value_set RAZORPAY_WEBHOOK_SECRET
     rule optional "Razorpay key is LIVE mode (rzp_live_)" sh -c 'case "$1" in rzp_live_*) exit 0;; *) exit 1;; esac' _ "$(raw RAZORPAY_KEY_ID)"
+fi
+echo "== Rooman plan payments - Rooman's own Razorpay account (leave empty until plan checkout is released)"
+check optional PLATFORM_RAZORPAY_KEY_ID PLATFORM_RAZORPAY_KEY_SECRET PLATFORM_RAZORPAY_WEBHOOK_SECRET
+if value_set PLATFORM_RAZORPAY_KEY_ID || value_set PLATFORM_RAZORPAY_KEY_SECRET; then
+    # The API refuses to start in production without these (see backend/app/core/config.py).
+    rule REQUIRED "platform key id and secret set together" sh -c 'v1="$1"; v2="$2"; [ -n "$v1" ] && [ -n "$v2" ]' _ \
+        "$(raw PLATFORM_RAZORPAY_KEY_ID)" "$(raw PLATFORM_RAZORPAY_KEY_SECRET)"
+    rule REQUIRED "platform webhook secret set with the platform keys" value_set PLATFORM_RAZORPAY_WEBHOOK_SECRET
+    rule REQUIRED "platform key is LIVE mode (rzp_live_) in production" sh -c 'case "$1" in rzp_live_*) exit 0;; *) exit 1;; esac' _ "$(raw PLATFORM_RAZORPAY_KEY_ID)"
+fi
+if sh -c 'case "$1" in [Tt]rue|1|[Yy]es) exit 0;; *) exit 1;; esac' _ "$(raw PLATFORM_CHECKOUT_ALLOW_LIVE)"; then
+    rule REQUIRED "PLATFORM_CHECKOUT_ALLOW_LIVE has platform keys + webhook" sh -c '[ -n "$1" ] && [ -n "$2" ] && [ -n "$3" ]' _ \
+        "$(raw PLATFORM_RAZORPAY_KEY_ID)" "$(raw PLATFORM_RAZORPAY_KEY_SECRET)" "$(raw PLATFORM_RAZORPAY_WEBHOOK_SECRET)"
 fi
 echo "== operations (strongly recommended)"
 check optional ALERT_WEBHOOK_URL GITHUB_PAT

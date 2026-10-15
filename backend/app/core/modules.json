@@ -1,5 +1,5 @@
 {
-  "_comment": "Rooman Billing product modules - the canonical list an organization can be entitled to. Identical copy: frontend/src/entitlements/modules.json (asserted by tests). base modules are part of every subscription; core_nav_items and unmapped API routes are always available. api_prefixes are /api/v1-relative path prefixes (longest match wins).",
+  "_comment": "Rooman Billing product modules - the canonical list an organization can be entitled to. Identical copy: frontend/src/entitlements/modules.json (asserted by tests). base modules are part of every subscription; core_nav_items and unmapped API routes are always available. api_prefixes are /api/v1-relative route-template prefixes, e.g. /customers/{customer_id}/subscriptions (longest match wins).",
   "core_nav_items": ["overview", "activity", "action_center", "approvals", "billing_calendar", "audit_log", "data_migration", "customization", "settings"],
   "modules": [
     { "key": "customers", "label": "Customers", "description": "Customer records, contacts and billing details.", "base": true,
@@ -11,9 +11,9 @@
     { "key": "payments", "label": "Payments", "description": "Record payments, receipts and refunds.", "base": true,
       "nav_items": ["payments"], "api_prefixes": ["/payments"] },
     { "key": "quotes", "label": "Quotes & CPQ", "description": "Quotes, proposals and configure-price-quote deals.",
-      "nav_items": ["quotes", "cpq"], "api_prefixes": ["/quotes", "/cpq"] },
+      "nav_items": ["quotes", "cpq"], "api_prefixes": ["/quotes", "/cpq", "/dashboard/quotes-summary", "/dashboard/deals-summary"] },
     { "key": "subscriptions", "label": "Subscriptions & Usage", "description": "Recurring billing, trials, metered usage and proration.",
-      "nav_items": ["subscriptions", "trials", "usage", "proration"], "api_prefixes": ["/subscriptions", "/trials", "/meters"] },
+      "nav_items": ["subscriptions", "trials", "usage", "proration"], "api_prefixes": ["/subscriptions", "/trials", "/meters", "/customers/{customer_id}/subscriptions"] },
     { "key": "reconciliation", "label": "Reconciliation", "description": "Match payments against bank and gateway records.",
       "nav_items": ["reconciliation"], "api_prefixes": ["/payments/reconciliation"] },
     { "key": "collections", "label": "Collections", "description": "Receivables follow-up and collection workflows.",
@@ -21,7 +21,7 @@
     { "key": "dunning", "label": "Dunning", "description": "Automated payment recovery and retry policies.",
       "nav_items": ["dunning"], "api_prefixes": ["/dunning"] },
     { "key": "customer_portal", "label": "Customer Portal & Hosted Payments", "description": "Self-service customer portal and hosted payment pages.",
-      "nav_items": ["customer_portal", "hosted_payment_pages"], "api_prefixes": ["/portal", "/checkout"] },
+      "nav_items": ["customer_portal", "hosted_payment_pages"], "api_prefixes": ["/portal", "/checkout", "/customers/{customer_id}/portal-access", "/customers/{customer_id}/portal-invite", "/customers/{customer_id}/portal-reactivate", "/customers/{customer_id}/portal-revoke"] },
     { "key": "customer_lifecycle", "label": "Customer Lifecycle", "description": "Onboarding, health and renewal tracking per customer.",
       "nav_items": ["customer_lifecycle"], "api_prefixes": ["/lifecycle"] },
     { "key": "expenses", "label": "Expenses", "description": "Expense tracking and recurring expenses.",

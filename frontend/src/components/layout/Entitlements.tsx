@@ -10,9 +10,16 @@ import { Clock, Lock } from 'lucide-react';
 import { Button } from '../common/Button';
 import { useAuth } from '../../hooks/useAuth';
 import { MODULES, navAllowed, navKeyForPath, trialDaysLeft } from '../../entitlements';
+import type { OrganizationAccess } from '../../types/api';
 import { sidebarSections } from './Sidebar';
+import { PLANS_ROUTE } from './TrialBanner';
 
 const NAV_ITEMS = sidebarSections.flatMap((s) => s.items.map((i) => ({ key: i.key, path: i.path, title: i.title })));
+
+/** Where the organization manages its plan: the legacy module trial keeps its request page (/subscription). */
+export function subscriptionPath(access: OrganizationAccess | null | undefined): string {
+  return access?.module_access === 'trial' ? '/subscription' : PLANS_ROUTE;
+}
 
 export function TrialBanner() {
   const { access } = useAuth();
@@ -28,7 +35,7 @@ export function TrialBanner() {
             <span className="font-semibold">{left}</span> Every module is open during the trial.
           </span>
         </p>
-        <Link to="/subscription" className="font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-900">
+        <Link to={subscriptionPath(access)} className="font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-900">
           Choose your plan
         </Link>
       </div>
@@ -37,12 +44,15 @@ export function TrialBanner() {
 }
 
 export function EntitlementGuard({ children }: { children: ReactNode }) {
-  const { access } = useAuth();
+  const { access, hasRole } = useAuth();
   const { pathname } = useLocation();
   const navKey = navKeyForPath(pathname, NAV_ITEMS);
   if (!navKey || navAllowed(access, navKey)) return <>{children}</>;
   const title = NAV_ITEMS.find((i) => i.key === navKey)?.title ?? 'This module';
   const module = MODULES.find((m) => m.nav_items.includes(navKey));
+  const next = hasRole('owner')
+    ? 'See your subscription for the plans that include it.'
+    : 'Ask your organization Owner about your plan.';
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
       <div className="mb-3 rounded-full border border-slate-200 bg-slate-100 p-3 text-slate-500">
@@ -50,10 +60,10 @@ export function EntitlementGuard({ children }: { children: ReactNode }) {
       </div>
       <h2 className="text-xl font-bold text-slate-900">{title} is not in your plan</h2>
       <p className="mt-1 max-w-sm text-sm text-slate-500">
-        {module ? `${module.label} is not part of your organization's subscription.` : ''} Ask Rooman to add it.
+        {module ? `${module.label} is not part of your organization's plan.` : ''} {next}
       </p>
       <div className="mt-4 flex flex-wrap justify-center gap-2">
-        <Link to="/subscription">
+        <Link to={subscriptionPath(access)}>
           <Button variant="primary" size="sm">View subscription</Button>
         </Link>
         <Link to="/dashboard">

@@ -140,11 +140,37 @@ describe('EntitlementGuard and TrialBanner', () => {
     );
   }
 
+  beforeEach(() => {
+    role = 'owner';
+  });
+
   it('blocks a direct URL to a module outside the plan', () => {
     access = { status: 'active', nav_items: ['overview', 'customers', 'quotes'], trial_ends_at: null };
     renderAt('/reports');
     expect(screen.getByText('Reports & Analytics is not in your plan')).toBeInTheDocument();
     expect(screen.queryByText('Page body')).not.toBeInTheDocument();
+  });
+
+  it('sends the Owner of a locked module to /settings/subscription', () => {
+    access = { status: 'active', module_access: 'entitled', nav_items: ['overview', 'customers'], trial_ends_at: null };
+    renderAt('/reports');
+    expect(screen.getByText(/See your subscription for the plans that include it/)).toBeInTheDocument();
+    expect(screen.queryByText(/Ask Rooman/)).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View subscription' })).toHaveAttribute('href', '/settings/subscription');
+  });
+
+  it('tells other members to ask their Owner', () => {
+    role = 'admin';
+    access = { status: 'active', module_access: 'entitled', nav_items: ['overview', 'customers'], trial_ends_at: null };
+    renderAt('/reports');
+    expect(screen.getByText(/Ask your organization Owner about your plan/)).toBeInTheDocument();
+    expect(screen.queryByText(/Ask Rooman/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the legacy request page link for an organization on the legacy module trial', () => {
+    access = { status: 'trial', module_access: 'trial', nav_items: ['overview', 'customers'], trial_ends_at: null };
+    renderAt('/reports');
+    expect(screen.getByRole('link', { name: 'View subscription' })).toHaveAttribute('href', '/subscription');
   });
 
   it('allows plan modules and pages that belong to no module', () => {
@@ -155,8 +181,11 @@ describe('EntitlementGuard and TrialBanner', () => {
     expect(screen.getAllByText('Page body').length).toBe(2);
   });
 
-  it('shows the trial countdown with a link to choose a plan', () => {
-    access = { status: 'trial', nav_items: [], trial_ends_at: new Date(Date.now() + 2.5 * 86_400_000).toISOString() };
+  it('shows the legacy trial countdown with a link to its request page', () => {
+    access = {
+      status: 'trial', module_access: 'trial', nav_items: [],
+      trial_ends_at: new Date(Date.now() + 2.5 * 86_400_000).toISOString(),
+    };
     renderAt('/dashboard');
     expect(screen.getByRole('status')).toHaveTextContent('Your free trial ends in 3 days.');
     expect(screen.getByRole('link', { name: 'Choose your plan' })).toHaveAttribute('href', '/subscription');

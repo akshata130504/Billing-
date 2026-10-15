@@ -4,6 +4,8 @@
 # https://{$DOMAIN}/api/v1/webhooks/razorpay - goes to the frontend container, whose nginx forwards
 # /api/ to the backend.
 
+# ACME_EMAIL is required with this file: docker-compose.caddy.yml refuses to start without it and deploy/check-env.sh
+# rejects a missing or placeholder value whenever DOMAIN is set (an empty `email` is invalid Caddyfile syntax).
 {
 	email {$ACME_EMAIL}
 }

@@ -91,9 +91,14 @@ def test_scheduler_starts_no_billing_work_in_trial(db, tenant, gateway, outbox_s
     assert counts["skipped_org_inactive"] >= 1
 
 
+# The optional modules the seeded scheduler work belongs to (renewals and trial conversion, dunning
+# retries, recurring expenses, automation schedules): unattended work runs only for entitled modules.
+SCHEDULED_WORK_MODULES = ("subscriptions", "dunning", "expenses", "automation")
+
+
 def test_scheduler_runs_everything_with_an_approved_subscription(db, tenant, gateway, outbox_seen):
     ids = _seed_due_work(db, tenant)
-    _set_access(db, tenant.organization.id, "entitled")
+    _set_access(db, tenant.organization.id, "entitled", modules=SCHEDULED_WORK_MODULES)
 
     counts = run_billing_jobs(db, today=date.today())
 
@@ -109,7 +114,7 @@ def test_queued_work_runs_once_the_subscription_is_approved(db, tenant, gateway,
     run_billing_jobs(db, today=date.today())
     assert not ({ids["trial_customer"], ids["dunning_customer"]} & _charged_customers(gateway))
     assert ids["outbox_event"] not in outbox_seen
-    _set_access(db, tenant.organization.id, "entitled")
+    _set_access(db, tenant.organization.id, "entitled", modules=SCHEDULED_WORK_MODULES)
     run_billing_jobs(db, today=date.today())
     _assert_processed(_state(db, ids))
 

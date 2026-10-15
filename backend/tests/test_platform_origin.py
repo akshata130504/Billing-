@@ -124,9 +124,9 @@ def test_production_serves_the_platform_on_the_https_application_origin():
                 ALLOWED_ORIGINS="https://app.example.test",
                 DATABASE_URL="postgresql://u:p@db/x", SECURE_COOKIES=True, DEBUG=False)
     with pytest.raises(ValueError, match="FRONTEND_URL"):
-        Settings(**base, FRONTEND_URL="http://app.example.test")
+        Settings(_env_file=None, **base, FRONTEND_URL="http://app.example.test")
     try:
-        prod = Settings(**base, FRONTEND_URL="https://app.example.test")
+        prod = Settings(_env_file=None, **base, FRONTEND_URL="https://app.example.test")  # never the local .env
     except ValueError as exc:  # other unrelated production checks must not be about the platform
         assert "PLATFORM" not in str(exc), exc
         pytest.skip(f"production settings need more unrelated configuration: {exc}")

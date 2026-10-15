@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState, type ReactNode } from 'react';
 import { AlertTriangle, KeyRound } from 'lucide-react';
 import { Button } from '../../components/common/Button';
 import { Input } from '../../components/common/Input';
@@ -15,6 +15,12 @@ export interface ActionDialogProps<T> {
   requireTicket?: boolean;
   /** Extra consequences shown to the operator before they confirm. */
   notes?: string[];
+  /** Additional required inputs rendered above the reason (the caller owns their state). */
+  extraFields?: ReactNode;
+  /** False while those extra inputs are incomplete. */
+  extraValid?: boolean;
+  reasonLabel?: string;
+  reasonPlaceholder?: string;
   onClose: () => void;
   onSubmit: (body: ReasonBody) => Promise<T>;
   onDone: (result: T) => void;
@@ -29,6 +35,8 @@ const MIN_REASON = 10;
  */
 export function ActionDialog<T>({
   isOpen, title, description, confirmLabel, danger = false, requireTicket = false, notes = [],
+  extraFields, extraValid = true, reasonLabel = 'Reason',
+  reasonPlaceholder = 'Why is this being done? (at least 10 characters)',
   onClose, onSubmit, onDone,
 }: ActionDialogProps<T>) {
   const [reason, setReason] = useState('');
@@ -49,7 +57,7 @@ export function ActionDialog<T>({
   }, [isOpen]);
 
   const body = (): ReasonBody => ({ reason: reason.trim(), ...(ticket.trim() ? { ticket_ref: ticket.trim() } : {}) });
-  const valid = reason.trim().length >= MIN_REASON && (!requireTicket || ticket.trim().length >= 2);
+  const valid = extraValid && reason.trim().length >= MIN_REASON && (!requireTicket || ticket.trim().length >= 2);
 
   const attempt = async () => {
     try {
@@ -103,9 +111,10 @@ export function ActionDialog<T>({
               ))}
             </ul>
           )}
+          {extraFields}
           <div>
             <label htmlFor="action-reason" className="block text-sm font-medium text-slate-700">
-              Reason <span className="text-rose-600">*</span>
+              {reasonLabel} <span className="text-rose-600">*</span>
             </label>
             <textarea
               id="action-reason"
@@ -115,7 +124,7 @@ export function ActionDialog<T>({
               maxLength={500}
               required
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-              placeholder="Why is this being done? (at least 10 characters)"
+              placeholder={reasonPlaceholder}
             />
           </div>
           <Input

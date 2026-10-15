@@ -112,6 +112,33 @@ payment page works from `localhost`. Webhooks need a public URL: expose port 800
 `RAZORPAY_WEBHOOK_SECRET`. Without a tunnel the verify step on the payment page is enough to mark
 invoices paid; the webhook is a redundancy path.
 
+`RAZORPAY_*` are the keys tenant payments use (when an organization has not connected its own
+account). Rooman Billing's **own** account, which organizations pay for a Rooman plan, is
+configured separately with `PLATFORM_RAZORPAY_KEY_ID` and `PLATFORM_RAZORPAY_KEY_SECRET` (Test
+Mode keys locally, also in `backend/.env`). Set both or neither; they must differ from `RAZORPAY_*`
+and are never used for tenant payments or sent to the browser.
+
+#### Sandbox test plan (Test Mode purchase without publishing a commercial plan)
+
+The plan catalog ships one test-only plan, `sandbox_foundation` ("Sandbox Test Plan (Foundation)",
+₹1/month, Foundation bundle only, 3 seats). It is never in the public catalog and can be bought only when
+**all** of these hold (checked on every request):
+
+1. `PLATFORM_SANDBOX_PLANS_ENABLED=true` in `backend/.env` (default `false`);
+2. `ENVIRONMENT` is `development` or `test` (production and staging refuse it whatever the flag says);
+3. `PLATFORM_RAZORPAY_KEY_ID` is a Test Mode key (`rzp_test_...`); Live Mode keys never sell it;
+4. `PLATFORM_RAZORPAY_WEBHOOK_SECRET` is set (plan checkout of any kind refuses to start without it).
+
+The platform webhook: expose port 8000 with a tunnel, register
+`https://<tunnel>/api/v1/webhooks/razorpay-platform` in the Razorpay dashboard **in Test Mode**, on
+Rooman's own account, with the events `subscription.authenticated`, `subscription.activated`,
+`subscription.charged`, `subscription.pending`, `subscription.halted`, `subscription.cancelled` and
+`subscription.completed`, and a newly generated secret of its own. Put that secret in
+`PLATFORM_RAZORPAY_WEBHOOK_SECRET` (never the API key secret and never `RAZORPAY_WEBHOOK_SECRET`; the API
+refuses to start if they are equal) and restart the backend. The Subscription page (Settings ->
+Subscription) then shows the plan under "TEST MODE - NOT A COMMERCIAL OFFER" for the Owner to buy with a
+Razorpay test card; the plan starts only after Razorpay confirms the payment (callback or webhook).
+
 ### Running the scheduler manually
 
 Owners can trigger one pass with `POST /api/v1/admin/jobs/run` (via Swagger). Use it to test

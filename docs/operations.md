@@ -266,6 +266,236 @@ rb logs --since 1h scheduler    # one summary line per SCHEDULER_INTERVAL_MINUTE
 Alert if no scheduler summary line appears for `2 x SCHEDULER_INTERVAL_MINUTES`. Owners can force
 a run with `POST /api/v1/admin/jobs/run`.
 
+### Rooman plan reconciliation (`platform_reconciliation`)
+
+A second scheduled job in the same scheduler process
+(`backend/app/services/platform_reconciliation_service.py`) keeps organizations' paid Rooman plans correct
+when a Razorpay webhook or the browser's Checkout callback is late or never arrives. Every
+`PLATFORM_RECONCILE_INTERVAL_MINUTES` (default 15) it re-reads, with Rooman's platform keys only (never
+tenant keys, never tenant payments), at most `PLATFORM_RECONCILE_BATCH_SIZE` (default 200) of each:
+
+1. **Checkouts** that may have been paid: `created`, `authorized`, and `expired` ones for 48 hours. The
+   payment is taken from the subscription's paid invoice at Razorpay and verified by the same code as the
+   callback and the webhook: the plan starts only with an active Razorpay subscription, at least one paid
+   cycle and a **captured** payment of exactly the checkout's amount and currency. An authorization alone
+   stays `authorized` without access; an unpaid checkout past its expiry becomes `expired`.
+2. **Paid subscriptions** (`active` / `past_due`) in the current key mode: newly paid cycles are applied by
+   count (never twice), `pending` / `halted` -> past due with grace, `cancelled` / `completed` -> access ends
+   at the period end (or now when the renewal was never paid).
+3. **`settle`**: time-based states (`past_due` at period end, `expired` after grace, `cancelled` at the end
+   of a cancelled period) are recorded, after step 2 so a renewal Razorpay already charged wins.
+
+**Retries.** Each checkout / subscription is its own transaction. Razorpay unreachable or timing out ->
+that item is rolled back and simply tried again next run (`retry_later`). Nothing is ever approved on a
+guess: a mismatch (amount, currency, plan, checkout reference, unknown subscription) or a payment that
+cannot be applied is left unchanged and reported (`checkout_mismatch` / `*_needs_review`, plus the
+`platform.payment_needs_review` alert). Rows of the other key mode (test vs live) are counted
+(`other_mode_checkouts`) and never read. Without platform keys only `settle` runs.
+
+**Overlap.** APScheduler runs at most one instance, and on PostgreSQL the run holds its own advisory lock
+(`skipped_locked` when another process has it). It does not block `billing_jobs`.
+
+**Monitoring.** One summary line per run:
+
+```bash
+rb logs --since 1h scheduler | grep "Platform reconciliation"
+# Platform reconciliation: checkout_activated=1, settle_no_change=12, subscription_no_change=12
+```
+
+The `scheduler_heartbeats` row `platform_reconciliation` holds the last start / finish time, counts and
+error count. Alert on: no summary line for `2 x PLATFORM_RECONCILE_INTERVAL_MINUTES`; `errors` > 0
+(`platform.reconciliation_item_failed` alert, one per item); `retry_later` on several consecutive runs
+(Razorpay unreachable or the keys wrong); any `*_mismatch` / `*_needs_review` (a payment to check by hand).
+Logs carry ids and outcomes only, never keys, secrets, emails or names.
+
+### Plan billing console (`/superadmin/billing`)
+
+Read-only views of Rooman's own plan billing for **Platform Administrator and Platform Operations** (Support is
+refused by the server; `GET /api/v1/platform/billing/*`): **Subscriptions** (stored and effective state, plan,
+amount from the checkout that started the Razorpay subscription, period, grace, cancellation, Razorpay id and mode),
+**Checkout attempts** (status, expected amount, created / expiry / authorized / completed times, the application's
+own short error), **Webhook ledger** (event type, status, outcome, timestamps; payloads and signatures are never
+stored, a redelivered event is answered `duplicate` and not recorded twice) and **Needs review**. All of it is
+stored application state: no Razorpay call is made to display it and tenant payments are not included. The only
+action is **recording the resolution of a payment-review case** (below); there is no approve, cancel, refund,
+retry or replay.
+
+**Needs review lists only durable records.** Since migration 0041 every payment finding that is not applied
+automatically - from the Checkout callback (`PAYMENT_NEEDS_REVIEW`), a signed webhook or the scheduled
+reconciliation (`*_mismatch` / `*_needs_review`) - is stored on its checkout attempt by
+`platform_payment_service._review`: `review_reason` = the latest finding as `<outcome>: <detail>` (application text
+only, one line, at most 300 characters) and `review_flagged_at` = when the checkout was first flagged (repeated runs
+do not move it). It is also logged and alerted (`platform.payment_needs_review`) as before. The queue lists those
+checkouts, webhook ledger `needs_review` rows whose subscription has no flagged checkout (for example rows from
+before 0041), checkout attempts in `unknown` (Razorpay's answer to the create call was lost), and attempts
+`authorized` for more than 24 hours - one entry per finding. The 0041 markers on the attempt are never cleared.
+
+**Review cases (migration 0043, `platform_payment_reviews`).** Each finding also goes to
+`platform_review_service.record_finding`: if the checkout has an **open** case, its `latest_reason`, `last_seen_at`
+and `finding_count` are updated (the `first_reason` and `opened_at` never change); otherwise a new open case is
+created. The database allows at most one open case per checkout (partial unique index); resolved cases are kept as
+history and are never updated again. Checkouts flagged before 0043 were backfilled as open cases.
+
+**Resolving a case** (`POST /api/v1/platform/billing/review-cases/{id}/resolve`, the **Resolve** button in Needs
+review): Platform Administrator or Platform Operations only, with a recent password step-up (Support 403; tenant
+tokens refused). It requires a category - `no_action_needed`, `resolved_by_payment_lifecycle`, `handled_in_razorpay`,
+`customer_contacted`, `duplicate_case` or `other` - and an explanation of what was investigated (10-500 characters),
+with an optional ticket. The case stores the category, explanation, ticket, time and the resolver's id, email and role
+(snapshots), and a platform audit entry `PLATFORM_PAYMENT_REVIEW_RESOLVED` records the same. A second resolve of the
+same case is refused (`409 REVIEW_ALREADY_RESOLVED`; the first resolution stands).
+
+**Resolving is bookkeeping, not approval.** It does not mark a payment successful, activate a subscription, grant
+modules or seats, change any checkout / subscription / payment status, call Razorpay, cancel, refund, or retry /
+replay anything. Do the real work first - in the Razorpay dashboard or with the organization - then record it. If
+the same problem is found again after a resolution (the reconciliation job re-checks the subscription every run),
+a **new open case** opens and the resolved one stays unchanged in the history.
+
+Views: **Open** (default), **Resolved** and **All**, with organization filter and pages. Open and All also list
+the state-derived signals above (stuck checkouts, ledger rows without a case); they are not cases and cannot be
+resolved - they leave the list when their state changes.
+
+**Email delivery** (`GET /api/v1/platform/billing/notifications`, the fifth tab) is a read-only view of
+`platform_notifications`, for Platform Administrator and Platform Operations only (Support 403, tenant tokens
+refused).
+
+- **Shown:** the email type, status, attempts, queued / updated / sent times, the next attempt for pending emails,
+  and a summary count per status.
+- **Filters:** `?status=pending|sent|failed|superseded|all`, `?kind=<one of the 7 kinds>` and `?organization=`.
+  Pages are served by the database, never by loading the whole table.
+- **Errors** appear only as allow-listed categories with a description (for example `smtp_timeout`, "The SMTP
+  server did not answer in time"). Anything else, including an exception class name, shows as `unclassified`.
+- **Never shown:** the subject, the text or HTML body, or the full recipient address. Only a masked hint
+  (`o***@example.test`) appears, enough to tell an organization's recipients apart and to spot a rejecting domain.
+- **What "Sent to SMTP" means:** Rooman's mail server accepted the message. It is not proof that it reached or was
+  read in the customer's inbox.
+- **No actions:** no resend, retry, resolve or delete. The `platform_notifications` scheduler job alone sends and
+  retries.
+
+### Payment receipts for Rooman plans (`platform_payments`, migration 0042)
+
+Every **verified, successful** payment for an organization's Rooman plan is recorded once in `platform_payments`
+(unique per Razorpay payment id) and is its **payment receipt** (`receipt_number` `RCPT-<yyyymm>-<8 hex>`). Recording
+happens only inside the shared verification (`platform_payment_service.sync_provider_subscription`, used by the
+Checkout callback, the platform webhook and the scheduled reconciliation):
+
+- **First payment**: when the plan is activated from a captured payment of exactly the checkout's amount and currency.
+- **Renewals**: when Razorpay's paid-cycle count is ahead of the recorded payments, the subscription's paid invoices
+  are read and each unrecorded payment is fetched and must again be captured for exactly the checkout's amount and
+  currency. Otherwise nothing is recorded and the checkout is flagged for review (`receipt not recorded for paid
+  cycle N: ...`). If Razorpay cannot be read the receipts wait for the next callback / webhook / reconciliation run;
+  the subscription lifecycle (renewal, past due, cancellation) is never held back by receipts.
+- Never recorded: authorizations, pending / failed / uncaptured charges, amount or currency mismatches, anything not
+  verified with Razorpay, and tenant payments (a different table, never read here).
+
+A receipt is a snapshot: amount and currency as charged, plan, period, method, the Razorpay payment / invoice ids and
+the organization's billing identity (Settings -> Organization: name, legal name, email, address, GSTIN) at the time
+it was recorded. Later price, plan, subscription or profile changes never rewrite it; the application never updates
+or deletes rows (foreign keys RESTRICT; migration downgrade refuses while rows exist). Owner, Admin and Finance see
+their organization's receipts in Settings -> Subscription and download a PDF (`GET /api/v1/plan-subscription/receipts`,
+`/{id}`, `/{id}/pdf`); other organizations' ids answer 404; Viewers are refused.
+
+**Receipt, not tax invoice.** The receipt and its PDF say "payment receipt, not a tax invoice", itemise no tax and
+print no seller tax registration. Before a GST tax invoice can be issued, decide: whether plan prices are inclusive or
+exclusive of GST and the rate (SAC classification); Rooman's legal entity name, address, GSTIN and state; place of
+supply rules (from the buyer's GSTIN / state); invoice numbering (sequential per financial year, prefix); B2B vs B2C
+handling; whether a tax invoice replaces or accompanies the receipt; e-invoicing applicability; refunds / credit
+notes. A tax invoice should be its own table referencing `platform_payments`, so receipts never change meaning.
+
+### Owner plan cancellation (`POST /api/v1/plan-subscription/cancel`)
+
+Owners cancel from Settings -> Subscription (`backend/app/services/platform_cancellation_service.py`):
+
+| Option | Razorpay call | Access |
+|---|---|---|
+| At the end of the current period | `cancel_at_cycle_end=true` | continues until `current_period_end`, then read-only (`settle` records `cancelled`) |
+| Immediately | `cancel_at_cycle_end=false` | read-only at once (`cancel_now`); no automatic refund |
+
+The plan changes only after Razorpay confirms (a 2xx for that subscription; for "immediately" with status
+`cancelled`, or a fresh read showing `cancelled` when Razorpay refuses because it already is). Razorpay accepts
+**one cancel per subscription and has no undo**, so: a repeated request returns the current state without
+calling Razorpay; "cancel now" after a scheduled cancellation is refused (`CANCELLATION_ALREADY_SCHEDULED`);
+there is no "undo cancellation" or "resume" (Razorpay's `resume` is only for paused subscriptions, which this
+app never creates, and `cancel_scheduled_changes` undoes plan updates, not cancellations). A cancelled plan is
+restarted only by a new, verified purchase; while a cancellation is scheduled a new purchase waits for the
+period end (`SUBSCRIPTION_ALREADY_ACTIVE`).
+
+| Error code | Meaning | What to do |
+|---|---|---|
+| `CANCELLATION_UNCONFIRMED` (503) | Razorpay timed out or answered without showing the cancellation; nothing changed | Retry; a cancellation Razorpay did make is then confirmed from its state |
+| `CANCELLATION_REFUSED` (409) | Razorpay refused and does not show it cancelled (e.g. another operation in progress, or a cycle-end cancel already scheduled there whose answer was lost) | Check the subscription in the Razorpay dashboard; reconciliation applies Razorpay's state at the cycle end |
+| `NOT_IN_PAID_PERIOD` (409) | Past due: only "immediately" is possible | - |
+| `CANCELLATION_NOT_AVAILABLE` | Keys not configured, or the plan was bought in the other key mode | - |
+
+Webhooks and reconciliation stay consistent: an immediately cancelled row is never re-read or revived; a
+scheduled one stays `active` + `cancel_at_period_end` until `settle`; a renewal charged despite a scheduled
+cancellation is refused and reported (`subscription_needs_review`). Each cancellation writes a platform audit
+entry (`PLATFORM_SUBSCRIPTION_CANCELLATION_SCHEDULED` / `PLATFORM_SUBSCRIPTION_CANCELLED`) and one log line with
+ids only.
+
+### Rooman subscription emails (`platform_notifications`, migration 0044)
+
+Customers are emailed about their Rooman plan from **Rooman's server SMTP settings** (`SMTP_*`, `EMAIL_FROM_*` -
+the same sender as the trial emails; never a tenant's own SMTP integration). Recipients: the organization's
+**active Owners** plus its **Billing email** (Settings -> Organization), each address once (case-insensitive).
+
+| Kind | When it is queued | Says |
+|---|---|---|
+| `subscription_activated` | First payment verified (captured, exact amount / currency) and the plan activated - callback, webhook or reconciliation | Payment confirmed, plan active, period end, receipt available |
+| `renewal_payment_received` | A NEW verified renewal receipt row (`platform_payments`, kind `renewal`) | Renewal payment received, amount, period, receipt available |
+| `payment_past_due` | `mark_past_due` (Razorpay pending / halted) or `settle` (period ended with no renewal) | Payment **not confirmed**, full access until the grace deadline, then read-only |
+| `access_expired` | `settle`: grace ended -> expired | Plan expired, read-only, choose a plan |
+| `cancellation_scheduled` | `schedule_cancellation` (Owner, or Razorpay reporting the subscription cancelled) | Still active today, ends on the period end, nothing more charged |
+| `cancelled_immediately` | `cancel_now` | Cancelled with immediate effect, read-only now |
+| `cancellation_effective` | `settle`: a scheduled cancellation took effect at the period end | Ended as scheduled, read-only now |
+
+No email ever says a payment succeeded unless the payment passed verification: an authorization, a pending, failed
+or uncaptured payment and any mismatch create no receipt and no activation, so no "payment" email. Emails link to
+Settings -> Subscription (sign-in required; receipts there are for Owner / Admin / Finance); no attachment, and the
+receipt is described as a payment receipt, not a GST tax invoice. They carry no Razorpay / payment ids,
+payment-method details, webhook data or secrets.
+
+**Reliability.**
+- Each email is a row written in the **same transaction** as the state change, so a rolled-back change queues
+  nothing and nothing is sent before the commit.
+- One row per (event, recipient): `UNIQUE (event_key, recipient)` with insert-or-ignore, so the callback, webhook
+  and reconciliation reporting the same event cannot queue it twice. Keys are namespaced
+  `<kind>:<entity>:<id>[:<time>]` (a CHECK enforces the kind prefix).
+- One transition never produces contradictory emails. A scheduled cancellation ends as `cancellation_effective`,
+  never `access_expired`. A terminal email (expired / cancelled / ended) marks the same subscription's pending
+  past-due or scheduled-cancellation email `superseded`.
+- The `platform_notifications` scheduler job (every `PLATFORM_NOTIFICATION_CHECK_SECONDS`, default 60, with a
+  heartbeat row) sends due rows one at a time, each locked `FOR UPDATE SKIP LOCKED`. Just before sending it checks
+  the email is still true; if not (for example a past-due notice after the renewal was confirmed, or a fact email
+  older than 7 days) the row becomes `superseded`.
+- SMTP failure, or SMTP not configured: `attempts` + 1, `last_error` gets the category only (for example
+  `smtp_timeout`), and the next attempt is after 1 min, 5 min, 15 min, 1 h, 3 h, 6 h, then 12 h. After 8 attempts
+  the row is `failed` and an error is logged. A retry re-sends the stored email only; no payment, subscription or
+  entitlement code runs.
+- Delivery is at least once. If the process dies after the SMTP server accepted a message but before the row was
+  committed, that one email can be sent again.
+
+**Terminal failures alert once.** When an email reaches `failed` (attempts exhausted), two things are committed
+together: the status change and an append-only platform audit entry `PLATFORM_NOTIFICATION_FAILED` (target
+`platform_notification`, details: kind, organization id, attempts, error category).
+
+- **One alert, after the commit.** It goes through the existing `core/alerts.send_alert` (event
+  `platform_notification.failed`, severity error): to `ALERT_WEBHOOK_URL` when set, always as an `ALERT …` ERROR log
+  line (which Sentry receives when enabled). A plain ERROR line `Platform notification <id> (<kind>) for
+  organization <id> failed after N attempts: <category>` is logged first.
+- **What it carries:** the notification id, kind, organization id, attempts and the allow-listed error category
+  only. Never the recipient, subject, bodies, SMTP settings, payment data or exception text.
+- **No repeats.** A failed row is never picked up again, so later scheduler runs never re-alert. The dedup key
+  `platform_notification.failed:<id>:<attempts>` also suppresses an in-process repeat.
+- **Alert service down:** the failure is logged as a warning, the row stays `failed`, and the job continues.
+- **If a retry workflow is added later**, it must leave these audit entries in place; a new terminal failure
+  would add a new entry and a new alert.
+
+**Check:** Plan billing -> **Email delivery** (Failed / Pending filters and the status counts), or
+`SELECT status, COUNT(*) FROM platform_notifications GROUP BY status;` - alert on `failed` rows, or on
+`pending` rows older than an hour. The log has a `Platform notifications: sent=…` line when anything was sent. Rows
+hold recipient addresses (personal data): organization FK `ON DELETE CASCADE`, so a future approved purge removes
+them along with the organization, while the platform audit log keeps the lifecycle changes themselves.
+
 ## 6. Routine checks
 
 ```bash
@@ -281,7 +511,7 @@ docker system df                                   # image/volume usage; `docker
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| `backend` exits immediately with `Refusing to start in production with insecure configuration: ...` | `.env.production` still has a default `SECRET_KEY`, `DEBUG=true`, password `postgres`, SQLite URL or a localhost origin | Fix the listed variable(s); `rb up -d backend scheduler`. |
+| `backend` exits immediately with `Refusing to start in production with insecure configuration: ...` | `.env.production` still has a default `SECRET_KEY`, `DEBUG=true`, password `postgres`, SQLite URL or a localhost origin; or a placeholder `EMAIL_FROM_ADDRESS` (with `SMTP_HOST` set); or Rooman's platform Razorpay keys in Test Mode / without `PLATFORM_RAZORPAY_WEBHOOK_SECRET`; or `PLATFORM_CHECKOUT_ALLOW_LIVE=true` without those keys; or `TRUSTED_PROXIES` containing `0.0.0.0/0` / `::/0` | Fix the listed variable(s); `rb up -d backend scheduler`. |
 | `backend` logs `waiting for database` for 60 s then exits | DB not healthy yet, wrong `POSTGRES_*`, or the `db` volume was initialised with a different password | `rb logs db`; `rb ps`. If the password changed after first init, run `ALTER USER ... PASSWORD` in `db` or reset the volume (data loss). |
 | Alembic error `Target database is not up to date` / `Can't locate revision` | Database from a different branch/release; someone ran migrations manually | `rb run --rm -e RUN_MIGRATIONS=false backend alembic -c backend/alembic.ini history` and `current`; downgrade/upgrade to the expected revision or restore a backup. |
 | Web loads, every API call fails with 502 | nginx cannot reach `backend:8000` | `rb ps backend` (healthy?), `rb logs backend`. After scaling/renaming, nginx re-resolves within 10 s. |

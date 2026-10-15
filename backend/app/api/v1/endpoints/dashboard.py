@@ -18,10 +18,43 @@ from backend.app.schemas.dashboard import (
     FinancialSummary,
     QuotesSummary,
 )
-from backend.app.services import dashboard_service, dashboard_summary_service, timezones
+from backend.app.services import dashboard_service, dashboard_summary_service, org_access, timezones
 from backend.app.services.pagination import PageParams, page_params
 
 router = APIRouter()
+
+# Overview, Action center and Calendar are core pages, but some of their figures come from optional
+# product modules (core/modules.json). Those figures are left out (zeroed / omitted) for an
+# organization that is not entitled to the module; everything from base modules is unchanged.
+_ACTION_MODULES = {"expiring_trial": "subscriptions", "pending_quote": "quotes"}
+_EVENT_MODULES = {"subscription_renewal": "subscriptions", "trial_ending": "subscriptions", "quote_expiry": "quotes"}
+
+
+def _without_subscriptions_summary(data: dict) -> dict:
+    data["revenue"].update(mrr="0.00", arr="0.00", mrr_change_pct=None, mrr_other_currencies={})
+    data["customer_health"] = {
+        "active": 0, "trialing": 0, "past_due": 0, "paused": 0, "cancelled_this_period": 0,
+        "churned_customers": 0, "customers_at_period_start": 0, "churn_rate": None,
+    }
+    return data
+
+
+def _filter_financial(data: dict, modules) -> dict:
+    if "subscriptions" not in modules:
+        data["subscriptions"] = {"total_count": 0, "by_status": {}}
+        data["mrr"] = {"currency": data["mrr"]["currency"], "mrr": "0.00", "arr": "0.00", "by_currency": {},
+                       "subscription_count": 0}
+    if "quotes" not in modules:
+        data["quotes"] = {"total_count": 0, "by_status": {}, "value_by_currency": []}
+    return data
+
+
+def _filter_action_center(data: dict, modules) -> dict:
+    items = [i for i in data["items"] if _ACTION_MODULES.get(i["category"]) in (None, *modules)]
+    counts = {key: 0 for key in data["counts"]}
+    for item in items:
+        counts[item["category"]] += 1
+    return {**data, "items": items, "counts": counts}
 
 
 @router.get("/dashboard/summary", response_model=DashboardSummary, summary="Dashboard KPIs, trend, pipeline and recent activity")
@@ -30,7 +63,10 @@ def dashboard_summary(
     ctx: CurrentContext = Depends(require_viewer),
     db: Session = Depends(get_db),
 ):
-    return dashboard_service.dashboard_summary(db, ctx.organization, range_)
+    data = dashboard_service.dashboard_summary(db, ctx.organization, range_)
+    if "subscriptions" not in org_access.entitled_modules(db, ctx.organization):
+        data = _without_subscriptions_summary(data)
+    return data
 
 
 @router.get(
@@ -50,7 +86,8 @@ def financial_summary(
     With neither `range` nor dates, range-based figures are all-time."""
     if range_ and not (date_from or date_to):
         date_from, date_to, _, _ = dashboard_service.resolve_range(range_, timezones.org_today(ctx.organization))
-    return dashboard_summary_service.financial_summary(db, ctx.organization, date_from=date_from, date_to=date_to)
+    data = dashboard_summary_service.financial_summary(db, ctx.organization, date_from=date_from, date_to=date_to)
+    return _filter_financial(data, org_access.entitled_modules(db, ctx.organization))
 
 
 @router.get("/dashboard/quotes-summary", response_model=QuotesSummary, summary="Quote counts and value by status (quotes list KPIs)")
@@ -94,7 +131,8 @@ def action_center(
     ctx: CurrentContext = Depends(require_viewer),
     db: Session = Depends(get_db),
 ):
-    return dashboard_service.action_center(db, ctx.organization_id)
+    data = dashboard_service.action_center(db, ctx.organization_id)
+    return _filter_action_center(data, org_access.entitled_modules(db, ctx.organization))
 
 
 @router.get("/calendar", response_model=CalendarResponse, summary="Billing events for a month")
@@ -103,7 +141,10 @@ def calendar(
     ctx: CurrentContext = Depends(require_viewer),
     db: Session = Depends(get_db),
 ):
-    return dashboard_service.calendar_events(db, ctx.organization_id, month)
+    data = dashboard_service.calendar_events(db, ctx.organization_id, month)
+    modules = org_access.entitled_modules(db, ctx.organization)
+    data["events"] = [e for e in data["events"] if _EVENT_MODULES.get(e["type"]) in (None, *modules)]
+    return data
 
 
 @router.get("/activity", response_model=PaginatedResponse[ActivityItem], summary="Activity feed derived from the audit log")

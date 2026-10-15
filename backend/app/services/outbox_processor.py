@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session
 from backend.app.core.logging import logger
 from backend.app.models.base import utcnow
 from backend.app.models.events import DomainEventType, OutboxEvent, OutboxStatus
-from backend.app.services import org_lifecycle
+from backend.app.services import org_access, org_lifecycle
 
 EMAIL_SEND_EVENT = "email.send"
 WEBHOOK_DELIVER_EVENT = "webhook.deliver"
@@ -217,21 +217,25 @@ def _handle_domain_event(db: Session, event: OutboxEvent) -> None:
 
     event_type = _event_type_str(event.event_type)
     payload = dict(event.payload or {})
-    customization_service.process_outbox_event_automation(
-        db,
-        event.organization_id,
-        event_type,
-        payload,
-        aggregate_type=event.aggregate_type,
-        aggregate_id=event.aggregate_id,
-    )
-    customization_service.enqueue_subscribed_webhooks(
-        db,
-        event.organization_id,
-        event_type,
-        payload,
-        event_id=event.id,
-    )
+    # Automation rules and the Integrations webhook are optional product modules: an organization
+    # that is not entitled to one gets no rule runs / no outbound webhook for the event.
+    if org_access.module_entitled(db, event.organization_id, "automation"):
+        customization_service.process_outbox_event_automation(
+            db,
+            event.organization_id,
+            event_type,
+            payload,
+            aggregate_type=event.aggregate_type,
+            aggregate_id=event.aggregate_id,
+        )
+    if org_access.module_entitled(db, event.organization_id, "integrations"):
+        customization_service.enqueue_subscribed_webhooks(
+            db,
+            event.organization_id,
+            event_type,
+            payload,
+            event_id=event.id,
+        )
 
 
 def _dispatch(db: Session, event: OutboxEvent) -> None:

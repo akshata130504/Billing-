@@ -26,14 +26,19 @@ from backend.app.services import audit
 from backend.app.services.invoice_service import mark_overdue, send_reminder
 from backend.app.services.subscription_service import renew_subscription
 from backend.app.services import timezones
+from backend.app.services.org_access import module_entitled
 from backend.app.services.org_lifecycle import AutomationGuard, automation_allowed
 
 _scheduler = None
 
 JOB_NAME = "billing_jobs"
 TRIAL_REMINDER_JOB_NAME = "trial_reminders"
+PLATFORM_RECONCILE_JOB_NAME = "platform_reconciliation"
+PLATFORM_NOTIFY_JOB_NAME = "platform_notifications"
 # Arbitrary, stable 64-bit key for pg_try_advisory_lock ("RBILLJOB").
 ADVISORY_LOCK_KEY = 0x52_42_49_4C_4C_4A_4F_42
+# Its own key, so reconciliation and billing_jobs never block each other ("RPLATREC").
+PLATFORM_RECONCILE_LOCK_KEY = 0x52_50_4C_41_54_52_45_43
 
 
 def _load_subscription(db: Session, subscription_id: str) -> Optional[Subscription]:
@@ -228,7 +233,7 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
         try:
             from backend.app.services.subscription_change_service import execute_due_scheduled_changes
 
-            guard = AutomationGuard(db, oid)
+            guard = AutomationGuard(db, oid, module="subscriptions")
             applied = execute_due_scheduled_changes(db, organization_id=oid, today=day, guard=guard)
             skipped_inactive += guard.refused
             scheduled_changes_applied += len(applied)
@@ -247,7 +252,7 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
         try:
             from backend.app.services.trial_service import evaluate_expiring_trials
 
-            guard = AutomationGuard(db, oid)
+            guard = AutomationGuard(db, oid, module="subscriptions")
             stats = evaluate_expiring_trials(db, today=day, org_id=oid, commit=True, guard=guard)
             skipped_inactive += guard.refused
             db.commit()
@@ -283,7 +288,9 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
             day = local_today(sub.organization_id)
             if sub.next_billing_date is None or sub.next_billing_date > day:
                 continue
-            if not automation_allowed(db, sub.organization_id):
+            if not automation_allowed(db, sub.organization_id) or not module_entitled(
+                db, sub.organization_id, "subscriptions"
+            ):
                 skipped_inactive += 1
                 db.rollback()
                 continue
@@ -377,7 +384,7 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
         try:
             from backend.app.services.dunning_service import execute_dunning_retries
 
-            guard = AutomationGuard(db, oid)
+            guard = AutomationGuard(db, oid, module="dunning")
             res = execute_dunning_retries(db, oid, guard=guard)
             skipped_inactive += guard.refused
             dunning_recovered += res.get("recovered_count", 0)
@@ -395,7 +402,7 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
         try:
             from backend.app.services.expense_service import process_due_recurring_expenses
 
-            guard = AutomationGuard(db, oid)
+            guard = AutomationGuard(db, oid, module="expenses")
             recurring_expenses_processed += process_due_recurring_expenses(
                 db, today=day, organization_id=oid, guard=guard
             )
@@ -437,12 +444,13 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
 
 
 def _record_heartbeat(
-    db: Session, *, started_at: datetime, counts: Dict[str, int], errors: int, skipped: bool = False
+    db: Session, *, started_at: datetime, counts: Dict[str, int], errors: int, skipped: bool = False,
+    job_name: str = JOB_NAME,
 ) -> None:
     try:
-        row = db.get(SchedulerHeartbeat, JOB_NAME)
+        row = db.get(SchedulerHeartbeat, job_name)
         if row is None:
-            row = SchedulerHeartbeat(job_name=JOB_NAME, total_runs=0, last_error_count=0)
+            row = SchedulerHeartbeat(job_name=job_name, total_runs=0, last_error_count=0)
             db.add(row)
         if not skipped:
             row.last_started_at = started_at
@@ -485,12 +493,12 @@ def get_scheduler_heartbeat(db: Session) -> Optional[Dict[str, Any]]:
     }
 
 
-def _acquire_run_lock(db: Session):
+def _acquire_run_lock(db: Session, key: int = ADVISORY_LOCK_KEY):
     """PostgreSQL: take a session-level advisory lock on a dedicated connection.
 
     Returns (acquired, connection). The ORM session commits per row and may hop
     connections, so the lock lives on its own connection held for the whole run.
-    Non-PostgreSQL databases (SQLite in dev/tests) run unlocked.
+    Non-PostgreSQL databases (SQLite in dev/tests) run unlocked. Each job has its own `key`.
     """
     bind = db.get_bind()
     if bind.dialect.name != "postgresql":
@@ -498,7 +506,7 @@ def _acquire_run_lock(db: Session):
     engine = getattr(bind, "engine", bind)
     conn = engine.connect()
     try:
-        acquired = bool(conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": ADVISORY_LOCK_KEY}).scalar())
+        acquired = bool(conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": key}).scalar())
         conn.commit()
     except Exception:
         conn.close()
@@ -509,11 +517,11 @@ def _acquire_run_lock(db: Session):
     return True, conn
 
 
-def _release_run_lock(conn) -> None:
+def _release_run_lock(conn, key: int = ADVISORY_LOCK_KEY) -> None:
     if conn is None:
         return
     try:
-        conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": ADVISORY_LOCK_KEY})
+        conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
         conn.commit()
     except Exception:
         logger.exception("Scheduler: failed to release advisory lock")
@@ -589,6 +597,38 @@ def _trial_reminder_job() -> None:
         db.close()
 
 
+def _platform_reconciliation_job() -> None:
+    """Re-read Rooman plan checkouts and paid subscriptions from Razorpay (missed / late webhooks) and
+    record time-based lifecycle states. Separate from billing_jobs: Rooman's own payments, not tenants'."""
+    from backend.app.core.database import SessionLocal
+    from backend.app.services import platform_reconciliation_service
+
+    db = SessionLocal()
+    try:
+        platform_reconciliation_service.run_reconciliation(db)
+    except Exception:  # pragma: no cover - defensive; per-item errors are already caught
+        logger.exception("Platform reconciliation run failed")
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _platform_notification_job() -> None:
+    """Send queued Rooman subscription lifecycle emails (platform_notifications) after their transactions
+    committed, with retry / backoff. Sending only: no payment, subscription or entitlement change happens here."""
+    from backend.app.core.database import SessionLocal
+    from backend.app.services import platform_notification_service
+
+    db = SessionLocal()
+    try:
+        platform_notification_service.run_delivery(db)
+    except Exception:  # pragma: no cover - defensive; per-row errors are already caught
+        logger.exception("Platform notification run failed")
+        db.rollback()
+    finally:
+        db.close()
+
+
 def start_scheduler():
     """Start the in-process APScheduler (idempotent). Returns the scheduler or None when disabled."""
     global _scheduler
@@ -621,6 +661,28 @@ def start_scheduler():
         coalesce=True,
         replace_existing=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=10),
+    )
+    scheduler.add_job(
+        _platform_reconciliation_job,
+        trigger="interval",
+        minutes=max(1, int(settings.PLATFORM_RECONCILE_INTERVAL_MINUTES)),
+        id=PLATFORM_RECONCILE_JOB_NAME,
+        name="Rooman plan checkout / subscription reconciliation with Razorpay",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
+    )
+    scheduler.add_job(
+        _platform_notification_job,
+        trigger="interval",
+        seconds=max(10, int(settings.PLATFORM_NOTIFICATION_CHECK_SECONDS)),
+        id=PLATFORM_NOTIFY_JOB_NAME,
+        name="Rooman subscription lifecycle emails",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
     )
     scheduler.start()
     _scheduler = scheduler

@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +12,8 @@ let auth: {
   reason?: string | null;
   /** /auth/me access.status (the server's effective status), when present. */
   accessStatus?: string;
+  /** /auth/me access.module_access ('trial' only for the legacy request-and-approve trial). */
+  moduleAccess?: string;
   organizations: { id: string; name: string; slug: string; role: string }[];
 };
 const switchOrganization = vi.fn();
@@ -21,7 +24,9 @@ vi.mock('../hooks/useAuth', () => ({
     isLoading: false,
     organization: { id: 'org-1', name: 'Acme Pvt Ltd', slug: 'acme', status: auth.status, status_reason: auth.reason ?? null },
     organizations: auth.organizations,
-    access: auth.accessStatus ? { status: auth.accessStatus, trial_ends_at: null, nav_items: [] } : null,
+    access: auth.accessStatus
+      ? { status: auth.accessStatus, trial_ends_at: null, nav_items: [], module_access: auth.moduleAccess ?? 'unrestricted' }
+      : null,
     logout: vi.fn(),
     refreshMe: vi.fn(),
     switchOrganization,
@@ -34,7 +39,7 @@ vi.mock('../pages/subscription-access/SubscriptionRequestPage', () => ({
   TrialExpiredScreen: ({ organizationName }: { organizationName: string }) => <div>Trial ended for {organizationName}</div>,
 }));
 
-import { ProtectedRoute } from './index';
+import { LegacySubscriptionRoute, ProtectedRoute } from './index';
 
 function renderGuard() {
   return render(
@@ -136,5 +141,44 @@ describe('ProtectedRoute organization lifecycle', () => {
     screen.getByRole('button', { name: 'Beta Traders' }).click();
     expect(switchOrganization).toHaveBeenCalledWith('org-2');
     expect(screen.queryByRole('button', { name: 'Acme Pvt Ltd' })).not.toBeInTheDocument();
+  });
+});
+
+describe('/subscription', () => {
+  function renderSubscription() {
+    return render(
+      <MemoryRouter initialEntries={['/subscription']}>
+        <Routes>
+          {/* AppLayout provides the Suspense boundary for lazy pages in the app */}
+          <Route path="/subscription" element={<Suspense fallback={null}><LegacySubscriptionRoute /></Suspense>} />
+          <Route path="/settings/subscription" element={<div>Plans and billing</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  beforeEach(() => {
+    auth = { role: 'owner', status: 'active', organizations: [] };
+  });
+
+  it.each(['unrestricted', 'entitled'])('redirects a %s organization to /settings/subscription', (moduleAccess) => {
+    auth.accessStatus = 'active';
+    auth.moduleAccess = moduleAccess;
+    renderSubscription();
+    expect(screen.getByText('Plans and billing')).toBeInTheDocument();
+    expect(screen.queryByText('Subscription page')).not.toBeInTheDocument();
+  });
+
+  it('redirects when access is not known yet', () => {
+    renderSubscription();
+    expect(screen.getByText('Plans and billing')).toBeInTheDocument();
+  });
+
+  it('keeps the request page for an organization on the legacy module trial', async () => {
+    auth.accessStatus = 'trial';
+    auth.moduleAccess = 'trial';
+    renderSubscription();
+    expect(await screen.findByText('Subscription page')).toBeInTheDocument();
+    expect(screen.queryByText('Plans and billing')).not.toBeInTheDocument();
   });
 });

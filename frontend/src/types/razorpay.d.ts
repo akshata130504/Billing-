@@ -42,6 +42,31 @@ interface RazorpayCheckoutOptions {
   config?: Record<string, any>;
 }
 
+/** What Checkout.js hands back after a subscription's authentication payment. */
+interface RazorpaySubscriptionCheckoutSuccess {
+  razorpay_payment_id: string;
+  razorpay_subscription_id: string;
+  razorpay_signature: string;
+}
+
+/** Checkout for a Razorpay subscription: the amount comes from the subscription's plan, not from here. */
+interface RazorpaySubscriptionCheckoutOptions {
+  key: string;
+  subscription_id: string;
+  name: string;
+  description?: string;
+  image?: string;
+  prefill?: RazorpayCheckoutPrefill;
+  notes?: Record<string, string>;
+  theme?: { color?: string };
+  handler: (response: RazorpaySubscriptionCheckoutSuccess) => void;
+  modal?: {
+    ondismiss?: () => void;
+    escape?: boolean;
+    confirm_close?: boolean;
+  };
+}
+
 interface RazorpayPaymentFailedEvent {
   error: {
     code?: string;
@@ -49,7 +74,7 @@ interface RazorpayPaymentFailedEvent {
     reason?: string;
     step?: string;
     source?: string;
-    metadata?: { order_id?: string; payment_id?: string };
+    metadata?: { order_id?: string; payment_id?: string; subscription_id?: string };
   };
 }
 
@@ -61,6 +86,7 @@ interface RazorpayCheckoutInstance {
 
 interface RazorpayCheckoutConstructor {
   new (options: RazorpayCheckoutOptions): RazorpayCheckoutInstance;
+  new (options: RazorpaySubscriptionCheckoutOptions): RazorpayCheckoutInstance;
 }
 
 interface Window {

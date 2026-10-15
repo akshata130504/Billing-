@@ -19,9 +19,10 @@ const REFRESH_TOKEN_KEY = 'rooman.refresh_token';
 /** Dispatched on `window` when the session can no longer be recovered. */
 export const LOGOUT_EVENT = 'rooman:logout';
 /** Fired when the API refuses a request because the organization's access changed (trial ended,
- * module not in the plan...): the app reloads /auth/me so the lifecycle screens update. */
+ * module not in the plan, paid plan no longer active...): the app reloads /auth/me so the lifecycle
+ * screens update. */
 export const ACCESS_CHANGED_EVENT = 'rooman:access-changed';
-const ACCESS_CODES = new Set(['ORGANIZATION_TRIAL_EXPIRED', 'FEATURE_NOT_ENTITLED']);
+const ACCESS_CODES = new Set(['ORGANIZATION_TRIAL_EXPIRED', 'FEATURE_NOT_ENTITLED', 'SUBSCRIPTION_INACTIVE']);
 /** Fired when the API refuses a change because the organization's free trial has ended. */
 export const TRIAL_EXPIRED_EVENT = 'rooman:trial-expired';
 

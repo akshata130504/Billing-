@@ -2,6 +2,7 @@ import { Suspense, type ReactNode } from 'react';
 import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { AlertCircle, ShieldOff } from 'lucide-react';
 import { AppLayout } from '../components/layout/AppLayout';
+import { PLANS_ROUTE } from '../components/layout/TrialBanner';
 import { Button } from '../components/common/Button';
 import { LoadingState } from '../components/common/LoadingState';
 import { PageLoader } from '../components/common/PageLoader';
@@ -189,6 +190,17 @@ export function ProtectedRoute({ children }: { children?: ReactNode }) {
     default:
       return content;
   }
+}
+
+/**
+ * /subscription is the old request-and-approve page. Plans now live at /settings/subscription; only an
+ * organization still on the legacy module trial (access.module_access === 'trial') keeps the request page,
+ * because that is the flow its trial was granted through.
+ */
+export function LegacySubscriptionRoute() {
+  const { access } = useAuth();
+  if (access?.module_access === 'trial') return <SubscriptionRequestPage />;
+  return <Navigate to={PLANS_ROUTE} replace />;
 }
 
 /** Lets a user who belongs to other organizations leave a locked one without signing out. */
@@ -507,7 +519,7 @@ export function AppRoutes() {
               <Route path="ai-billing" element={<AIBillingPage />} />
               <Route path="automation" element={<AutomationPage />} />
               <Route path="customization" element={<CustomizationPage />} />
-              <Route path="subscription" element={<SubscriptionRequestPage />} />
+              <Route path="subscription" element={<LegacySubscriptionRoute />} />
               <Route path="integrations" element={<Navigate to="/settings?tab=integrations" replace />} />
               <Route path="platforms/mobile" element={<MobilePlatformPage />} />
               <Route path="platforms/desktop" element={<DesktopPlatformPage />} />

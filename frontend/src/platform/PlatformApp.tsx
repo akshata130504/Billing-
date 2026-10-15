@@ -13,13 +13,14 @@ import type { PlatformRole } from './platformApi';
 import { AccessGrantsPage } from './console/AccessGrantsPage';
 import { AccountPage } from './console/AccountPage';
 import { AuditPage } from './console/AuditPage';
-import { ADMIN, useConsole } from './console/ConsoleContext';
+import { ADMIN, OPS, useConsole } from './console/ConsoleContext';
 const SUPPORT: PlatformRole = 'platform_support';
 import { ConsoleLayout } from './console/ConsoleLayout';
 import { DashboardPage } from './console/DashboardPage';
 import { HealthPage } from './console/HealthPage';
 import { OrganizationDetailPage } from './console/OrganizationDetailPage';
 import { SubscriptionRequestsPage } from './console/SubscriptionRequestsPage';
+import { BillingPage } from './console/BillingPage';
 import { OrganizationsPage } from './console/OrganizationsPage';
 import { StaffPage } from './console/StaffPage';
 import { WebsitePage } from './console/website/WebsitePage';
@@ -49,6 +50,7 @@ export function PlatformRoutes() {
         <Route path="organizations" element={<OrganizationsPage />} />
         <Route path="organizations/:organizationId" element={<OrganizationDetailPage />} />
         <Route path="subscription-requests" element={<SubscriptionRequestsPage />} />
+        <Route path="billing" element={<RequireRole roles={[ADMIN, OPS]}><BillingPage /></RequireRole>} />
         <Route path="staff" element={<RequireRole roles={[ADMIN]}><StaffPage /></RequireRole>} />
         <Route path="audit" element={<RequireRole roles={[ADMIN]}><AuditPage /></RequireRole>} />
         <Route path="website" element={<RequireRole roles={[ADMIN]}><WebsitePage /></RequireRole>} />

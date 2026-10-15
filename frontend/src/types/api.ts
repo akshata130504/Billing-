@@ -203,6 +203,25 @@ export interface TrialInfo {
   seconds_remaining: number;
 }
 
+/** Effective state of the organization's paid Rooman plan. 'invalid': a record the server cannot trust. */
+export type PlatformSubscriptionState = 'active' | 'past_due' | 'cancelled' | 'expired' | 'invalid';
+
+/** The organization's paid Rooman plan (not a customer subscription). Null/absent: no paid plan yet. */
+export interface PlatformSubscriptionInfo {
+  state: PlatformSubscriptionState;
+  plan_code: string | null;
+  /** The plan is a Razorpay Test Mode sandbox test plan, not a commercial plan. */
+  sandbox?: boolean;
+  billing_interval: string | null;
+  billing_interval_count: number | null;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  /** Only while past_due: when changes stop being allowed if the payment is not recovered. */
+  grace_period_end: string | null;
+  writable: boolean;
+}
+
 export interface MeResponse {
   user: MeUser;
   organization: OrganizationOut;
@@ -210,6 +229,7 @@ export interface MeResponse {
   organizations: MeOrganizationSummary[];
   access?: OrganizationAccess | null;
   trial?: TrialInfo | null;
+  subscription?: PlatformSubscriptionInfo | null;
 }
 
 export type SignupResponse = AuthTokens & { me: MeResponse };

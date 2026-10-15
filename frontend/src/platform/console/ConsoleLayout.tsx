@@ -4,6 +4,7 @@ import {
   Activity,
   Building2,
   ClipboardCheck,
+  CreditCard,
   Globe,
   KeyRound,
   LayoutDashboard,
@@ -20,7 +21,7 @@ import { LoadingState } from '../../components/common/LoadingState';
 import { cn } from '../../utils/cn';
 import { PlatformApiError, PlatformMe, PlatformRole, ROLE_LABELS, platformApi } from '../platformApi';
 import { loadPlatformMe } from '../platformSession';
-import { ADMIN, ConsoleContext, ConsoleSession } from './ConsoleContext';
+import { ADMIN, ConsoleContext, ConsoleSession, OPS } from './ConsoleContext';
 
 interface NavItem {
   to: string;
@@ -35,6 +36,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/organizations', label: 'Organizations', icon: Building2 },
   { to: '/subscription-requests', label: 'Subscription requests', icon: ClipboardCheck },
+  { to: '/billing', label: 'Plan billing', icon: CreditCard, roles: [ADMIN, OPS] },
   { to: '/staff', label: 'Platform staff', icon: Users, roles: [ADMIN] },
   { to: '/audit', label: 'Audit log', icon: ScrollText, roles: [ADMIN] },
   { to: '/website', label: 'Website', icon: Globe, roles: [ADMIN] },

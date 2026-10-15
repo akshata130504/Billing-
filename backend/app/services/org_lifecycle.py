@@ -128,15 +128,23 @@ def assert_payment_collection_allowed(db: Session, organization_id: Optional[str
 
 
 class AutomationGuard:
-    """Per-organization gate handed to service loops; counts how often it refused."""
+    """Per-organization gate handed to service loops; counts how often it refused.
 
-    def __init__(self, db: Session, organization_id: Optional[str]):
+    `module`: the optional product module (core/modules.json) the work belongs to; the work is
+    also refused while the organization is not entitled to it (services/org_access.py)."""
+
+    def __init__(self, db: Session, organization_id: Optional[str], module: Optional[str] = None):
         self.db = db
         self.organization_id = organization_id
+        self.module = module
         self.refused = 0
 
     def __call__(self) -> bool:
         allowed = automation_allowed(self.db, self.organization_id)
+        if allowed and self.module:
+            from backend.app.services.org_access import module_entitled
+
+            allowed = module_entitled(self.db, self.organization_id, self.module)
         if not allowed:
             self.refused += 1
         return allowed

@@ -174,6 +174,7 @@ SECRET_KEY=8f3c1e7a9b2d4c6e0f1a3b5c7d9e2f4a6b8c0d2e
 FRONTEND_URL=https://billing.example.test
 ALLOWED_ORIGINS=https://billing.example.test
 DOMAIN=billing.example.test
+ACME_EMAIL=ops@rooman-billing.in
 POSTGRES_USER=rooman_owner
 POSTGRES_PASSWORD=owner-password-0123456789
 POSTGRES_DB=rooman_billing
@@ -185,7 +186,7 @@ SMTP_HOST=smtp.example.test
 SMTP_PORT=587
 SMTP_USERNAME=mailer
 SMTP_PASSWORD=mailer-password
-EMAIL_FROM_ADDRESS=billing@example.test
+EMAIL_FROM_ADDRESS=billing@rooman-billing.in
 DEBUG=false
 """
 
@@ -240,7 +241,7 @@ PROD_BASE = {
     "ENVIRONMENT": "production", "DEBUG": False,
     "SECRET_KEY": "a-cryptographically-secure-random-secret-key-67890",
     "ALLOWED_ORIGINS": ["https://billing.example.com"], "FRONTEND_URL": "https://billing.example.com",
-    "SMTP_HOST": "smtp.example.com",
+    "SMTP_HOST": "smtp.example.com", "EMAIL_FROM_ADDRESS": "billing@rooman-billing.in",
 }
 
 

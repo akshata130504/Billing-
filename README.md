@@ -106,7 +106,7 @@ scheduler container for background jobs and nginx serving the SPA on port 80 wit
 to the API. Put TLS in front of it - the bundled Caddy overlay does it automatically:
 
 ```bash
-# .env.production: DOMAIN=billing.example.com  ACME_EMAIL=ops@example.com  FRONTEND_BIND=127.0.0.1:8080
+# .env.production: DOMAIN=billing.example.com  ACME_EMAIL=<real mailbox, required>  FRONTEND_BIND=127.0.0.1:8080
 docker compose --env-file .env.production -f docker-compose.prod.yml -f docker-compose.caddy.yml up -d --build
 ```
 

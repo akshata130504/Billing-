@@ -726,6 +726,13 @@ def test_platform_routes_expose_no_tenant_data(client, db):
     subs = f"{console}/subscription-requests"
     console_paths |= {subs, f"{subs}/{{request_id}}", f"{subs}/{{request_id}}/approve", f"{subs}/{{request_id}}/reject",
                       f"{subs}/organizations/{{organization_id}}/entitlements"}
+    console_paths |= {f"{console}/plans"}  # Rooman's own plan catalog (no tenant data)
+    # Rooman's own plan billing: read-only views + recording a review resolution (no tenant payments; see
+    # test_platform_billing_console.py and test_platform_review_resolution.py).
+    billing = f"{console}/billing"
+    console_paths |= {f"{billing}/subscriptions", f"{billing}/checkout-attempts", f"{billing}/webhook-events",
+                      f"{billing}/review-queue", f"{billing}/review-cases/{{case_id}}/resolve",
+                      f"{billing}/notifications"}  # email delivery status (test_platform_email_delivery.py)
     assert platform_paths == auth_paths | console_paths
 
 

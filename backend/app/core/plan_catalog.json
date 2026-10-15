@@ -1,0 +1,53 @@
+{
+  "_comment": "Rooman Billing's OWN subscription plans (what organizations buy from Rooman) - unrelated to tenant Plan rows, which are a tenant's plans for its customers. Backend source of truth, validated by backend/app/core/plan_catalog.py against core/modules.json. Prices are integers in the currency's smallest unit (paise). A plan is offered only when status is 'published', which also requires tax_treatment and approval to be recorded. Status 'sandbox' marks a TEST-ONLY plan (reserved 'sandbox_' code, 'Sandbox' name, tiny amount, no tax treatment, never approved): it is never listed publicly and can be bought only in a local environment with PLATFORM_SANDBOX_PLANS_ENABLED and Razorpay Test Mode keys. Nothing here grants modules to any organization.",
+  "catalog_version": 2,
+  "updated_on": "2026-10-13",
+  "bundles": [
+    { "key": "foundation", "label": "Foundation",
+      "description": "Customers, catalog, GST invoices, credit notes, payments, quotes, standard reports and your own Razorpay / SMTP connections.",
+      "modules": ["customers", "products", "invoices", "payments", "quotes", "reports", "integrations"],
+      "requires": [] },
+    { "key": "service_operations", "label": "Service Operations",
+      "description": "Run a service business: customer portal and hosted payment pages, collections, payment matching, expenses, projects and timesheets.",
+      "modules": ["customer_portal", "collections", "reconciliation", "expenses", "projects", "timesheets"],
+      "requires": ["foundation"] },
+    { "key": "recurring_revenue", "label": "Recurring Revenue",
+      "description": "Recurring billing: subscriptions, trials, usage and proration, failed-payment recovery, customer lifecycle and automation.",
+      "modules": ["subscriptions", "dunning", "customer_lifecycle", "automation"],
+      "requires": ["foundation"] }
+  ],
+  "packaging_requires": {
+    "dunning": { "modules": ["subscriptions"],
+      "reason": "Dunning cases are opened automatically only for failed subscription-invoice payments (api/v1/endpoints/webhooks.py)." }
+  },
+  "not_offered": {
+    "ai_billing": "Deterministic keyword assistant, not a general AI model; not sold as a feature.",
+    "platforms": "Device registry only; no native mobile or desktop apps exist."
+  },
+  "plans": [
+    { "code": "starter", "name": "Starter", "status": "draft",
+      "description": "GST-ready invoicing, quotes and payments for small teams.",
+      "bundles": ["foundation"],
+      "price": { "amount_minor": 79900, "currency": "INR", "interval": "month", "interval_count": 1 },
+      "tax_treatment": null, "seat_limit": 3, "approved_by": null, "approved_on": null,
+      "created_on": "2026-10-12", "updated_on": "2026-10-12" },
+    { "code": "growth", "name": "Growth", "status": "draft",
+      "description": "Everything in Starter plus the tools to run a service business.",
+      "bundles": ["foundation", "service_operations"],
+      "price": { "amount_minor": 129900, "currency": "INR", "interval": "month", "interval_count": 1 },
+      "tax_treatment": null, "seat_limit": 5, "approved_by": null, "approved_on": null,
+      "created_on": "2026-10-12", "updated_on": "2026-10-12" },
+    { "code": "business", "name": "Business", "status": "draft",
+      "description": "Everything in Growth plus recurring billing and payment recovery.",
+      "bundles": ["foundation", "service_operations", "recurring_revenue"],
+      "price": { "amount_minor": 179900, "currency": "INR", "interval": "month", "interval_count": 1 },
+      "tax_treatment": null, "seat_limit": 10, "approved_by": null, "approved_on": null,
+      "created_on": "2026-10-12", "updated_on": "2026-10-12" },
+    { "code": "sandbox_foundation", "name": "Sandbox Test Plan (Foundation)", "status": "sandbox",
+      "description": "TEST MODE ONLY - not a commercial offer. Grants only the Foundation bundle so a Razorpay Test Mode purchase can be checked end to end.",
+      "bundles": ["foundation"],
+      "price": { "amount_minor": 100, "currency": "INR", "interval": "month", "interval_count": 1 },
+      "tax_treatment": null, "seat_limit": 3, "approved_by": null, "approved_on": null,
+      "created_on": "2026-10-13", "updated_on": "2026-10-13" }
+  ]
+}

@@ -38,7 +38,7 @@ from backend.app.schemas.chat import (
     RoomiChatResponse,
     RoomiNavigationHint,
 )
-from backend.app.services import ai_service
+from backend.app.services import ai_service, org_access
 
 logger = logging.getLogger(__name__)
 
@@ -561,8 +561,9 @@ def _get_conversation_turns(
     return turns
 
 
-def _get_tenant_billing_metrics(db: Session, organization_id: str) -> Dict[str, Any]:
-    """Retrieves live aggregate billing metrics strictly scoped to the tenant."""
+def _get_tenant_billing_metrics(db: Session, organization_id: str, include_subscriptions: bool = True) -> Dict[str, Any]:
+    """Retrieves live aggregate billing metrics strictly scoped to the tenant. Without
+    `include_subscriptions` (organization not entitled to Subscriptions) the count is left out."""
     total_due = db.scalar(
         select(func.coalesce(func.sum(Invoice.amount_due), Decimal("0.00"))).where(
             Invoice.organization_id == organization_id,
@@ -581,19 +582,19 @@ def _get_tenant_billing_metrics(db: Session, organization_id: str) -> Dict[str, 
             Invoice.status == InvoiceStatus.OVERDUE,
         )
     ) or 0
-    active_subs = db.scalar(
-        select(func.count(Subscription.id)).where(
-            Subscription.organization_id == organization_id,
-            Subscription.status == SubscriptionStatus.ACTIVE,
-        )
-    ) or 0
-
-    return {
+    metrics: Dict[str, Any] = {
         "total_outstanding_balance": str(total_due),
         "open_invoice_count": open_count,
         "overdue_invoice_count": overdue_count,
-        "active_subscription_count": active_subs,
     }
+    if include_subscriptions:
+        metrics["active_subscription_count"] = db.scalar(
+            select(func.count(Subscription.id)).where(
+                Subscription.organization_id == organization_id,
+                Subscription.status == SubscriptionStatus.ACTIVE,
+            )
+        ) or 0
+    return metrics
 
 
 def _call_gemini(
@@ -627,7 +628,8 @@ def _call_gemini(
         f"• Total Outstanding Receivables: ₹{metrics.get('total_outstanding_balance', '0.00')}\n"
         f"• Open Invoices: {metrics.get('open_invoice_count', 0)}\n"
         f"• Overdue Invoices: {metrics.get('overdue_invoice_count', 0)}\n"
-        f"• Active Subscriptions: {metrics.get('active_subscription_count', 0)}\n\n"
+        + (f"• Active Subscriptions: {metrics['active_subscription_count']}\n" if "active_subscription_count" in metrics else "")
+        + "\n"
         f"REAL SIDEBAR NAVIGATION STRUCTURE (use this exactly — never guess or invent what a "
         f"section contains):\n"
         f"{_sidebar_structure_text()}\n\n"
@@ -700,7 +702,9 @@ def process_chat(
     )
     conv_id = conv.id
     history_turns = _get_conversation_turns(db, conv_id, ctx.organization_id, request.history, user_id=ctx.user_id)
-    metrics = _get_tenant_billing_metrics(db, ctx.organization_id)
+    # Optional product modules this organization may use: Roomi never reports data of the others.
+    modules = org_access.entitled_modules(db, ctx.organization)
+    metrics = _get_tenant_billing_metrics(db, ctx.organization_id, include_subscriptions="subscriptions" in modules)
 
     used_llm = False
     response: Optional[RoomiChatResponse] = None
@@ -927,14 +931,17 @@ def process_chat(
 
         # (f) Revenue & MRR
         elif any(w in lowered for w in ["what is our revenue", "what is my revenue", "total revenue", "current mrr", "what is our mrr", "monthly recurring revenue", "how much have we made", "revenue summary"]):
-            try:
-                _, mrr_data, _ = ai_service._tool_mrr_summary(db, ctx.organization_id)
-                mrr_val = mrr_data.get("mrr", "0.00")
-                subs_val = mrr_data.get("active_subscription_count", 0)
-            except Exception:
-                mrr_val = "0.00"
-                subs_val = metrics.get("active_subscription_count", 0)
-            
+            # MRR comes from Subscriptions: reported only when the organization is entitled to it.
+            has_subscriptions = "subscriptions" in modules
+            mrr_val, subs_val = "0.00", 0
+            if has_subscriptions:
+                try:
+                    _, mrr_data, _ = ai_service._tool_mrr_summary(db, ctx.organization_id)
+                    mrr_val = mrr_data.get("mrr", "0.00")
+                    subs_val = mrr_data.get("active_subscription_count", 0)
+                except Exception:
+                    subs_val = metrics.get("active_subscription_count") or 0
+
             total_collected = db.scalar(
                 select(func.coalesce(func.sum(Payment.amount), Decimal("0.00"))).where(
                     Payment.organization_id == ctx.organization_id,
@@ -944,8 +951,9 @@ def process_chat(
             reply_text = (
                 f"📈 **Revenue Overview** (*{ctx.organization.name}*):\n\n"
                 f"• **Total Payments Collected**: ₹{total_collected:,.2f}\n"
-                f"• **Current MRR**: ₹{Decimal(mrr_val):,.2f} (from {subs_val} active recurring subscriptions)\n"
-                f"• **Outstanding Receivables**: ₹{Decimal(metrics.get('total_outstanding_balance', '0.00')):,.2f}\n\n"
+                + (f"• **Current MRR**: ₹{Decimal(mrr_val):,.2f} (from {subs_val} active recurring subscriptions)\n"
+                   if has_subscriptions else "")
+                + f"• **Outstanding Receivables**: ₹{Decimal(metrics.get('total_outstanding_balance', '0.00')):,.2f}\n\n"
                 f"Detailed revenue recognition and cohort graphs are available under **Insights → Revenue Intelligence**."
             )
             response = RoomiChatResponse(
@@ -953,11 +961,11 @@ def process_chat(
                 conversation_id=conv_id,
                 suggested_chips=["View Revenue Intelligence", "Show recent payments", "View invoices"],
                 navigation=RoomiNavigationHint(label="Revenue Intelligence", route="/revenue-intelligence", description="Open Revenue Intelligence"),
-                data={"total_collected": str(total_collected), "mrr": str(mrr_val)},
+                data={"total_collected": str(total_collected), **({"mrr": str(mrr_val)} if has_subscriptions else {})},
             )
 
         # (g) Subscriptions
-        elif any(w in lowered for w in ["how many subscription", "active subscription", "my subscription", "show subscription", "list subscription", "subscription count"]) and not any(w in lowered for w in ["explain", "how to", "how do"]):
+        elif any(w in lowered for w in ["how many subscription", "active subscription", "my subscription", "show subscription", "list subscription", "subscription count"]) and not any(w in lowered for w in ["explain", "how to", "how do"]) and "subscriptions" in modules:
             active_count = db.scalar(
                 select(func.count(Subscription.id)).where(
                     Subscription.organization_id == ctx.organization_id,
@@ -985,7 +993,7 @@ def process_chat(
             )
 
         # (h) Expenses
-        elif any(w in lowered for w in ["my expense", "show expense", "list expense", "total expense", "how much did we spend", "company spending"]) and not any(w in lowered for w in ["how to", "explain"]):
+        elif any(w in lowered for w in ["my expense", "show expense", "list expense", "total expense", "how much did we spend", "company spending"]) and not any(w in lowered for w in ["how to", "explain"]) and "expenses" in modules:
             exp_count = db.scalar(select(func.count(Expense.id)).where(Expense.organization_id == ctx.organization_id)) or 0
             exp_sum = db.scalar(select(func.coalesce(func.sum(Expense.amount), Decimal("0.00"))).where(Expense.organization_id == ctx.organization_id)) or Decimal("0.00")
             reply_text = (
@@ -1002,7 +1010,7 @@ def process_chat(
             )
 
         # (i) Projects
-        elif any(w in lowered for w in ["my project", "show project", "list project", "active project", "how many project"]) and not any(w in lowered for w in ["how to", "explain"]):
+        elif any(w in lowered for w in ["my project", "show project", "list project", "active project", "how many project"]) and not any(w in lowered for w in ["how to", "explain"]) and "projects" in modules:
             proj_count = db.scalar(select(func.count(Project.id)).where(Project.organization_id == ctx.organization_id)) or 0
             reply_text = (
                 f"📁 **Projects Summary** (*{ctx.organization.name}*):\n\n"
@@ -1133,8 +1141,9 @@ def process_chat(
                             label=f"{ctx.organization.name} Billing Summary",
                             snippet=(
                                 f"Outstanding: ₹{metrics['total_outstanding_balance']}, "
-                                f"Overdue: {metrics['overdue_invoice_count']}, "
-                                f"Active Subs: {metrics['active_subscription_count']}"
+                                f"Overdue: {metrics['overdue_invoice_count']}"
+                                + (f", Active Subs: {metrics['active_subscription_count']}"
+                                   if "active_subscription_count" in metrics else "")
                             ),
                         )
                     ],

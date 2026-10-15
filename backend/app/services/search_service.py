@@ -1,6 +1,6 @@
 """Global search across the tenant's customers, invoices, quotes, products, subscriptions, payments,
 projects and expenses."""
-from typing import Any, Dict, List
+from typing import AbstractSet, Any, Dict, List, Optional
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
@@ -24,7 +24,15 @@ def _result(id_: str, category: str, title: str, subtitle: str | None, path: str
     return {"id": id_, "category": category, "title": title, "subtitle": subtitle, "path": path, "badge": badge}
 
 
-def search(db: Session, organization_id: str, q: str, limit: int = 20) -> List[Dict[str, Any]]:
+# Result categories owned by an optional product module (core/modules.json). The others belong to
+# base modules every organization has.
+CATEGORY_MODULES = {"quotes": "quotes", "subscriptions": "subscriptions", "projects": "projects", "expenses": "expenses"}
+
+
+def search(db: Session, organization_id: str, q: str, limit: int = 20,
+           modules: Optional[AbstractSet[str]] = None) -> List[Dict[str, Any]]:
+    """`modules`: the organization's entitled module keys (org_access.entitled_modules); results of
+    an optional module outside it are left out. None means no filtering."""
     term = (q or "").strip()
     if not term:
         return []
@@ -210,4 +218,6 @@ def search(db: Session, organization_id: str, q: str, limit: int = 20) -> List[D
             )
         )
 
+    if modules is not None:
+        results = [r for r in results if CATEGORY_MODULES.get(r["category"]) in (None, *modules)]
     return results[:limit]

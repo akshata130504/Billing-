@@ -37,6 +37,7 @@ from backend.app.schemas.portal import (
 )
 from backend.app.services import (
     customer_portal_service,
+    org_access,
     org_lifecycle,
     subscription_service,
     trial_service,
@@ -72,6 +73,9 @@ async def get_current_portal_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
     # Design §8: the portal is read-only for a suspended merchant and refused otherwise.
     if not org_lifecycle.customer_pages_visible(db, user.organization_id):
+        raise org_lifecycle.OrganizationUnavailableError("This customer portal is not available.")
+    # The portal is an optional product module of the merchant (core/modules.json "customer_portal").
+    if not org_access.module_entitled(db, user.organization_id, "customer_portal"):
         raise org_lifecycle.OrganizationUnavailableError("This customer portal is not available.")
     return user
 

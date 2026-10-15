@@ -234,7 +234,12 @@ class OrganizationNotActiveError(ForbiddenError):
 
 # Reachable while a trial has ended: what the organization needs to see its state and ask for a
 # subscription (everything else answers ORGANIZATION_TRIAL_EXPIRED). /api/v1-relative prefixes.
-TRIAL_EXPIRED_ALLOWED = ("/subscription-requests", "/ui-config", "/organization")
+TRIAL_EXPIRED_ALLOWED = ("/subscription-requests", "/subscription-checkout", "/ui-config", "/organization")
+
+# Buying a plan must work exactly when the organization is read-only for lack of one (trial ended,
+# paid plan lapsed). Only these routes are exempt from that read-only mode; organization lifecycle,
+# roles and module checks still apply to them. /api/v1-relative prefixes.
+SUBSCRIPTION_PURCHASE_ROUTES = ("/subscription-checkout",)
 
 
 def _api_path(request: Request) -> str:
@@ -332,19 +337,36 @@ _TRIAL_READ_ONLY_POST_ROUTES = (
 )
 
 
+class SubscriptionInactiveError(ForbiddenError):
+    """403 SUBSCRIPTION_INACTIVE: the organization's paid plan has ended (cancelled, expired, or a
+    record that cannot be trusted), so it is read-only until it starts a plan again."""
+
+    def __init__(self):
+        super().__init__("Your subscription is not active. Your data is safe - renew your plan to continue making changes.")
+        self.code = "SUBSCRIPTION_INACTIVE"
+
+
 def _check_trial(ctx: CurrentContext, request: Request, db: Session) -> None:
-    """After the free trial ends the organization is read-only: reads (and the read-only POSTs above)
-    pass, anything that changes data is refused with TRIAL_EXPIRED. Expiry is judged from the stored
-    end time on every request, never from a scheduler. Organizations without a trial are unaffected."""
+    """Without a running trial or a paid plan in good standing the organization is read-only: reads
+    (and the read-only POSTs above) pass, anything that changes data is refused - TRIAL_EXPIRED after
+    the free trial, SUBSCRIPTION_INACTIVE after a paid plan. Judged from the stored row and the clock
+    on every request (services/platform_subscription_service.py), never from a scheduler.
+    Organizations without a row (they predate trials) are unaffected."""
     if request.method.upper() in _READ_METHODS:
         return
     route_path = getattr(request.scope.get("route"), "path", "") or ""
     if request.method.upper() == "POST" and route_path.endswith(_TRIAL_READ_ONLY_POST_ROUTES):
         return
-    from backend.app.services import platform_trial_service
+    if _path_allowed(_api_path(request), SUBSCRIPTION_PURCHASE_ROUTES):
+        return
+    from backend.app.services import platform_subscription_service
 
-    if platform_trial_service.is_trial_expired(db, ctx.organization_id):
+    access = platform_subscription_service.access_for(db, ctx.organization_id)
+    if access.writable:
+        return
+    if access.code == platform_subscription_service.TRIAL_EXPIRED_CODE:
         raise TrialExpiredError()
+    raise SubscriptionInactiveError()
 
 
 def require_tenant_user(minimum: MemberRole) -> Callable[..., CurrentContext]:

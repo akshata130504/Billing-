@@ -39,7 +39,7 @@ from backend.app.core.logging import logger
 from backend.app.core.rate_limit import limiter, webhook_rate_limit
 from backend.app.models import AuditStatus, Invoice, InvoiceStatus, Payment, PaymentStatus, RefundStatus, WebhookEvent, utcnow
 from backend.app.schemas.public import WebhookAck
-from backend.app.services import audit, dunning_service, payment_service, razorpay_gateway
+from backend.app.services import audit, dunning_service, org_access, payment_service, razorpay_gateway
 
 router = APIRouter()
 
@@ -219,9 +219,15 @@ def _handle_payment_failed(db: Session, event: WebhookEvent, payload: Dict[str, 
     # schedule, past_due status, follow-up emails); one-time invoices don't.
     # trigger_dunning_for_failed_payment already de-dupes on invoice_id, so a
     # redelivered event or a second distinct failed attempt for the same invoice
-    # never opens a second case.
+    # never opens a second case. Dunning is an optional product module: the failed payment above is
+    # always recorded, but no recovery case is opened for an organization not entitled to it.
     invoice = _invoice_for_payment(db, payment, entity)
-    if invoice is not None and invoice.subscription_id and invoice.status not in (InvoiceStatus.PAID, InvoiceStatus.VOID):
+    if (
+        invoice is not None
+        and invoice.subscription_id
+        and invoice.status not in (InvoiceStatus.PAID, InvoiceStatus.VOID)
+        and org_access.module_entitled(db, payment.organization_id, "dunning")
+    ):
         dunning_service.trigger_dunning_for_failed_payment(
             db,
             organization_id=payment.organization_id,
@@ -337,7 +343,7 @@ def _verify_signature(db: Session, raw: bytes, signature: Optional[str], payload
     org_id = _attributed_organization_id(db, payload)
     if org_id:
         creds = razorpay_gateway.credentials_for(db, org_id)
-        platform_secret = razorpay_gateway.platform_credentials().webhook_secret
+        platform_secret = razorpay_gateway.default_tenant_credentials().webhook_secret
         if creds.webhook_secret and creds.webhook_secret != platform_secret:
             if razorpay_gateway.verify_webhook_signature(raw, signature, secret=creds.webhook_secret):
                 return True, org_id

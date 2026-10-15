@@ -2,6 +2,7 @@
 # proxies to the frontend container, which in turn proxies /api/ to the backend.
 #
 #   Set in .env.production:   DOMAIN=billing.example.com     # host of FRONTEND_URL: /admin and /superadmin
+#                             ACME_EMAIL=ops@<your domain>   # REQUIRED: Let's Encrypt account / expiry notices
 #                             FRONTEND_BIND=127.0.0.1:8080   # keep :80/:443 free for caddy
 #   Run:
 #   docker compose --env-file .env.production -f docker-compose.prod.yml -f docker-compose.caddy.yml up -d --build
@@ -20,7 +21,9 @@ services:
       - "443:443/udp"   # HTTP/3
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN in .env.production}
-      ACME_EMAIL: ${ACME_EMAIL:-}
+      # Required: compose refuses to start the overlay without it (an empty value is invalid Caddyfile syntax and
+      # would leave Caddy restarting). deploy/check-env.sh also rejects a placeholder whenever DOMAIN is set.
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL (a real mailbox for Let's Encrypt) in .env.production to use the Caddy overlay}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

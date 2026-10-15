@@ -2,6 +2,7 @@ import axios, { AxiosError, AxiosHeaders, type AxiosResponse, type InternalAxios
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ApiError } from '../types/api';
 import {
+  ACCESS_CHANGED_EVENT,
   API_BASE_URL,
   LOGOUT_EVENT,
   TRIAL_EXPIRED_EVENT,
@@ -383,6 +384,31 @@ describe('apiClient interceptors', () => {
     window.removeEventListener(TRIAL_EXPIRED_EVENT, onExpired);
     expect(onExpired).toHaveBeenCalledTimes(1);
     expect(tokenStorage.getAccessToken()).toBe('acc-1'); // still signed in: expiry is not a logout
+  });
+
+  it('announces SUBSCRIPTION_INACTIVE refusals as an access change so /auth/me is re-read', async () => {
+    tokenStorage.set({ access_token: 'acc-1', refresh_token: 'ref-1' });
+    const onChanged = vi.fn();
+    const onExpired = vi.fn();
+    window.addEventListener(ACCESS_CHANGED_EVENT, onChanged);
+    window.addEventListener(TRIAL_EXPIRED_EVENT, onExpired);
+    apiClient.defaults.adapter = async (config) =>
+      Promise.reject(
+        new AxiosError('Forbidden', 'ERR_BAD_REQUEST', config, {}, {
+          data: { error: { code: 'SUBSCRIPTION_INACTIVE', message: 'Your subscription is not active.' } },
+          status: 403,
+          statusText: '',
+          headers: {},
+          config,
+        } as AxiosResponse)
+      );
+
+    await expect(apiClient.post('/customers', {})).rejects.toMatchObject({ status: 403, code: 'SUBSCRIPTION_INACTIVE' });
+    window.removeEventListener(ACCESS_CHANGED_EVENT, onChanged);
+    window.removeEventListener(TRIAL_EXPIRED_EVENT, onExpired);
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(onExpired).not.toHaveBeenCalled();
+    expect(tokenStorage.getAccessToken()).toBe('acc-1'); // read-only, not signed out
   });
 
   it('does not announce other 403s as a trial expiry', async () => {

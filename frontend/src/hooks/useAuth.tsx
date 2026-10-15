@@ -20,6 +20,7 @@ import type {
   MeUser,
   MemberRole,
   OrganizationOut,
+  PlatformSubscriptionInfo,
   TrialInfo,
 } from '../types/api';
 
@@ -49,6 +50,8 @@ export interface AuthContextValue {
   access?: OrganizationAccess | null;
   /** The organization's own free trial, or null when it has none (absent in previews and older test doubles). */
   trial?: TrialInfo | null;
+  /** The organization's paid Rooman plan, or null before it has one (absent in previews and older test doubles). */
+  subscription?: PlatformSubscriptionInfo | null;
   /** Server clock minus browser clock (ms), measured when /auth/me was last loaded (absent: 0). */
   serverClockOffsetMs?: number;
   isAuthenticated: boolean;
@@ -222,6 +225,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       organizations: me?.organizations ?? [],
       access: me?.access ?? null,
       trial: me?.trial ?? null,
+      subscription: me?.subscription ?? null,
       serverClockOffsetMs,
       isAuthenticated: me !== null,
       isLoading,

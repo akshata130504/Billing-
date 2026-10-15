@@ -10,9 +10,17 @@ Multi-tenant credentials
 Every function accepts an optional `creds` (`RazorpayCredentials`). Callers that
 know the organization resolve them with `credentials_for(db, organization_id)`,
 which honours the organization's own connected Razorpay account (Settings ->
-Integrations) and falls back to the platform keys from the environment. When
-`creds` is omitted the platform keys are used, which keeps single-tenant
-deployments and older call sites working unchanged.
+Integrations) and falls back to the deployment-wide RAZORPAY_* keys
+(`default_tenant_credentials`). When `creds` is omitted those default tenant keys
+are used, which keeps single-tenant deployments and older call sites working.
+
+Rooman's own account
+--------------------
+Rooman Billing's own merchant account (PLATFORM_RAZORPAY_*, used when an
+organization buys a Rooman plan) is returned ONLY by `rooman_account_credentials()`
+and must be passed explicitly. No tenant path resolves it: neither
+`credentials_for` nor the `creds=None` default ever reads PLATFORM_RAZORPAY_*,
+and settings refuse a configuration where it equals the RAZORPAY_* keys.
 """
 import hashlib
 import hmac
@@ -37,7 +45,8 @@ class RazorpayCredentials:
         return bool(self.key_id and self.key_secret)
 
 
-def platform_credentials() -> RazorpayCredentials:
+def default_tenant_credentials() -> RazorpayCredentials:
+    """The deployment-wide RAZORPAY_* keys tenant payments fall back to. Never Rooman's own account."""
     return RazorpayCredentials(
         key_id=settings.RAZORPAY_KEY_ID or None,
         key_secret=settings.RAZORPAY_KEY_SECRET or None,
@@ -45,8 +54,21 @@ def platform_credentials() -> RazorpayCredentials:
     )
 
 
+def rooman_account_credentials() -> RazorpayCredentials:
+    """Rooman Billing's own merchant account (PLATFORM_RAZORPAY_*), for platform plan payments only.
+
+    Not configured: both fields are None (`configured` is False). There is no webhook secret for
+    this account yet.
+    """
+    return RazorpayCredentials(
+        key_id=settings.PLATFORM_RAZORPAY_KEY_ID.strip() or None,
+        key_secret=settings.PLATFORM_RAZORPAY_KEY_SECRET.strip() or None,
+    )
+
+
 def credentials_for(db, organization_id: Optional[str]) -> RazorpayCredentials:
-    """Tenant keys when the organization connected its own account, else the platform keys."""
+    """Tenant keys when the organization connected its own account, else the default tenant keys
+    (RAZORPAY_*). Never Rooman's own account (`rooman_account_credentials`)."""
     if db is not None and organization_id:
         try:
             from backend.app.services.integrations_service import get_active_razorpay_credentials
@@ -56,11 +78,11 @@ def credentials_for(db, organization_id: Optional[str]) -> RazorpayCredentials:
                 return RazorpayCredentials(key_id, key_secret, webhook_secret or None)
         except Exception as exc:  # a broken integration row must not take payments down
             logger.warning("Could not resolve Razorpay credentials for org %s: %s", organization_id, exc)
-    return platform_credentials()
+    return default_tenant_credentials()
 
 
 def _resolve(creds: Optional[RazorpayCredentials]) -> RazorpayCredentials:
-    return creds if creds is not None else platform_credentials()
+    return creds if creds is not None else default_tenant_credentials()
 
 
 def is_configured(creds: Optional[RazorpayCredentials] = None) -> bool:
@@ -279,7 +301,8 @@ def verify_fetched_payment(
 __all__ = [
     "RazorpayCredentials",
     "credentials_for",
-    "platform_credentials",
+    "default_tenant_credentials",
+    "rooman_account_credentials",
     "is_configured",
     "public_key_id",
     "create_order",

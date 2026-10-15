@@ -102,12 +102,13 @@ def effective_state(sub: PlatformSubscription, now: Optional[datetime] = None) -
 
 
 def trial_info(db: Session, organization_id: str, now: Optional[datetime] = None) -> Optional[Dict[str, Any]]:
-    """What the SPA needs for the banner, or None for organizations without a trial.
+    """What the SPA needs for the banner, or None for organizations without a trial - including those
+    whose row has moved on to a paid plan (platform_subscription_service.summary describes those).
 
     `server_time` lets the browser correct for its own clock being off.
     """
     sub = get_subscription(db, organization_id)
-    if sub is None:
+    if sub is None or sub.state != PlatformSubscriptionState.TRIALING.value:
         return None
     now = now or _utcnow()
     ends = _aware(sub.trial_ends_at)

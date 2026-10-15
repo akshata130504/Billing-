@@ -57,9 +57,12 @@ Edit and set at minimum:
 | `FRONTEND_URL` | `https://billing.example.com` |
 | `ALLOWED_ORIGINS` | `https://billing.example.com` |
 | `SECURE_COOKIES` | `true` |
-| `SMTP_*`, `EMAIL_FROM_*` | your relay (optional but strongly recommended) |
+| `SMTP_*`, `EMAIL_FROM_*` | your relay (optional but strongly recommended). With `SMTP_HOST` set, `EMAIL_FROM_ADDRESS` must be a real sender on your mail domain: the API refuses to start with a placeholder such as `billing@example.com` or an `example.*`, `*.example`, `*.test`, `*.invalid`, `*.localhost` or `*.local` address |
 | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` | live keys (optional until you take payments). Whenever the keys are set the **webhook secret is required** (the API refuses to start without it, so a captured payment can never be lost); webhook URL `https://<DOMAIN>/api/v1/webhooks/razorpay` |
-| `DOMAIN`, `ACME_EMAIL`, `FRONTEND_BIND=127.0.0.1:8080` | only when using the Caddy overlay (`DOMAIN` = the host of `FRONTEND_URL`) |
+| `PLATFORM_RAZORPAY_KEY_ID`, `PLATFORM_RAZORPAY_KEY_SECRET`, `PLATFORM_RAZORPAY_WEBHOOK_SECRET` | Rooman's **own** account for plan purchases (never the tenant `RAZORPAY_*` keys). Leave all empty until plan checkout is released. Once the keys are set the API refuses to start in production unless they are **Live Mode** (`rzp_live_...`) and the platform webhook secret is set (webhook URL `https://<DOMAIN>/api/v1/webhooks/razorpay-platform`). Staging may use Test Mode keys (the webhook secret is still required) |
+| `PLATFORM_CHECKOUT_ALLOW_LIVE` | `false` until live plan selling is approved; `true` requires the three platform settings above (the API refuses to start otherwise) |
+| `DOMAIN`, `ACME_EMAIL`, `FRONTEND_BIND=127.0.0.1:8080` | only when using the Caddy overlay, and then **all required**: `DOMAIN` = the host of `FRONTEND_URL`; `ACME_EMAIL` = a real mailbox for Let's Encrypt (`docker-compose.caddy.yml` refuses to start without it - an empty value is invalid Caddyfile syntax - and `deploy/check-env.sh` rejects a missing or placeholder address whenever `DOMAIN` is set). Leave `DOMAIN`/`ACME_EMAIL` empty without the overlay |
+| `TRUSTED_PROXIES` | optional; unset = private + loopback ranges. Never `0.0.0.0/0` or `::/0` (the API refuses to start and `deploy/check-env.sh` fails); specific addresses / CIDRs are fine |
 | `ALLOWED_HOSTS` | optional; defaults to the host of `FRONTEND_URL` (`*` is refused) |
 | `ALERT_WEBHOOK_URL` | strongly recommended; app, deploy and backup alerts (`{"text": ...}`) |
 | `OFFSITE_BACKUP_REMOTE`, `OFFSITE_S3_*` | strongly recommended; nightly offsite copy (see section 9 / `operations.md`); with a remote set, the S3 credentials are required |

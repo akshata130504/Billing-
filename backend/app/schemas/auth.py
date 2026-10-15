@@ -173,6 +173,23 @@ class TrialOut(BaseModel):
     seconds_remaining: int
 
 
+class PlatformSubscriptionOut(BaseModel):
+    """The organization's paid Rooman plan (services/platform_subscription_service.py). `state` is
+    the effective one: active | past_due | cancelled | expired | invalid. Prices and modules come
+    from the plan catalog, not from here."""
+
+    state: str
+    plan_code: Optional[str] = None
+    sandbox: bool = False  # the plan is a Test Mode sandbox test plan, never a commercial plan
+    billing_interval: Optional[str] = None
+    billing_interval_count: Optional[int] = None
+    current_period_start: Optional[UTCDateTime] = None
+    current_period_end: Optional[UTCDateTime] = None
+    cancel_at_period_end: bool = False
+    grace_period_end: Optional[UTCDateTime] = None
+    writable: bool
+
+
 class MeResponse(BaseModel):
     user: UserOut
     organization: OrganizationOut
@@ -180,6 +197,8 @@ class MeResponse(BaseModel):
     organizations: List[OrganizationSummary] = Field(description="Every organization the user is an active member of")
     access: Optional[OrganizationAccess] = Field(default=None, description="Trial state, modules and seats (API-enforced)")
     trial: Optional[TrialOut] = Field(default=None, description="Free-trial timing; null for organizations without a trial")
+    subscription: Optional[PlatformSubscriptionOut] = Field(
+        default=None, description="Paid Rooman plan; null while the organization has none (trial or no record)")
 
 
 class SignupResponse(AuthTokens):

@@ -68,12 +68,13 @@ from backend.app.schemas.auth import (
     MembershipOut,
     OrganizationSummary,
     SignupVerificationRequest,
+    PlatformSubscriptionOut,
     TrialOut,
     UserOut,
 )
 from backend.app.schemas.organization import OrganizationOut, normalize_email
 from backend.app.schemas.subscription_access import OrganizationAccess
-from backend.app.services import audit, org_access, platform_trial_service
+from backend.app.services import audit, org_access, platform_subscription_service, platform_trial_service
 from backend.app.services.email import EmailDeliveryError, frontend_url, send_email
 
 # Failed credential checks allowed per (email, client IP) - or per account for TOTP codes -
@@ -331,8 +332,10 @@ def build_me(db: Session, ctx: CurrentContext) -> MeResponse:
     ).all()
     m = ctx.membership
     trial = platform_trial_service.trial_info(db, ctx.organization.id)
+    paid = platform_subscription_service.summary(db, ctx.organization.id)
     return MeResponse(
         trial=TrialOut.model_validate(trial) if trial else None,
+        subscription=PlatformSubscriptionOut.model_validate(paid) if paid else None,
         user=UserOut.model_validate(ctx.user),
         organization=OrganizationOut.model_validate(ctx.organization),
         membership=MembershipOut(id=m.id, role=m.role, status=m.status, joined_at=m.accepted_at or m.created_at),

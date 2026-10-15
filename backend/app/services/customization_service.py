@@ -58,6 +58,7 @@ from backend.app.schemas.customization import (
     WebTabUpdate,
 )
 from backend.app.services import notification_service
+from backend.app.services import org_access
 from backend.app.services import org_lifecycle
 from backend.app.services import timezones
 
@@ -1639,7 +1640,9 @@ def run_due_automation_schedules(db: Session, limit: int = 50) -> int:
             continue
         # Organization lifecycle: re-checked under the organization row lock in the transaction
         # that runs and commits this schedule (the claim committed earlier).
-        if not org_lifecycle.automation_allowed(db, schedule.organization_id):
+        if not org_lifecycle.automation_allowed(db, schedule.organization_id) or not org_access.module_entitled(
+            db, schedule.organization_id, "automation"
+        ):
             db.rollback()
             continue
         try:
