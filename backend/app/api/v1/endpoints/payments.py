@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from backend.app.api.deps import CurrentContext, get_db, require_admin, require_finance, require_viewer
 from backend.app.schemas.common import PaginatedResponse
 from backend.app.schemas.payments import (
+    AllocationIn,
     AllocationsPut,
     PaymentCreate,
     PaymentOut,
@@ -148,6 +149,21 @@ def set_allocations(
 ):
     payment = payment_service.get_payment(db, ctx.organization_id, payment_id)
     return payment_service.serialize_payment(payment_service.set_allocations(db, ctx, payment, body.allocations))
+
+
+@router.post(
+    "/{payment_id}/allocations/add",
+    response_model=PaymentOut,
+    summary="Allocate part of the payment's unallocated amount to an invoice (existing allocations are kept)",
+)
+def add_allocation(
+    payment_id: str,
+    body: AllocationIn,
+    ctx: CurrentContext = Depends(require_finance),
+    db: Session = Depends(get_db),
+):
+    payment = payment_service.get_payment(db, ctx.organization_id, payment_id)
+    return payment_service.serialize_payment(payment_service.add_allocation(db, ctx, payment, body))
 
 
 @router.post("/{payment_id}/refund", response_model=PaymentOut, summary="Refund (part of) a payment")

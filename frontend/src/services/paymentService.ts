@@ -42,10 +42,17 @@ export const paymentService = {
     return data;
   },
 
+  /** Replaces the payment's whole allocation set: any allocation not listed is removed. */
   setAllocations: async (id: string, allocations: PaymentAllocationIn[]): Promise<PaymentOut> => {
     const { data } = await apiClient.put<PaymentOut>(`/payments/${id}/allocations`, {
       allocations,
     });
+    return data;
+  },
+
+  /** Allocates part of the payment's unallocated amount to one invoice, keeping existing allocations. */
+  addAllocation: async (id: string, allocation: PaymentAllocationIn): Promise<PaymentOut> => {
+    const { data } = await apiClient.post<PaymentOut>(`/payments/${id}/allocations/add`, allocation);
     return data;
   },
 
