@@ -316,7 +316,14 @@ def lock_customer_row(db: Session, organization_id: str, customer_id: str) -> No
     )
 
 
-_SLOT_STATUSES = (SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING, SubscriptionStatus.PAUSED)
+# Live subscriptions occupy the (customer, plan) slot. PAST_DUE is still live and billed: a
+# second subscription beside it would bill the customer twice for the same plan.
+_SLOT_STATUSES = (
+    SubscriptionStatus.ACTIVE,
+    SubscriptionStatus.TRIALING,
+    SubscriptionStatus.PAUSED,
+    SubscriptionStatus.PAST_DUE,
+)
 
 
 def assert_no_conflicting_subscription(
@@ -328,8 +335,8 @@ def assert_no_conflicting_subscription(
     statuses=_SLOT_STATUSES,
     exclude_id: Optional[str] = None,
 ) -> None:
-    """One live subscription per (organization, customer, plan): a paused subscription
-    still occupies the slot. Raises ValidationAppError (422) when another one exists."""
+    """One live subscription per (organization, customer, plan): a paused or past-due
+    subscription still occupies the slot. Raises ValidationAppError (422) when another one exists."""
     stmt = select(Subscription).where(
         Subscription.organization_id == organization_id,
         Subscription.customer_id == customer_id,
@@ -341,6 +348,12 @@ def assert_no_conflicting_subscription(
     existing = db.scalars(stmt.order_by(Subscription.created_at)).first()
     if existing is None:
         return
+    if existing.status == SubscriptionStatus.PAST_DUE:
+        raise ValidationAppError(
+            f"This customer already has a past-due subscription ({existing.subscription_number}) to this plan. "
+            "Collect its outstanding invoice or cancel it instead.",
+            {"fields": {"plan_id": "A past-due subscription for this customer and plan already exists."}},
+        )
     if existing.status == SubscriptionStatus.PAUSED:
         raise ValidationAppError(
             f"This customer already has a paused subscription ({existing.subscription_number}) to this plan. "

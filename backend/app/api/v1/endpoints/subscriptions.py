@@ -1,7 +1,8 @@
 """/subscriptions (contract §7)."""
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Header, Query, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import CurrentContext, get_db, require_finance, require_viewer
@@ -17,7 +18,7 @@ from backend.app.schemas.subscriptions import (
     SubscriptionSummaryOut,
     SubscriptionUpdate,
 )
-from backend.app.services import invoice_service, subscription_service
+from backend.app.services import idempotency_service, invoice_service, subscription_service
 from backend.app.services.pagination import PageParams, page_params
 
 router = APIRouter()
@@ -72,10 +73,26 @@ def list_subscriptions(
 @router.post("", response_model=SubscriptionOut, status_code=status.HTTP_201_CREATED, summary="Create a subscription")
 def create_subscription(
     body: SubscriptionCreate,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key", max_length=128),
     ctx: CurrentContext = Depends(require_finance),
     db: Session = Depends(get_db),
 ):
-    return subscription_service.serialize_subscription(subscription_service.create_subscription(db, ctx, body))
+    """Send an optional `Idempotency-Key` header to make retries safe: a repeated key with
+    the same body returns the original subscription (and its first invoice) instead of
+    creating another."""
+    status_code, out = idempotency_service.run_idempotent(
+        db,
+        organization_id=ctx.organization_id,
+        key=idempotency_key,
+        request_path="/subscriptions",
+        request_method="POST",
+        params={"path": "/subscriptions", "body": body.model_dump(mode="json")},
+        handler=lambda: SubscriptionOut.model_validate(
+            subscription_service.serialize_subscription(subscription_service.create_subscription(db, ctx, body))
+        ).model_dump(mode="json"),
+        status_code=status.HTTP_201_CREATED,
+    )
+    return JSONResponse(status_code=status_code, content=out)
 
 
 @router.get("/{subscription_id}", response_model=SubscriptionOut, summary="Get a subscription")
