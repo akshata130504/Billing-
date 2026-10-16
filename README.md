@@ -8,6 +8,9 @@
 >   step. It started from `rooman-itsd/Rooman-Billing` `main` at `a287d17`, with full history.
 > - **It cannot deploy:** `.github/workflows/deploy.yml` was removed, so nothing here builds or
 >   publishes images to `ghcr.io/rooman-itsd/*`. CI only tests and builds, with `push: false`.
+> - A byte-identical copy of the deploy workflow is kept as inert text in
+>   [`deploy/reference/`](deploy/reference/README.md), where Actions never runs it, so the
+>   deployment tests still check it.
 > - The `deploy/` scripts and `docker-compose.prod.yml` are kept for reference only. They still name
 >   the production images, so don't run them from this repository.
 > - Moving production to this repository needs a separate, explicitly approved migration plan.

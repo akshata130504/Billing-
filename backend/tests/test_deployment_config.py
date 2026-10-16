@@ -21,9 +21,12 @@ from sqlalchemy.engine import make_url
 from backend.app.core.config import Settings
 
 REPO = Path(__file__).resolve().parents[2]
+# Modularization copy: the production deploy workflow is kept as inert reference text, outside
+# .github/workflows/, so this repository can never publish images (see README).
+DEPLOY_WORKFLOW = "deploy/reference/deploy.workflow.yml.txt"
 RETIRED = ("PLATFORM_APP_ORIGIN", "PLATFORM_DOMAIN", "TENANT_APP_ORIGIN", "platform-web", "Dockerfile.platform")
 DEPLOY_FILES = (
-    "docker-compose.prod.yml", "docker-compose.caddy.yml", "deploy/Caddyfile", ".github/workflows/deploy.yml",
+    "docker-compose.prod.yml", "docker-compose.caddy.yml", "deploy/Caddyfile", DEPLOY_WORKFLOW,
     ".github/workflows/ci.yml", "deploy/deploy-poll.sh", "frontend/Dockerfile", "frontend/docker/nginx.conf",
     "frontend/vite.config.ts", "frontend/package.json",
 )
@@ -133,7 +136,7 @@ def test_visual_editor_preview_frame_is_same_origin_only():
 
 
 def test_deploy_workflow_builds_both_images_from_the_same_sha():
-    wf = _read(".github/workflows/deploy.yml")
+    wf = _read(DEPLOY_WORKFLOW)
     for image in ("API_IMAGE", "WEB_IMAGE"):
         assert re.search(rf"tags: \${{{{ env\.{image} }}}}:\${{{{ env\.DEPLOY_SHA }}}}", wf), image
     assert "file: frontend/Dockerfile\n" in wf
