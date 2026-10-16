@@ -310,7 +310,9 @@ class PriceSimulationResponse(BaseModel):
 
 class CPQDealItemIn(BaseModel):
     offering_id: str
-    quantity: Decimal = Field(Decimal("1"), gt=0)
+    # Same ceiling as the pricing simulator (/cpq/simulate, /pricing/*); a larger value used to
+    # fail inside the service's simulation request and return 500.
+    quantity: Decimal = Field(Decimal("1"), gt=0, le=1_000_000)
     discount_pct: Decimal = Field(Decimal("0"), ge=0, le=100)
     description: Optional[str] = None
 

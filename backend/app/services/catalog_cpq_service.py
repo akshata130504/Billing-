@@ -1,6 +1,6 @@
 """Service operations for Offerings, Price Books, Rules, Deals, and Quote conversion."""
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
@@ -23,7 +23,7 @@ from backend.app.models.catalog_cpq import (
     PriceBookStatus,
 )
 from backend.app.models.customers import Customer
-from backend.app.models.quotes import Quote, QuoteItem, QuoteStatus
+from backend.app.models.quotes import Quote, QuoteStatus
 from backend.app.schemas.catalog_cpq import (
     CPQDealCreate,
     CPQDealUpdate,
@@ -707,6 +707,10 @@ def reject_deal(db: Session, ctx: CurrentContext, deal_id: str, reason: str = ""
     return get_deal_or_404(db, ctx.organization_id, deal.id)
 
 
+# Validity given to a quote converted from a deal; the quote editor uses the same default.
+DEFAULT_QUOTE_VALIDITY_DAYS = 30
+
+
 def convert_deal_to_quote(db: Session, ctx: CurrentContext, deal_id: str) -> Quote:
     """Creates a real Quote from an approved CPQ Deal (or a configured one that needs no approval)."""
     get_deal_or_404(db, ctx.organization_id, deal_id)
@@ -735,59 +739,55 @@ def convert_deal_to_quote(db: Session, ctx: CurrentContext, deal_id: str) -> Quo
 
     quote_number = next_number(db, ctx.organization_id, "quote")
     supply = gst.resolve_supply(ctx.organization, deal.customer)
-    quote_split = gst.split_tax(deal.tax_amount, supply)
     # No GSTIN, no GST: an unregistered supplier's quote carries no tax at all.
     no_gst = not supply.supplier_registered
-    quote_tax = Decimal("0.00") if no_gst else deal.tax_amount
-    quote_total = (deal.total - deal.tax_amount) if no_gst else deal.total
 
+    # A quote has no per-line discount, so each line carries its net unit price (line
+    # discount applied) and the deal-level discount stays the quote's discount_pct. The
+    # quote's own totals are then computed exactly as an edit-and-save would recompute
+    # them, so opening the converted quote in the editor never reprices it.
+    from types import SimpleNamespace
+
+    from backend.app.services.quote_service import _apply_totals, compute_quote_totals
+
+    lines = []
+    for d_item in deal.items:
+        line_disc = min(Decimal("100"), max(Decimal("0"), Decimal(d_item.discount_pct or 0)))
+        net_unit = round_money(Decimal(d_item.unit_price) * (Decimal("100") - line_disc) / Decimal("100"))
+        lines.append(SimpleNamespace(
+            description=d_item.description,
+            quantity=d_item.quantity,
+            unit_price=net_unit,
+            tax_rate_pct=Decimal("0") if no_gst else d_item.tax_rate_pct,
+            offering_id=d_item.offering_id,
+            product_id=None,
+            plan_id=None,
+            pricing_explanation=None,
+            hsn_sac_code=None,
+        ))
+    totals = compute_quote_totals(lines, deal.discount_pct or Decimal("0"), supply=supply)
+
+    issue_date = timezones.org_today(ctx.organization)
+    validity_days = DEFAULT_QUOTE_VALIDITY_DAYS
     quote = Quote(
         organization_id=ctx.organization_id,
         quote_number=quote_number,
         customer_id=deal.customer_id,
         status=QuoteStatus.DRAFT,
-        issue_date=timezones.org_today(ctx.organization),
+        issue_date=issue_date,
+        expiry_date=issue_date + timedelta(days=validity_days),
         currency=deal.currency,
-        subtotal=deal.subtotal,
-        discount_pct=deal.discount_pct,
-        discount_amount=deal.discount_amount,
-        tax_amount=quote_tax,
-        cgst_amount=quote_split.cgst,
-        sgst_amount=quote_split.sgst,
-        igst_amount=quote_split.igst,
-        supply_type=supply.supply_type,
-        place_of_supply_code=supply.place_of_supply_code,
-        place_of_supply_name=supply.place_of_supply_name,
-        total=quote_total,
         title=deal.title,
         notes=deal.notes,
-        terms=deal.terms,
+        terms=deal.terms or (
+            f"1. Quote valid for {validity_days} days.\n2. Payment terms: 30 days from invoice date.\n"
+            "3. Taxes as applicable per Indian GST."
+        ),
         created_by_id=ctx.user.id,
     )
     db.add(quote)
+    _apply_totals(quote, totals, supply)
     db.flush()
-
-    for idx, d_item in enumerate(deal.items):
-        item_tax_split = gst.split_tax(d_item.tax_amount, supply)
-        item_rate_split = gst.split_rate(d_item.tax_rate_pct, supply)
-        q_item = QuoteItem(
-            organization_id=ctx.organization_id,
-            quote_id=quote.id,
-            offering_id=d_item.offering_id,
-            description=d_item.description,
-            quantity=d_item.quantity,
-            unit_price=d_item.unit_price,
-            tax_rate_pct=Decimal("0") if no_gst else d_item.tax_rate_pct,
-            amount=round_money(d_item.quantity * d_item.unit_price),
-            cgst_amount=item_tax_split.cgst,
-            sgst_amount=item_tax_split.sgst,
-            igst_amount=item_tax_split.igst,
-            cgst_rate_pct=item_rate_split.cgst,
-            sgst_rate_pct=item_rate_split.sgst,
-            igst_rate_pct=item_rate_split.igst,
-            position=idx,
-        )
-        db.add(q_item)
 
     deal.converted_quote_id = quote.id
     db.flush()
