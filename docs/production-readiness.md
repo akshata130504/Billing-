@@ -13,7 +13,7 @@ This document summarizes the production readiness status, architecture configura
 | **C. Production Deployment Readiness** | **READY** | Multi-container Docker Compose (`docker-compose.prod.yml`) with per-service resource limits, Nginx reverse proxy with SPA fallback, Caddy TLS overlay, health probes. CI-gated image publish by immutable SHA tag; pull-based deploy with pre-deploy DB dump, readiness gate, automatic rollback and webhook alerts (section 10). |
 | **G. Backups** | **READY once offsite is configured** | Nightly DB dump + uploads tarball, rclone offsite copy, failure alerts, healthcheck on last success. Set `OFFSITE_BACKUP_REMOTE` + `OFFSITE_S3_*` and `ALERT_WEBHOOK_URL`. |
 | **D. Persistent File/Logo Storage** | **READY (Single Host) / REQUIRES EXTERNAL DECISION (Multi-Instance)** | Local filesystem storage (`uploads_data` volume mounted to `/app/backend/uploads`) with 5MB validation, MIME/magic byte checks, and automatic file cleanup. Multi-instance shared object storage (S3/GCS/R2) requires Sir's external provider decision. |
-| **E. Production QA & Verification** | **READY** | All 578 backend tests and 303 frontend tests passing; TypeScript (`tsc --noEmit`) and Vite production bundle passing; live smoke tests verified across all 18 business workflows. |
+| **E. Production QA & Verification** | **CODE READY / NOT RELEASED** | As of PR #47 (2026-10-16): CI on PostgreSQL 16 has 2,132 backend tests passing (34 skipped) and the frontend has 1,004 tests passing; tsc and the Vite build pass. Status of every QA item: `docs/qa/new-bugs-pdf-status-2026-10-16.md`. Production needs re-verification after the next deploy. |
 | **F. Documentation** | **READY** | Complete operations, deployment, and runbook documentation available in `docs/`. |
 
 ---
@@ -174,6 +174,12 @@ The following items are deliberately maintained without modification and require
 
 ---
 
+## 9a. Release notes for operators (PR #47)
+
+- **Migration 0037** adds a unique index on `refunds.gateway_refund_id`. It is backward compatible: the previous image runs fine with it. If duplicate gateway refund ids already exist, it skips the index and logs `WARNING [0037]` instead of failing startup. Rollback is `alembic downgrade 4c5d6e7f8091`, which drops the index; no data changes.
+- **Scheduler:** a new step, `reconcile_stale_gateway_payments`, runs every interval. It only acts when Razorpay keys are configured; with none it makes no calls. It settles Razorpay payments left PENDING for more than 30 minutes (up to 7 days) from Razorpay's own record, and logs ids only.
+- **New public endpoint:** `POST /auth/reset-password/validate`, rate-limited like `/auth/reset-password`.
+
 ## 10. Infrastructure & Operations Checklist (current)
 
 **Deploy pipeline**
@@ -200,7 +206,7 @@ The following items are deliberately maintained without modification and require
 - [x] ruff (real-error rules, `backend/ruff.toml`), pytest on PostgreSQL 16, vitest, tsc, vite build.
 - [x] Postgres enum labels vs Python enums checked after `alembic upgrade head` (`backend/tests/test_migrations.py`).
 - [x] pip-audit / npm audit (high) - **non-blocking** for now.
-- [ ] `alembic check` still a warning: declare the 5 known indexes in the models (`ix_subscriptions_org_status`, `ix_org_integrations_org_id`, `ix_org_integrations_provider`), then make it blocking.
+- [x] `alembic check` is blocking in CI (upgrade, check, downgrade -1, re-upgrade, check).
 - [x] Runtime deps pinned exactly in `backend/requirements.txt`; test/lint tools in `backend/requirements-dev.txt` (not in the image).
 
 **Security hardening** ([`database-security.md`](database-security.md), [`security-roadmap.md`](security-roadmap.md))
