@@ -17,7 +17,7 @@ deployments and older call sites working unchanged.
 import hashlib
 import hmac
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from backend.app.core.config import settings
 from backend.app.core.exceptions import GatewayError, GatewayNotConfiguredError
@@ -190,6 +190,19 @@ def fetch_payment(gateway_payment_id: str, *, creds: Optional[RazorpayCredential
     if not isinstance(payment, dict) or not payment.get("id"):
         raise GatewayError("Razorpay returned an unexpected payment response.")
     return payment
+
+
+def fetch_order_payments(gateway_order_id: str, *, creds: Optional[RazorpayCredentials] = None) -> List[Dict[str, Any]]:
+    """Every payment attempt Razorpay holds for an order (server-to-server, authenticated with our keys)."""
+    client = _get_client(creds)
+    try:
+        result = client.order.payments(gateway_order_id)
+    except Exception as exc:
+        raise GatewayError(f"Razorpay could not list payments for order {gateway_order_id}: {exc}") from exc
+    items = result.get("items") if isinstance(result, dict) else None
+    if not isinstance(items, list):
+        raise GatewayError("Razorpay returned an unexpected order payments response.")
+    return [item for item in items if isinstance(item, dict)]
 
 
 def fetch_card(gateway_payment_id: str, *, creds: Optional[RazorpayCredentials] = None) -> Dict[str, Any]:

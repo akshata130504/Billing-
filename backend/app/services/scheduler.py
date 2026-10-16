@@ -131,6 +131,15 @@ def _process_due_jobs(db: Session):
     return outbox_processor.process_due_jobs(db)
 
 
+def _reconcile_stale_gateway_payments(db: Session):
+    """Settle Razorpay payments left PENDING because no webhook or browser verify arrived.
+    Commits per payment; returns how many were captured or failed."""
+    from backend.app.services import gateway_reconciliation_service
+
+    counts = gateway_reconciliation_service.reconcile_stale_gateway_payments(db)
+    return counts["captured"] + counts["failed"]
+
+
 def _run_due_automation_schedules(db: Session):
     from backend.app.services import customization_service
 
@@ -414,6 +423,7 @@ def _run_billing_jobs_unlocked(db: Session, today: Optional[date]) -> tuple[Dict
         ("outbox_processed", "process_pending_outbox", _process_pending_outbox),
         ("durable_jobs_completed", "process_due_jobs", _process_due_jobs),
         ("automation_schedules_run", "run_due_automation_schedules", _run_due_automation_schedules),
+        ("gateway_payments_reconciled", "reconcile_stale_gateway_payments", _reconcile_stale_gateway_payments),
     ):
         result, failed = _run_step(db, name, lambda fn=fn: fn(db))
         errors += failed
