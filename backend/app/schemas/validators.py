@@ -79,6 +79,22 @@ def validate_person_name(value: Optional[str], field_label: str = "Name") -> Opt
     return val
 
 
+_NUMBER_AFFIX_RE = re.compile(r"(?:[A-Za-z0-9/_-]|\{YYYY\}|\{MM\}|\{DD\})*")
+
+
+def validate_number_affix(value: Optional[str], field_label: str = "Prefix") -> Optional[str]:
+    """Document-number prefix/suffix (BUG-50): letters, digits, / _ - and the date tokens
+    {YYYY}, {MM}, {DD} only, so no markup or other characters reach invoice numbers."""
+    if value is None:
+        return None
+    val = value.strip()
+    if not _NUMBER_AFFIX_RE.fullmatch(val):
+        raise ValueError(
+            f"{field_label} may contain only letters, digits, / _ - and the tokens {{YYYY}}, {{MM}}, {{DD}}."
+        )
+    return val
+
+
 def _is_name_char(ch: str) -> bool:
     return ch in _NAME_PUNCTUATION or ch.isspace() or unicodedata.category(ch)[0] in ("L", "M", "N")
 
