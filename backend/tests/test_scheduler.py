@@ -1,7 +1,6 @@
 """Characterization tests for background billing jobs and scheduler operations."""
 from datetime import date, timedelta
 from decimal import Decimal
-import pytest
 from sqlalchemy import select
 
 from backend.app.models import (

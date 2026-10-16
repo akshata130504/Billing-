@@ -1,8 +1,14 @@
-# Minimal lint gate for CI: only rules that indicate real bugs (syntax errors, invalid
-# comparisons/`is` with literals, misplaced return/yield/break, undefined names).
-# Widen gradually (e.g. add "F401", "E711") once the codebase is cleaned up.
+# Lint gate for CI. Rules that indicate real bugs (syntax errors, invalid
+# comparisons/`is` with literals, misplaced return/yield/break, undefined names) plus, since the
+# security sync, dead code: unused imports and variables, redefinitions, placeholder-less f-strings
+# and `== None` / `== True` comparisons. Widen further gradually.
 target-version = "py312"
 extend-exclude = ["alembic/versions/__pycache__", "venv", "uploads"]
 
 [lint]
-select = ["E9", "F63", "F7", "F82"]
+select = ["E9", "F63", "F7", "F82", "F401", "F541", "F811", "F841", "E711", "E712"]
+
+[lint.per-file-ignores]
+# pytest fixtures imported from another test module are "redefined" by the test arguments
+"**/tests/test_platform_console.py" = ["F811"]
+"**/tests/test_trial_billing_gates.py" = ["F811"]

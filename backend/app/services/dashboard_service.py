@@ -26,7 +26,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import Select, and_, func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app.models.billing_cycles import SubscriptionItem, SubscriptionItemStatus, SubscriptionItemType
@@ -53,7 +53,6 @@ from backend.app.models import (
     QuoteStatus,
     Subscription,
     SubscriptionStatus,
-    User,
 )
 from backend.app.schemas.common_refs import customer_ref, iso_dt, money_str
 from backend.app.services.invoice_service import SETTLED_PAYMENT_STATUSES

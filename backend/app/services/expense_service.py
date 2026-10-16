@@ -5,7 +5,7 @@ import os
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, List, Optional
 
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
@@ -310,7 +310,7 @@ def add_to_invoice(db: Session, ctx, expense_id: str, invoice_id: Optional[str] 
     currency); otherwise a new draft invoice is created for the customer. The expense
     row is locked and marked INVOICED in the same transaction as the invoice change.
     """
-    from backend.app.models.invoices import Invoice, InvoiceStatus
+    from backend.app.models.invoices import InvoiceStatus
     from backend.app.schemas.common_refs import LineItemIn
     from backend.app.schemas.invoices import InvoiceUpdate
     from backend.app.services import audit, invoice_service

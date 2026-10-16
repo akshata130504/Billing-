@@ -14,8 +14,8 @@ import {
   tokenStorage,
 } from './apiClient';
 
-const ACCESS_KEY = 'rooman.access_token';
-const REFRESH_KEY = 'rooman.refresh_token';
+const HINT_KEY = 'rooman.session';
+const LEGACY_REFRESH_KEY = 'rooman.refresh_token';
 
 function axiosErrorWithResponse(
   status: number,
@@ -46,49 +46,57 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('tokenStorage', () => {
-  it('stores both tokens under the namespaced keys', () => {
+  beforeEach(() => tokenStorage.clear());
+
+  it('keeps the access token in memory only and never stores a refresh token', () => {
     tokenStorage.set({ access_token: 'acc-1', refresh_token: 'ref-1' });
-    expect(window.localStorage.getItem(ACCESS_KEY)).toBe('acc-1');
-    expect(window.localStorage.getItem(REFRESH_KEY)).toBe('ref-1');
     expect(tokenStorage.getAccessToken()).toBe('acc-1');
-    expect(tokenStorage.getRefreshToken()).toBe('ref-1');
+    const stored = Object.keys(window.localStorage).map((k) => window.localStorage.getItem(k));
+    expect(stored).not.toContain('acc-1');
+    expect(stored).not.toContain('ref-1');
+    expect(window.localStorage.getItem(HINT_KEY)).toBe('1');
   });
 
   it('reports no session before login and a session after', () => {
     expect(tokenStorage.hasSession()).toBe(false);
     expect(tokenStorage.getAccessToken()).toBeNull();
-    tokenStorage.set({ access_token: 'acc-1', refresh_token: 'ref-1' });
+    tokenStorage.set({ access_token: 'acc-1' });
     expect(tokenStorage.hasSession()).toBe(true);
   });
 
-  it('clear() removes both tokens (no stale credentials after logout)', () => {
-    tokenStorage.set({ access_token: 'acc-1', refresh_token: 'ref-1' });
+  it('a reload (hint only, no token in memory) still counts as a session to refresh', () => {
+    window.localStorage.setItem(HINT_KEY, '1');
+    expect(tokenStorage.getAccessToken()).toBeNull();
+    expect(tokenStorage.hasSession()).toBe(true);
+  });
+
+  it('clear() forgets the token and the hint', () => {
+    tokenStorage.set({ access_token: 'acc-1' });
     tokenStorage.clear();
-    expect(window.localStorage.getItem(ACCESS_KEY)).toBeNull();
-    expect(window.localStorage.getItem(REFRESH_KEY)).toBeNull();
+    expect(tokenStorage.getAccessToken()).toBeNull();
+    expect(window.localStorage.getItem(HINT_KEY)).toBeNull();
     expect(tokenStorage.hasSession()).toBe(false);
   });
 
   it('overwrites the previous session on re-login', () => {
-    tokenStorage.set({ access_token: 'acc-1', refresh_token: 'ref-1' });
-    tokenStorage.set({ access_token: 'acc-2', refresh_token: 'ref-2' });
+    tokenStorage.set({ access_token: 'acc-1' });
+    tokenStorage.set({ access_token: 'acc-2' });
     expect(tokenStorage.getAccessToken()).toBe('acc-2');
-    expect(tokenStorage.getRefreshToken()).toBe('ref-2');
   });
 
-  it('degrades gracefully when localStorage reads throw (private mode)', () => {
+  it('degrades gracefully when localStorage throws (private mode)', () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('blocked');
     });
-    expect(tokenStorage.getAccessToken()).toBeNull();
-    expect(tokenStorage.hasSession()).toBe(false);
-  });
-
-  it('degrades gracefully when localStorage writes throw', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('quota');
     });
-    expect(() => tokenStorage.set({ access_token: 'a', refresh_token: 'b' })).not.toThrow();
+    expect(() => tokenStorage.set({ access_token: 'a' })).not.toThrow();
+    expect(tokenStorage.getAccessToken()).toBe('a');
+  });
+
+  it('never leaves a legacy refresh token behind', () => {
+    expect(window.localStorage.getItem(LEGACY_REFRESH_KEY)).toBeNull();
   });
 });
 
@@ -407,8 +415,11 @@ describe('apiClient interceptors', () => {
     });
   });
 
-  it('force-logs-out on a 401 when there is no refresh token', async () => {
-    window.localStorage.setItem(ACCESS_KEY, 'acc-1');
+  beforeEach(() => tokenStorage.clear());
+
+  it('force-logs-out on a 401 when the session cookie can no longer be refreshed', async () => {
+    tokenStorage.set({ access_token: 'acc-1' });
+    vi.spyOn(axios, 'post').mockRejectedValue(axiosErrorWithResponse(401, {}));
     const onLogout = vi.fn();
     window.addEventListener(LOGOUT_EVENT, onLogout);
 
@@ -428,11 +439,10 @@ describe('apiClient interceptors', () => {
 
     expect(onLogout).toHaveBeenCalledTimes(1);
     expect(tokenStorage.hasSession()).toBe(false);
-    expect(window.localStorage.getItem(REFRESH_KEY)).toBeNull();
   });
 
   it('does not log out on a 401 from an auth route (bad credentials)', async () => {
-    window.localStorage.setItem(ACCESS_KEY, 'acc-1');
+    tokenStorage.set({ access_token: 'acc-1' });
     const onLogout = vi.fn();
     window.addEventListener(LOGOUT_EVENT, onLogout);
 
@@ -489,14 +499,10 @@ describe('apiClient interceptors', () => {
     }
   );
 
-  it('replays change-password with the rotated refresh token so this session is kept', async () => {
-    tokenStorage.set({ access_token: 'acc-old', refresh_token: 'ref-old' });
-    vi.spyOn(axios, 'post').mockResolvedValue({
-      data: { access_token: 'acc-new', refresh_token: 'ref-new' },
-    });
-    const bodies: unknown[] = [];
+  it('refreshes from the cookie (no token in the body, session header set)', async () => {
+    tokenStorage.set({ access_token: 'acc-old' });
+    const refreshSpy = vi.spyOn(axios, 'post').mockResolvedValue({ data: { access_token: 'acc-new' } });
     apiClient.defaults.adapter = async (config) => {
-      bodies.push(config.data);
       if (AxiosHeaders.from(config.headers).get('Authorization') === 'Bearer acc-old') {
         return Promise.reject(
           new AxiosError('Unauthorized', 'ERR_BAD_REQUEST', config, {}, {
@@ -507,10 +513,24 @@ describe('apiClient interceptors', () => {
       return { data: null, status: 204, statusText: 'No Content', headers: {}, config };
     };
 
-    await apiClient.post('/auth/change-password', {
-      current_password: 'a', new_password: 'b', refresh_token: 'ref-old',
-    });
-    expect(JSON.parse(bodies[1] as string).refresh_token).toBe('ref-new');
+    await apiClient.post('/auth/change-password', { current_password: 'a', new_password: 'b' });
+    expect(refreshSpy).toHaveBeenCalledTimes(1);
+    const [url, body, options] = refreshSpy.mock.calls[0];
+    expect(url).toMatch(/\/auth\/refresh$/);
+    expect(body).toBeUndefined();
+    expect(options).toMatchObject({ withCredentials: true, headers: { 'X-Rooman-Session': 'cookie' } });
+    expect(tokenStorage.getAccessToken()).toBe('acc-new');
+  });
+
+  it('sends the cookie-mode header on every API call', async () => {
+    let seen: InternalAxiosRequestConfig | undefined;
+    apiClient.defaults.adapter = async (config) => {
+      seen = config;
+      return { data: {}, status: 200, statusText: 'OK', headers: {}, config };
+    };
+    await apiClient.get('/health');
+    expect(AxiosHeaders.from(seen!.headers).get('X-Rooman-Session')).toBe('cookie');
+    expect(seen!.withCredentials).toBe(true);
   });
 
   it.each(['/auth/login', '/auth/login/mfa', '/auth/logout', '/auth/signup/verify-otp', '/auth/reset-password'])(
@@ -531,7 +551,7 @@ describe('apiClient interceptors', () => {
   );
 
   it('does not log out on a non-401 error', async () => {
-    window.localStorage.setItem(ACCESS_KEY, 'acc-1');
+    tokenStorage.set({ access_token: 'acc-1' });
     apiClient.defaults.adapter = async (config) =>
       Promise.reject(
         new AxiosError('Server error', 'ERR_BAD_RESPONSE', config, {}, {

@@ -149,7 +149,8 @@ export interface IntegrationsMeta {
 
 export interface AuthTokens {
   access_token: string;
-  refresh_token: string;
+  /** Absent for the browser app: the refresh token is kept in an HttpOnly cookie by the API. */
+  refresh_token?: string | null;
   token_type: 'bearer';
   expires_in: number;
 }

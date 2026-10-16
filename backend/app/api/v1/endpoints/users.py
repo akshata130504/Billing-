@@ -1,6 +1,5 @@
 """User profile and avatar endpoints."""
-from typing import Optional
-from fastapi import APIRouter, Depends, File, UploadFile, status
+from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import CurrentContext, get_current_context, get_db

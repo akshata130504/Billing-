@@ -141,7 +141,6 @@ def render_invoice_pdf(invoice, organization, template=None) -> bytes:
             template = None
 
     accent_color = _parse_color(getattr(template, "accent_color", None), ACCENT)
-    primary_color = _parse_color(getattr(template, "primary_color", None), colors.HexColor("#111827"))
 
     base_font = "Helvetica"
     bold_font = "Helvetica-Bold"

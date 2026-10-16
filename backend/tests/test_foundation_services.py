@@ -1,17 +1,14 @@
 """Tests for Phase 1 foundation services: UnitOfWork, Idempotency, DurableJobs, Notifications."""
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 import pytest
 
 from backend.app.models.events import DomainEventType, JobStatus, OutboxEvent, OutboxStatus
 from backend.app.models.notifications import (
     NotificationChannel,
     NotificationDeliveryStatus,
-    NotificationTemplate,
 )
 from backend.app.services.durable_job_service import (
     claim_due_jobs,
-    complete_job,
     enqueue_job,
     fail_job,
 )

@@ -3,7 +3,6 @@ from datetime import date
 from decimal import Decimal
 import uuid
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -499,7 +498,7 @@ def test_recurring_expense_skipped_when_inactive_or_future(client: TestClient, t
 
 def test_recurring_expense_tenant_isolation(client: TestClient, tenant, auth_headers, db):
     """Tenant isolation: Organization A's recurring expense creates Expense only for Organization A."""
-    from backend.app.models.expenses import Expense, RecurringExpense, RecurringExpenseFrequency, RecurringExpenseStatus
+    from backend.app.models.expenses import RecurringExpense, RecurringExpenseFrequency, RecurringExpenseStatus
     from backend.app.services.expense_service import process_due_recurring_expenses
     from backend.tests.conftest import Tenant
 

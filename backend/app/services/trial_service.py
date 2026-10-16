@@ -1,11 +1,11 @@
 """Trial management service: lifecycle, extensions, conversions, fallback, reminders, and reports."""
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from backend.app.core.exceptions import ConflictError, NotFoundAppError, ValidationAppError
@@ -18,14 +18,8 @@ from backend.app.models.notifications import NotificationChannel
 from backend.app.models.payments import (
     CustomerPaymentMethod,
     CustomerPaymentMethodStatus,
-    Payment,
-    PaymentAllocation,
     PaymentAttempt,
     PaymentAttemptStatus,
-    PaymentGateway,
-    PaymentMethod,
-    PaymentStatus,
-    ReconciliationStatus,
 )
 from backend.app.models.subscriptions import Subscription, SubscriptionStatus
 from backend.app.models.trials import (
@@ -47,7 +41,6 @@ from backend.app.schemas.trials import (
 from backend.app.services import audit, org_lifecycle, payment_service, razorpay_gateway, timezones
 from backend.app.services.gateways.registry import get_gateway_adapter
 from backend.app.services.notification_service import dispatch_notification
-from backend.app.services.numbering import next_number
 from backend.app.services.subscription_service import (
     apply_plan_terms,
     claim_status_transition,

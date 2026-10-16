@@ -13,8 +13,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from backend.app.core.tenant_context import system_context, tenant_context
-from backend.app.models.identity import Membership, MemberRole, Organization, User
-from backend.app.models.integrations import OrganizationIntegration
+from backend.app.models.identity import Organization
 from backend.app.services import integrations_service
 
 

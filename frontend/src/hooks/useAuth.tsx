@@ -56,7 +56,7 @@ export interface AuthContextValue {
   switchOrganization: (organizationId: string) => Promise<MeResponse>;
   refreshMe: () => Promise<MeResponse | null>;
   /** Apply tokens obtained elsewhere (e.g. accept-invitation, reset flows) and load /auth/me. */
-  applyTokens: (tokens: { access_token: string; refresh_token: string }) => Promise<MeResponse>;
+  applyTokens: (tokens: { access_token: string; refresh_token?: string | null }) => Promise<MeResponse>;
   hasRole: (min: MemberRole) => boolean;
 }
 
@@ -114,7 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [queryClient]);
 
   const applyTokens = useCallback(
-    async (tokens: { access_token: string; refresh_token: string }): Promise<MeResponse> => {
+    async (tokens: { access_token: string; refresh_token?: string | null }): Promise<MeResponse> => {
       tokenStorage.set(tokens);
       queryClient.clear();
       return loadMe();
@@ -146,9 +146,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // SignupPage drives. The unverified POST /auth/signup endpoint was removed (410 Gone).
 
   const logout = useCallback(async (): Promise<void> => {
-    const refreshToken = tokenStorage.getRefreshToken();
     try {
-      if (refreshToken) await authService.logout(refreshToken);
+      if (tokenStorage.hasSession()) await authService.logout();
     } catch {
       // Server-side revocation is best effort; the client session is cleared regardless.
     } finally {

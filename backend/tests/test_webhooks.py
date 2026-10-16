@@ -4,7 +4,6 @@ import hashlib
 import hmac
 import json
 import uuid
-import pytest
 
 from backend.app.core.config import settings
 from backend.app.models import InvoiceStatus, WebhookEvent

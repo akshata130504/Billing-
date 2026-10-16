@@ -15,7 +15,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from backend.app.models.catalog_cpq import (
     Offering,
     OfferingPricingModel,
-    PriceBook,
     PriceBookEntry,
     PriceBookStatus,
     CPQRule,

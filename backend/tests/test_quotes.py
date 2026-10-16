@@ -1,7 +1,6 @@
 """Quotes API tests, including approval gating, conversion and the public page."""
 import uuid
 from datetime import date, timedelta
-from decimal import Decimal
 
 import pytest
 

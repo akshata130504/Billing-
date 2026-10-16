@@ -1,18 +1,12 @@
 """Tests for the invitation-only Customer Portal activation and access control flow."""
 from datetime import timedelta
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from backend.app.core.security import hash_password
 from backend.app.models import MemberRole
 from backend.app.models.base import utcnow
-from backend.app.models.customers import Customer
 from backend.app.models.portal import (
     CustomerPortalInvitation,
-    CustomerPortalSession,
-    CustomerPortalSettings,
-    CustomerPortalUser,
 )
 from backend.tests.conftest import Tenant
 
@@ -158,7 +152,7 @@ def test_token_validation_and_security(client: TestClient, db: Session):
     """Requirement 5: Token is single-use, time-limited, secure, and cannot be reused after acceptance."""
     tenant = Tenant(db, "token-sec")
     customer = tenant.customer(email="token.user@example.com")
-    finance_headers = tenant.headers_for_role(MemberRole.FINANCE)
+    tenant.headers_for_role(MemberRole.FINANCE)
 
     # 1. Create invitation
     res = client.post(
@@ -236,13 +230,6 @@ def test_expired_and_revoked_token_rejection(client: TestClient, db: Session):
     raw_token2 = res.json()["invite_url"].split("token=")[1]
 
     # Manually expire in DB
-    inv = db.scalars(
-        CustomerPortalInvitation.__table__.select().where(
-            CustomerPortalInvitation.customer_id == customer.id,
-            CustomerPortalInvitation.accepted_at.is_(None),
-            CustomerPortalInvitation.revoked_at.is_(None),
-        )
-    ).first()
     db.query(CustomerPortalInvitation).filter(CustomerPortalInvitation.customer_id == customer.id).update(
         {"expires_at": utcnow() - timedelta(hours=1)}
     )
@@ -257,7 +244,7 @@ def test_portal_login_without_org_uuid(client: TestClient, db: Session):
     """Requirement 4: Customers should not be forced to manually enter an Organization UUID."""
     tenant = Tenant(db, "login-no-org")
     customer = tenant.customer(email="customer.login@example.com")
-    finance_headers = tenant.headers_for_role(MemberRole.FINANCE)
+    tenant.headers_for_role(MemberRole.FINANCE)
 
     # Invite and activate
     res = client.post(
@@ -328,7 +315,7 @@ def test_customer_portal_profile_self_service(client: TestClient, db: Session):
     customer.gstin = "29ABCDE1234F1Z5"
     db.commit()
 
-    finance_headers = tenant.headers_for_role(MemberRole.FINANCE)
+    tenant.headers_for_role(MemberRole.FINANCE)
 
     # 1. Invite and activate customer
     res = client.post(
@@ -381,7 +368,7 @@ def test_customer_portal_payment_methods_self_service(client: TestClient, db: Se
 
     tenant = Tenant(db, "portal-pm-test")
     customer = tenant.customer(email="pm.user@example.com")
-    finance_headers = tenant.headers_for_role(MemberRole.FINANCE)
+    tenant.headers_for_role(MemberRole.FINANCE)
 
     # 1. Invite and activate
     res = client.post(

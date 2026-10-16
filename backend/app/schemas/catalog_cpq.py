@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.app.models.catalog_cpq import (
-    CPQDealStatus,
     OfferingPricingModel,
     OfferingType,
     PriceBookStatus,

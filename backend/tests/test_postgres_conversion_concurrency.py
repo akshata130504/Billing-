@@ -5,7 +5,6 @@ released by a barrier). The state change must happen once AND be audited once; t
 losers get 409 (or, for quote -> subscription, the same subscription back).
 """
 import uuid
-from datetime import date
 
 import pytest
 from sqlalchemy import func, select
@@ -14,7 +13,7 @@ from backend.app.core.database import engine
 from backend.app.models import Invoice, Plan, Quote, QuoteStatus
 from backend.app.models.catalog_cpq import CPQDeal
 from backend.app.models.governance import AuditLog
-from backend.app.models.subscriptions import Subscription, SubscriptionStatus
+from backend.app.models.subscriptions import Subscription
 from backend.tests.test_postgres_concurrency import fresh, run_concurrently, thread_client
 
 pytestmark = pytest.mark.skipif(

@@ -6,13 +6,13 @@ plans, inactive / one-time / cross-tenant offerings rejected, no duplicate linke
 and legacy regression.
 """
 import uuid
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import func, select
 
-from backend.app.models import Invoice, InvoiceStatus, MemberRole, Plan, Product
-from backend.app.models.billing_cycles import PriceSnapshot, SubscriptionItem, SubscriptionItemType
+from backend.app.models import Invoice, MemberRole, Plan, Product
+from backend.app.models.billing_cycles import SubscriptionItem, SubscriptionItemType
 from backend.app.models.subscriptions import Subscription
 from backend.app.services import subscription_service
 from backend.tests.conftest import Tenant

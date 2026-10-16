@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from backend.app.api.deps import CurrentContext, get_db, require_admin, require_finance, require_viewer
 from backend.app.core.exceptions import NotFoundAppError
-from backend.app.models.dunning import DunningCase, DunningPolicy
+from backend.app.models.dunning import DunningCase
 from backend.app.schemas.dunning import (
     DunningCaseDetailOut,
     DunningCaseOut,

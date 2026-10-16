@@ -32,11 +32,12 @@ class TotpDisableRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str = Field(min_length=1, max_length=512)
+    # Optional: browser sessions (X-Rooman-Session: cookie) carry it in the HttpOnly session cookie.
+    refresh_token: Optional[str] = Field(default=None, min_length=1, max_length=512)
 
 
 class LogoutRequest(BaseModel):
-    refresh_token: str = Field(min_length=1, max_length=512)
+    refresh_token: Optional[str] = Field(default=None, min_length=1, max_length=512)
 
 
 class SwitchOrganizationRequest(BaseModel):
@@ -78,7 +79,8 @@ class AcceptInvitationRequest(BaseModel):
 
 class AuthTokens(BaseModel):
     access_token: str
-    refresh_token: str
+    # None in cookie mode (api/session_cookies.py): the refresh token is then only in the HttpOnly cookie.
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
     expires_in: int = Field(description="Access token lifetime in seconds")
 

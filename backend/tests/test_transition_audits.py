@@ -1,7 +1,6 @@
 """One-shot transitions audit exactly once: a repeated activation / conversion is rejected
 (or returns the existing result) without writing a second audit entry."""
 import uuid
-from datetime import date
 
 from sqlalchemy import func, select
 

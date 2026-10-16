@@ -1,7 +1,6 @@
 """Customer payment method vault and payment attempt tracking service."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session

@@ -332,7 +332,7 @@ def test_only_administrator_with_step_up_decides(client, db):
     for role in (PlatformRole.PLATFORM_OPERATIONS, PlatformRole.PLATFORM_SUPPORT):
         staff = Staff(db, role)
         staff.step_up()
-        assert staff.get(f"/subscription-requests").status_code == 200
+        assert staff.get("/subscription-requests").status_code == 200
         assert staff.get(f"/subscription-requests/{req_id}").status_code == 200
         assert staff.post(f"/subscription-requests/{req_id}/approve", {}).status_code == 403
         assert staff.post(f"/subscription-requests/{req_id}/reject", {"reason": "Not a fit for us now"}).status_code == 403

@@ -8,7 +8,6 @@ from backend.app.api.deps import CurrentContext, get_db, require_admin, require_
 from backend.app.schemas.catalog_cpq import (
     CPQDealCreate,
     CPQDealOut,
-    CPQDealUpdate,
     CPQRuleCreate,
     CPQRuleOut,
     PriceSimulationRequest,

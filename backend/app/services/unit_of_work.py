@@ -6,7 +6,7 @@ occur in a single atomic database transaction without intermediate rogue commits
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Any, Callable, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 from sqlalchemy.orm import Session
 
 from backend.app.core.database import SessionLocal

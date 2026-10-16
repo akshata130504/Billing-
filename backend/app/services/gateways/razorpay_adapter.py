@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 from backend.app.models.payments import PaymentGateway
 from backend.app.services import razorpay_gateway
-from backend.app.services.gateways.base import GatewayChargeResult, GatewayRefundResult, PaymentGatewayAdapter
+from backend.app.services.gateways.base import GatewayChargeResult, GatewayRefundResult
 
 
 class RazorpayGatewayAdapter:

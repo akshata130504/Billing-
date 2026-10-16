@@ -3,7 +3,6 @@
 Every query is scoped to ctx.organization_id; rows of another organization
 surface as 404. Each mutating function records an audit row and commits once.
 """
-from datetime import date
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 

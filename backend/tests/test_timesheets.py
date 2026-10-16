@@ -3,13 +3,9 @@ from datetime import date, timedelta
 from decimal import Decimal
 import uuid
 
-import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.models import (
-    Customer,
-    Invoice,
-    InvoiceStatus,
     MemberRole,
     TimeEntry,
     TimeEntryStatus,
@@ -377,7 +373,6 @@ def test_unapproved_timesheets_cannot_be_invoiced(client: TestClient, tenant, au
         json={"customer_id": customer.id, "time_entry_ids": [app_entry["id"]]},
     )
     assert res_app.status_code == 200
-    inv = res_app.json()
 
     # 6. Already billed entry cannot be invoiced again
     res_billed = client.post(

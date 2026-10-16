@@ -50,6 +50,7 @@ CORS_ALLOWED_HEADERS = [
     "Accept-Language",
     "Idempotency-Key",
     "X-Portal-Token",
+    "X-Rooman-Session",
     "X-Request-ID",
     "X-Correlation-ID",
 ]

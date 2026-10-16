@@ -1,6 +1,6 @@
 """Pricing Engine API endpoints for live calculations and simulator."""
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -8,8 +8,8 @@ from sqlalchemy import select
 
 from backend.app.api.deps import CurrentContext, get_db, require_viewer
 from backend.app.core.exceptions import ValidationAppError
-from backend.app.models.catalog_cpq import Offering, PriceBook, PriceBookEntry
-from backend.app.models.catalog import Plan as LegacyPlan, Product
+from backend.app.models.catalog_cpq import Offering, PriceBookEntry
+from backend.app.models.catalog import Plan as LegacyPlan
 from backend.app.services.pricing_engine import calculate_line_item_pricing, round_money
 
 router = APIRouter()

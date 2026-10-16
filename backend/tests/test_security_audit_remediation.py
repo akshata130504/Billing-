@@ -12,14 +12,13 @@ from fastapi.testclient import TestClient
 from backend.app.core.config import settings
 from backend.app.core.exceptions import EntityNotFoundError, ValidationAppError
 from backend.app.core.network_security import assert_safe_url, is_safe_ip, is_safe_url
-from backend.app.main import app
 from backend.app.models.checkout import CheckoutSession, CheckoutSessionPurpose, CheckoutSessionStatus
 from backend.app.models.identity import Organization, User, Membership, MemberRole, MembershipStatus
 from backend.app.models.invoices import Invoice, InvoiceStatus
 from backend.app.models.payments import Payment, PaymentMethod, PaymentStatus
 from backend.app.schemas.checkout import CheckoutConfirmIn
 from backend.app.schemas.common_refs import LineItemIn
-from backend.app.services import checkout_service, invoice_service, payment_service
+from backend.app.services import checkout_service
 from backend.app.services.checkout_service import _is_safe_redirect_url
 
 

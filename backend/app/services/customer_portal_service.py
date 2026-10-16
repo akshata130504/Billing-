@@ -10,18 +10,18 @@ from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, joinedload
 
 from backend.app.api.deps import CurrentContext
 from backend.app.core.config import settings
-from backend.app.core.exceptions import ConflictAppError, NotFoundAppError, UnauthorizedError, ValidationAppError
+from backend.app.core.exceptions import NotFoundAppError, UnauthorizedError, ValidationAppError
 from backend.app.core.security import hash_password, validate_password_strength, verify_password
 from backend.app.models.base import utcnow
-from backend.app.models.customers import Customer, CustomerContact
-from backend.app.models.identity import MemberRole, Organization, User
+from backend.app.models.customers import Customer
+from backend.app.models.identity import MemberRole, Organization
 from backend.app.models.invoices import OPEN_INVOICE_STATUSES, Invoice, InvoiceStatus
 from backend.app.models.payments import CustomerPaymentMethod, CustomerPaymentMethodStatus
 from backend.app.models.portal import (
@@ -34,9 +34,7 @@ from backend.app.models.subscriptions import Subscription, SubscriptionStatus
 from backend.app.schemas.portal import (
     CustomerPortalAccessStatusOut,
     CustomerPortalInvitationOut,
-    CustomerPortalSettingsOut,
     CustomerPortalSettingsUpdate,
-    PortalActivateIn,
     PortalDashboardOut,
     PortalInvitationValidateOut,
     PortalLoginIn,
@@ -89,7 +87,6 @@ def verify_signed_document_token(token: str) -> Tuple[str, str, str]:
     if exp_ts < int(datetime.now(timezone.utc).timestamp()):
         raise UnauthorizedError("Signed document link has expired.")
     return org_id, cust_id, inv_id
-from backend.app.services import audit
 
 
 def get_or_create_portal_settings(db: Session, organization_id: str) -> CustomerPortalSettings:

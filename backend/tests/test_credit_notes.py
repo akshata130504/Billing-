@@ -1,17 +1,6 @@
 """Tests for Credit Notes and Credit Applications (Phase 1)."""
-from decimal import Decimal
-import pytest
 
 from backend.app.models.credits import CreditNoteStatus
-from backend.app.models.invoices import Invoice, InvoiceStatus
-from backend.app.services.credit_service import (
-    apply_credit_note_to_invoice,
-    create_credit_note,
-    get_credit_note,
-    list_credit_notes,
-    void_credit_note,
-)
-from backend.app.core.exceptions import ConflictAppError, ValidationAppError
 
 
 def test_credit_note_lifecycle_and_api(client, tenant, auth_headers, db):

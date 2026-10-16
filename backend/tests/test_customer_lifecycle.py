@@ -3,17 +3,10 @@ from datetime import date, timedelta
 from decimal import Decimal
 import uuid
 
-import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.models import (
-    Customer,
-    CustomerLifecycle,
-    CustomerLifecycleStage,
-    HealthStatus,
-    Invoice,
     InvoiceStatus,
-    MemberRole,
     Payment,
     PaymentMethod,
     PaymentStatus,

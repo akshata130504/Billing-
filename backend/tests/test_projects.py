@@ -3,7 +3,6 @@ from datetime import date
 from decimal import Decimal
 import uuid
 
-import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.models import MemberRole
