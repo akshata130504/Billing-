@@ -347,3 +347,27 @@ def test_tenant_isolation_boundary(client, db):
     # Admin A attempts to fetch Customer in Org B -> 404 (not found in tenant context)
     r = client.get(f"{API}/customers/{cust_b.id}", headers=headers_a)
     assert r.status_code == 404
+
+
+def test_invited_admin_cannot_be_reactivated(db):
+    """BUG-32: "Reactivate" on an invited (never accepted) Admin made them active without accepting."""
+    admin_staff = Staff(db, PlatformRole.PLATFORM_ADMINISTRATOR)
+    admin_staff.step_up()
+    org = Organization(name=f"Corp {uuid.uuid4().hex[:6]}", slug=f"corp-{uuid.uuid4().hex[:6]}",
+                       status=OrganizationStatus.ACTIVE)
+    db.add(org)
+    db.flush()
+    _create_tenant_user(db, org, f"owner-{uuid.uuid4().hex[:6]}@corp.test", MemberRole.OWNER, "Alice Owner")
+    invited_user, invited_mem = _create_tenant_user(
+        db, org, f"invited-{uuid.uuid4().hex[:6]}@corp.test", MemberRole.ADMIN, "Ivy Invited")
+    invited_mem.status = MembershipStatus.INVITED
+    db.commit()
+
+    res = admin_staff.post(
+        f"/organizations/{org.id}/admins/{invited_user.id}/reactivate",
+        {"reason": "Trying to activate an invitation"},
+    )
+    assert res.status_code == 409, res.text
+    assert "resend the invitation" in res.text
+    db.refresh(invited_mem)
+    assert invited_mem.status == MembershipStatus.INVITED

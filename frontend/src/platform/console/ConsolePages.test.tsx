@@ -319,6 +319,21 @@ describe('organization detail', () => {
     expect(within(dialog).getByLabelText(/^Ticket reference \(optional\)/)).toBeInTheDocument();
   });
 
+  it('offers Reactivate only for a deactivated Admin, never for an invited one (BUG-32)', async () => {
+    const admin = (id: string, name: string, status: string) => ({
+      membership_id: `m-${id}`, user_id: id, email: `${id}@corp.test`, full_name: name, role: 'admin', status,
+      has_2fa: false, live_sessions: 0, created_at: '2026-10-01T00:00:00Z', last_login_at: null,
+    });
+    api.organization.mockResolvedValue(orgDetail());
+    api.tenantAdmins.mockResolvedValue([admin('u1', 'Ivy Invited', 'invited'), admin('u2', 'Dan Deactivated', 'deactivated')]);
+    renderAt('/organizations/org-1', 'platform_administrator');
+    const invitedRow = (await screen.findByText('Ivy Invited')).closest('tr') as HTMLElement;
+    const deactivatedRow = screen.getByText('Dan Deactivated').closest('tr') as HTMLElement;
+    expect(within(invitedRow).queryByRole('button', { name: 'Reactivate' })).toBeNull();
+    expect(within(invitedRow).getByText('Invitation pending')).toBeInTheDocument();
+    expect(within(deactivatedRow).getByRole('button', { name: 'Reactivate' })).toBeInTheDocument();
+  });
+
   it('shows billing automation as held for a trial organization (BUG-17)', async () => {
     api.organization.mockResolvedValue(orgDetail({
       lifecycle: { ...orgDetail().lifecycle, automation_running: false, automation_state: 'held_trial',
