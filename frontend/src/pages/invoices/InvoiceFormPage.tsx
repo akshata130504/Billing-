@@ -106,6 +106,9 @@ export const InvoiceFormPage: React.FC = () => {
   // Per-row selection counter: a pricing response is applied only if the row's
   // selection has not changed since the request was made.
   const selectionTokens = useRef<number[]>([]);
+  // Text being typed in a Qty box. The line's quantity (and its repricing) only changes once the
+  // text is a valid positive number, so clearing the box to retype never zeroes the line.
+  const [qtyDrafts, setQtyDrafts] = useState<Record<number, string>>({});
 
   const [items, setItems] = useState<FormLineItem[]>([
     {
@@ -409,6 +412,7 @@ export const InvoiceFormPage: React.FC = () => {
   const removeItemRow = (index: number) => {
     if (items.length === 1) return;
     selectionTokens.current.splice(index, 1);
+    setQtyDrafts({}); // drafts are keyed by row index, which shifts
     setItems((prev) => prev.filter((_, i) => i !== index));
   };
 
@@ -787,8 +791,23 @@ export const InvoiceFormPage: React.FC = () => {
                     <input
                       type="number"
                       min="1"
-                      value={item.quantity}
-                      onChange={(e) => handleItemChange(index, 'quantity', Number(e.target.value))}
+                      aria-label={`Line ${index + 1} quantity`}
+                      value={qtyDrafts[index] ?? item.quantity}
+                      onChange={(e) => {
+                        const text = e.target.value;
+                        setQtyDrafts((d) => ({ ...d, [index]: text }));
+                        const qty = Number(text);
+                        if (text.trim() !== '' && Number.isFinite(qty) && qty > 0) {
+                          handleItemChange(index, 'quantity', qty);
+                        }
+                      }}
+                      onBlur={() =>
+                        setQtyDrafts((d) => {
+                          const next = { ...d };
+                          delete next[index];
+                          return next;
+                        })
+                      }
                       className="w-full px-3 py-1.5 bg-white border border-gray-300 rounded-md text-sm text-right focus:ring-1 focus:ring-indigo-500"
                     />
                   </div>
