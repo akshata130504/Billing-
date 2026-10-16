@@ -320,7 +320,7 @@ export function OrganizationDetailPage() {
                                       Deactivate
                                     </Button>
                                   </>
-                                ) : (
+                                ) : admin.status === 'deactivated' ? (
                                   <Button
                                     size="sm"
                                     variant="outline"
@@ -329,6 +329,9 @@ export function OrganizationDetailPage() {
                                   >
                                     Reactivate
                                   </Button>
+                                ) : (
+                                  // BUG-32: an invited Admin has not accepted yet; reactivating would skip acceptance.
+                                  <span className="text-xs italic text-slate-400">Invitation pending</span>
                                 )}
                               </div>
                             )}
