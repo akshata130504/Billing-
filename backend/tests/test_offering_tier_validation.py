@@ -63,3 +63,41 @@ def test_api_update_rejects_open_ended_tier_not_last(client, auth_headers):
         f"{OFFERINGS}/{created.json()['id']}", json={"pricing_tiers": INVALID["open_ended_not_last"]}, headers=auth_headers
     )
     assert res.status_code == 422, res.text
+
+
+# QA (new-bugs PDF, "Catalog - Edit Commercial Offering"): adding a pricing bracket while updating an
+# offering returned 500 "An unexpected error occurred" (Decimal values written to the JSON column).
+@pytest.mark.parametrize("model,brackets", [
+    ("volume", [{"min_qty": 0, "max_qty": 1, "unit_price": 1000}]),
+    ("tiered", [{"min_qty": 0, "max_qty": 11, "unit_price": 1000}]),
+    ("tiered", [{"min_qty": 0, "max_qty": 10, "unit_price": "1000.00"}, {"min_qty": 11, "max_qty": None, "unit_price": "2500.00"}]),
+])
+def test_api_update_adds_valid_brackets(client, auth_headers, model, brackets):
+    created = client.post(OFFERINGS, json=_payload(pricing_model="per_unit", type="service"), headers=auth_headers)
+    assert created.status_code == 201, created.text
+    res = client.patch(
+        f"{OFFERINGS}/{created.json()['id']}",
+        json={"pricing_model": model, "pricing_tiers": brackets},
+        headers=auth_headers,
+    )
+    assert res.status_code == 200, res.text
+    stored = res.json()["pricing_tiers"]
+    assert len(stored) == len(brackets)
+    assert float(stored[0]["unit_price"]) == 1000.0
+    again = client.get(f"{OFFERINGS}/{created.json()['id']}", headers=auth_headers)
+    assert again.json()["pricing_tiers"] == stored
+
+
+# QA (new-bugs PDF, "Catalog - Price Books"): searching "science" must list only matching books.
+def test_price_book_search_filters_by_name(client, auth_headers):
+    tag = uuid.uuid4().hex[:6]
+    for name in (f"English {tag}", f"Science {tag}", f"Test2 {tag}"):
+        res = client.post(
+            "/api/v1/catalog/price-books",
+            json={"name": name, "currency": "INR", "customer_segment": "Enterprise", "entries": []},
+            headers=auth_headers,
+        )
+        assert res.status_code == 201, res.text
+    found = client.get("/api/v1/catalog/price-books", params={"search": f"science {tag}"}, headers=auth_headers)
+    assert found.status_code == 200, found.text
+    assert [b["name"] for b in found.json()["items"]] == [f"Science {tag}"]
