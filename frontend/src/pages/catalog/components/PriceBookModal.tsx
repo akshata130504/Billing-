@@ -4,6 +4,7 @@ import { X, Plus, Trash2, BookOpen, AlertCircle } from 'lucide-react';
 import { Button } from '../../../components/common/Button';
 import type { PriceBookIn, PriceBookOut, OfferingOut } from '../../../types/catalog_cpq';
 import { formatMoney, currencySymbol } from '../../../utils/format';
+import { currencyChoices, currencyOptionLabel } from '../../../utils/currencies';
 
 interface PriceBookModalProps {
   isOpen: boolean;
@@ -155,9 +156,10 @@ export const PriceBookModal: React.FC<PriceBookModalProps> = ({
                 onChange={(e) => setCurrency(e.target.value)}
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
               >
-                <option value="INR">INR (₹)</option>
-                <option value="USD">USD ($)</option>
-                <option value="EUR">EUR (€)</option>
+                {/* BUG-24: every supported currency, plus the stored one when it is outside the list. */}
+                {currencyChoices(currency).map((code) => (
+                  <option key={code} value={code}>{currencyOptionLabel(code)}</option>
+                ))}
               </select>
             </div>
             <div className="flex items-center pt-5">
