@@ -85,3 +85,15 @@ def test_deal_line_quantity_is_bounded(client, auth_headers):
         "items": [{"offering_id": a["id"], "quantity": 187654446786545}],
     }, headers=auth_headers)
     assert res.status_code == 422, res.text
+
+
+def test_deal_without_currency_uses_the_organization_currency(client, tenant, auth_headers, db):
+    """BUG-24: a CPQ deal created without a currency fell back to INR, not the org's currency."""
+    tenant.organization.default_currency = "AED"
+    db.commit()
+    a = _offering(client, auth_headers, "10.00")
+    customer = client.post(CUSTOMERS, json={"display_name": "Gulf Buyer"}, headers=auth_headers).json()
+    res = client.post(CPQ_DEALS, json={"title": "Gulf", "customer_id": customer["id"],
+                                       "items": [{"offering_id": a["id"], "quantity": 1}]}, headers=auth_headers)
+    assert res.status_code == 201, res.text
+    assert res.json()["currency"] == "AED"

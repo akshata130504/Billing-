@@ -26,6 +26,7 @@ import { planPricingService } from '../../services/planPricingService';
 import type { OfferingOut } from '../../types/catalog_cpq';
 import type { QuoteItemIn, SupplyPreview } from '../../types/quotes';
 import { todayIso, addDays, calculateValidityDays, formatQuoteTerms, updateTermsValidity, formatMoney, currencySymbol } from '../../utils/format';
+import { currencyChoices, currencyOptionLabel } from '../../utils/currencies';
 
 const VALIDITY_PRESETS = [7, 15, 30, 60, 90] as const;
 
@@ -632,10 +633,10 @@ export function QuoteFormPage() {
               onChange={(e) => setCurrency(e.target.value)}
               className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white font-medium text-slate-900"
             >
-              <option value="INR">INR (₹)</option>
-              <option value="USD">USD ($)</option>
-              <option value="EUR">EUR (€)</option>
-              <option value="GBP">GBP (£)</option>
+              {/* BUG-24: every supported currency, plus the stored one when it is outside the list. */}
+              {currencyChoices(currency).map((code) => (
+                <option key={code} value={code}>{currencyOptionLabel(code)}</option>
+              ))}
             </select>
           </div>
 

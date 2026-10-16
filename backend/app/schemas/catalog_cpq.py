@@ -323,7 +323,8 @@ class CPQDealCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     customer_id: str
     price_book_id: Optional[str] = None
-    currency: Optional[str] = Field("INR", min_length=3, max_length=3)
+    # None: the deal takes the customer's currency, else the organization's (BUG-24).
+    currency: Optional[str] = Field(None, min_length=3, max_length=3)
     discount_pct: Decimal = Field(Decimal("0"), ge=0, le=100)
     notes: Optional[str] = None
     terms: Optional[str] = None

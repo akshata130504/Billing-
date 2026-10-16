@@ -580,6 +580,14 @@ def list_deals(
     return paginate(db, stmt, params)
 
 
+def _customer_currency(db: Session, organization_id: str, customer_id: Optional[str]) -> Optional[str]:
+    if not customer_id:
+        return None
+    return db.scalar(
+        select(Customer.currency).where(Customer.id == customer_id, Customer.organization_id == organization_id)
+    )
+
+
 def create_deal(db: Session, ctx: CurrentContext, data: CPQDealCreate) -> CPQDeal:
     # Run simulation logic to compute exact mathematical figures and transparency tree
     sim_req = PriceSimulationRequest(
@@ -603,7 +611,10 @@ def create_deal(db: Session, ctx: CurrentContext, data: CPQDealCreate) -> CPQDea
         customer_id=data.customer_id,
         price_book_id=data.price_book_id,
         status=status,
-        currency=data.currency or "INR",
+        # BUG-24: without an explicit currency the deal is in the customer's currency, else the
+        # organization's (it used to fall back to INR).
+        currency=data.currency or _customer_currency(db, ctx.organization_id, data.customer_id)
+        or ctx.organization.default_currency or "INR",
         subtotal=Decimal(calc_res["subtotal"]),
         discount_pct=data.discount_pct,
         discount_amount=Decimal(calc_res["discount_amount"]),

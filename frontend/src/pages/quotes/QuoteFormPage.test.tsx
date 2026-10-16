@@ -402,6 +402,17 @@ describe('<QuoteFormPage /> archived offerings', () => {
     expect(catalogCpqService.getOffering).toHaveBeenCalledWith('off-far');
   });
 
+  it('offers every supported currency, and keeps a stored currency outside the list (BUG-24)', async () => {
+    vi.mocked(quoteService.getQuote).mockResolvedValue({ ...storedQuote(), currency: 'JPY' } as never);
+    renderRoute('/quotes/q1/edit');
+    await waitFor(() => expect(offeringSelects().length).toBe(2));
+    const currencySelect = screen.getAllByRole('combobox').find((s) =>
+      within(s).queryByRole('option', { name: 'INR (₹)' })) as HTMLSelectElement;
+    const codes = Array.from(currencySelect.options).map((o) => o.value);
+    expect(codes).toEqual(expect.arrayContaining(['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD', 'AUD', 'CAD', 'JPY']));
+    expect(currencySelect.value).toBe('JPY');
+  });
+
   it('keeps the stored price and does not simulate pricing when changing the quantity of an archived line', async () => {
     renderRoute('/quotes/q1/edit');
     await waitFor(() => expect(offeringSelects().length).toBe(2));
