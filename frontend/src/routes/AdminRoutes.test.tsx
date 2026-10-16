@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../components/common/Toast';
 import tenantRoutesSource from './index.tsx?raw';
 
@@ -40,6 +40,12 @@ function renderAt(path: string) {
 }
 
 describe('/admin - the tenant app entry point', () => {
+  // LoginPage is a lazy route. Its first import (transform + load) used to happen inside the first
+  // test's findByText window (1 s), which a busy full-suite run could exceed; load it up front so the
+  // tests measure routing only.
+  beforeAll(async () => {
+    await import('../pages/auth/LoginPage');
+  });
   beforeEach(() => vi.clearAllMocks());
 
   it('/admin opens the tenant sign-in directly', async () => {

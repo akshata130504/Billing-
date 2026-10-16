@@ -65,6 +65,18 @@ def test_refresh_from_cookie_rotates_and_needs_the_header(browser, tenant):
     assert browser.post(f"{API}/auth/refresh", headers=COOKIE).status_code == 200
 
 
+def test_a_dead_cookie_is_refused_and_removed(browser):
+    browser.cookies.set(session_cookies.cookie_name(), "not-a-real-token", path=f"{API}/auth")
+    r = browser.post(f"{API}/auth/refresh", headers=COOKIE)
+    assert r.status_code == 401
+    assert r.json()["error"]["code"]
+    raw = _set_cookie_header(r)
+    assert f"{session_cookies.cookie_name()}=" in raw
+    assert "Max-Age=0" in raw or "expires=" in raw.lower()
+    # nothing to present any more: the next attempt is refused without a cookie
+    assert browser.post(f"{API}/auth/refresh", headers=COOKIE).status_code == 401
+
+
 def test_logout_clears_the_cookie_and_revokes_the_session(browser, tenant):
     access = _login(browser, tenant.owner.email).json()["access_token"]
     old_cookie = browser.cookies.get(session_cookies.cookie_name())

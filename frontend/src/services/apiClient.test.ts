@@ -15,7 +15,19 @@ import {
 } from './apiClient';
 
 const HINT_KEY = 'rooman.session';
+const LEGACY_ACCESS_KEY = 'rooman.access_token';
 const LEGACY_REFRESH_KEY = 'rooman.refresh_token';
+
+const unauthorized = (config: InternalAxiosRequestConfig) =>
+  Promise.reject(
+    new AxiosError('Unauthorized', 'ERR_BAD_REQUEST', config, {}, {
+      data: {}, status: 401, statusText: '', headers: {}, config,
+    } as AxiosResponse)
+  );
+const ok = (config: InternalAxiosRequestConfig) =>
+  ({ data: { ok: true }, status: 200, statusText: 'OK', headers: {}, config }) as AxiosResponse;
+const bearer = (config: InternalAxiosRequestConfig) =>
+  AxiosHeaders.from(config.headers).get('Authorization') as string | undefined;
 
 function axiosErrorWithResponse(
   status: number,
@@ -95,8 +107,14 @@ describe('tokenStorage', () => {
     expect(tokenStorage.getAccessToken()).toBe('a');
   });
 
-  it('never leaves a legacy refresh token behind', () => {
+  it('wipes tokens left in localStorage by older builds when the app loads', async () => {
+    window.localStorage.setItem(LEGACY_ACCESS_KEY, 'old-access');
+    window.localStorage.setItem(LEGACY_REFRESH_KEY, 'old-refresh');
+    vi.resetModules();
+    const fresh = await import('./apiClient');
+    expect(window.localStorage.getItem(LEGACY_ACCESS_KEY)).toBeNull();
     expect(window.localStorage.getItem(LEGACY_REFRESH_KEY)).toBeNull();
+    expect(fresh.tokenStorage.getAccessToken()).toBeNull();
   });
 });
 
@@ -520,6 +538,59 @@ describe('apiClient interceptors', () => {
     expect(body).toBeUndefined();
     expect(options).toMatchObject({ withCredentials: true, headers: { 'X-Rooman-Session': 'cookie' } });
     expect(tokenStorage.getAccessToken()).toBe('acc-new');
+  });
+
+  it('after a reload (no access token in memory) gets one from the cookie and retries', async () => {
+    tokenStorage.clear();
+    window.localStorage.setItem(HINT_KEY, '1');
+    const refreshSpy = vi.spyOn(axios, 'post').mockResolvedValue({ data: { access_token: 'acc-new' } });
+    const seen: (string | undefined)[] = [];
+    apiClient.defaults.adapter = async (config) => {
+      seen.push(bearer(config));
+      return bearer(config) === 'Bearer acc-new' ? ok(config) : unauthorized(config);
+    };
+
+    await expect(apiClient.get('/auth/me')).resolves.toMatchObject({ data: { ok: true } });
+    expect(refreshSpy).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual([undefined, 'Bearer acc-new']);
+  });
+
+  it('does not loop when the retried request is refused again: one refresh, then sign-out', async () => {
+    tokenStorage.set({ access_token: 'acc-old' });
+    const refreshSpy = vi.spyOn(axios, 'post').mockResolvedValue({ data: { access_token: 'acc-new' } });
+    const onLogout = vi.fn();
+    window.addEventListener(LOGOUT_EVENT, onLogout);
+    let calls = 0;
+    apiClient.defaults.adapter = async (config) => {
+      calls += 1;
+      return unauthorized(config);
+    };
+
+    await expect(apiClient.get('/customers')).rejects.toMatchObject({ status: 401 });
+    window.removeEventListener(LOGOUT_EVENT, onLogout);
+    expect(refreshSpy).toHaveBeenCalledTimes(1);
+    expect(calls).toBe(2);
+    expect(onLogout).toHaveBeenCalledTimes(1);
+    expect(tokenStorage.hasSession()).toBe(false);
+  });
+
+  it('shares one refresh between concurrent 401s (the cookie rotates on every refresh)', async () => {
+    tokenStorage.set({ access_token: 'acc-old' });
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const refreshSpy = vi
+      .spyOn(axios, 'post')
+      .mockImplementation(() => gate.then(() => ({ data: { access_token: 'acc-new' } })));
+    apiClient.defaults.adapter = async (config) =>
+      bearer(config) === 'Bearer acc-new' ? ok(config) : unauthorized(config);
+
+    const both = Promise.all([apiClient.get('/customers'), apiClient.get('/invoices')]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    release();
+    await expect(both).resolves.toHaveLength(2);
+    expect(refreshSpy).toHaveBeenCalledTimes(1);
   });
 
   it('sends the cookie-mode header on every API call', async () => {

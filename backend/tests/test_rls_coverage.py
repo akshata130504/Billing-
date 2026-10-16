@@ -4,8 +4,10 @@
   and every table with an organization_id column is either covered or in EXEMPT with a reason.
   A new tenant table therefore fails this test until a migration puts the policy on it.
 * PostgreSQL (TEST_DATABASE_URL): the migrated database really has RLS enabled AND forced, with
-  tenant_isolation_policy, on every table with an organization_id column outside EXEMPT; and the
-  policy denies a NOSUPERUSER/NOBYPASSRLS role another tenant's rows.
+  tenant_isolation_policy, on every table with an organization_id column outside EXEMPT; every such
+  policy is the same ALL-commands policy (USING = WITH CHECK) as migration 0032; and the policy denies
+  a NOSUPERUSER/NOBYPASSRLS role another tenant's rows (read, insert, move, update, delete) and
+  shows nothing without a tenant context.
 """
 from __future__ import annotations
 
@@ -99,6 +101,33 @@ def test_migrated_database_forces_the_policy_on_every_tenant_table():
 
 
 @postgres_only
+def test_every_tenant_policy_is_the_same_all_commands_policy():
+    """One policy per table, for ALL commands (SELECT, INSERT, UPDATE, DELETE), permissive, for every
+    role, with WITH CHECK equal to USING and the same expression on every table. So the behaviour
+    probed below on one table holds on all of them; a hand-edited or weakened policy fails here."""
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT tablename, policyname, cmd, permissive, roles::text AS roles, qual, with_check
+            FROM pg_policies WHERE schemaname = current_schema()
+        """)).all()
+    by_table: dict[str, list] = {}
+    for r in rows:
+        by_table.setdefault(r.tablename, []).append(r)
+    expected = tenant_tables() | (covered_tables() & set(Base.metadata.tables))
+    assert expected <= set(by_table), f"tenant tables without a policy: {sorted(expected - set(by_table))}"
+    reference = by_table["customers"][0].qual  # migration 0032
+    assert "app.current_organization_id" in reference and "organization_id" in reference
+    wrong = sorted(
+        t for t in expected
+        if len(by_table[t]) != 1
+        or (p := by_table[t][0]).policyname != "tenant_isolation_policy"
+        or p.cmd != "ALL" or p.permissive != "PERMISSIVE" or p.roles != "{public}"
+        or p.qual != reference or p.with_check != reference
+    )
+    assert not wrong, f"tables whose tenant policy differs from migration 0032's: {wrong}"
+
+
+@postgres_only
 def test_policy_hides_other_tenants_rows_from_an_unprivileged_role():
     """Superusers bypass RLS, so prove it as a throwaway NOSUPERUSER NOBYPASSRLS role (SET ROLE)."""
     role = f"rls_probe_{uuid.uuid4().hex[:8]}"
@@ -113,7 +142,7 @@ def test_policy_hides_other_tenants_rows_from_an_unprivileged_role():
         try:
             conn.execute(text(f"CREATE ROLE {role} NOLOGIN NOSUPERUSER NOBYPASSRLS"))
             conn.execute(text(f"GRANT USAGE ON SCHEMA {conn.execute(text('SELECT current_schema()')).scalar()} TO {role}"))
-            conn.execute(text(f"GRANT SELECT, INSERT ON products, outbox_events, organizations TO {role}"))
+            conn.execute(text(f"GRANT SELECT, INSERT, UPDATE, DELETE ON products, outbox_events, organizations TO {role}"))
             conn.execute(text("SELECT set_config('app.current_organization_id', '__SYSTEM__', true)"))
             for org in (org_a, org_b):
                 conn.execute(text("INSERT INTO organizations (id, name, slug, country, default_currency, timezone, "
@@ -136,6 +165,20 @@ def test_policy_hides_other_tenants_rows_from_an_unprivileged_role():
                                   "payload, status, retry_count, created_at) VALUES (:id, :org, 'probe', 'probe', 'p', "
                                   "'{}', 'PENDING', 0, now())"), {"id": str(uuid.uuid4()), "org": org_b})
             conn.execute(text("ROLLBACK TO SAVEPOINT cross_write"))
+            # moving an own row to another tenant is refused (WITH CHECK)
+            conn.execute(text("SAVEPOINT cross_move"))
+            with pytest.raises(Exception, match="row-level security"):
+                conn.execute(text("UPDATE outbox_events SET organization_id = :b WHERE event_type = 'probe'"), {"b": org_b})
+            conn.execute(text("ROLLBACK TO SAVEPOINT cross_move"))
+            # another tenant's rows cannot be updated or deleted (they are invisible: 0 rows)
+            assert conn.execute(text("UPDATE outbox_events SET retry_count = retry_count + 1 WHERE organization_id = :b"),
+                                {"b": org_b}).rowcount == 0
+            assert conn.execute(text("DELETE FROM outbox_events WHERE organization_id = :b"), {"b": org_b}).rowcount == 0
+            conn.execute(text("SELECT set_config('app.current_organization_id', :o, true)"), {"o": org_b})
+            assert conn.execute(text("SELECT count(*) FROM outbox_events WHERE event_type = 'probe'")).scalar() == 1
+            # no tenant context at all: nothing is visible (fails closed)
+            conn.execute(text("SELECT set_config('app.current_organization_id', '', true)"))
+            assert conn.execute(text("SELECT count(*) FROM outbox_events WHERE event_type = 'probe'")).scalar() == 0
             conn.execute(text("SELECT set_config('app.current_organization_id', '__NONE__', true)"))
             assert conn.execute(text("SELECT count(*) FROM outbox_events WHERE event_type = 'probe'")).scalar() == 0
         finally:
