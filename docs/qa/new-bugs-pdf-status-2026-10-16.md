@@ -59,3 +59,16 @@ a regression test, so it stays fixed.
 | CPQ wizard overlay is hand-rolled (no portal, Escape key or focus trap) | Low | It works visually; moving it to `ModalShell` is a refactor |
 | `refunds.gateway_refund_id` has no unique index | Low | Duplicates are prevented by a row lock on PostgreSQL; an index needs a migration and a deploy window |
 | Item 12 (issue date after expiry) | Decision | Choose between error and auto-shift |
+
+## Earlier QA audit (BUG-01 to BUG-60, PR #40): status on this branch
+
+Each item was checked against the code. "Fixed earlier" means it was fixed in an earlier commit,
+which is already on `main`, and has a test.
+
+| Status | Bugs |
+|---|---|
+| **Fixed in this branch** | BUG-16 (leftover: scheduler trial-expiry actor), BUG-24 (quote and price book currency pickers; CPQ deal currency), BUG-27 (dead reset link rejected before the form), BUG-32 (an invited Admin could be "reactivated" without accepting; now 409), BUG-34 (Resend invitation), BUG-37 (invited name prefilled), BUG-50 (number-series prefix and suffix) |
+| Fixed earlier | 01, 02, 04, 05, 06, 08, 09, 10, 12, 13, 14, 15 (code; not checked in production), 17, 18, 19, 20, 22, 23, 25, 28, 29, 30, 31, 33, 35, 38, 39, 40, 41, 42, 43, 44, 45, 47 (scheme), 48, 49, 51, 52 (per browser), 53 (layout; needs a browser check at 1024 px), 55, 56, 57, 58, 59, 60 |
+| Not code | 03 (Razorpay live setup; needs the merchant owner), 07 (the "no GSTIN, no GST" rule is built; GST adviser sign-off still needed), 26 (mail deliverability; check the `email_delivered` audit field and SMTP logs) |
+| Kept as instructed | 11 (expenses currency; code in place, production verification blocked), 21 (tokens in localStorage; risk acceptance unsigned) |
+| Partial, not changed | 46: about 130 request schemas still accept unknown fields. Making them strict can break current clients that echo whole objects back, so it needs a per-area rollout with frontend checks. 47: redirect host allow-list is a product decision. 52: saving widget choices on the server would be a new feature |
