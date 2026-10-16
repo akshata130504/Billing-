@@ -181,3 +181,42 @@ describe('<CatalogPage /> prices in the offering currency (BUG-10)', () => {
     expect(aed).not.toContain('₹');
   });
 });
+
+// QA (new-bugs PDF, "Catalog - Price Books"): searching "science" still listed every price book.
+// Each keystroke reloads the lists; a slower reply for an earlier prefix must not overwrite the
+// results for the latest search.
+describe('<CatalogPage /> price book search', () => {
+  const book = (id: string, name: string) => ({ id, name, currency: 'INR', customer_segment: 'Enterprise', status: 'active', is_default: false, entries_count: 1 }) as any;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(catalogCpqService.listOfferings).mockResolvedValue({ items: [], total: 0 } as any);
+    vi.mocked(dashboardSummaryService.catalog).mockResolvedValue({ offerings: { total: 0, active: 0, by_type: {} } } as any);
+    vi.mocked(catalogCpqService.listPriceBooks).mockResolvedValue({
+      items: [book('1', 'English'), book('2', 'Science'), book('3', 'Test2')], total: 3,
+    } as any);
+  });
+
+  it('shows the results of the latest search even when an earlier reply arrives last', async () => {
+    renderCatalog();
+    fireEvent.click(await screen.findByRole('button', { name: /Price Books/ }));
+    await screen.findByText('English');
+
+    let releaseSci: (v: unknown) => void = () => undefined;
+    vi.mocked(catalogCpqService.listPriceBooks)
+      .mockImplementationOnce(() => new Promise((resolve) => { releaseSci = resolve; }) as any)
+      .mockResolvedValueOnce({ items: [book('2', 'Science')], total: 1 } as any);
+
+    const box = screen.getByRole('textbox', { name: 'Search price books' });
+    fireEvent.change(box, { target: { value: 'sci' } });
+    fireEvent.change(box, { target: { value: 'science' } });
+    await waitFor(() => expect(screen.queryByText('English')).toBeNull());
+    expect(screen.getByText('Science')).toBeInTheDocument();
+
+    // The stale "sci" reply (all three books) arrives last and must be ignored.
+    releaseSci({ items: [book('1', 'English'), book('2', 'Science'), book('3', 'Test2')], total: 3 });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByText('English')).toBeNull();
+    expect(screen.queryByText('Test2')).toBeNull();
+  });
+});
