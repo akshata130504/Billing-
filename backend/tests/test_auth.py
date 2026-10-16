@@ -614,3 +614,20 @@ def test_openapi_documents_auth_routes(client):
         assert f"{API}{path}" in spec["paths"], path
     login_ok = spec["paths"][f"{API}/auth/login"]["post"]["responses"]["200"]
     assert "LoginResponse" in login_ok["content"]["application/json"]["schema"]["$ref"]
+
+
+def test_reset_link_can_be_checked_before_the_form_is_shown(client, db, tenant):
+    """BUG-27: an invalid or used reset link showed the form and failed only on submit."""
+    user = tenant.add_member("checker", MemberRole.FINANCE)
+    db.commit()
+    assert client.post(f"{API}/auth/forgot-password", json={"email": user.email}).status_code == 202
+    token = emailed_reset_token(user.email)
+    check = lambda t: client.post(f"{API}/auth/reset-password/validate", json={"token": t})  # noqa: E731
+
+    assert check(token).status_code == 204
+    assert check(token).status_code == 204  # checking never consumes the token
+    bad = check("not-a-real-token")
+    assert bad.status_code == 422 and bad.json()["error"]["details"]["fields"]["token"]
+
+    assert client.post(f"{API}/auth/reset-password", json={"token": token, "new_password": NEW_PASSWORD}).status_code == 204
+    assert check(token).status_code == 422  # used links are reported dead
