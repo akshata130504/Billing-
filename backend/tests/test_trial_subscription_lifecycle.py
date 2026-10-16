@@ -154,6 +154,7 @@ def test_scheduler_records_expired_trials_with_audit(db):
     rows = db.scalars(select(PlatformAuditLog).where(PlatformAuditLog.organization_id == org.id,
                                                     PlatformAuditLog.action == platform_audit.ORGANIZATION_TRIAL_EXPIRED)).all()
     assert len(rows) == 1
+    assert rows[0].staff_email_snapshot == "system:scheduler"  # BUG-16: not "unknown" in the console
     assert db.scalars(select(PlatformAuditLog).where(PlatformAuditLog.organization_id == live.id,
                                                     PlatformAuditLog.action == platform_audit.ORGANIZATION_TRIAL_EXPIRED)).first() is None
 
