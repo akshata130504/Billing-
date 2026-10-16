@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Lock } from 'lucide-react';
 import { Input } from '../../components/common/Input';
@@ -20,6 +20,20 @@ export function ResetPasswordPage() {
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
+  // BUG-27: check the link first, so a used or expired link says so before a password is typed.
+  // Only a definite "invalid link" answer (422) hides the form; on a network error the reset itself
+  // still validates the token on submit.
+  const [linkDead, setLinkDead] = useState(false);
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    authService.validateResetToken(token).catch((err) => {
+      if (!cancelled && toApiError(err).status === 422) setLinkDead(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -50,6 +64,24 @@ export function ResetPasswordPage() {
       setSubmitting(false);
     }
   };
+
+  if (linkDead) {
+    return (
+      <AuthShell
+        title="This reset link is no longer valid"
+        subtitle="It has expired or was already used. Request a new link to choose a password."
+        footer={
+          <Link to="/login" className="font-semibold text-brand-600 hover:text-brand-700">
+            Back to sign in
+          </Link>
+        }
+      >
+        <Link to="/forgot-password">
+          <Button className="w-full">Request a new link</Button>
+        </Link>
+      </AuthShell>
+    );
+  }
 
   if (!token) {
     return (

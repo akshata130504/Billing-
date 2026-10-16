@@ -66,6 +66,7 @@ interface MeResponse {
 - `POST /auth/change-password` [auth] body `{ current_password, new_password }` → 204. Revokes all other refresh tokens.
 - `POST /auth/forgot-password` body `{ email }` → 202 `{ message, reset_url?: string }`. Always 202 even if the email is unknown. `reset_url` is only included when SMTP is NOT configured (so the flow still works in that deployment) — it is `${FRONTEND_URL}/reset-password?token=…`.
 - `POST /auth/reset-password` body `{ token, new_password }` → 204.
+- `POST /auth/reset-password/validate` body `{ token }` → 204 when the link is usable, 422 (`fields.token`) when it is invalid, expired or used. Read-only; the reset page calls it before showing the form.
 - `GET /auth/invitations/{token}` → `{ email, organization_name, role, invited_by: string, expires_at, user_exists: boolean }` (404 if invalid/expired).
 - `POST /auth/accept-invitation` body `{ token, full_name?, password? }` → `AuthTokens`. `full_name`/`password` required when `user_exists` was false.
 

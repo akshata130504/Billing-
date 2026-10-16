@@ -106,6 +106,11 @@ export const authService = {
     return data;
   },
 
+  /** Resolves when the reset link is still usable; rejects with 422 when it is invalid, expired or used. */
+  validateResetToken: async (token: string): Promise<void> => {
+    await apiClient.post('/auth/reset-password/validate', { token });
+  },
+
   resetPassword: async (token: string, new_password: string): Promise<void> => {
     await apiClient.post('/auth/reset-password', { token, new_password });
   },

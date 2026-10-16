@@ -1342,7 +1342,8 @@ def forgot_password(db: Session, email: str, ip: Optional[str], user_agent: Opti
     return message
 
 
-def reset_password(db: Session, raw_token: str, new_password: str, ip: Optional[str], user_agent: Optional[str]) -> None:
+def _usable_reset_token(db: Session, raw_token: str) -> Tuple[PasswordResetToken, User]:
+    """The unused, unexpired reset token and its active user, or the one 'invalid link' error."""
     invalid = ValidationAppError(
         "This password reset link is invalid or has expired.",
         {"fields": {"token": "This password reset link is invalid or has expired. Request a new link."}},
@@ -1353,6 +1354,17 @@ def reset_password(db: Session, raw_token: str, new_password: str, ip: Optional[
     user = db.get(User, token.user_id)
     if user is None or not user.is_active:
         raise invalid
+    return token, user
+
+
+def check_reset_token(db: Session, raw_token: str) -> None:
+    """BUG-27: lets the reset page reject a dead link before the user types a new password.
+    Read-only: the token is not consumed."""
+    _usable_reset_token(db, raw_token)
+
+
+def reset_password(db: Session, raw_token: str, new_password: str, ip: Optional[str], user_agent: Optional[str]) -> None:
+    token, user = _usable_reset_token(db, raw_token)
     _password_problem(new_password, "new_password")
 
     user.hashed_password = hash_password(new_password)

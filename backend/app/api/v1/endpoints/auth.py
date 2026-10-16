@@ -22,6 +22,7 @@ from backend.app.schemas.auth import (
     RefreshRequest,
     ResendOtpRequest,
     ResetPasswordRequest,
+    ResetTokenCheck,
     SessionOut,
     SignupCompleteRequest,
     SignupConfirmEmailRequest,
@@ -349,6 +350,21 @@ def forgot_password(request: Request, payload: ForgotPasswordRequest, db: Sessio
 @limiter.limit(auth_rate_limit)
 def reset_password(request: Request, payload: ResetPasswordRequest, db: Session = Depends(get_db)) -> Response:
     auth_service.reset_password(db, payload.token, payload.new_password, ip=client_ip(request), user_agent=_ua(request))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/reset-password/validate",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+    response_class=Response,
+    summary="Check that a password reset link is still usable",
+)
+@limiter.limit(auth_rate_limit)
+def validate_reset_token(request: Request, payload: ResetTokenCheck, db: Session = Depends(get_db)) -> Response:
+    """204 when the link can still be used, 422 (same error as the reset) when it cannot.
+    POST keeps the token out of access logs; the token is not consumed."""
+    auth_service.check_reset_token(db, payload.token)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
