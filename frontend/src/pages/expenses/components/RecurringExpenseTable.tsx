@@ -243,6 +243,8 @@ export function RecurringExpenseTable({
                           }}
                           className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
                           title="More Actions"
+                          aria-haspopup="menu"
+                          aria-expanded={isMenuOpen}
                         >
                           <MoreVertical className="w-3.5 h-3.5" />
                         </button>
@@ -259,6 +261,7 @@ export function RecurringExpenseTable({
                               }}
                             />
                             <div
+                              role="menu"
                               className="fixed w-44 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-1 text-xs"
                               style={{
                                 top: menuPos.openUp ? 'auto' : `${menuPos.top}px`,

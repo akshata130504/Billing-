@@ -80,4 +80,16 @@ describe('<TimeEntryModal />', () => {
     await waitFor(() => expect(onSave).toHaveBeenCalled());
     expect(onSave.mock.calls[0][0]).toEqual(expect.objectContaining({ project_id: null, project_name: 'Internal training' }));
   });
+
+  // QA (new-bugs PDF, "Edit Time Entry"): an end time earlier than the start time was accepted.
+  it('refuses an end time earlier than the start time and does not save', async () => {
+    const { onSave } = renderModal();
+    fireEvent.change(screen.getByLabelText(/^Start Time/), { target: { value: '12:20' } });
+    fireEvent.change(screen.getByLabelText(/^End Time/), { target: { value: '12:13' } });
+    expect(await screen.findByText('End time must be later than start time.')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/^Work Description/), { target: { value: 'Review' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Log Time' }));
+    await waitFor(() => expect(screen.getByText('End time must be later than start time.')).toBeInTheDocument());
+    expect(onSave).not.toHaveBeenCalled();
+  });
 });
