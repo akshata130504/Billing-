@@ -144,6 +144,8 @@ def expire_due_trials(db: Session, now: Optional[datetime] = None) -> int:
         for org in due:
             platform_audit.record(
                 db, action=platform_audit.ORGANIZATION_TRIAL_EXPIRED, result=platform_audit.SUCCESS,
+                # BUG-16: name the scheduler as the actor instead of leaving it "unknown" in the console.
+                email="system:scheduler",
                 organization=org, target_type="organization", target_id=org.id,
                 details={"trial_ends_at": _aware(org.trial_ends_at).isoformat() if org.trial_ends_at else None},
             )
