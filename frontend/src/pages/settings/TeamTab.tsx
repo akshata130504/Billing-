@@ -65,6 +65,27 @@ export function TeamTab({ canEdit }: { canEdit: boolean }) {
     onError: (err) => showToast('error', 'Could not deactivate', toApiError(err).message),
   });
 
+  const handleInvited = (result: InviteResponse, resent = false) => {
+    setInviteOpen(false);
+    setInviteResult(result.invite_url ? result : null);
+    void invalidate();
+    showToast(
+      result.invite_url ? 'warning' : 'success',
+      result.invite_url ? 'Invitation Created (Action Required)' : resent ? 'Invitation Resent' : 'Invitation Sent',
+      result.invite_url
+        ? `Email could not be delivered to ${result.user.email}. Share the invitation link shown above.`
+        : `An invitation email was sent to ${result.user.email}.`
+    );
+  };
+
+  // BUG-34: re-inviting the same email rotates the link and resets its expiry (the old link stops working).
+  const resendMutation = useMutation({
+    mutationFn: (m: TeamMember) =>
+      organizationService.invite({ email: m.user.email, role: m.role, full_name: m.user.full_name }),
+    onSuccess: (result) => handleInvited(result, true),
+    onError: (err) => showToast('error', 'Could not resend the invitation', toApiError(err).message),
+  });
+
   const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -197,6 +218,17 @@ export function TeamTab({ canEdit }: { canEdit: boolean }) {
                       </td>
                       {canEdit && (
                         <td className="py-3 px-5 text-right">
+                          {m.status === 'invited' && !isSelf && (isOwner || m.role !== 'owner') && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => resendMutation.mutate(m)}
+                              disabled={resendMutation.isPending}
+                              leadingIcon={<Mail className="w-3.5 h-3.5" />}
+                            >
+                              Resend invitation
+                            </Button>
+                          )}
                           {canDeactivate && (
                             <Button variant="ghost" size="sm" className="text-rose-600 hover:bg-rose-50" onClick={() => setDeactivating(m)} leadingIcon={<UserX className="w-3.5 h-3.5" />}>
                               Deactivate
@@ -236,18 +268,7 @@ export function TeamTab({ canEdit }: { canEdit: boolean }) {
         onClose={() => setInviteOpen(false)}
         canGrantOwner={isOwner}
         onCopy={copy}
-        onInvited={(result) => {
-          setInviteOpen(false);
-          setInviteResult(result.invite_url ? result : null);
-          void invalidate();
-          showToast(
-            result.invite_url ? 'warning' : 'success',
-            result.invite_url ? 'Invitation Created (Action Required)' : 'Invitation Sent',
-            result.invite_url
-              ? `Email could not be delivered to ${result.user.email}. Share the invitation link shown above.`
-              : `An invitation email was sent to ${result.user.email}.`
-          );
-        }}
+        onInvited={(result) => handleInvited(result)}
       />
 
       <ConfirmDialog
