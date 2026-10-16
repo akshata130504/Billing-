@@ -227,6 +227,10 @@ export function QuoteFormPage() {
               lineOfferingIds.map((oid) => catalogCpqService.getOffering(oid).catch(() => null))
             );
             setArchivedLineOfferings(found.filter((o): o is OfferingOut => Boolean(o) && o!.is_active === false));
+            // An active offering beyond the first page of the picker must still be selectable,
+            // otherwise its line showed as "Custom Item" in the editor (QA new-bugs PDF).
+            const activeBeyondPage = found.filter((o): o is OfferingOut => Boolean(o) && o!.is_active !== false);
+            if (activeBeyondPage.length > 0) setOfferings([...offRes.items, ...activeBeyondPage]);
           }
         } else if (location.state?.prefilledItem) {
           // Pre-filled from Pricing Simulator
