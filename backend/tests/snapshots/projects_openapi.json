@@ -1,0 +1,1209 @@
+{
+  "paths": {
+    "/api/v1/projects": {
+      "get": {
+        "operationId": "list_projects_api_v1_projects_get",
+        "parameters": [
+          {
+            "description": "Search by name, customer, or description",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search by name, customer, or description",
+              "title": "Search"
+            }
+          },
+          {
+            "description": "Filter by project status",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by project status",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Filter by customer ID",
+            "in": "query",
+            "name": "customer_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by customer ID",
+              "title": "Customer Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectRead"
+                  },
+                  "title": "Response List Projects Api V1 Projects Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List projects",
+        "tags": [
+          "Projects"
+        ]
+      },
+      "post": {
+        "operationId": "create_project_api_v1_projects_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create a project",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/summary": {
+      "get": {
+        "operationId": "get_project_summary_api_v1_projects_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectSummaryKPIs"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get project summary KPIs",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}": {
+      "delete": {
+        "operationId": "delete_project_api_v1_projects__project_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete a project",
+        "tags": [
+          "Projects"
+        ]
+      },
+      "get": {
+        "operationId": "get_project_api_v1_projects__project_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get project details",
+        "tags": [
+          "Projects"
+        ]
+      },
+      "patch": {
+        "operationId": "update_project_api_v1_projects__project_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update a project",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/invoices": {
+      "post": {
+        "operationId": "create_project_invoice_api_v1_projects__project_id__invoices_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectInvoiceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectInvoiceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create a draft invoice for the project's customer",
+        "tags": [
+          "Projects"
+        ]
+      }
+    }
+  },
+  "schemas": {
+    "BillingMethod": {
+      "enum": [
+        "fixed_price",
+        "time_and_material",
+        "non_billable"
+      ],
+      "title": "BillingMethod",
+      "type": "string"
+    },
+    "HTTPValidationError": {
+      "properties": {
+        "detail": {
+          "items": {
+            "$ref": "#/components/schemas/ValidationError"
+          },
+          "title": "Detail",
+          "type": "array"
+        }
+      },
+      "title": "HTTPValidationError",
+      "type": "object"
+    },
+    "ProjectCreate": {
+      "properties": {
+        "billing_method": {
+          "$ref": "#/components/schemas/BillingMethod",
+          "default": "fixed_price"
+        },
+        "budget": {
+          "anyOf": [
+            {
+              "maximum": 999999999999.99,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "default": "0.00",
+          "title": "Budget"
+        },
+        "customer_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer Id"
+        },
+        "customer_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer Name"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Description"
+        },
+        "end_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "End Date"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Notes"
+        },
+        "project_manager": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Project Manager"
+        },
+        "start_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Start Date"
+        },
+        "status": {
+          "$ref": "#/components/schemas/ProjectStatus",
+          "default": "active"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ProjectCreate",
+      "type": "object"
+    },
+    "ProjectDetail": {
+      "properties": {
+        "billed": {
+          "default": "0.00",
+          "title": "Billed",
+          "type": "string"
+        },
+        "billing_method": {
+          "$ref": "#/components/schemas/BillingMethod"
+        },
+        "budget": {
+          "title": "Budget",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "customer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer"
+        },
+        "customer_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer Id"
+        },
+        "customer_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer Name"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Description"
+        },
+        "end_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "End Date"
+        },
+        "expense_list": {
+          "default": [],
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Expense List",
+          "type": "array"
+        },
+        "expenses": {
+          "default": "0.00",
+          "title": "Expenses",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "invoices": {
+          "default": [],
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Invoices",
+          "type": "array"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Notes"
+        },
+        "organization_id": {
+          "title": "Organization Id",
+          "type": "string"
+        },
+        "payments": {
+          "default": [],
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Payments",
+          "type": "array"
+        },
+        "project_manager": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Project Manager"
+        },
+        "start_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Start Date"
+        },
+        "status": {
+          "$ref": "#/components/schemas/ProjectStatus"
+        },
+        "timesheets": {
+          "default": [],
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Timesheets",
+          "type": "array"
+        },
+        "transactions": {
+          "default": [],
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Transactions",
+          "type": "array"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "organization_id",
+        "name",
+        "status",
+        "billing_method",
+        "budget",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "ProjectDetail",
+      "type": "object"
+    },
+    "ProjectInvoiceCreate": {
+      "description": "Milestone / progress invoice raised from a project (billed to the project's customer).",
+      "properties": {
+        "amount": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "maximum": 999999999999.99,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Amount"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Description"
+        },
+        "due_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Due Date"
+        },
+        "issue_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Issue Date"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 5000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Notes"
+        },
+        "tax_rate_pct": {
+          "anyOf": [
+            {
+              "maximum": 100.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Tax Rate Pct"
+        }
+      },
+      "required": [
+        "amount"
+      ],
+      "title": "ProjectInvoiceCreate",
+      "type": "object"
+    },
+    "ProjectInvoiceOut": {
+      "properties": {
+        "amount": {
+          "title": "Amount",
+          "type": "number"
+        },
+        "amountDue": {
+          "title": "Amountdue",
+          "type": "number"
+        },
+        "currency": {
+          "title": "Currency",
+          "type": "string"
+        },
+        "date": {
+          "title": "Date",
+          "type": "string"
+        },
+        "dueDate": {
+          "title": "Duedate",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "invoiceNumber": {
+          "title": "Invoicenumber",
+          "type": "string"
+        },
+        "projectId": {
+          "title": "Projectid",
+          "type": "string"
+        },
+        "rawStatus": {
+          "title": "Rawstatus",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "projectId",
+        "invoiceNumber",
+        "date",
+        "dueDate",
+        "amount",
+        "amountDue",
+        "currency",
+        "status",
+        "rawStatus"
+      ],
+      "title": "ProjectInvoiceOut",
+      "type": "object"
+    },
+    "ProjectRead": {
+      "properties": {
+        "billed": {
+          "default": "0.00",
+          "title": "Billed",
+          "type": "string"
+        },
+        "billing_method": {
+          "$ref": "#/components/schemas/BillingMethod"
+        },
+        "budget": {
+          "title": "Budget",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "customer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer"
+        },
+        "customer_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer Id"
+        },
+        "customer_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer Name"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Description"
+        },
+        "end_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "End Date"
+        },
+        "expenses": {
+          "default": "0.00",
+          "title": "Expenses",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Notes"
+        },
+        "organization_id": {
+          "title": "Organization Id",
+          "type": "string"
+        },
+        "project_manager": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Project Manager"
+        },
+        "start_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Start Date"
+        },
+        "status": {
+          "$ref": "#/components/schemas/ProjectStatus"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "organization_id",
+        "name",
+        "status",
+        "billing_method",
+        "budget",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "ProjectRead",
+      "type": "object"
+    },
+    "ProjectStatus": {
+      "enum": [
+        "draft",
+        "active",
+        "on_hold",
+        "completed",
+        "cancelled"
+      ],
+      "title": "ProjectStatus",
+      "type": "string"
+    },
+    "ProjectSummaryKPIs": {
+      "properties": {
+        "active_projects": {
+          "default": 0,
+          "title": "Active Projects",
+          "type": "integer"
+        },
+        "total_billed": {
+          "default": "0.00",
+          "title": "Total Billed",
+          "type": "string"
+        },
+        "total_budget": {
+          "default": "0.00",
+          "title": "Total Budget",
+          "type": "string"
+        },
+        "total_expenses": {
+          "default": "0.00",
+          "title": "Total Expenses",
+          "type": "string"
+        },
+        "total_projects": {
+          "default": 0,
+          "title": "Total Projects",
+          "type": "integer"
+        }
+      },
+      "title": "ProjectSummaryKPIs",
+      "type": "object"
+    },
+    "ProjectUpdate": {
+      "properties": {
+        "billing_method": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/BillingMethod"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "budget": {
+          "anyOf": [
+            {
+              "maximum": 999999999999.99,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Budget"
+        },
+        "customer_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer Id"
+        },
+        "customer_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer Name"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Description"
+        },
+        "end_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "End Date"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Name"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Notes"
+        },
+        "project_manager": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Project Manager"
+        },
+        "start_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Start Date"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/ProjectStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "title": "ProjectUpdate",
+      "type": "object"
+    },
+    "ValidationError": {
+      "properties": {
+        "ctx": {
+          "title": "Context",
+          "type": "object"
+        },
+        "input": {
+          "title": "Input"
+        },
+        "loc": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "title": "Location",
+          "type": "array"
+        },
+        "msg": {
+          "title": "Message",
+          "type": "string"
+        },
+        "type": {
+          "title": "Error Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "loc",
+        "msg",
+        "type"
+      ],
+      "title": "ValidationError",
+      "type": "object"
+    }
+  }
+}
