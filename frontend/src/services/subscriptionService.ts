@@ -11,6 +11,7 @@ import type {
   SubscriptionSummaryOut,
   SubscriptionUpdate,
 } from '../types/api';
+import { idempotencyHeaders } from '../utils/idempotency';
 
 /** POST /subscriptions/{id}/cancel body, incl. the optional prorated-credit flag. */
 export type SubscriptionCancelBody = SubscriptionCancelRequest & {
@@ -75,8 +76,9 @@ export const subscriptionService = {
     return data;
   },
 
-  create: async (body: SubscriptionIn): Promise<SubscriptionOut> => {
-    const { data } = await apiClient.post<SubscriptionOut>('/subscriptions', body);
+  /** Pass the same `idempotencyKey` for every retry of one form submission; a fresh key is used otherwise. */
+  create: async (body: SubscriptionIn, idempotencyKey?: string): Promise<SubscriptionOut> => {
+    const { data } = await apiClient.post<SubscriptionOut>('/subscriptions', body, idempotencyHeaders(idempotencyKey));
     return data;
   },
 

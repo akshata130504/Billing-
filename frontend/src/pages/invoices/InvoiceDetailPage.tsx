@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -29,6 +29,7 @@ import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { toApiError } from '../../services/apiClient';
 import { todayIso, formatMoney, currencySymbol } from '../../utils/format';
+import { newIdempotencyKey } from '../../utils/idempotency';
 
 export const InvoiceDetailPage = () => {
   const { id } = useParams<{ id: string }>();
@@ -45,6 +46,8 @@ export const InvoiceDetailPage = () => {
 
   // Record Payment Modal State
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  // One key per payment being recorded: a retry after a lost response cannot book it twice.
+  const paymentKey = useRef(newIdempotencyKey());
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
   const [paymentDate, setPaymentDate] = useState(todayIso());
   const [paymentMethod, setPaymentMethod] = useState<string>('bank_transfer');
@@ -166,7 +169,8 @@ export const InvoiceDetailPage = () => {
         reference_number: paymentRef,
         notes: paymentNotes,
       };
-      const recorded = await invoiceService.recordPayment(id, payload);
+      const recorded = await invoiceService.recordPayment(id, payload, paymentKey.current);
+      paymentKey.current = newIdempotencyKey();
       setShowPaymentModal(false);
       setPaymentRef('');
       setPaymentNotes('');

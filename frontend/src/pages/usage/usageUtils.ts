@@ -1,4 +1,5 @@
 import type { AggregationType, RecordedUsageEvent, UsageEventIn, UsageEventOut, UsageMeterOut } from '../../types/meters';
+import { newIdempotencyKey } from '../../utils/idempotency';
 
 export const AGGREGATION_LABELS: Record<AggregationType, { label: string; hint: string }> = {
   sum: { label: 'Sum', hint: 'Adds every event quantity in the period (e.g. API calls, GB transferred).' },
@@ -7,17 +8,7 @@ export const AGGREGATION_LABELS: Record<AggregationType, { label: string; hint: 
   last: { label: 'Last', hint: 'Bills the most recent quantity reported in the period (e.g. current seat count).' },
 };
 
-/** RFC 4122 v4 id; falls back to a Math.random-based generator on very old browsers. */
-export function newIdempotencyKey(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
+export { newIdempotencyKey };
 
 /** Value for an <input type="datetime-local"> representing the given local time (minute precision). */
 export function toDatetimeLocalValue(d: Date = new Date()): string {

@@ -1,6 +1,7 @@
 import { apiClient } from './apiClient';
 import { downloadAuthenticated } from './download';
 import { paidAtForLocalDate } from '../utils/format';
+import { idempotencyHeaders } from '../utils/idempotency';
 import type {
   Invoice,
   PaymentRecordIn,
@@ -96,7 +97,8 @@ export const invoiceService = {
     return res.data;
   },
 
-  async recordPayment(id: string, data: PaymentRecordIn): Promise<any> {
+  /** Pass the same `idempotencyKey` for every retry of one payment; a fresh key is used otherwise. */
+  async recordPayment(id: string, data: PaymentRecordIn, idempotencyKey?: string): Promise<any> {
     const methodStr = (data.payment_method || 'bank_transfer').toLowerCase();
     const res = await apiClient.post<any>(`/invoices/${id}/record-payment`, {
       amount: data.amount,
@@ -104,7 +106,7 @@ export const invoiceService = {
       method: methodStr,
       reference: data.reference_number || undefined,
       notes: data.notes || undefined,
-    });
+    }, idempotencyHeaders(idempotencyKey));
     return res.data;
   },
 

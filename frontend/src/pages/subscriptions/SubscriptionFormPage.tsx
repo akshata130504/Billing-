@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Repeat,
@@ -26,6 +26,7 @@ import { LoadingState } from '../../components/common/LoadingState';
 import { useToast } from '../../components/common/Toast';
 import { formatMoney, todayIso } from '../../utils/format';
 import { validatePositiveInteger } from '../../utils/validation';
+import { newIdempotencyKey } from '../../utils/idempotency';
 import { NewPlanModal } from './NewPlanModal';
 
 /** Trial length used by the Trial Center when the selected plan has no default trial. */
@@ -75,6 +76,9 @@ export function SubscriptionFormPage() {
   const [enginePreview, setEnginePreview] = useState<{ unitRate: number; subtotal: number } | null>(null);
   const [loadingData, setLoadingData] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  // One key per open form: resubmitting after a lost response returns the subscription that was
+  // already created instead of creating a duplicate.
+  const idempotencyKey = useRef(newIdempotencyKey());
   const [error, setError] = useState<string | null>(null);
   const [trialDaysError, setTrialDaysError] = useState<string | null>(null);
 
@@ -278,7 +282,7 @@ export function SubscriptionFormPage() {
         notes: notes.trim() || undefined,
       };
 
-      const result = await subscriptionService.create(payload);
+      const result = await subscriptionService.create(payload, idempotencyKey.current);
       showToast(
         'success',
         isTrialMode ? 'Trial Started' : 'Subscription Created',

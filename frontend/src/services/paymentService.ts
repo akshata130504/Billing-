@@ -11,6 +11,7 @@ import type {
   ReconciliationSummary,
   RefundRequest,
 } from '../types/api';
+import { idempotencyHeaders } from '../utils/idempotency';
 
 /**
  * List/summary query. `status` may be a single status or a comma-separated
@@ -32,8 +33,9 @@ export const paymentService = {
     return data;
   },
 
-  create: async (body: PaymentIn): Promise<PaymentOut> => {
-    const { data } = await apiClient.post<PaymentOut>('/payments', body);
+  /** Pass the same `idempotencyKey` for every retry of one payment; a fresh key is used otherwise. */
+  create: async (body: PaymentIn, idempotencyKey?: string): Promise<PaymentOut> => {
+    const { data } = await apiClient.post<PaymentOut>('/payments', body, idempotencyHeaders(idempotencyKey));
     return data;
   },
 
