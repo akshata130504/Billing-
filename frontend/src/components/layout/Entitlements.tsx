@@ -20,7 +20,7 @@ export function TrialBanner() {
   const days = trialDaysLeft(access.trial_ends_at);
   const left = days === null ? 'You are on a free trial.' : days <= 1 ? 'Your free trial ends today.' : `Your free trial ends in ${days} days.`;
   return (
-    <div role="status" className="border-b border-indigo-200 bg-indigo-50 px-4 py-2 text-sm text-indigo-900">
+    <div role="status" className="no-print border-b border-indigo-200 bg-indigo-50 px-4 py-2 text-sm text-indigo-900">
       <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <p className="flex min-w-0 items-center gap-2">
           <Clock className="h-4 w-4 shrink-0" aria-hidden="true" />

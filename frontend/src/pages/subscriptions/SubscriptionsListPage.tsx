@@ -351,7 +351,7 @@ export function SubscriptionsListPage() {
                   }`}
                 >
                   <span>{tab.label}</span>
-                  {count !== undefined && count > 0 && (
+                  {count !== undefined && (
                     <span
                       className={`text-[11px] px-1.5 py-0.2 rounded-full font-bold ${
                         isActive ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600'

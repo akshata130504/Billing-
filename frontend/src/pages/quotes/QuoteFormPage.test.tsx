@@ -355,6 +355,41 @@ describe('<QuoteFormPage /> archived offerings', () => {
     expect(quoteService.updateQuote).not.toHaveBeenCalled();
   });
 
+  it('lets the user clear the quantity and type a new one (QA new-bugs PDF)', async () => {
+    renderRoute('/quotes/q1/edit');
+    await waitFor(() => expect(offeringSelects().length).toBe(2));
+    fireEvent.change(quantityInputs()[0], { target: { value: '' } });
+    expect(quantityInputs()[0].value).toBe(''); // not snapped back to 1, so typing "7" gives 7, not 17
+    fireEvent.change(quantityInputs()[0], { target: { value: '7' } });
+    await waitFor(() => expect(quantityInputs()[0].value).toBe('7'));
+    fireEvent.blur(quantityInputs()[0]);
+    fireEvent.click(screen.getByRole('button', { name: /Save Draft/i }));
+    await waitFor(() => expect(quoteService.updateQuote).toHaveBeenCalled());
+    expect(savedItems(quoteService.updateQuote)[0]).toEqual(expect.objectContaining({ quantity: 7, unit_price: 100 }));
+  });
+
+  it('keeps every stored value when an existing quote is edited and saved (QA new-bugs PDF)', async () => {
+    const today = todayIso();
+    vi.mocked(quoteService.getQuote).mockResolvedValue({
+      ...storedQuote(),
+      expiry_date: addDays(today, 15),
+      discount_pct: '7.50',
+      notes: 'Call before delivery',
+      terms: '1. Quote valid for 15 days.\n2. Net 30.',
+    } as never);
+    renderRoute('/quotes/q1/edit');
+    await waitFor(() => expect(offeringSelects().length).toBe(2));
+    fireEvent.click(screen.getByRole('button', { name: /Save Draft/i }));
+    await waitFor(() => expect(quoteService.updateQuote).toHaveBeenCalled());
+    const payload = vi.mocked(quoteService.updateQuote).mock.calls[0][1] as Record<string, unknown>;
+    expect(payload).toEqual(expect.objectContaining({
+      expiry_date: addDays(today, 15),
+      notes: 'Call before delivery',
+      terms: '1. Quote valid for 15 days.\n2. Net 30.',
+    }));
+    expect(Number(payload.discount_pct)).toBe(7.5);
+  });
+
   it('keeps the stored price and does not simulate pricing when changing the quantity of an archived line', async () => {
     renderRoute('/quotes/q1/edit');
     await waitFor(() => expect(offeringSelects().length).toBe(2));

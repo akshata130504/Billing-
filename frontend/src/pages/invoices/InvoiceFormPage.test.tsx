@@ -207,6 +207,39 @@ describe('<InvoiceFormPage /> line item quantity editing', () => {
     expect(mockedPricing.calculatePrice).toHaveBeenCalledTimes(1);
   });
 
+  it('clearing the quantity to retype it never zeroes the line or reprices for 0 (QA new-bugs PDF)', async () => {
+    mockedPricing.getPlans.mockResolvedValue({ items: [plan('p6', 'package', 1000)], total: 1 } as any);
+    mockedPricing.calculatePrice.mockResolvedValue(priceResponse(1000));
+    renderPage();
+    await selectPlan('p6');
+    await waitFor(() => expect(rateInput().value).toBe('1000'));
+    const callsBefore = mockedPricing.calculatePrice.mock.calls.length;
+
+    await act(async () => {
+      fireEvent.change(qtyInput(), { target: { value: '' } });
+    });
+    expect(qtyInput().value).toBe('');
+    expect(rateInput().value).toBe('1000');
+    expect(lineAmount()).toMatch(/1,?180/); // still 1 x 1000 x 1.18
+    expect(mockedPricing.calculatePrice).toHaveBeenCalledTimes(callsBefore);
+
+    await act(async () => {
+      fireEvent.change(qtyInput(), { target: { value: '5' } });
+    });
+    expect(qtyInput().value).toBe('5');
+    expect(rateInput().value).toBe('1000');
+    expect(lineAmount()).toMatch(/5,?900/);
+
+    // Leaving an empty box restores the last valid quantity instead of keeping 0.
+    await act(async () => {
+      fireEvent.change(qtyInput(), { target: { value: '' } });
+    });
+    await act(async () => {
+      fireEvent.blur(qtyInput());
+    });
+    expect(qtyInput().value).toBe('5');
+  });
+
   it('starts an added line as a blank custom item', async () => {
     mockedPricing.getPlans.mockResolvedValue({ items: [plan('p5', 'flat', 100)], total: 1 } as any);
     mockedPricing.calculatePrice.mockResolvedValue(priceResponse(100, 'flat'));

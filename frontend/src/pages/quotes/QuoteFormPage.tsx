@@ -127,6 +127,9 @@ export function QuoteFormPage() {
   const [terms, setTerms] = useState(formatQuoteTerms(30));
 
   const [items, setItems] = useState<FormLineItem[]>([]);
+  // Text being typed in a Qty box: the line only changes (and is re-priced) once the text is a
+  // valid positive number, so clearing the box to retype neither resets it to 1 nor prices "0".
+  const [qtyDrafts, setQtyDrafts] = useState<Record<number, string>>({});
 
   // GST treatment as the server will save it (org GSTIN/state vs the customer's place of
   // supply). Null until a customer is picked or when it cannot be fetched.
@@ -397,6 +400,7 @@ export function QuoteFormPage() {
 
   const handleRemoveItem = (index: number) => {
     if (items.length === 1) return;
+    setQtyDrafts({}); // drafts are keyed by row index, which shifts
     setItems(items.filter((_, i) => i !== index));
   };
 
@@ -778,8 +782,23 @@ export function QuoteFormPage() {
                       <input
                         type="number"
                         min="1"
-                        value={item.quantity}
-                        onChange={(e) => handleQuantityChange(idx, Number(e.target.value))}
+                        aria-label={`Line ${idx + 1} quantity`}
+                        value={qtyDrafts[idx] ?? item.quantity}
+                        onChange={(e) => {
+                          const text = e.target.value;
+                          setQtyDrafts((d) => ({ ...d, [idx]: text }));
+                          const qty = Number(text);
+                          if (text.trim() !== '' && Number.isFinite(qty) && qty > 0) {
+                            void handleQuantityChange(idx, qty);
+                          }
+                        }}
+                        onBlur={() =>
+                          setQtyDrafts((d) => {
+                            const next = { ...d };
+                            delete next[idx];
+                            return next;
+                          })
+                        }
                         className="w-full px-2 py-1.5 text-xs font-bold rounded border border-slate-200 text-center"
                       />
                     </td>
