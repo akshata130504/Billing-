@@ -1,7 +1,7 @@
 """Payments, allocations to invoices, refunds and gateway webhook events."""
 import enum
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Column, DateTime, Enum, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 
 from sqlalchemy.orm import relationship
 
@@ -95,6 +95,10 @@ class RefundStatus(str, enum.Enum):
 
 class Refund(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "refunds"
+    # One Razorpay refund can be booked once (NULLs allowed: manual refunds have no gateway id).
+    # The webhook and refund paths also check in code under the payment row lock; this makes the
+    # guarantee hold on every database and for every writer (migration 0037).
+    __table_args__ = (Index("uq_refunds_gateway_refund_id", "gateway_refund_id", unique=True),)
 
     payment_id = Column(String(36), ForeignKey("payments.id", ondelete="CASCADE"), nullable=False, index=True)
     amount = Column(Numeric(14, 2), nullable=False)
