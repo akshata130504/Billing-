@@ -91,12 +91,28 @@ then restore from the `backup_data` volume as above.
 
 ### Restore - uploads
 
+The tarball holds **two** volumes. The public uploads (logos, avatars, website assets) are at the
+top level. The **private** expense receipts are under `./_private_uploads/`, because `backup` mounts
+`private_uploads_data` there. Restore each part into its own volume. Unpacking the whole archive
+into `uploads_data` would publish the receipts under the public `/uploads/` path and leave the
+receipt volume empty.
+
 ```bash
 rb stop backend scheduler
-# the uploads volume is mounted read-only in `backup`; use a throwaway container for the write
-docker run --rm -v rooman-billing_uploads_data:/uploads -v "$PWD":/in alpine   sh -c 'rm -rf /uploads/* && tar xzf /in/uploads_20260901_011500.tar.gz -C /uploads && chown -R 10001:10001 /uploads'
+# The volumes are read-only in `backup`, so use throwaway containers for the writes.
+# 1. Public uploads, without the private receipts:
+docker run --rm -v rooman-billing_uploads_data:/uploads -v "$PWD":/in alpine sh -c \
+  'rm -rf /uploads/* && tar xzf /in/uploads_20260901_011500.tar.gz -C /uploads --exclude="./_private_uploads" && chown -R 10001:10001 /uploads'
+# 2. Private receipts, into their own volume:
+docker run --rm -v rooman-billing_private_uploads_data:/private -v "$PWD":/in alpine sh -c \
+  'mkdir -p /tmp/r && tar xzf /in/uploads_20260901_011500.tar.gz -C /tmp/r ./_private_uploads && rm -rf /private/* && cp -a /tmp/r/_private_uploads/. /private/ && chown -R 10001:10001 /private'
+# 3. Check: no receipts in the public volume.
+docker run --rm -v rooman-billing_uploads_data:/uploads alpine sh -c 'test ! -e /uploads/_private_uploads && echo "public volume OK"'
 rb start backend scheduler
 ```
+
+The split was checked against a sample archive built the way `deploy/backup.sh` builds one (GNU tar).
+Run the drill below once with the alpine image's tar before relying on it.
 
 (10001 is the API image's `app` user.) Restore the uploads archive from the **same** run as the
 database dump so file references match.
