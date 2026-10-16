@@ -12,6 +12,7 @@ export function PaymentStatusWidget({ pipeline, title = 'Payment Status' }: Paym
   const paidCount = pipeline?.paid_this_period?.count ?? 0;
   const pendingCount = (pipeline?.sent?.count ?? 0) + (pipeline?.partially_paid?.count ?? 0);
   const overdueCount = pipeline?.overdue?.count ?? 0;
+  // The grey slice is draft invoices (the pipeline has no cancelled bucket); it was mislabelled "Cancelled".
   const cancelledCount = pipeline?.draft?.count ?? 0;
 
   const safeTotal = paidCount + pendingCount + overdueCount + cancelledCount;
@@ -40,7 +41,7 @@ export function PaymentStatusWidget({ pipeline, title = 'Payment Status' }: Paym
     { label: 'Paid', count: paidCount, pct: `${paidPct}%`, dotColor: 'bg-[#10B981]' },
     { label: 'Pending', count: pendingCount, pct: `${pendingPct}%`, dotColor: 'bg-[#E83E8C]' },
     { label: 'Overdue', count: overdueCount, pct: `${overduePct}%`, dotColor: 'bg-[#F9D9E8] border border-[#F3B8D4]' },
-    { label: 'Cancelled', count: cancelledCount, pct: `${cancelledPct}%`, dotColor: 'bg-[#94A3B8]' },
+    { label: 'Draft', count: cancelledCount, pct: `${cancelledPct}%`, dotColor: 'bg-[#94A3B8]' },
   ];
 
   return (
@@ -104,7 +105,7 @@ export function PaymentStatusWidget({ pipeline, title = 'Payment Status' }: Paym
               strokeDashoffset={overdueOffset}
             />
 
-            {/* Cancelled Segment (Grey) */}
+            {/* Draft Segment (Grey) */}
             <circle
               cx="65"
               cy="65"

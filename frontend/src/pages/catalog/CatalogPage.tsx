@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Package,
   BookOpen,
@@ -109,11 +109,16 @@ export function CatalogPage() {
   const [offeringToUnarchive, setOfferingToUnarchive] = useState<OfferingOut | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
 
+  const loadSeq = useRef(0);
+  const countsSeq = useRef(0);
+
   // Loaded on search change / after a mutation only; switching the status filter just picks a different set.
   const loadCounts = useCallback(async () => {
+    const seq = ++countsSeq.current;
     try {
       const search = searchQuery.trim() || undefined;
       const { offerings: o } = await dashboardSummaryService.catalog({ search });
+      if (seq !== countsSeq.current) return; // a newer search has been sent
       setStatusCounts({
         active: toCounts(o.active, o.active_by_type || {}),
         archived: toCounts(o.inactive, o.inactive_by_type || {}),
@@ -125,6 +130,9 @@ export function CatalogPage() {
   }, [searchQuery]);
 
   const loadData = useCallback(async () => {
+    // Every keystroke reloads; only the newest request may write the lists. Before, a slower reply
+    // for "sci" could land after "science" and show unfiltered price books (QA new-bugs PDF).
+    const seq = ++loadSeq.current;
     try {
       setLoading(true);
       setLoadError(null);
@@ -144,6 +152,7 @@ export function CatalogPage() {
           page_size: PAGE_SIZE,
         }),
       ]);
+      if (seq !== loadSeq.current) return;
       setOfferings(offeringData.items || []);
       setOfferingsTotal(offeringData.total ?? 0);
       setPriceBooks(pbData.items || []);
@@ -154,9 +163,9 @@ export function CatalogPage() {
         if (page > lastPage) setPage(lastPage);
       }
     } catch (err) {
-      setLoadError(toApiError(err).message);
+      if (seq === loadSeq.current) setLoadError(toApiError(err).message);
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, [searchQuery, activeTab, statusFilter, page]);
 

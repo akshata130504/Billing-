@@ -189,7 +189,7 @@ export function RevenueOverviewWidget({ revenue, currency = 'INR', title = 'Reve
         </div>
       </div>
 
-      {chartData.length === 0 ? (
+      {chartData.length === 0 || chartData.every((d) => d.invoiced === 0 && d.received === 0) ? (
         <div className="w-full h-48 flex flex-col items-center justify-center text-slate-400 text-xs">
           <p className="font-medium text-slate-500">No revenue data available for this period.</p>
           <p className="text-[11px] text-slate-400 mt-1">Invoiced and collected amounts will appear here automatically.</p>
