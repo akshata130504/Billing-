@@ -390,6 +390,18 @@ describe('<QuoteFormPage /> archived offerings', () => {
     expect(Number(payload.discount_pct)).toBe(7.5);
   });
 
+  it('shows a line whose active offering is beyond the first page as that offering, not "Custom Item"', async () => {
+    const FAR = offering({ id: 'off-far', name: 'Far Away', sku: 'FAR', base_price: '50.00' });
+    vi.mocked(catalogCpqService.getOffering).mockResolvedValue(FAR);
+    vi.mocked(quoteService.getQuote).mockResolvedValue({
+      ...storedQuote(),
+      items: [{ id: 'line-far', offering_id: 'off-far', description: 'Far Away (FAR)', quantity: '1', unit_price: '50.00', tax_rate_pct: '18' }],
+    } as never);
+    renderRoute('/quotes/q1/edit');
+    await waitFor(() => expect(offeringSelects()[0]?.value).toBe('off-far'));
+    expect(catalogCpqService.getOffering).toHaveBeenCalledWith('off-far');
+  });
+
   it('keeps the stored price and does not simulate pricing when changing the quantity of an archived line', async () => {
     renderRoute('/quotes/q1/edit');
     await waitFor(() => expect(offeringSelects().length).toBe(2));
