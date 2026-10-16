@@ -1,4 +1,16 @@
-# Rooman Billing
+# Rooman Billing — modularization copy
+
+> **This repository is NOT the production source.**
+> - Production (`https://billing.futureacad.ae`) is built only from
+>   [`rooman-itsd/Rooman-Billing`](https://github.com/rooman-itsd/Rooman-Billing), which stays the
+>   stable reference and rollback option.
+> - This copy, `akshatatrathodrooman/Rooman-Billing-Modular`, is where the app is modularized step by
+>   step. It started from `rooman-itsd/Rooman-Billing` `main` at `a287d17`, with full history.
+> - **It cannot deploy:** `.github/workflows/deploy.yml` was removed, so nothing here builds or
+>   publishes images to `ghcr.io/rooman-itsd/*`. CI only tests and builds, with `push: false`.
+> - The `deploy/` scripts and `docker-compose.prod.yml` are kept for reference only. They still name
+>   the production images, so don't run them from this repository.
+> - Moving production to this repository needs a separate, explicitly approved migration plan.
 
 Multi-tenant billing and subscription management for Indian SMEs: customers, catalog, quotes,
 subscriptions, invoices with a hosted payment page, Razorpay online payments, manual payments and
