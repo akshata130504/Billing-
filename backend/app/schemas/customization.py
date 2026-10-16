@@ -12,7 +12,7 @@ from backend.app.models.customization import (
     TemplateLayoutType,
 )
 from backend.app.schemas.common_refs import StrictRequest
-from backend.app.schemas.validators import validate_custom_css
+from backend.app.schemas.validators import validate_custom_css, validate_number_affix
 
 
 # ---------------------------------------------------------------------------
@@ -31,11 +31,25 @@ class TransactionNumberSeriesBase(BaseModel):
     notes: Optional[str] = Field(None, max_length=255)
 
 
-class TransactionNumberSeriesCreate(TransactionNumberSeriesBase, StrictRequest):
+class _NumberAffixChecks(BaseModel):
+    """Request-side only: stored series are still serialized even if they predate the check."""
+
+    @field_validator("prefix", check_fields=False)
+    @classmethod
+    def _prefix(cls, v):
+        return validate_number_affix(v, "Prefix")
+
+    @field_validator("suffix", check_fields=False)
+    @classmethod
+    def _suffix(cls, v):
+        return validate_number_affix(v, "Suffix")
+
+
+class TransactionNumberSeriesCreate(_NumberAffixChecks, TransactionNumberSeriesBase, StrictRequest):
     pass
 
 
-class TransactionNumberSeriesUpdate(StrictRequest):
+class TransactionNumberSeriesUpdate(_NumberAffixChecks, StrictRequest):
     name: Optional[str] = Field(None, max_length=100)
     prefix: Optional[str] = Field(None, max_length=20)
     starting_number: Optional[int] = Field(None, ge=1)
@@ -56,7 +70,7 @@ class TransactionNumberSeriesOut(TransactionNumberSeriesBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-class NumberSeriesPreviewRequest(StrictRequest):
+class NumberSeriesPreviewRequest(_NumberAffixChecks, StrictRequest):
     prefix: str = ""
     starting_number: int = 1
     padding: int = 6
