@@ -84,7 +84,8 @@ async def save_organization_logo(db: Session, organization: Organization, file: 
         else:
             ext = ".jpg"
 
-    content = await file.read()
+    # Read at most one byte past the limit so an oversized upload is rejected without buffering it whole.
+    content = await file.read(MAX_LOGO_SIZE + 1)
     _validate_image_content(content, file.content_type, ext)
 
     logo_dir = _ensure_logo_dir()
@@ -120,7 +121,8 @@ async def save_template_logo(db: Session, template: DocumentTemplate, file: Uplo
         else:
             ext = ".jpg"
 
-    content = await file.read()
+    # Read at most one byte past the limit so an oversized upload is rejected without buffering it whole.
+    content = await file.read(MAX_LOGO_SIZE + 1)
     _validate_image_content(content, file.content_type, ext)
 
     logo_dir = _ensure_logo_dir()

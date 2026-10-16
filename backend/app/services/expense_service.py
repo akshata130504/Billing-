@@ -276,8 +276,16 @@ def update_expense(db: Session, organization_id: str, expense_id: str, data: Exp
 
 def delete_expense(db: Session, organization_id: str, expense_id: str) -> None:
     expense = get_expense(db, organization_id, expense_id)
+    receipt = _receipt_path(expense)
     db.delete(expense)
     db.commit()
+    # Removed only after the row is gone: a failed delete never loses the receipt, and a private
+    # receipt never outlives the expense it belongs to.
+    if receipt and os.path.isfile(receipt):
+        try:
+            os.remove(receipt)
+        except OSError as exc:
+            logger.warning("Could not delete the receipt of deleted expense '%s': %s", expense_id, exc)
 
 
 def _expense_line(expense: Expense):

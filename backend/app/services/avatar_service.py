@@ -84,7 +84,8 @@ async def save_avatar(db: Session, user: User, file: UploadFile) -> User:
         else:
             ext = ".jpg"
 
-    content = await file.read()
+    # Read at most one byte past the limit so an oversized upload is rejected without buffering it whole.
+    content = await file.read(MAX_AVATAR_SIZE + 1)
     _validate_image_content(content, file.content_type, ext)
 
     avatar_dir = _ensure_upload_dir()
