@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Lock, ShieldCheck, User } from 'lucide-react';
@@ -33,6 +33,11 @@ export function AcceptInvitationPage() {
   });
 
   const [fullName, setFullName] = useState('');
+  // BUG-37: start from the name the inviter entered; the invitee can still change it.
+  const invitedName = invitation.data?.full_name;
+  useEffect(() => {
+    if (invitedName) setFullName((current) => current || invitedName);
+  }, [invitedName]);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   // Existing accounts with two-factor authentication on are asked for a code too.
