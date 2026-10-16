@@ -264,6 +264,8 @@ export interface InvitationDetails {
   invited_by: string;
   expires_at: string;
   user_exists: boolean;
+  /** Name entered by whoever sent the invitation (BUG-37); null when none was given. */
+  full_name?: string | null;
 }
 
 export interface AcceptInvitationRequest {

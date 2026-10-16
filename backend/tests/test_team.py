@@ -246,6 +246,7 @@ def test_invite_new_user_and_accept(client, db, tenant, auth_headers):
         "invited_by": tenant.owner.full_name,
         "expires_at": preview.json()["expires_at"],
         "user_exists": False,
+        "full_name": None,  # only the email placeholder exists, so nothing to prefill (BUG-37)
     }
     assert client.get(f"{API}/auth/invitations/not-a-token").status_code == 404
     assert client.get(f"{API}/auth/invitations/not-a-token").json()["error"]["code"] == "ENTITY_NOT_FOUND"
@@ -564,3 +565,13 @@ def test_invited_placeholder_does_not_block_signup(client, db, tenant, auth_head
     assert len(users) == 1 and users[0].hashed_password is not None and users[0].email_verified_at is not None
     # the pending invitation is still there to accept later
     assert membership_of(db, tenant.organization.id, users[0].id).status == MembershipStatus.INVITED
+
+
+def test_invitation_preview_offers_the_name_the_inviter_entered(client, auth_headers):
+    """BUG-37: the name typed when inviting is returned so the acceptance form can prefill it."""
+    email = f"{unique('named')}@example.test"
+    r = invite(client, auth_headers, email, role="admin", full_name="Ravi Kumar")
+    assert r.status_code == 201, r.text
+    preview = client.get(f"{API}/auth/invitations/{token_of(r.json()['invite_url'])}")
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["full_name"] == "Ravi Kumar"

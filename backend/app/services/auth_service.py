@@ -1419,7 +1419,19 @@ def get_invitation(db: Session, raw_token: str) -> Dict[str, Any]:
         "invited_by": inviter.full_name if inviter else organization.name,
         "expires_at": aware(membership.invite_expires_at),
         "user_exists": user.hashed_password is not None,
+        # BUG-37: the name the inviter entered, to prefill the form. Not offered when it is only
+        # the placeholder derived from the email (or for an existing account, which keeps its own).
+        "full_name": _invited_name(user),
     }
+
+
+def _invited_name(user: User) -> Optional[str]:
+    if user.hashed_password is not None:
+        return None
+    name = (user.full_name or "").strip()
+    if not name or name == (user.email or "").split("@", 1)[0]:
+        return None
+    return name
 
 
 def accept_invitation(

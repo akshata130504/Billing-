@@ -184,6 +184,8 @@ class InvitationOut(BaseModel):
     invited_by: str
     expires_at: UTCDateTime
     user_exists: bool
+    # The name the inviter entered (BUG-37); None when only an email placeholder exists.
+    full_name: Optional[str] = None
 
 
 class SignupVerificationRequest(BaseModel):
