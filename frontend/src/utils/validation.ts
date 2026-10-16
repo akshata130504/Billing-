@@ -53,6 +53,21 @@ export function validateSensibleName(value: string | null | undefined, fieldLabe
   return null;
 }
 
+// A person's name: letters and marks of any script, spaces and . ' ’ - only (no digits or symbols).
+const PERSON_NAME_RE = /^[\p{L}\p{M}\s.'’-]{1,200}$/u;
+
+/** Validates a person's name (e.g. a customer contact); mirrors backend validate_person_name. */
+export function validatePersonName(value: string | null | undefined, fieldLabel = 'Name'): ValidationResult {
+  if (value === null || value === undefined || value.trim() === '') {
+    return `${fieldLabel} is required.`;
+  }
+  const val = value.trim();
+  if (val.length > 200) return `${fieldLabel} must be at most 200 characters.`;
+  if (!HAS_LETTER_RE.test(val)) return `${fieldLabel} must contain at least one letter.`;
+  if (!PERSON_NAME_RE.test(val)) return `${fieldLabel} can contain only letters, spaces and . ' - characters.`;
+  return null;
+}
+
 export function validateEmail(value: string | null | undefined, options: { required?: boolean } = {}): ValidationResult {
   const val = (value ?? '').trim();
   if (val === '') return options.required ? 'Email is required.' : null;
@@ -254,6 +269,24 @@ export function validateDateAfter(
   return null;
 }
 
+const ISO_DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Today's calendar date in the browser's own time zone, as YYYY-MM-DD. */
+function localTodayIso(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * A date input's value ("YYYY-MM-DD") is a calendar day, but `new Date("YYYY-MM-DD")` is midnight
+ * UTC, which is the previous local day west of UTC. Date-only values are therefore compared as
+ * strings against the local calendar day.
+ */
+function compareDateOnlyToToday(value: string): number {
+  const today = localTodayIso();
+  return value < today ? -1 : value > today ? 1 : 0;
+}
+
 /** date must not be before today (rejects past dates). */
 export function validateDateNotPast(
   value: string | Date | null | undefined,
@@ -261,6 +294,10 @@ export function validateDateNotPast(
   options: { required?: boolean } = {}
 ): ValidationResult {
   if (!value) return options.required ? `${fieldLabel} is required.` : null;
+  if (typeof value === 'string' && ISO_DATE_ONLY.test(value)) {
+    if (Number.isNaN(new Date(value).getTime())) return `${fieldLabel} is invalid.`;
+    return compareDateOnlyToToday(value) < 0 ? `${fieldLabel} cannot be in the past.` : null;
+  }
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return `${fieldLabel} is invalid.`;
   const today = new Date();
@@ -280,6 +317,10 @@ export function validateDateNotFuture(
   options: { required?: boolean } = {}
 ): ValidationResult {
   if (!value) return options.required ? `${fieldLabel} is required.` : null;
+  if (typeof value === 'string' && ISO_DATE_ONLY.test(value)) {
+    if (Number.isNaN(new Date(value).getTime())) return `${fieldLabel} is invalid.`;
+    return compareDateOnlyToToday(value) > 0 ? `${fieldLabel} cannot be later than today.` : null;
+  }
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return `${fieldLabel} is invalid.`;
   const today = new Date();

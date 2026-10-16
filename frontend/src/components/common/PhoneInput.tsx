@@ -64,6 +64,8 @@ export const PhoneInput: React.FC<PhoneInputProps> = ({
           id={id}
           className="w-full h-full"
           international
+          // Stop typing at the selected country's maximum length instead of accepting any count.
+          limitMaxLength
           defaultCountry={defaultCountry}
           value={toE164Phone(value, defaultCountry)}
           onChange={(v) => onChange(v ?? '')}

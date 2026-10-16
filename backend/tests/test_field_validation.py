@@ -373,3 +373,32 @@ class TestOrgProfilePortalValidation:
     def test_portal_slug_normalized_to_lowercase(self):
         s = CustomerPortalSettingsUpdate(portal_url_slug="Acme-Corp")
         assert s.portal_url_slug == "acme-corp"
+
+
+# QA (new-bugs PDF, "Create Customer - Primary Contact"): a contact is a person, so its name must
+# not accept digits or business punctuation; any script's letters still pass. The customer's own
+# display name keeps the broader business-name rules (BUG-09).
+@pytest.mark.parametrize("name", ["José Ñúñez", "محمد علي", "Mary-Jane O'Neil", "Dr. A. Rao", "李小龙", "Praveen V"])
+def test_contact_person_names_accepted(name):
+    assert ContactIn(name=name).name == name
+
+
+@pytest.mark.parametrize("name", ["9876543", "John123", "x/y@z", "Ravi #2", "<b>Jo</b>", "   "])
+def test_contact_names_with_digits_or_symbols_rejected(name):
+    with pytest.raises(ValidationError):
+        ContactIn(name=name)
+
+
+def test_business_display_name_rules_are_unchanged_for_customers():
+    assert CustomerCreate(display_name="Rooman Technologies 2.0 #1/A").display_name == "Rooman Technologies 2.0 #1/A"
+
+
+@pytest.mark.parametrize("country,code", [("IN", "lkhjghfg"), ("IN", "56001"), ("IN", "056001"), ("US", "zzzz")])
+def test_invalid_postal_codes_rejected(country, code):
+    with pytest.raises(ValidationError):
+        CustomerCreate(display_name="Acme", billing_country=country, billing_postal_code=code)
+
+
+@pytest.mark.parametrize("country,code", [("IN", "560001"), ("US", "94105"), ("GB", "SW1A 1AA")])
+def test_valid_postal_codes_accepted(country, code):
+    assert CustomerCreate(display_name="Acme", billing_country=country, billing_postal_code=code).billing_postal_code

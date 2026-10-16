@@ -10,6 +10,7 @@ from backend.app.schemas.common_refs import CustomerRef
 from backend.app.schemas.validators import (
     validate_gstin_format,
     validate_pan_format,
+    validate_person_name,
     validate_phone_number,
     validate_sensible_name,
     validate_website_url,
@@ -73,7 +74,8 @@ class ContactIn(BaseModel):
     @field_validator("name")
     @classmethod
     def _name(cls, v):
-        return validate_sensible_name(v, "Contact name")
+        # A contact is a person, so the stricter person-name rule applies (QA new-bugs PDF).
+        return validate_person_name(v, "Contact name")
 
     @field_validator("email")
     @classmethod

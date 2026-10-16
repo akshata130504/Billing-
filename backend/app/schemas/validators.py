@@ -55,6 +55,30 @@ def validate_sensible_name(value: Optional[str], field_label: str = "Name") -> O
     return val
 
 
+_PERSON_NAME_PUNCTUATION = set(".'’- ")
+
+
+def validate_person_name(value: Optional[str], field_label: str = "Name") -> Optional[str]:
+    """A person's name: letters and marks of any script, spaces and . ' ’ - only.
+
+    Stricter than validate_sensible_name (which also allows digits and business punctuation such
+    as '&', '#', '/'): "José Ñúñez", "محمد", "Mary-Jane O'Neil" and "Dr. A. Rao"
+    pass; "9876543", "John123" and "x/y@z" do not.
+    """
+    if value is None:
+        return None
+    val = value.strip()
+    if not val:
+        raise ValueError(f"{field_label} cannot be empty or whitespace-only.")
+    if not any(ch.isalpha() for ch in val):
+        raise ValueError(f"{field_label} must contain at least one letter.")
+    if len(val) > _NAME_MAX_LEN or not all(
+        ch in _PERSON_NAME_PUNCTUATION or ch.isspace() or unicodedata.category(ch)[0] in ("L", "M") for ch in val
+    ):
+        raise ValueError(f"{field_label} can contain only letters, spaces and . ' - characters.")
+    return val
+
+
 def _is_name_char(ch: str) -> bool:
     return ch in _NAME_PUNCTUATION or ch.isspace() or unicodedata.category(ch)[0] in ("L", "M", "N")
 
