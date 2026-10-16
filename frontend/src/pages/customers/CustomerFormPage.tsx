@@ -16,6 +16,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { cn } from '../../utils/cn';
 import {
   validateSensibleName,
+  validatePersonName,
   validateEmail,
   validatePhone,
   validateUrl,
@@ -210,7 +211,7 @@ function validate(values: FormValues): FieldErrors {
   }
 
   values.contacts.forEach((c, i) => {
-    const contactNameError = validateSensibleName(c.name, 'Contact name');
+    const contactNameError = validatePersonName(c.name, 'Contact name');
     if (contactNameError) errors[`contacts.${i}.name`] = contactNameError;
 
     const contactEmailError = validateEmail(c.email);
