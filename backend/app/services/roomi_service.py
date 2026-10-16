@@ -13,7 +13,7 @@ import uuid
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 import httpx
-from sqlalchemy import desc, func, or_, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, joinedload
 
 from backend.app.api.deps import CurrentContext
@@ -1038,7 +1038,6 @@ def process_chat(
     if not response:
         first_name = ctx.user.full_name.split()[0] if ctx.user.full_name else "there"
         if any(re.search(rf"\b{g}\b", lowered) for g in ["hi", "hello", "hey", "good morning", "good afternoon", "good evening", "how are you", "what's up"]):
-            role_label = ctx.role.value.capitalize() if hasattr(ctx.role, "value") else str(ctx.role).capitalize()
             response = RoomiChatResponse(
                 reply=(
                     f"Hello {first_name}! 👋 I'm doing great, thank you. I'm **Roomi**, your AI billing assistant for **{ctx.organization.name}**.\n\n"

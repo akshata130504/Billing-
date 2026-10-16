@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, List, Optional
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, joinedload
 
-from backend.app.core.exceptions import ConflictAppError, NotFoundAppError, ValidationAppError
+from backend.app.core.exceptions import NotFoundAppError, ValidationAppError
 from backend.app.core.logging import logger
 from backend.app.models.base import utcnow
 from backend.app.models.customers import Customer
@@ -23,7 +23,6 @@ from backend.app.models.dunning import (
     DunningFinalAction,
     DunningPolicy,
 )
-from backend.app.models.events import DomainEventType, OutboxEvent, OutboxStatus
 from backend.app.models.governance import ApprovalRequest, ApprovalStatus, ApprovalType
 from backend.app.models.invoices import Invoice, InvoiceStatus
 from backend.app.models.notifications import NotificationChannel
@@ -31,30 +30,23 @@ from backend.app.models.payments import (
     CustomerPaymentMethod,
     CustomerPaymentMethodStatus,
     Payment,
-    PaymentAllocation,
     PaymentAttempt,
     PaymentAttemptStatus,
     PaymentGateway,
-    PaymentMethod,
     PaymentStatus,
-    ReconciliationStatus,
 )
 from backend.app.models.subscriptions import Subscription, SubscriptionStatus
 from backend.app.schemas.dunning import (
-    DunningCaseDetailOut,
-    DunningCaseOut,
     DunningCasePauseIn,
     DunningCaseStopIn,
     DunningMetricsOut,
     DunningPolicyCreate,
-    DunningPolicyOut,
     DunningPolicyUpdate,
     ExpiringCardNoticeOut,
 )
 from backend.app.services import audit, currency_totals, invoice_service, payment_service, razorpay_gateway, timezones
 from backend.app.services.gateways.registry import get_gateway_adapter
 from backend.app.services.notification_service import dispatch_notification
-from backend.app.services.numbering import next_number
 
 
 def _safe_dispatch_notification(

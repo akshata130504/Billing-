@@ -15,7 +15,7 @@ from sqlalchemy import select
 from backend.app.api.platform_deps import CSRF_COOKIE, CSRF_HEADER, get_platform_context
 from backend.app.core.config import settings
 from backend.app.core.database import engine
-from backend.app.models import Customer, MemberRole, Organization, OrganizationStatus
+from backend.app.models import MemberRole, Organization, OrganizationStatus
 from backend.app.models.platform import PlatformAuditLog, PlatformRole, PlatformStaff
 from backend.app.services import org_lifecycle
 from backend.app.services import platform_auth_service as auth_svc

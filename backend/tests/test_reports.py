@@ -122,7 +122,7 @@ def _mk_invoice(
         amount_due = Decimal("0.00") if status in (InvoiceStatus.PAID, InvoiceStatus.DRAFT, InvoiceStatus.VOID) else total_d
     else:
         amount_due = Decimal(amount_due)
-    amount_paid = q2 = total_d - amount_due
+    amount_paid = total_d - amount_due
     inv = Invoice(
         organization_id=org.id,
         invoice_number=f"INV-{uuid.uuid4().hex[:10]}",

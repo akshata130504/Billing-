@@ -17,12 +17,11 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
 import jwt
-import pytest
 from sqlalchemy import select
 
 from backend.app.core.config import settings
-from backend.app.core.security import ACCESS_TOKEN_TYPE, create_access_token, TENANT_TOKEN_AUDIENCE, TOKEN_ISSUER
-from backend.app.models import Membership, MemberRole, MembershipStatus, Organization, User, utcnow
+from backend.app.core.security import ACCESS_TOKEN_TYPE, TENANT_TOKEN_AUDIENCE, TOKEN_ISSUER
+from backend.app.models import User, utcnow
 
 API = "/api/v1"
 PASSWORD = "Str0ngPassw0rd!"

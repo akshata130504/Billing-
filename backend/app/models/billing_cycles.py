@@ -2,13 +2,9 @@
 from __future__ import annotations
 
 import enum
-from datetime import date, datetime
-from decimal import Decimal
-from typing import Optional
 
 from sqlalchemy import (
     JSON,
-    Boolean,
     Column,
     Date,
     DateTime,
@@ -17,7 +13,6 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
-    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import relationship

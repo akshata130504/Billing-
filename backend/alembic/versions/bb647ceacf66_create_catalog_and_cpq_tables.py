@@ -8,7 +8,6 @@ Create Date: 2026-09-08 12:55:30.450707
 from typing import Sequence, Union
 
 from alembic import op
-import sqlalchemy as sa
 import backend.app.models  # noqa: F401
 from backend.app.core.database import Base
 
@@ -26,7 +25,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    conn = op.get_bind()
     catalog_cpq_tables = [
         "cpq_deal_items",
         "cpq_deals",

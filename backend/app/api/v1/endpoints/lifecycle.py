@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from backend.app.api.deps import (
     CurrentContext,
     get_db,
-    require_admin,
     require_finance,
     require_viewer,
 )

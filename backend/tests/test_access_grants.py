@@ -8,14 +8,13 @@ import uuid
 from datetime import timedelta
 
 import pytest
-import sqlalchemy as sa
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from backend.app.core.grant_scopes import GRANT_READ_ROUTES, READ_METHODS
 from backend.app.models import AuditLog, MemberRole, Organization, OrganizationStatus
-from backend.app.models.access_grants import GrantStatus, TenantAccessGrant
+from backend.app.models.access_grants import TenantAccessGrant
 from backend.app.models.base import utcnow
 from backend.app.models.platform import PlatformAuditLog, PlatformStaff
 from backend.app.services import access_grant_service
@@ -284,7 +283,7 @@ def test_even_all_scopes_allow_no_write_or_money_action(support, db, tenant, ten
         ("post", "/api/v1/payments"), ("post", f"/api/v1/invoices/{invoice.id}/payments"),
         ("post", "/api/v1/credit-notes"), ("put", f"/api/v1/customers/{customer.id}"),
         ("patch", f"/api/v1/customers/{customer.id}"), ("delete", f"/api/v1/customers/{customer.id}"),
-        ("post", f"/api/v1/checkout/razorpay/order"), ("put", "/api/v1/settings/integrations/razorpay"),
+        ("post", "/api/v1/checkout/razorpay/order"), ("put", "/api/v1/settings/integrations/razorpay"),
         ("post", "/api/v1/team/invite"), ("patch", f"/api/v1/team/{tenant.owner.id}"),
         ("get", "/api/v1/audit-logs/export"), ("get", "/api/v1/reports/export"), ("get", "/api/v1/settings/integrations"),
     ]:

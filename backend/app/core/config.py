@@ -119,6 +119,10 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    # Browser sessions (refresh token in the HttpOnly session cookie, api/session_cookies.py): a
+    # just-rotated cookie presented again within this many seconds (two tabs refreshing at once) gets
+    # a fresh session instead of tripping refresh-token reuse detection. 0 = off.
+    SESSION_REFRESH_REUSE_GRACE_SECONDS: int = 30
     INVITE_TOKEN_EXPIRE_HOURS: int = 72
     PASSWORD_RESET_EXPIRE_MINUTES: int = 60
 

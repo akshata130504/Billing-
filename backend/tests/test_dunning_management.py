@@ -14,17 +14,15 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-import pytest
 from sqlalchemy import select
 
 from backend.app.models.dunning import (
     DunningAttemptStatus,
-    DunningCase,
     DunningCaseStatus,
     DunningFinalAction,
     DunningPolicy,
 )
-from backend.app.models.invoices import Invoice, InvoiceStatus
+from backend.app.models.invoices import InvoiceStatus
 from backend.app.models.payments import CustomerPaymentMethod, CustomerPaymentMethodStatus
 from backend.app.models.subscriptions import Subscription, SubscriptionStatus
 from backend.app.services import dunning_service
@@ -537,7 +535,6 @@ def test_auto_created_default_policy_from_get_is_persisted(client, tenant, auth_
     It previously only flushed it, so the request session rolled it back on close and
     the id handed to the client referenced a phantom row that 404'd on PUT.
     """
-    from backend.app.models.dunning import DunningPolicy
 
     res = client.get("/api/v1/dunning/policies", headers=auth_headers)
     assert res.status_code == 200

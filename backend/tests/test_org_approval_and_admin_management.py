@@ -5,7 +5,6 @@ import uuid
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-import pytest
 from sqlalchemy import select
 
 from backend.app.core.security import create_access_token
@@ -16,7 +15,6 @@ from backend.app.models import (
     MembershipStatus,
     Organization,
     OrganizationStatus,
-    PendingSignup,
     RefreshToken,
     User,
 )

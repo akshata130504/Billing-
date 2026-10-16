@@ -8,18 +8,14 @@ Reuses the same DocumentTemplate branding (colors, typography, layout, header/fo
 as the invoice PDF engine.
 """
 import re
-from datetime import date
-from decimal import Decimal
 from io import BytesIO
-from typing import Any, List, Optional
-from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Spacer, Table, TableStyle
 
 from backend.app.core.logging import logger
 from backend.app.services.invoice_pdf import (
@@ -74,7 +70,6 @@ def render_quote_pdf(quote, organization, template=None) -> bytes:
             template = None
 
     accent_color = _parse_color(getattr(template, "accent_color", None), ACCENT)
-    primary_color = _parse_color(getattr(template, "primary_color", None), colors.HexColor("#111827"))
 
     base_font = "Helvetica"
     bold_font = "Helvetica-Bold"

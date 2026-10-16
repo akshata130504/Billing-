@@ -1,6 +1,6 @@
 """Models for Customization & Automation: number series, document templates, reporting tags, web tabs, workflows, logs, and schedules."""
 import enum
-from sqlalchemy import JSON, Boolean, Column, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from backend.app.core.database import Base

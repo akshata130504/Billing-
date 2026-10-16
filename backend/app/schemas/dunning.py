@@ -1,7 +1,7 @@
 """Pydantic schemas for dunning policies, cases, retries, and recovery metrics."""
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.models.dunning import DunningAttemptStatus, DunningCaseStatus, DunningFinalAction

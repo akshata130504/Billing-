@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import enum
-from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import (
     JSON,
@@ -15,7 +13,6 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
-    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 

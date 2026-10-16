@@ -6,7 +6,7 @@ Admin-protected endpoints to configure, test, save, and disconnect external inte
 - Outbound Webhooks (event delivery)
 - Accounting, CRM, Cloud Storage (honest coming-soon status reporting)
 """
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import CurrentContext, get_db, require_admin, require_viewer

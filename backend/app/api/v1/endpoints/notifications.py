@@ -13,7 +13,6 @@ from backend.app.schemas.notifications import (
     NotificationReadStateItem,
     NotificationReadStateOut,
     NotificationDeliveryOut,
-    NotificationDispatchIn,
     NotificationTemplateCreateIn,
     NotificationTemplateOut,
     NotificationTemplatePreviewIn,

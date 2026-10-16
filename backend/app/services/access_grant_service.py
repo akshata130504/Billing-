@@ -33,7 +33,7 @@ from backend.app.core.exceptions import ConflictError, ForbiddenError, NotFoundE
 from backend.app.core.grant_scopes import SCOPE_LABELS, required_scope
 from backend.app.core.security import create_grant_token, decode_grant_token
 from backend.app.models import Membership, MemberRole, MembershipStatus, Organization, OrganizationStatus, User
-from backend.app.models.access_grants import OPEN_STATUSES, GrantScope, GrantStatus, TenantAccessGrant
+from backend.app.models.access_grants import GrantScope, GrantStatus, TenantAccessGrant
 from backend.app.models.base import utcnow
 from backend.app.models.platform import PlatformRole, PlatformSession, PlatformStaff
 from backend.app.services import audit, platform_audit, platform_auth_service

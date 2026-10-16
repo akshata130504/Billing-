@@ -5,12 +5,10 @@ import uuid
 from datetime import timedelta
 from unittest.mock import patch
 
-import pytest
 from sqlalchemy import select
 
-from backend.app.core.config import settings
 from backend.app.core.security import constant_time_equals
-from backend.app.models import AuditLog, Organization, PendingSignup, User, utcnow
+from backend.app.models import PendingSignup, User, utcnow
 from backend.app.services.auth_service import hash_otp
 
 API = "/api/v1"
@@ -387,7 +385,7 @@ def test_duplicate_signup_after_verification_prevented(client, db):
         return re.search(r"verification code is:\s*(\d{6})", text_body).group(1)
 
     otp = None
-    with patch("backend.app.services.auth_service.send_email", return_value=True) as m:
+    with patch("backend.app.services.auth_service.send_email", return_value=True):
         client.post(
             f"{API}/auth/signup/request-verification",
             json={

@@ -2,7 +2,7 @@
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 
 from backend.app.core.database import Base
-from backend.app.models.base import TenantMixin, TimestampMixin, UUIDPrimaryKeyMixin, utcnow
+from backend.app.models.base import TenantMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class OrganizationIntegration(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):

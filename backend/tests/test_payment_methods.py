@@ -1,11 +1,9 @@
 """Tests for customer payment methods vault and payment attempts tracking (Phase 1)."""
 from decimal import Decimal
-import pytest
 
 from backend.app.models.payments import (
     CustomerPaymentMethodStatus,
     PaymentAttemptStatus,
-    PaymentGateway,
 )
 
 
@@ -103,7 +101,6 @@ def test_payment_attempts_lifecycle(client, tenant, auth_headers, db):
     from backend.app.services.payment_method_service import (
         record_payment_attempt,
         update_payment_attempt,
-        list_invoice_payment_attempts,
     )
 
     # Record first attempt (failed)

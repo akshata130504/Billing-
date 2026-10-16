@@ -19,11 +19,11 @@ from __future__ import annotations
 import csv
 import io
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.app.models import (
@@ -34,7 +34,6 @@ from backend.app.models import (
     InvoiceItem,
     InvoiceStatus,
     Payment,
-    PaymentStatus,
     Plan,
     Product,
     Refund,

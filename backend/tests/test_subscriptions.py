@@ -1,22 +1,12 @@
 """Comprehensive Subscription Management Module tests."""
 from datetime import date, timedelta
 from decimal import Decimal
-import uuid
 
-import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.models import (
-    BillingInterval,
-    Customer,
     Invoice,
-    InvoiceStatus,
-    MembershipStatus,
     MemberRole,
-    Plan,
-    PricingModel,
-    Product,
-    ProductType,
     Subscription,
     SubscriptionStatus,
 )
@@ -300,7 +290,7 @@ def test_subscription_multi_tenant_isolation(client: TestClient, tenant, db):
 
     tenant_b = Tenant(db, "org-b")
     customer_a = tenant.customer()
-    customer_b = tenant_b.customer()
+    tenant_b.customer()
     product_a, plan_a = tenant.product_with_plan(unit_amount="1000.00")
     product_b, plan_b = tenant_b.product_with_plan(unit_amount="2000.00")
 

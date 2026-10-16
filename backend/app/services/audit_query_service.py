@@ -3,7 +3,7 @@ import csv
 import io
 import json
 from dataclasses import dataclass
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime
 from typing import Any, Dict, Iterator, Optional
 
 from sqlalchemy import Select, or_, select

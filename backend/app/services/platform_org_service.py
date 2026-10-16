@@ -876,7 +876,6 @@ def reactivate_tenant_admin(
         raise ConflictError("Target member is not a tenant Admin.")
     if m.status == MembershipStatus.ACTIVE:
         raise ConflictError("Tenant Admin is already active.")
-    from backend.app.services import org_access
     org_access.ensure_seat_available(db, org, already_counted=m.status == MembershipStatus.INVITED)
 
     m.status = MembershipStatus.ACTIVE

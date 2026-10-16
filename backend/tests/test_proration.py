@@ -1,12 +1,10 @@
 """Tests for Proration Calculator and Subscription Changes (Phase 2)."""
 from datetime import date, timedelta
 from decimal import Decimal
-import pytest
 
-from backend.app.models.credits import CreditNote, CreditNoteStatus
+from backend.app.models.credits import CreditNote
 from backend.app.models.invoices import Invoice
 from backend.app.models.proration import (
-    ProrationEffectiveType,
     SubscriptionChangeStatus,
     SubscriptionChangeType,
 )
@@ -162,7 +160,7 @@ def test_subscription_change_scheduled_and_cancelled(client, tenant, auth_header
 
 
 def test_scheduled_change_execution_via_worker_and_scheduler(client, tenant, auth_headers, db):
-    from datetime import date, timedelta
+    from datetime import date
     from backend.app.models.subscriptions import Subscription
     from backend.app.services.subscription_change_service import execute_due_scheduled_changes
     from backend.app.services.scheduler import run_billing_jobs
@@ -185,7 +183,6 @@ def test_scheduled_change_execution_via_worker_and_scheduler(client, tenant, aut
         headers=auth_headers,
     )
     assert sched_resp.status_code == 201
-    change_id = sched_resp.json()["id"]
     change_data = sched_resp.json()
     assert change_data["status"] == "scheduled"
     effective_date = date.fromisoformat(change_data["effective_date"])
@@ -205,7 +202,7 @@ def test_scheduled_change_execution_via_worker_and_scheduler(client, tenant, aut
 
 def test_scheduled_change_with_future_date_is_deferred_not_applied(client, tenant, auth_headers, db):
     """A SCHEDULED change dated in the future must NOT mutate the subscription today."""
-    from datetime import date, timedelta
+    from datetime import date
     from backend.app.models.subscriptions import Subscription
     from backend.app.models.invoices import Invoice
     from backend.app.services.subscription_change_service import execute_due_scheduled_changes
@@ -260,7 +257,7 @@ def test_scheduled_mid_cycle_upgrade_bills_on_execution(client, tenant, auth_hea
     """A genuinely mid-cycle scheduled change (not end-of-term) must raise the same
     credit note + prorated invoice the immediate path would, using the already-stored
     proration values - this is the gap that was fixed."""
-    from datetime import date, timedelta
+    from datetime import date
     from backend.app.models.subscriptions import Subscription
     from backend.app.services.subscription_change_service import execute_due_scheduled_changes
 
@@ -325,7 +322,7 @@ def test_scheduled_mid_cycle_downgrade_bills_opposite_direction(client, tenant, 
     """A downgrade nets a credit rather than a charge - both documents are still
     raised (old-plan credit is larger than new-plan charge), auto-offset pays the
     invoice fully and leaves the remaining credit on the credit note."""
-    from datetime import date, timedelta
+    from datetime import date
     from backend.app.models.subscriptions import Subscription
     from backend.app.services.subscription_change_service import execute_due_scheduled_changes
 
@@ -427,7 +424,7 @@ def test_scheduled_end_of_term_change_bills_nothing(client, tenant, auth_headers
 
 def test_scheduled_change_execution_is_idempotent(client, tenant, auth_headers, db):
     """Running the scheduler twice for the same due change must not double-bill it."""
-    from datetime import date, timedelta
+    from datetime import date
     from backend.app.services.subscription_change_service import execute_due_scheduled_changes
 
     customer = tenant.customer()
@@ -479,7 +476,7 @@ def test_scheduled_change_billing_failure_does_not_report_false_success(client, 
     """If credit-note/invoice creation blows up mid-execution, the change must be
     marked FAILED (not APPLIED), with no invoice/credit-note id and no plan switch -
     never silently reported as successfully billed."""
-    from datetime import date, timedelta
+    from datetime import date
     from backend.app.models.subscriptions import Subscription
     from backend.app.services import subscription_change_service
 

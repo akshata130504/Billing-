@@ -94,7 +94,7 @@ def mixed(db, tenant):
     with tenant_context(org.id):
         # INR: 7,210.71 paid 2,111.51 in cash + 590.00 by credit note -> 4,509.20 due.
         inr1 = invoice(c_inr, "INR", "7210.71", "2701.51", InvoiceStatus.PARTIALLY_PAID)
-        inr2 = invoice(c_inr, "INR", "1000.00", "0.00", InvoiceStatus.OVERDUE, due_in_days=-1)
+        invoice(c_inr, "INR", "1000.00", "0.00", InvoiceStatus.OVERDUE, due_in_days=-1)
         # The same INR customer billed in AED (the BUG-12 subscription invoice).
         aed1 = invoice(c_inr, "AED", "433.36", "100.00", InvoiceStatus.PARTIALLY_PAID)
         usd1 = invoice(c_usd, "USD", "50.00", "50.00", InvoiceStatus.PAID, paid_at=now)

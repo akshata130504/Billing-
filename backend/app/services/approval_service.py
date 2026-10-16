@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session, selectinload
 
 from backend.app.api.deps import CurrentContext
 from backend.app.core.exceptions import EntityNotFoundError, ForbiddenError, InvalidStateError
-from backend.app.core.logging import logger
 from backend.app.models import (
     ApprovalRequest,
     ApprovalStatus,

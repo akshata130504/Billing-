@@ -40,7 +40,6 @@ from backend.app.core.platform_security import (
 from backend.app.core.security import (
     TENANT_TOKEN_AUDIENCE,
     TOKEN_ISSUER,
-    create_access_token,
     decode_access_token,
     encrypt_secret,
     verify_password,

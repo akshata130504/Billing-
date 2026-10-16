@@ -1,10 +1,7 @@
 """Characterization tests for Invoice lifecycle and public access."""
 from datetime import date, timedelta
-from decimal import Decimal
 import uuid
-import pytest
 
-from backend.app.models import AuditLog, Invoice, InvoiceStatus
 
 BASE = "/api/v1/invoices"
 PUBLIC = "/api/v1/public/invoices"
@@ -221,7 +218,7 @@ def test_invoices_summary_kpis(client, tenant, auth_headers):
     initial_total = initial_summary["total_invoices"]
 
     # Create a draft invoice
-    inv = _create_draft_invoice(client, auth_headers, customer)
+    _create_draft_invoice(client, auth_headers, customer)
     sum_resp2 = client.get(f"{BASE}/summary", headers=auth_headers)
     assert sum_resp2.status_code == 200
     data = sum_resp2.json()

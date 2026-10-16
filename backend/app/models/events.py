@@ -2,11 +2,8 @@
 from __future__ import annotations
 
 import enum
-from datetime import datetime
-from typing import Any, Dict, Optional
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import relationship
+from sqlalchemy import JSON, Column, DateTime, Enum, Integer, String, Text, UniqueConstraint
 
 from backend.app.core.database import Base
 from backend.app.models.base import TenantMixin, TimestampMixin, UUIDPrimaryKeyMixin, utcnow

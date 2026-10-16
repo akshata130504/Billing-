@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from typing import Dict, Optional
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app.core.logging import logger
