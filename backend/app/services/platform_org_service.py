@@ -880,8 +880,8 @@ def reactivate_tenant_admin(
     # invitation (the user may have no password yet), so activating them would skip acceptance.
     if m.status != MembershipStatus.DEACTIVATED:
         raise ConflictError("This Admin has not accepted the invitation yet; resend the invitation instead.")
-    from backend.app.services import org_access
     org_access.ensure_seat_available(db, org, already_counted=False)
+    org_access.ensure_seat_available(db, org, already_counted=m.status == MembershipStatus.INVITED)
 
     m.status = MembershipStatus.ACTIVE
     u = db.get(User, user_id)

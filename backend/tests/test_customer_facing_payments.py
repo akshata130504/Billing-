@@ -2,25 +2,14 @@
 
 The hosted-checkout payment flow itself is covered in test_hosted_checkout_payments.py.
 """
-from datetime import date, datetime, timedelta, timezone
+from datetime import date
 from decimal import Decimal
-import pytest
 
 from backend.app.models import (
-    CustomerPaymentMethod,
-    CustomerPaymentMethodStatus,
-    Invoice,
     InvoiceStatus,
-    Payment,
-    Plan,
-    Subscription,
-    SubscriptionStatus,
 )
 from backend.app.models.checkout import (
     CheckoutSession,
-    CheckoutSessionPurpose,
-    CheckoutSessionStatus,
-    CheckoutTemplate,
 )
 from backend.app.core.security import hash_password
 from backend.app.models.portal import CustomerPortalUser
@@ -70,7 +59,7 @@ def test_customer_portal_settings_management(client, tenant, auth_headers, db):
 def test_customer_portal_signup_login_and_dashboard(client, tenant, auth_headers, db):
     customer = tenant.customer(email="customer_contact@example.com")
     product, plan = tenant.product_with_plan(unit_amount="1000.00")
-    inv = tenant.invoice(customer, amount="1000.00")
+    tenant.invoice(customer, amount="1000.00")
 
     # 1. Customer open signup is disabled (Requirement 1)
     signup_res = client.post(

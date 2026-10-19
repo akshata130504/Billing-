@@ -17,18 +17,15 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 import httpx
-import pytest
 
 from backend.app.core.config import settings
 from backend.app.models import MemberRole
 from backend.app.models.ai import (
-    AIActionDraft,
-    AIActionDraftStatus,
     AIConversation,
     AIRequest,
 )
 from backend.app.models.credits import CreditNote
-from backend.app.models.invoices import Invoice, InvoiceStatus
+from backend.app.models.invoices import InvoiceStatus
 from backend.tests.conftest import Tenant
 
 

@@ -1,14 +1,10 @@
 """Tests for notification email templates API and dispatch service."""
-import pytest
 
-from backend.app.models.notifications import NotificationChannel, NotificationTemplate
 from backend.app.services.notification_service import (
     html_to_plain_text,
     render_template_string,
     get_active_template,
 )
-from backend.app.services.invoice_service import _invoice_email
-from backend.app.services.quote_service import _notify_customer
 
 
 def test_html_to_plain_text():

@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import enum
-from datetime import date, datetime
-from typing import Optional
 
 from sqlalchemy import (
     Boolean,
@@ -20,7 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from backend.app.core.database import Base
-from backend.app.models.base import TenantMixin, TimestampMixin, UUIDPrimaryKeyMixin, utcnow
+from backend.app.models.base import TenantMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class TrialPeriodStatus(str, enum.Enum):

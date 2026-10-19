@@ -7,7 +7,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from backend.app.api.deps import CurrentContext, get_db, require_admin, require_viewer
-from backend.app.core.exceptions import UnauthorizedError, ValidationAppError
+from backend.app.core.exceptions import UnauthorizedError
 from backend.app.core.rate_limit import auth_rate_limit, limiter, public_rate_limit
 from backend.app.models.customers import Customer
 from backend.app.models.invoices import Invoice, InvoiceStatus
@@ -16,10 +16,8 @@ from backend.app.models.payments import (
     CustomerPaymentMethod,
     CustomerPaymentMethodStatus,
     Payment,
-    PaymentGateway,
 )
 from backend.app.models.portal import (
-    CustomerPortalSettings,
     CustomerPortalUser,
 )
 from backend.app.models.subscriptions import Subscription
@@ -38,7 +36,6 @@ from backend.app.schemas.portal import (
 from backend.app.services import (
     customer_portal_service,
     org_lifecycle,
-    subscription_service,
     trial_service,
 )
 from backend.app.services.invoice_pdf import render_invoice_pdf

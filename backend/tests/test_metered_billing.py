@@ -1,10 +1,10 @@
 """Tests for Metered Billing, event ingestion, and usage aggregation (Phase 2)."""
-from datetime import date, datetime, timezone
+from datetime import date
 from decimal import Decimal
 import pytest
 
 from backend.app.models.billing_cycles import BillingCycle, BillingCycleStatus
-from backend.app.models.meters import AggregationType, UsageAggregateStatus
+from backend.app.models.meters import UsageAggregateStatus
 
 
 def test_meter_definition_and_duplicate_handling(client, tenant, auth_headers):

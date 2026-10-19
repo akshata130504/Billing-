@@ -21,7 +21,6 @@ from backend.app.core.tenant_context import (
     get_current_tenant_id,
     is_system_context,
     reset_tenant_context,
-    set_tenant_context,
     strict_context,
     system_context,
     tenant_context,
@@ -31,11 +30,7 @@ from backend.app.models import (
     Invoice,
     InvoiceItem,
     InvoiceStatus,
-    Membership,
-    MemberRole,
-    MembershipStatus,
     Organization,
-    User,
 )
 
 
@@ -205,7 +200,7 @@ def test_orm_isolation_fails_closed_with_security_error(db: Session):
     """Without tenant context in strict mode, querying tenant-scoped models fails closed with MissingTenantContextError."""
     org = _make_org(db, "Org FailClosed")
     with system_context():
-        cust = _make_customer(db, org.id, "Cust FC")
+        _make_customer(db, org.id, "Cust FC")
 
     # Outside any context in strict mode: fails closed with security error
     reset_tenant_context()

@@ -8,7 +8,7 @@ service alone flips collections to collected" guarantee, RBAC, and tenant
 isolation.
 """
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -29,7 +29,6 @@ from backend.app.models import (
     MemberRole,
     Membership,
     Organization,
-    PromiseToPay,
     PromiseToPayStatus,
     User,
 )
@@ -568,8 +567,8 @@ def test_dashboard_kpis_and_aging_are_internally_consistent(db: Session, org_ctx
     org, user, customer, ctx = org_ctx
 
     current_inv = _make_invoice(db, ctx, customer, due_in_days=20, amount="1000.00")
-    overdue_10 = _make_invoice(db, ctx, customer, due_in_days=-10, amount="2000.00")
-    overdue_45 = _make_invoice(db, ctx, customer, due_in_days=-45, amount="3000.00")
+    _make_invoice(db, ctx, customer, due_in_days=-10, amount="2000.00")
+    _make_invoice(db, ctx, customer, due_in_days=-45, amount="3000.00")
 
     result = collection_service.dashboard(db, org.id)
 

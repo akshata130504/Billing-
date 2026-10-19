@@ -1,8 +1,6 @@
 """Customer Portal models: portal preferences, customer users, and portal sessions."""
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import (
     Boolean,

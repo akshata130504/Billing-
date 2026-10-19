@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from backend.app.models import MemberRole
-from backend.app.models.credits import CreditNote, CreditNoteStatus
+from backend.app.models.credits import CreditNoteStatus
 from backend.app.services import credit_service
 
 from backend.tests.conftest import Tenant

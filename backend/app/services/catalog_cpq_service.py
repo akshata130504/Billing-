@@ -16,17 +16,14 @@ from backend.app.models.catalog_cpq import (
     CPQDealStatus,
     CPQRule,
     Offering,
-    OfferingPricingModel,
     OfferingType,
     PriceBook,
     PriceBookEntry,
-    PriceBookStatus,
 )
 from backend.app.models.customers import Customer
 from backend.app.models.quotes import Quote, QuoteStatus
 from backend.app.schemas.catalog_cpq import (
     CPQDealCreate,
-    CPQDealUpdate,
     CPQRuleCreate,
     OfferingCreate,
     OfferingUpdate,

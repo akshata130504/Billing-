@@ -1,5 +1,4 @@
 """Tests for Quote PDF generation and GET /api/v1/quotes/{quote_id}/pdf."""
-import io
 import os
 import re
 import uuid
@@ -42,7 +41,7 @@ def _extract_pdf_text(pdf_bytes: bytes) -> str:
             a85 = base64.a85decode(chunk, adobe=True)
             txt = zlib.decompress(a85).decode("latin1", errors="ignore")
             decompressed_chunks.append(txt)
-        except Exception as e:
+        except Exception:
             # Maybe the chunk didn't have adobe markers or had extra padding
             try:
                 # try stripping <~ and ~>

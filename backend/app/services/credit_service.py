@@ -4,7 +4,6 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
-import uuid
 
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, selectinload

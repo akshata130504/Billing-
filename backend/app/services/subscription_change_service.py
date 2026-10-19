@@ -1,14 +1,14 @@
 """Subscription plan, quantity, and add-on change service with proration calculation and auto-offsetting."""
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
 from backend.app.api.deps import CurrentContext
-from backend.app.core.exceptions import ConflictAppError, EntityNotFoundError, NotFoundAppError, ValidationAppError
+from backend.app.core.exceptions import ConflictAppError, NotFoundAppError, ValidationAppError
 from backend.app.core.logging import logger
 from backend.app.models.base import utcnow
 from backend.app.models.catalog import Plan

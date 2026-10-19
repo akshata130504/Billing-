@@ -11,7 +11,7 @@ Verifies:
 import pytest
 from pydantic import ValidationError
 
-from backend.app.core.config import Settings, _INSECURE_SECRET_KEYS
+from backend.app.core.config import Settings
 
 
 @pytest.fixture(autouse=True)

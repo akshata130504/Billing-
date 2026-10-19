@@ -1,7 +1,6 @@
 """Automated tests for Phase 3 Trial Lifecycle: creation, extensions, conversions, fallback, and reporting."""
 from datetime import date, timedelta
 from decimal import Decimal
-import pytest
 
 from backend.app.models import (
     CustomerPaymentMethod,
@@ -11,11 +10,7 @@ from backend.app.models import (
     Plan,
     Subscription,
     SubscriptionStatus,
-    TrialConversionStatus,
-    TrialPeriod,
-    TrialPeriodStatus,
 )
-from backend.app.services import trial_service
 
 
 def test_trial_creation_and_details(client, tenant, auth_headers, db):

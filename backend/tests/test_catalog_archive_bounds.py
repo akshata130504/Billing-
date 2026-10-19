@@ -4,7 +4,7 @@ import uuid
 import pytest
 
 from backend.app.models import MemberRole, Plan, Product
-from backend.tests.test_offering_subscriptions import OFFERINGS, SUBS, _offering, _subscribe
+from backend.tests.test_offering_subscriptions import OFFERINGS, _offering, _subscribe
 
 CPQ_SIMULATE = "/api/v1/cpq/simulate"
 MAX_PRICE = "999999999999.99"

@@ -1,9 +1,7 @@
 """Tests for safe subscription backfill service."""
 from datetime import date
-from decimal import Decimal
-import pytest
 
-from backend.app.models.billing_cycles import BillingCycle, PriceSnapshot, SubscriptionItem
+from backend.app.models.billing_cycles import BillingCycle
 from backend.app.models.subscriptions import Subscription, SubscriptionStatus
 from backend.app.services.backfill_service import backfill_legacy_subscriptions
 

@@ -13,8 +13,12 @@ import type { ApiError, AuthTokens } from '../types/api';
 export const API_ORIGIN: string = import.meta.env.VITE_API_BASE_URL || '';
 export const API_BASE_URL = `${API_ORIGIN}/api/v1`;
 
-const ACCESS_TOKEN_KEY = 'rooman.access_token';
-const REFRESH_TOKEN_KEY = 'rooman.refresh_token';
+/** Not a credential: only remembers that this browser has a session cookie worth refreshing. */
+const SESSION_HINT_KEY = 'rooman.session';
+/** Legacy keys from builds that kept the tokens in localStorage; wiped on load. */
+const LEGACY_TOKEN_KEYS = ['rooman.access_token', 'rooman.refresh_token'];
+/** Header that puts the API in cookie mode (backend/app/api/session_cookies.py). */
+export const SESSION_MODE_HEADER = 'X-Rooman-Session';
 
 /** Dispatched on `window` when the session can no longer be recovered. */
 export const LOGOUT_EVENT = 'rooman:logout';
@@ -26,6 +30,11 @@ const ACCESS_CODES = new Set(['ORGANIZATION_TRIAL_EXPIRED', 'FEATURE_NOT_ENTITLE
 // ---------------------------------------------------------------------------
 // Token storage
 // ---------------------------------------------------------------------------
+//
+// The access token lives in memory only (gone on reload) and the refresh token never
+// reaches JavaScript at all - the API keeps it in an HttpOnly, SameSite=Strict cookie scoped to
+// /api/v1/auth. A reload calls POST /auth/refresh (the browser attaches the cookie) to get a new
+// access token. localStorage only holds a "there may be a session" hint, never a token.
 
 function safeGet(key: string): string | null {
   try {
@@ -40,22 +49,27 @@ function safeSet(key: string, value: string | null): void {
     if (value === null) window.localStorage.removeItem(key);
     else window.localStorage.setItem(key, value);
   } catch {
-    // Storage unavailable (private mode / blocked). Session simply won't persist.
+    // Storage unavailable (private mode / blocked): the hint is simply not kept.
   }
 }
 
+LEGACY_TOKEN_KEYS.forEach((key) => safeSet(key, null));
+
+let accessToken: string | null = null;
+
 export const tokenStorage = {
-  getAccessToken: (): string | null => safeGet(ACCESS_TOKEN_KEY),
-  getRefreshToken: (): string | null => safeGet(REFRESH_TOKEN_KEY),
-  set: (tokens: Pick<AuthTokens, 'access_token' | 'refresh_token'>): void => {
-    safeSet(ACCESS_TOKEN_KEY, tokens.access_token);
-    safeSet(REFRESH_TOKEN_KEY, tokens.refresh_token);
+  getAccessToken: (): string | null => accessToken,
+  /** Store a token response. Any refresh token in it is ignored (it belongs in the cookie). */
+  set: (tokens: Pick<AuthTokens, 'access_token'> & { refresh_token?: string | null }): void => {
+    accessToken = tokens.access_token || null;
+    safeSet(SESSION_HINT_KEY, accessToken ? '1' : null);
   },
   clear: (): void => {
-    safeSet(ACCESS_TOKEN_KEY, null);
-    safeSet(REFRESH_TOKEN_KEY, null);
+    accessToken = null;
+    safeSet(SESSION_HINT_KEY, null);
   },
-  hasSession: (): boolean => Boolean(safeGet(ACCESS_TOKEN_KEY)),
+  /** True when a session may exist: an access token in memory or a session cookie from earlier. */
+  hasSession: (): boolean => Boolean(accessToken) || safeGet(SESSION_HINT_KEY) === '1',
 };
 
 // ---------------------------------------------------------------------------
@@ -158,7 +172,8 @@ export function errorSummary(error: unknown): string {
 
 export const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
-  headers: { 'Content-Type': 'application/json' },
+  headers: { 'Content-Type': 'application/json', [SESSION_MODE_HEADER]: 'cookie' },
+  withCredentials: true,
   timeout: 20000,
 });
 
@@ -203,26 +218,30 @@ function isAuthRoute(url: string | undefined): boolean {
   return NO_REFRESH_AUTH_ROUTE.test(url);
 }
 
-function performRefresh(): Promise<AuthTokens> {
+function refreshRequest(): Promise<AuthTokens> {
+  // Plain axios (not apiClient) so this call never re-enters the interceptor. No body: the
+  // refresh token is the HttpOnly session cookie.
+  return axios
+    .post<AuthTokens>(`${API_BASE_URL}/auth/refresh`, undefined, {
+      timeout: 15000,
+      withCredentials: true,
+      headers: { [SESSION_MODE_HEADER]: 'cookie' },
+    })
+    .then((res) => {
+      tokenStorage.set(res.data);
+      return res.data;
+    });
+}
+
+/** Exchange the session cookie for a fresh access token. One refresh at a time per tab, and across
+ * tabs too where the Web Locks API exists (the cookie rotates on every refresh). */
+export function performRefresh(): Promise<AuthTokens> {
   if (!refreshPromise) {
-    const refresh_token = tokenStorage.getRefreshToken();
-    if (!refresh_token) {
-      return Promise.reject<AuthTokens>({
-        code: 'UNAUTHORIZED',
-        message: 'Your session has expired. Please sign in again.',
-        status: 401,
-      } satisfies ApiError);
-    }
-    // Plain axios (not apiClient) so this call never re-enters the interceptor.
-    refreshPromise = axios
-      .post<AuthTokens>(`${API_BASE_URL}/auth/refresh`, { refresh_token }, { timeout: 15000 })
-      .then((res) => {
-        tokenStorage.set(res.data);
-        return res.data;
-      })
-      .finally(() => {
-        refreshPromise = null;
-      });
+    const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
+    const run = locks?.request ? locks.request('rooman-session-refresh', () => refreshRequest()) : refreshRequest();
+    refreshPromise = Promise.resolve(run).finally(() => {
+      refreshPromise = null;
+    });
   }
   return refreshPromise;
 }
@@ -242,25 +261,13 @@ apiClient.interceptors.response.use(
     const config = error.config as RetriableConfig | undefined;
     const status = error.response?.status;
 
-    if (
-      status === 401 &&
-      config &&
-      !config._retried &&
-      !isAuthRoute(config.url) &&
-      tokenStorage.getRefreshToken()
-    ) {
+    if (status === 401 && config && !config._retried && !isAuthRoute(config.url) && tokenStorage.hasSession()) {
       config._retried = true;
-      const staleRefreshToken = tokenStorage.getRefreshToken();
       try {
         const tokens = await performRefresh();
         const headers = AxiosHeaders.from(config.headers);
         headers.set('Authorization', `Bearer ${tokens.access_token}`);
         config.headers = headers;
-        // A body that carries our own refresh token (change-password keeps "this" session by
-        // it) must carry the rotated one on the replay, or the server would keep the old row.
-        if (typeof config.data === 'string' && staleRefreshToken && config.data.includes(staleRefreshToken)) {
-          config.data = config.data.split(staleRefreshToken).join(tokens.refresh_token);
-        }
         return apiClient.request(config);
       } catch (refreshError) {
         forceLogout();

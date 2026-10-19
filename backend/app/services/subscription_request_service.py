@@ -14,7 +14,6 @@ No money moves here and nothing reads or writes tenant financial data.
 from __future__ import annotations
 
 import html
-from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from sqlalchemy import delete, func, select

@@ -3,7 +3,6 @@ charges, dunning, credit notes, GST numbering/exports, PDF logo loading and idem
 import hashlib
 import hmac
 import json
-import os
 import time
 import uuid
 from decimal import Decimal
@@ -11,7 +10,6 @@ from decimal import Decimal
 import pytest
 
 from backend.app.core.config import settings
-from backend.app.core.exceptions import InvalidStateError
 from backend.app.models import (
     CustomerPaymentMethod,
     CustomerPaymentMethodStatus,

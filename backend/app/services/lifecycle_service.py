@@ -1,7 +1,7 @@
 """Customer Lifecycle business logic service."""
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -9,7 +9,7 @@ from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import CurrentContext
-from backend.app.core.exceptions import EntityNotFoundError, ForbiddenError, ValidationAppError
+from backend.app.core.exceptions import EntityNotFoundError
 from backend.app.models import (
     AuditLog,
     Customer,
@@ -19,9 +19,7 @@ from backend.app.models import (
     Invoice,
     InvoiceStatus,
     Payment,
-    PaymentStatus,
     Quote,
-    QuoteStatus,
     Subscription,
     SubscriptionStatus,
     TimeEntry,
@@ -311,7 +309,7 @@ def list_customer_lifecycles(
         .where(
             TimeEntry.organization_id == org_id,
             TimeEntry.customer_id.in_(customer_ids),
-            TimeEntry.billable == True,
+            TimeEntry.billable.is_(True),
         )
         .group_by(TimeEntry.customer_id)
     ).all()

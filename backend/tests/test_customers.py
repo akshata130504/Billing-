@@ -5,7 +5,6 @@ from decimal import Decimal
 
 from backend.app.models import (
     AuditLog,
-    Customer,
     Invoice,
     InvoiceStatus,
     MemberRole,

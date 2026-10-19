@@ -2,15 +2,13 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Dict, Optional
 
-from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import desc, func, select
-from sqlalchemy.orm import Session, joinedload
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import desc, select
+from sqlalchemy.orm import Session
 
 from backend.app.api.deps import CurrentContext, get_db, require_finance, require_viewer
-from backend.app.core.exceptions import NotFoundAppError, ValidationAppError
-from backend.app.models.subscriptions import Subscription, SubscriptionStatus
 from backend.app.models.trials import TrialPeriod, TrialPeriodStatus
 from backend.app.schemas.common import PaginatedResponse
 from backend.app.schemas.subscriptions import SubscriptionOut
@@ -19,7 +17,6 @@ from backend.app.schemas.trials import (
     TrialConvertIn,
     TrialDetailOut,
     TrialExtensionIn,
-    TrialExtensionOut,
     TrialFallbackIn,
     TrialPeriodOut,
     TrialReportsOut,

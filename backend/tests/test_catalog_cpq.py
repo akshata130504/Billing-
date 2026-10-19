@@ -1,11 +1,10 @@
 """Tests for Product Catalog, Pricing Engine, Price Books, and CPQ Deal Builder."""
 import uuid
-from datetime import date, timedelta
 from decimal import Decimal
 import pytest
 
 from backend.app.models import MemberRole
-from backend.app.models.catalog_cpq import OfferingType, OfferingPricingModel
+from backend.app.models.catalog_cpq import OfferingPricingModel
 
 CATALOG_OFFERINGS = "/api/v1/catalog/offerings"
 CATALOG_PRICE_BOOKS = "/api/v1/catalog/price-books"

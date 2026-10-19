@@ -2,7 +2,7 @@
 Comprehensive End-to-End Tests for Plans & Pricing, Quotes, and Invoices.
 Covers Tests 1 to 13 from the Master Implementation Prompt.
 """
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 import uuid
 import pytest
@@ -12,9 +12,8 @@ from backend.app.api.deps import CurrentContext
 from backend.app.models.identity import Organization, User, Membership
 from backend.app.models.customers import Customer
 from backend.app.models.catalog_cpq import Offering
-from backend.app.models.quotes import Quote, QuoteStatus
+from backend.app.models.quotes import QuoteStatus
 from backend.app.models.invoices import Invoice, InvoiceStatus
-from backend.app.models.payments import Payment, PaymentAllocation
 from backend.app.schemas.quotes import QuoteCreate, QuoteConvertIn
 from backend.app.schemas.invoices import InvoiceCreate, RecordPaymentIn
 from backend.app.schemas.common_refs import LineItemIn
@@ -307,7 +306,7 @@ def test_6_to_8_quote_lifecycle_and_conversion_to_invoice(db: Session, org_and_u
         issue_date=timezones.org_today(org),
         due_date=timezones.org_today(org) + timedelta(days=30),
     )
-    inv_out = quote_service.convert_to_invoice(db, ctx, quote.id, conv_data)
+    quote_service.convert_to_invoice(db, ctx, quote.id, conv_data)
     db.refresh(quote)
 
     invoice = db.scalars(quote_service.select(Invoice).where(Invoice.id == quote.converted_invoice_id)).first()

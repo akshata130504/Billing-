@@ -103,7 +103,10 @@ jobs:
           psql -h localhost -U postgres -d rooman_migrate -X -v ON_ERROR_STOP=1 \
             -v app_role=rooman_app_ci -v app_password=ci-runtime-role-password \
             -f deploy/sql/least_privilege.sql
-          pytest -q -rs backend/tests/test_rls_runtime_role.py 2>&1 | tee /tmp/rls.txt
+          # test_least_privilege: grants/ownership of the runtime role; test_rls_coverage: every tenant
+          # table has the same forced tenant policy, probed as a NOBYPASSRLS role.
+          pytest -q -rs backend/tests/test_rls_runtime_role.py backend/tests/test_least_privilege.py \
+            backend/tests/test_rls_coverage.py 2>&1 | tee /tmp/rls.txt
           # A skipped RLS test must fail the gate, not pass it silently.
           ! grep -qi "skipped" /tmp/rls.txt
 

@@ -1166,7 +1166,24 @@ def revoke_session(db: Session, ctx: CurrentContext, session_id: str) -> None:
     _commit(db)
 
 
-def refresh(db: Session, raw_token: str, ip: Optional[str], user_agent: Optional[str]) -> TokenBundle:
+def _rotated_within_grace(db: Session, token: RefreshToken, grace_seconds: int) -> bool:
+    """A rotated token presented again within `grace_seconds` of its rotation, while its successor is
+    still live: two tabs of one browser refreshing at once with the same session cookie (each tab
+    keeps its access token in memory). Not treated as theft."""
+    if grace_seconds <= 0 or token.replaced_by_id is None or token.revoked_at is None:
+        return False
+    if aware(token.revoked_at) + timedelta(seconds=grace_seconds) < utcnow():
+        return False
+    successor = db.get(RefreshToken, token.replaced_by_id)
+    if successor is None:
+        return False
+    # live, or itself rotated normally; an explicitly revoked successor (logout) ends the grace
+    return successor.revoked_at is None or successor.replaced_by_id is not None
+
+
+def refresh(
+    db: Session, raw_token: str, ip: Optional[str], user_agent: Optional[str], reuse_grace_seconds: int = 0
+) -> TokenBundle:
     # Lock the row for the rotation so two concurrent refreshes with the same token cannot both
     # mint a successor (FOR UPDATE is a no-op on SQLite, which serialises writers anyway).
     token = db.scalars(
@@ -1179,6 +1196,14 @@ def refresh(db: Session, raw_token: str, ip: Optional[str], user_agent: Optional
         # just refuse. Not treated as theft, so signing out one device from another does not
         # cascade into signing out everything when the revoked device next tries to refresh.
         raise UnauthorizedError("Refresh token has been revoked. Please sign in again.")
+    if token.revoked_at is not None and _rotated_within_grace(db, token, reuse_grace_seconds):
+        user = db.get(User, token.user_id)
+        membership = pick_membership(db, token.user_id, token.organization_id) if user is not None else None
+        if user is None or not user.is_active or membership is None:
+            raise UnauthorizedError("Refresh token has been revoked. Please sign in again.")
+        tokens, _ = issue_tokens(db, user, membership, ip, user_agent)
+        _commit(db)
+        return tokens
     if token.revoked_at is not None:
         # Replay of a rotated token: someone else may hold the chain. Kill every session.
         revoked = revoke_refresh_tokens(db, token.user_id)

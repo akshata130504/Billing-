@@ -9,7 +9,6 @@ from backend.app.api.deps import CurrentContext, get_db, require_finance, requir
 from backend.app.core.rate_limit import limiter, public_action_rate_limit, public_rate_limit
 from backend.app.models.checkout import (
     CheckoutSession,
-    CheckoutSessionStatus,
     CheckoutTemplate,
 )
 from backend.app.schemas.checkout import (
@@ -19,7 +18,6 @@ from backend.app.schemas.checkout import (
     CheckoutSessionOut,
     CheckoutTemplateCreate,
     CheckoutTemplateOut,
-    CheckoutTemplateUpdate,
     PublicCheckoutView,
 )
 from backend.app.schemas.common import PaginatedResponse

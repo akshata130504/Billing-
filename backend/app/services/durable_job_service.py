@@ -1,7 +1,7 @@
 """Durable PostgreSQL/SQLite backed job queue service with lease-based locking and retry logic."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_

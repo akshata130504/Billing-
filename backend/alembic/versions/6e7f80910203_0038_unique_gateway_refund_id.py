@@ -1,4 +1,4 @@
-"""0037_unique_gateway_refund_id
+"""0038_unique_gateway_refund_id
 
 refunds.gateway_refund_id: a UNIQUE index (NULLs allowed, so manual refunds without a gateway id
 are unaffected). One Razorpay refund can then never be booked twice, whatever the writer and
@@ -19,8 +19,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '5d6e7f809102'
-down_revision: Union[str, None] = '4c5d6e7f8091'
+revision: str = '6e7f80910203'
+down_revision: Union[str, None] = '5d6e7f809102'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -43,7 +43,7 @@ def upgrade() -> None:
     ).fetchall()
     if duplicates:
         print(
-            "WARNING [0037]: skipped the unique index on refunds.gateway_refund_id - duplicate gateway "
+            "WARNING [0038]: skipped the unique index on refunds.gateway_refund_id - duplicate gateway "
             f"refund ids exist ({', '.join(str(r[0]) for r in duplicates[:10])}). Reconcile them (each "
             "Razorpay refund may be booked once), then create the index manually: "
             f"CREATE UNIQUE INDEX {INDEX} ON refunds (gateway_refund_id);"

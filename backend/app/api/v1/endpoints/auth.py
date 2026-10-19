@@ -5,7 +5,10 @@ from fastapi import APIRouter, Depends, File, Request, Response, UploadFile, sta
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
+from backend.app.api import session_cookies
 from backend.app.api.deps import CurrentContext, client_ip, get_current_context, get_db
+from backend.app.core.config import settings
+from backend.app.core.exceptions import UnauthorizedError
 from backend.app.core.rate_limit import auth_rate_limit, limiter
 from backend.app.schemas.auth import (
     AcceptInvitationRequest,
@@ -115,6 +118,7 @@ def confirm_signup_email(
 @limiter.limit(auth_rate_limit)
 def complete_signup(
     request: Request,
+    response: Response,
     payload: SignupCompleteRequest,
     db: Session = Depends(get_db),
 ) -> SignupResponse:
@@ -128,7 +132,7 @@ def complete_signup(
         ip=client_ip(request),
         user_agent=_ua(request),
     )
-    return SignupResponse(**tokens.as_dict(), me=auth_service.build_me(db, ctx))
+    return SignupResponse(**session_cookies.deliver(request, response, tokens.as_dict()), me=auth_service.build_me(db, ctx))
 
 
 @router.post(
@@ -140,13 +144,14 @@ def complete_signup(
 @limiter.limit(auth_rate_limit)
 def verify_signup_otp(
     request: Request,
+    response: Response,
     payload: SignupVerifyOtpRequest,
     db: Session = Depends(get_db),
 ) -> SignupResponse:
     tokens, ctx = auth_service.verify_signup_otp(
         db, payload.email, payload.otp, payload.password, ip=client_ip(request), user_agent=_ua(request)
     )
-    return SignupResponse(**tokens.as_dict(), me=auth_service.build_me(db, ctx))
+    return SignupResponse(**session_cookies.deliver(request, response, tokens.as_dict()), me=auth_service.build_me(db, ctx))
 
 
 @router.post(
@@ -176,16 +181,16 @@ def signup() -> JSONResponse:
     summary="Sign in with email and password (returns an MFA challenge when 2FA is on)",
 )
 @limiter.limit(auth_rate_limit)
-def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
+def login(request: Request, response: Response, payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
     result = auth_service.login(db, payload.email, payload.password, ip=client_ip(request), user_agent=_ua(request))
-    return LoginResponse(**result.as_dict())
+    return LoginResponse(**session_cookies.deliver(request, response, result.as_dict()))
 
 
 @router.post("/login/mfa", response_model=AuthTokens, summary="Complete a two-factor sign-in with a TOTP code")
 @limiter.limit(auth_rate_limit)
-def login_mfa(request: Request, payload: MfaLoginRequest, db: Session = Depends(get_db)) -> AuthTokens:
+def login_mfa(request: Request, response: Response, payload: MfaLoginRequest, db: Session = Depends(get_db)) -> AuthTokens:
     tokens = auth_service.login_mfa(db, payload.mfa_token, payload.code, ip=client_ip(request), user_agent=_ua(request))
-    return AuthTokens(**tokens.as_dict())
+    return AuthTokens(**session_cookies.deliver(request, response, tokens.as_dict()))
 
 
 @router.post("/2fa/setup", response_model=TotpSetupResponse, summary="Start two-factor enrolment (new TOTP seed)")
@@ -252,9 +257,28 @@ def revoke_session(
 
 
 @router.post("/refresh", response_model=AuthTokens, summary="Rotate a refresh token")
-def refresh(request: Request, payload: RefreshRequest, db: Session = Depends(get_db)) -> AuthTokens:
-    tokens = auth_service.refresh(db, payload.refresh_token, ip=client_ip(request), user_agent=_ua(request))
-    return AuthTokens(**tokens.as_dict())
+def refresh(
+    request: Request, response: Response, payload: RefreshRequest | None = None, db: Session = Depends(get_db)
+):
+    raw = session_cookies.read_refresh_token(request, payload.refresh_token if payload else None)
+    if not raw:
+        raise UnauthorizedError("Refresh token is missing. Please sign in again.")
+    from_cookie = not (payload and payload.refresh_token)
+    try:
+        tokens = auth_service.refresh(
+            db, raw, ip=client_ip(request), user_agent=_ua(request),
+            # concurrent tabs of one browser may present the cookie that was just rotated
+            reuse_grace_seconds=settings.SESSION_REFRESH_REUSE_GRACE_SECONDS if from_cookie else 0,
+        )
+    except UnauthorizedError as exc:
+        if not from_cookie:
+            raise
+        # a dead cookie is removed, so the browser stops presenting it
+        failed = JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED,
+                              content={"error": {"code": exc.code, "message": exc.message, "details": {}}})
+        session_cookies.clear_refresh_cookie(failed)
+        return failed
+    return AuthTokens(**session_cookies.deliver(request, response, tokens.as_dict()))
 
 
 @router.post(
@@ -265,12 +289,15 @@ def refresh(request: Request, payload: RefreshRequest, db: Session = Depends(get
     summary="Revoke a refresh token",
 )
 def logout(
-    payload: LogoutRequest,
+    request: Request,
+    payload: LogoutRequest | None = None,
     ctx: CurrentContext = Depends(get_current_context),
     db: Session = Depends(get_db),
 ) -> Response:
-    auth_service.logout(db, ctx, payload.refresh_token)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    auth_service.logout(db, ctx, session_cookies.read_refresh_token(request, payload.refresh_token if payload else None))
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    session_cookies.clear_refresh_cookie(response)
+    return response
 
 
 @router.get("/me", response_model=MeResponse, summary="Current user, organization and membership")
@@ -300,6 +327,7 @@ def delete_my_avatar(
 @router.post("/switch-organization", response_model=AuthTokens, summary="Issue tokens for another organization")
 def switch_organization(
     request: Request,
+    response: Response,
     payload: SwitchOrganizationRequest,
     ctx: CurrentContext = Depends(get_current_context),
     db: Session = Depends(get_db),
@@ -307,7 +335,7 @@ def switch_organization(
     tokens = auth_service.switch_organization(
         db, ctx, payload.organization_id, ip=client_ip(request), user_agent=_ua(request)
     )
-    return AuthTokens(**tokens.as_dict())
+    return AuthTokens(**session_cookies.deliver(request, response, tokens.as_dict()))
 
 
 @router.post(
@@ -318,12 +346,14 @@ def switch_organization(
     summary="Change the current user's password (revokes other sessions)",
 )
 def change_password(
+    request: Request,
     payload: ChangePasswordRequest,
     ctx: CurrentContext = Depends(get_current_context),
     db: Session = Depends(get_db),
 ) -> Response:
     auth_service.change_password(
-        db, ctx, payload.current_password, payload.new_password, keep_refresh_token=payload.refresh_token
+        db, ctx, payload.current_password, payload.new_password,
+        keep_refresh_token=session_cookies.read_refresh_token(request, payload.refresh_token),
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -375,7 +405,9 @@ def get_invitation(token: str, db: Session = Depends(get_db)) -> InvitationOut:
 
 @router.post("/accept-invitation", response_model=AuthTokens, summary="Accept a team invitation")
 @limiter.limit(auth_rate_limit)
-def accept_invitation(request: Request, payload: AcceptInvitationRequest, db: Session = Depends(get_db)) -> AuthTokens:
+def accept_invitation(
+    request: Request, response: Response, payload: AcceptInvitationRequest, db: Session = Depends(get_db)
+) -> AuthTokens:
     tokens = auth_service.accept_invitation(
         db,
         payload.token,
@@ -385,4 +417,4 @@ def accept_invitation(request: Request, payload: AcceptInvitationRequest, db: Se
         user_agent=_ua(request),
         totp_code=payload.totp_code,
     )
-    return AuthTokens(**tokens.as_dict())
+    return AuthTokens(**session_cookies.deliver(request, response, tokens.as_dict()))

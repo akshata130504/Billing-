@@ -1,9 +1,7 @@
 """Tests for profile photo upload, validation, persistence, deletion, and authorization."""
 import io
 import uuid
-import pytest
 
-from backend.app.core.config import settings
 
 API = "/api/v1"
 PASSWORD = "Str0ngPassw0rd!"

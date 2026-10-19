@@ -14,7 +14,6 @@ from backend.app.api.deps import CurrentContext
 from backend.app.core.exceptions import EntityNotFoundError, InvalidStateError, ValidationAppError
 from backend.app.models import (
     INTERVAL_MONTHS,
-    BillingInterval,
     Customer,
     Invoice,
     InvoiceStatus,

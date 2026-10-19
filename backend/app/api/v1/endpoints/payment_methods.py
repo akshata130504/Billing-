@@ -6,7 +6,7 @@ from typing import List
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from backend.app.api.deps import CurrentContext, get_db, require_admin, require_finance, require_viewer
+from backend.app.api.deps import CurrentContext, get_db, require_finance, require_viewer
 from backend.app.schemas.common_refs import money_str
 from backend.app.schemas.payment_methods import (
     CustomerPaymentMethodCreateIn,

@@ -1,4 +1,4 @@
-import { apiClient, tokenStorage } from './apiClient';
+import { apiClient, performRefresh, toApiError } from './apiClient';
 import type {
   AcceptInvitationRequest,
   AuthTokens,
@@ -72,13 +72,19 @@ export const authService = {
     return data;
   },
 
-  refresh: async (refresh_token: string): Promise<AuthTokens> => {
-    const { data } = await apiClient.post<AuthTokens>('/auth/refresh', { refresh_token });
-    return data;
-  },
+  /** New access token from the HttpOnly session cookie. */
+  refresh: async (): Promise<AuthTokens> => performRefresh(),
 
-  logout: async (refresh_token: string): Promise<void> => {
-    await apiClient.post('/auth/logout', { refresh_token });
+  /** Revokes this browser's session (the server reads and clears the session cookie). */
+  logout: async (): Promise<void> => {
+    try {
+      await apiClient.post('/auth/logout');
+    } catch (error) {
+      // An expired access token must not leave the cookie session alive: refresh once, then log out.
+      if (toApiError(error).status !== 401) throw error;
+      await performRefresh();
+      await apiClient.post('/auth/logout');
+    }
   },
 
   me: async (): Promise<MeResponse> => {
@@ -94,9 +100,8 @@ export const authService = {
   },
 
   changePassword: async (current_password: string, new_password: string): Promise<void> => {
-    // Send our own refresh token so the server keeps this session and only revokes the others.
-    const refresh_token = tokenStorage.getRefreshToken() ?? undefined;
-    await apiClient.post('/auth/change-password', { current_password, new_password, refresh_token });
+    // The server keeps this browser's session (its cookie) and revokes the others.
+    await apiClient.post('/auth/change-password', { current_password, new_password });
   },
 
   forgotPassword: async (email: string): Promise<ForgotPasswordResponse> => {
