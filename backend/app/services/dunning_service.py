@@ -70,6 +70,13 @@ def _safe_dispatch_notification(
         logger.warning("Failed to dispatch dunning notification email to %s: %s", recipient, exc)
 
 
+def _stop_autopay(db: Session, subscription) -> None:
+    """A subscription cancelled by dunning must not keep an AutoPay mandate charging (best effort)."""
+    from backend.app.services import autopay_service
+
+    autopay_service.stop_quietly(db, subscription, reason="cancelled by dunning")
+
+
 def _record_dunning_void_approval(
     db: Session,
     organization_id: str,
@@ -427,6 +434,7 @@ def _trigger_dunning_for_failed_payment_impl(
         if prior_invoices_count == 0:
             logger.warning("dunning.first_ach_failure.cancelling_subscription subscription_id=%s", sub.id)
             sub.status = SubscriptionStatus.CANCELLED
+            _stop_autopay(db, sub)
             if D_(invoice.amount_paid) <= 0 and invoice.status != InvoiceStatus.VOID:
                 invoice_service.void_invoice(
                     db, None, invoice, f"First ACH payment failed: {reason}", actor_label=audit.SYSTEM_ACTOR, commit=False
@@ -825,6 +833,7 @@ def _execute_dunning_retries_impl(
                 if final_action == DunningFinalAction.CANCEL_AND_VOID:
                     if case.subscription:
                         case.subscription.status = SubscriptionStatus.CANCELLED
+                        _stop_autopay(db, case.subscription)
                     case.status = DunningCaseStatus.FINALIZED
                     justification = (
                         f"Dunning retries exhausted for case {case.case_number}. "
@@ -958,6 +967,7 @@ def stop_dunning_case(db: Session, case_id: str, organization_id: str, data: Dun
         if action == DunningFinalAction.CANCEL_AND_VOID:
             if case.subscription:
                 case.subscription.status = SubscriptionStatus.CANCELLED
+                _stop_autopay(db, case.subscription)
             case.status = DunningCaseStatus.FINALIZED
             justification = f"Dunning stopped by operator ({case.stop_reason}). Applied final action cancel_and_void."
             if D_(case.invoice.amount_paid) > 0 or case.invoice.status == InvoiceStatus.VOID:

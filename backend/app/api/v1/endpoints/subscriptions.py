@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import CurrentContext, get_db, require_finance, require_viewer
 from backend.app.core.exceptions import InvalidStateError
-from backend.app.models import SubscriptionStatus
+from backend.app.models import AutopayStatus, SubscriptionStatus
+from backend.app.schemas.autopay import AutopayMandateOut, AutopayStatusOut
 from backend.app.schemas.common import PaginatedResponse
 from backend.app.schemas.invoices import InvoiceOut
 from backend.app.schemas.subscriptions import (
@@ -17,7 +18,7 @@ from backend.app.schemas.subscriptions import (
     SubscriptionSummaryOut,
     SubscriptionUpdate,
 )
-from backend.app.services import invoice_service, subscription_service
+from backend.app.services import autopay_service, invoice_service, subscription_service
 from backend.app.services.pagination import PageParams, page_params
 
 router = APIRouter()
@@ -108,6 +109,41 @@ def activate_subscription(
 ):
     sub = subscription_service.get_subscription(db, ctx.organization_id, subscription_id)
     return subscription_service.serialize_subscription(subscription_service.activate_subscription(db, ctx, sub))
+
+
+@router.get("/{subscription_id}/autopay", response_model=AutopayStatusOut, summary="UPI AutoPay / e-mandate status")
+def get_autopay(
+    subscription_id: str,
+    ctx: CurrentContext = Depends(require_viewer),
+    db: Session = Depends(get_db),
+):
+    sub = subscription_service.get_subscription(db, ctx.organization_id, subscription_id)
+    mandate = autopay_service.get_mandate(db, ctx.organization_id, sub.id)
+    reason = None if mandate is not None and mandate.status in AutopayStatus.LIVE else autopay_service.ineligibility_reason(db, sub)
+    return {"eligible": reason is None, "reason": reason, "mandate": autopay_service.serialize_mandate(mandate)}
+
+
+@router.post("/{subscription_id}/autopay", response_model=AutopayMandateOut, summary="Set up UPI AutoPay / e-mandate")
+def setup_autopay(
+    subscription_id: str,
+    ctx: CurrentContext = Depends(require_finance),
+    db: Session = Depends(get_db),
+):
+    """Creates the Razorpay subscription (or reuses the unauthorised one) and returns a fresh link
+    for the customer to authorise the mandate. A repeated call never creates a second mandate."""
+    sub = subscription_service.get_subscription(db, ctx.organization_id, subscription_id)
+    row, token = autopay_service.setup_autopay(db, ctx, sub)
+    return autopay_service.serialize_mandate(row, link=autopay_service.authorization_link(token))
+
+
+@router.post("/{subscription_id}/autopay/cancel", response_model=AutopayMandateOut, summary="Stop UPI AutoPay / e-mandate")
+def cancel_autopay(
+    subscription_id: str,
+    ctx: CurrentContext = Depends(require_finance),
+    db: Session = Depends(get_db),
+):
+    sub = subscription_service.get_subscription(db, ctx.organization_id, subscription_id)
+    return autopay_service.serialize_mandate(autopay_service.cancel_autopay(db, ctx, sub))
 
 
 @router.post("/{subscription_id}/pause", response_model=SubscriptionOut, summary="Pause")

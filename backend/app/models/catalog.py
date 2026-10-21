@@ -2,6 +2,7 @@
 import enum
 
 from sqlalchemy import Boolean, Column, Enum, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import false as sql_false
 from sqlalchemy.orm import relationship
 
 from backend.app.core.database import Base
@@ -81,6 +82,8 @@ class Plan(UUIDPrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
     setup_fee = Column(Numeric(14, 2), nullable=False, default=0)
     trial_days = Column(Integer, nullable=False, default=0)
     is_active = Column(Boolean, nullable=False, default=True)
+    # UPI AutoPay / e-mandate: subscriptions to this plan may be collected by a Razorpay Subscription.
+    autopay_enabled = Column(Boolean, nullable=False, default=False, server_default=sql_false())
     # Linked plans: the recurring catalog Offering (Plans & Pricing) this plan bills, and
     # the "interval|currency|model" terms it was created for. NULL on legacy plans.
     offering_id = Column(

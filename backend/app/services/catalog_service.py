@@ -6,8 +6,9 @@ from sqlalchemy import Select, exists, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app.api.deps import CurrentContext
-from backend.app.core.exceptions import ConflictError, EntityNotFoundError, InvalidStateError
+from backend.app.core.exceptions import ConflictError, EntityNotFoundError, InvalidStateError, ValidationAppError
 from backend.app.models import (
+    BillingInterval,
     InvoiceItem,
     Plan,
     Product,
@@ -41,6 +42,7 @@ PLAN_SNAPSHOT_FIELDS = (
     "setup_fee",
     "trial_days",
     "is_active",
+    "autopay_enabled",
 )
 
 
@@ -235,6 +237,7 @@ def create_plan(db: Session, ctx: CurrentContext, data: PlanCreate) -> Plan:
         raise ConflictError(f"A plan with code '{data.code}' already exists.", details={"fields": {"code": "duplicate"}})
     payload = data.model_dump(exclude_none=True)
     payload.setdefault("currency", ctx.organization.default_currency or "INR")
+    _validate_autopay(payload.get("autopay_enabled"), payload["billing_interval"], payload["currency"])
     plan = Plan(organization_id=ctx.organization_id, **payload)
     plan.product_id = product.id
     db.add(plan)
@@ -256,6 +259,17 @@ PLAN_STRUCTURAL_FIELDS = ("billing_interval", "interval_count", "pricing_model",
 ENDED_SUBSCRIPTION_STATUSES = (SubscriptionStatus.CANCELLED, SubscriptionStatus.EXPIRED, SubscriptionStatus.TRIAL_EXPIRED)
 
 
+def _validate_autopay(enabled: Optional[bool], billing_interval, currency: Optional[str]) -> None:
+    """AutoPay (Razorpay Subscriptions: UPI AutoPay / e-mandate) needs a recurring INR plan."""
+    if not enabled:
+        return
+    if enum_value(billing_interval) == BillingInterval.ONE_TIME.value:
+        raise ValidationAppError("AutoPay needs a recurring plan.", {"fields": {"autopay_enabled": "one-time plans cannot use AutoPay"}})
+    if (currency or "INR").upper() != "INR":
+        raise ValidationAppError("AutoPay (UPI AutoPay / e-mandate) is available for INR plans only.",
+                                 {"fields": {"autopay_enabled": "INR plans only"}})
+
+
 def _has_live_subscriptions(db: Session, organization_id: str, plan_id: str) -> bool:
     return bool(
         db.scalar(
@@ -272,8 +286,10 @@ def _has_live_subscriptions(db: Session, organization_id: str, plan_id: str) -> 
 
 def update_plan(db: Session, ctx: CurrentContext, plan_id: str, data: PlanUpdate) -> Plan:
     plan = get_plan_or_404(db, ctx.organization_id, plan_id)
-    _guard_not_linked(plan, "plan")
     changes = data.model_dump(exclude_unset=True)
+    if set(changes) != {"autopay_enabled"}:
+        # AutoPay is a collection setting, not a billing term: it may be switched on linked plans too.
+        _guard_not_linked(plan, "plan")
     if not changes:
         return plan
     if not plan.is_active and not (set(changes) == {"is_active"} and changes["is_active"] is True):
@@ -298,6 +314,12 @@ def update_plan(db: Session, ctx: CurrentContext, plan_id: str, data: PlanUpdate
             + ", ".join(f.replace("_", " ") for f in structural)
             + " cannot be changed. Create a new plan and move subscribers to it instead.",
             {"fields": {f: "locked while the plan has live subscriptions" for f in structural}},
+        )
+    if changes.get("autopay_enabled") or (plan.autopay_enabled and changes.keys() & {"billing_interval", "currency"}):
+        _validate_autopay(
+            changes.get("autopay_enabled", plan.autopay_enabled),
+            changes.get("billing_interval") or plan.billing_interval,
+            changes.get("currency") or plan.currency,
         )
     before = audit.snapshot(plan, PLAN_SNAPSHOT_FIELDS)
     for field, value in changes.items():
@@ -375,6 +397,7 @@ def serialize_plan(plan: Plan, active_subscriptions: int = 0) -> Dict[str, Any]:
         "setup_fee": money_str(plan.setup_fee),
         "trial_days": int(plan.trial_days or 0),
         "is_active": bool(plan.is_active),
+        "autopay_enabled": bool(plan.autopay_enabled),
         "active_subscriptions": int(active_subscriptions),
         "created_at": iso_dt(plan.created_at),
         "updated_at": iso_dt(plan.updated_at),

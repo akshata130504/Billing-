@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pencil, Power, Search } from 'lucide-react';
+import { Pencil, Power, Repeat, Search } from 'lucide-react';
 import { Modal } from '../../components/common/Modal';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
@@ -110,6 +110,26 @@ export function LegacyPlansManager({ isOpen, onClose, onChanged }: LegacyPlansMa
         plan.is_active && plan.active_subscriptions > 0
           ? `${plan.name}: existing ${plan.active_subscriptions} subscription(s) keep billing; no new ones can start.`
           : plan.name
+      );
+      await load();
+      onChanged?.();
+    } catch (err: any) {
+      showToast('error', 'Update failed', apiError(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const toggleAutopay = async (plan: PlanOut) => {
+    try {
+      setBusyId(plan.id);
+      await catalogService.updatePlan(plan.id, { autopay_enabled: !plan.autopay_enabled });
+      showToast(
+        'success',
+        plan.autopay_enabled ? 'AutoPay turned off' : 'AutoPay turned on',
+        plan.autopay_enabled
+          ? `${plan.name}: no new AutoPay mandates; existing ones keep collecting until stopped.`
+          : `${plan.name}: subscriptions can now be collected by UPI AutoPay / e-mandate.`
       );
       await load();
       onChanged?.();
@@ -233,7 +253,7 @@ export function LegacyPlansManager({ isOpen, onClose, onChanged }: LegacyPlansMa
               {draftErrors.trial_days && <p className="mt-1 text-[11px] text-rose-600">{draftErrors.trial_days}</p>}
             </div>
             <div className="text-[11px] text-slate-500 self-end pb-2">
-              {editing.billing_interval} x{editing.interval_count} · {editing.pricing_model} · {editing.active_subscriptions} live subscription(s)
+              {editing.billing_interval} x{editing.interval_count} Â· {editing.pricing_model} Â· {editing.active_subscriptions} live subscription(s)
             </div>
             <div className="sm:col-span-2">
               <label className="block text-xs font-medium text-slate-700 mb-1">Description</label>
@@ -299,7 +319,7 @@ export function LegacyPlansManager({ isOpen, onClose, onChanged }: LegacyPlansMa
                               <div className="text-[11px] text-slate-400 font-mono">{plan.code}</div>
                             </td>
                             <td className="px-3 py-2 text-slate-600 capitalize">
-                              {plan.billing_interval} · {plan.pricing_model.replace('_', ' ')}
+                              {plan.billing_interval} Â· {plan.pricing_model.replace('_', ' ')}
                             </td>
                             <td className="px-3 py-2 text-right tabular-nums text-slate-900">
                               {formatMoney(plan.unit_amount, plan.currency)}
@@ -309,6 +329,11 @@ export function LegacyPlansManager({ isOpen, onClose, onChanged }: LegacyPlansMa
                               <Badge variant={plan.is_active ? 'success' : 'neutral'} size="sm">
                                 {plan.is_active ? 'Active' : 'Inactive'}
                               </Badge>
+                              {plan.autopay_enabled && (
+                                <Badge variant="info" size="sm" className="ml-1">
+                                  AutoPay
+                                </Badge>
+                              )}
                             </td>
                             <td className="px-3 py-2 text-right">
                               {canWrite && (
@@ -320,6 +345,19 @@ export function LegacyPlansManager({ isOpen, onClose, onChanged }: LegacyPlansMa
                                   >
                                     <Pencil className="w-3.5 h-3.5" />
                                   </button>
+                                  {plan.billing_interval !== 'one_time' && plan.currency === 'INR' && (
+                                    <button
+                                      onClick={() => toggleAutopay(plan)}
+                                      disabled={busyId === plan.id}
+                                      className={`p-1 rounded disabled:opacity-50 ${
+                                        plan.autopay_enabled ? 'text-brand-600 hover:text-slate-500' : 'text-slate-400 hover:text-brand-600'
+                                      }`}
+                                      title={plan.autopay_enabled ? 'Turn off UPI AutoPay / e-mandate' : 'Allow UPI AutoPay / e-mandate'}
+                                      aria-pressed={Boolean(plan.autopay_enabled)}
+                                    >
+                                      <Repeat className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
                                   <button
                                     onClick={() => togglePlan(plan)}
                                     disabled={busyId === plan.id}

@@ -458,6 +458,8 @@ export interface PlanOut {
   setup_fee: string;
   trial_days: number;
   is_active: boolean;
+  /** UPI AutoPay / e-mandate (Razorpay Subscriptions) may collect subscriptions to this plan. */
+  autopay_enabled?: boolean;
   active_subscriptions: number;
   created_at: string;
   updated_at: string;
@@ -476,6 +478,7 @@ export interface PlanIn {
   setup_fee?: string;
   trial_days?: number;
   is_active?: boolean;
+  autopay_enabled?: boolean;
 }
 
 export interface ProductOut {
@@ -1526,4 +1529,63 @@ export interface TimesheetInvoiceCreate {
   issue_date?: string | null;
   due_date?: string | null;
   notes?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// UPI AutoPay / e-mandate (Razorpay Subscriptions)
+// ---------------------------------------------------------------------------
+
+export type AutopayStatus =
+  | 'created'
+  | 'authenticated'
+  | 'active'
+  | 'pending'
+  | 'halted'
+  | 'paused'
+  | 'cancelled'
+  | 'completed'
+  | 'expired';
+
+export interface AutopayMandate {
+  id: string;
+  subscription_id: string;
+  status: AutopayStatus;
+  gateway_subscription_id: string;
+  amount: string;
+  currency: string;
+  period: string;
+  interval: number;
+  total_count: number;
+  paid_count: number;
+  start_at: string | null;
+  charge_at: string | null;
+  authorized_at: string | null;
+  ended_at: string | null;
+  last_error: string | null;
+  /** Only in the response that (re)issued it. */
+  authorization_link: string | null;
+}
+
+export interface AutopayStatusOut {
+  eligible: boolean;
+  reason: string | null;
+  mandate: AutopayMandate | null;
+}
+
+export interface PublicAutopay {
+  status: AutopayStatus;
+  can_authorize: boolean;
+  organization_name: string;
+  plan_name: string;
+  subscription_number: string;
+  amount: string;
+  currency: string;
+  period: string;
+  interval: number;
+  total_count: number;
+  start_at: string | null;
+  authorized_at: string | null;
+  gateway_subscription_id: string | null;
+  key_id: string | null;
+  prefill: { name: string | null; email: string | null; contact: string | null };
 }

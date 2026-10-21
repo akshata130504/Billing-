@@ -3,6 +3,7 @@ import { API_BASE_URL, absoluteUrl, toApiError } from './apiClient';
 import type {
   HealthResponse,
   IntegrationsMeta,
+  PublicAutopay,
   PublicInvoice,
   PublicQuote,
   RazorpayOrderResponse,
@@ -52,6 +53,21 @@ export const publicService = {
       `/public/invoices/${t(token)}/razorpay-verify`,
       body
     );
+    return data;
+  },
+
+  /** UPI AutoPay / e-mandate authorisation page. */
+  getAutopay: async (token: string): Promise<PublicAutopay> => {
+    const { data } = await publicClient.get<PublicAutopay>(`/public/autopay/${t(token)}`);
+    return data;
+  },
+
+  /** Checkout returned: the server verifies the signature and re-reads the mandate from Razorpay. */
+  confirmAutopay: async (
+    token: string,
+    body: { razorpay_payment_id: string; razorpay_subscription_id: string; razorpay_signature: string }
+  ): Promise<PublicAutopay> => {
+    const { data } = await publicClient.post<PublicAutopay>(`/public/autopay/${t(token)}/confirm`, body);
     return data;
   },
 

@@ -49,6 +49,7 @@ const LandingPage = lazyNamed(() => import('../pages/public/LandingPage'), 'Land
 // Rooman platform staff under an approved access grant (token handed over by the platform console).
 const PlatformAccessWorkspace = lazyNamed(() => import('../pages/platformAccess/PlatformAccessWorkspace'), 'PlatformAccessWorkspace');
 const PublicCheckoutPage = lazyNamed(() => import('../pages/public/PublicCheckoutPage'), 'PublicCheckoutPage');
+const AutopayAuthorizePage = lazyNamed(() => import('../pages/public/AutopayAuthorizePage'), 'AutopayAuthorizePage');
 const CustomerLifecycleCinematicPage = lazyNamed(() => import('../pages/public/CustomerLifecycleCinematicPage'), 'CustomerLifecycleCinematicPage');
 const ActivityPage = lazyNamed(() => import('../pages/activity/ActivityPage'), 'ActivityPage');
 const ActionCenterPage = lazyNamed(() => import('../pages/control-center/ActionCenterPage'), 'ActionCenterPage');
@@ -430,6 +431,7 @@ export function AppRoutes() {
       <Route path="/pay/:token" element={<PayInvoicePage />} />
       <Route path="/quote/:token" element={<PublicQuotePage />} />
       <Route path="/checkout/:token" element={<PublicCheckoutPage />} />
+      <Route path="/autopay/:token" element={<AutopayAuthorizePage />} />
       <Route path="/lifecycle-cinematic" element={<CustomerLifecycleCinematicPage />} />
 
       {/* Customer Self-Service Portal */}

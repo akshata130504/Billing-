@@ -1266,6 +1266,10 @@ def update_subscription(db: Session, ctx: CurrentContext, subscription: Subscrip
 def pause_subscription(db: Session, ctx: CurrentContext, subscription: Subscription) -> Subscription:
     if subscription.status not in (SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING, SubscriptionStatus.PAST_DUE):
         raise InvalidStateError(f"Only active, trialing or past-due subscriptions can be paused; this one is {subscription.status.value}.")
+    # A paused subscription must not be charged: cancel its AutoPay mandate first (re-authorise after resume).
+    from backend.app.services import autopay_service
+
+    autopay_service.stop_for_subscription(db, subscription, reason="subscription paused", ctx=ctx)
     before = snapshot(subscription)
     subscription.status = SubscriptionStatus.PAUSED
     subscription.paused_at = utcnow()
@@ -1389,6 +1393,11 @@ def cancel_subscription(
 ) -> Subscription:
     if subscription.status == SubscriptionStatus.CANCELLED:
         raise InvalidStateError("This subscription is already cancelled.")
+    # Stop AutoPay before anything else: also for cancel-at-period-end, since Razorpay would otherwise
+    # charge the next cycle at the very moment the period ends (the current period is already paid).
+    from backend.app.services import autopay_service
+
+    autopay_service.stop_for_subscription(db, subscription, reason="subscription cancelled", ctx=ctx)
     before = snapshot(subscription)
     credit_amount = Decimal("0")
     if at_period_end and subscription.status != SubscriptionStatus.PAUSED:
@@ -1571,6 +1580,9 @@ def renew_subscription(
         subscription.next_billing_date = None
         subscription.updated_at = now
         db.flush()
+        from backend.app.services import autopay_service
+
+        autopay_service.stop_quietly(db, subscription, reason="subscription expired (auto-renewal off)")
         audit.record(
             db,
             action="SUBSCRIPTION_EXPIRED",

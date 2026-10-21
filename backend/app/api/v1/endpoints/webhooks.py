@@ -37,7 +37,17 @@ from backend.app.core.alerts import send_alert
 from backend.app.core.exceptions import AppException
 from backend.app.core.logging import logger
 from backend.app.core.rate_limit import limiter, webhook_rate_limit
-from backend.app.models import AuditStatus, Invoice, InvoiceStatus, Payment, PaymentStatus, RefundStatus, WebhookEvent, utcnow
+from backend.app.models import (
+    AuditStatus,
+    GatewaySubscription,
+    Invoice,
+    InvoiceStatus,
+    Payment,
+    PaymentStatus,
+    RefundStatus,
+    WebhookEvent,
+    utcnow,
+)
 from backend.app.schemas.public import WebhookAck
 from backend.app.services import audit, dunning_service, payment_service, razorpay_gateway
 
@@ -122,6 +132,18 @@ def _check_org(event: WebhookEvent, payment: Payment) -> None:
         raise ValueError("event signed by a different organization than the referenced payment")
 
 
+def _is_subscription_charge(entity: Dict[str, Any]) -> bool:
+    """A payment Razorpay made itself for a Razorpay Subscription (UPI AutoPay / e-mandate): it carries
+    the Razorpay invoice of the subscription cycle, and this app never creates Razorpay invoices."""
+    return str(entity.get("invoice_id") or "").startswith("inv_")
+
+
+def _handle_subscription_event(db: Session, event: WebhookEvent, payload: Dict[str, Any]) -> None:
+    from backend.app.services import autopay_service
+
+    autopay_service.handle_subscription_event(db, event, payload, verified_org_id=getattr(event, "_verified_org_id", None))
+
+
 def _invoice_for_payment(db: Session, payment, entity: Dict[str, Any]) -> Optional[Invoice]:
     notes: Dict[str, Any] = {}
     if isinstance(entity.get("notes"), dict):
@@ -150,6 +172,8 @@ def _handle_payment_captured(db: Session, event: WebhookEvent, payload: Dict[str
     with system_context():
         payment = payment_service.find_by_order_id(db, order_id)
     if payment is None:
+        if _is_subscription_charge(entity):
+            return  # recorded by the subscription.charged event of the same charge
         raise LookupError(f"no payment with gateway_order_id {order_id}")
     _check_org(event, payment)
     event.organization_id = payment.organization_id
@@ -201,6 +225,8 @@ def _handle_payment_failed(db: Session, event: WebhookEvent, payload: Dict[str, 
     with system_context():
         payment = payment_service.find_by_order_id(db, order_id) if order_id else None
     if payment is None:
+        if _is_subscription_charge(entity):
+            return  # an AutoPay charge attempt: Razorpay retries it; subscription.pending/halted inform us
         raise LookupError(f"no payment with gateway_order_id {order_id}")
     _check_org(event, payment)
     event.organization_id = payment.organization_id
@@ -301,6 +327,12 @@ HANDLERS = {
     "payment.failed": _handle_payment_failed,
     "refund.processed": _handle_refund_processed,
     "refund.failed": _handle_refund_failed,
+    # UPI AutoPay / e-mandate (Razorpay Subscriptions); see services/autopay_service.py.
+    **{
+        f"subscription.{name}": _handle_subscription_event
+        for name in ("authenticated", "activated", "charged", "pending", "halted", "cancelled", "completed",
+                     "paused", "resumed", "updated")
+    },
 }
 
 
@@ -309,7 +341,7 @@ def _attributed_organization_id(db: Session, payload: Dict[str, Any]) -> Optiona
     from backend.app.core.tenant_context import system_context
 
     body = payload.get("payload") or {}
-    for kind in ("payment", "refund", "order"):
+    for kind in ("payment", "refund", "order", "subscription"):
         entity = (body.get(kind) or {}).get("entity") or {}
         notes = entity.get("notes") if isinstance(entity.get("notes"), dict) else {}
         if notes.get("organization_id"):
@@ -319,6 +351,15 @@ def _attributed_organization_id(db: Session, payload: Dict[str, Any]) -> Optiona
     with system_context():
         if order_id:
             org = db.scalars(select(Payment.organization_id).where(Payment.gateway_order_id == order_id)).first()
+            if org:
+                return org
+        subscription_entity = (body.get("subscription") or {}).get("entity") or {}
+        if subscription_entity.get("id"):
+            org = db.scalars(
+                select(GatewaySubscription.organization_id).where(
+                    GatewaySubscription.gateway_subscription_id == subscription_entity["id"]
+                )
+            ).first()
             if org:
                 return org
         refund_entity = (body.get("refund") or {}).get("entity") or {}

@@ -24,6 +24,8 @@ class PlanCreate(BaseModel):
     setup_fee: Decimal = Field(Decimal("0"), ge=0)
     trial_days: int = Field(0, ge=0, le=3650)
     is_active: bool = True
+    # UPI AutoPay / e-mandate (Razorpay Subscriptions) may collect subscriptions to this plan.
+    autopay_enabled: bool = False
 
     @field_validator("currency")
     @classmethod
@@ -50,6 +52,7 @@ class PlanUpdate(BaseModel):
     setup_fee: Optional[Decimal] = Field(None, ge=0)
     trial_days: Optional[int] = Field(None, ge=0, le=3650)
     is_active: Optional[bool] = None
+    autopay_enabled: Optional[bool] = None
 
     @field_validator("currency")
     @classmethod
@@ -76,6 +79,7 @@ class PlanOut(BaseModel):
     setup_fee: str
     trial_days: int
     is_active: bool
+    autopay_enabled: bool = False
     active_subscriptions: int
     created_at: datetime
     updated_at: datetime

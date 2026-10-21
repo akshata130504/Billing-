@@ -246,6 +246,97 @@ def create_recurring_payment(payload: Dict[str, Any], *, creds: Optional[Razorpa
     return res
 
 
+# --- Subscriptions (UPI AutoPay / e-mandate) ---------------------------------------------------------------
+
+
+def _subscription_call(what: str, fn) -> Dict[str, Any]:
+    try:
+        res = fn()
+    except Exception as exc:
+        logger.warning("Razorpay %s failed: %s", what, exc)
+        raise GatewayError(f"Razorpay could not {what}: {exc}") from exc
+    if not isinstance(res, dict) or not res.get("id"):
+        raise GatewayError(f"Razorpay returned an unexpected response to {what}.")
+    return res
+
+
+def create_plan(
+    *,
+    period: str,
+    interval: int,
+    name: str,
+    amount_paise: int,
+    currency: str,
+    notes: Optional[Dict[str, Any]] = None,
+    creds: Optional[RazorpayCredentials] = None,
+) -> Dict[str, Any]:
+    """POST /v1/plans - the amount charged every `interval` `period`s (daily needs interval >= 7)."""
+    client = _get_client(creds)
+    payload: Dict[str, Any] = {
+        "period": period,
+        "interval": int(interval),
+        "item": {"name": (name or "Subscription")[:100], "amount": int(amount_paise), "currency": currency},
+    }
+    if notes:
+        payload["notes"] = {k: str(v) for k, v in list(notes.items())[:15]}
+    return _subscription_call("create the plan", lambda: client.plan.create(data=payload))
+
+
+def create_subscription(
+    *,
+    plan_id: str,
+    total_count: int,
+    start_at: Optional[int] = None,
+    expire_by: Optional[int] = None,
+    customer_notify: bool = True,
+    notes: Optional[Dict[str, Any]] = None,
+    creds: Optional[RazorpayCredentials] = None,
+) -> Dict[str, Any]:
+    """POST /v1/subscriptions - status `created`; the customer authorises it through Checkout
+    (subscription_id) or its short_url. With a future start_at Razorpay takes a refundable
+    authorisation amount now and the first plan charge on start_at."""
+    client = _get_client(creds)
+    payload: Dict[str, Any] = {"plan_id": plan_id, "total_count": int(total_count), "quantity": 1,
+                               "customer_notify": 1 if customer_notify else 0}
+    if start_at:
+        payload["start_at"] = int(start_at)
+    if expire_by:
+        payload["expire_by"] = int(expire_by)
+    if notes:
+        payload["notes"] = {k: str(v) for k, v in list(notes.items())[:15]}
+    return _subscription_call("create the subscription", lambda: client.subscription.create(data=payload))
+
+
+def fetch_subscription(gateway_subscription_id: str, *, creds: Optional[RazorpayCredentials] = None) -> Dict[str, Any]:
+    client = _get_client(creds)
+    return _subscription_call("fetch the subscription", lambda: client.subscription.fetch(gateway_subscription_id))
+
+
+def cancel_subscription(gateway_subscription_id: str, *, creds: Optional[RazorpayCredentials] = None) -> Dict[str, Any]:
+    """POST /v1/subscriptions/:id/cancel - immediately: no further charges."""
+    client = _get_client(creds)
+    return _subscription_call(
+        "cancel the subscription",
+        lambda: client.subscription.cancel(gateway_subscription_id, {"cancel_at_cycle_end": 0}),
+    )
+
+
+def verify_subscription_signature(
+    payment_id: str,
+    gateway_subscription_id: str,
+    signature: str,
+    *,
+    creds: Optional[RazorpayCredentials] = None,
+) -> bool:
+    """Checkout handler for a subscription: HMAC-SHA256(payment_id|subscription_id, key_secret).
+    `gateway_subscription_id` must be the id stored on the server, not the one the browser sent."""
+    secret = _resolve(creds).key_secret
+    if not secret or not signature or not payment_id or not gateway_subscription_id:
+        return False
+    expected = _hmac_hex(secret, f"{payment_id}|{gateway_subscription_id}")
+    return hmac.compare_digest(expected.encode("utf-8"), signature.strip().lower().encode("utf-8"))
+
+
 # Razorpay payment states that mean the money is (or will automatically be) ours:
 # orders are created with payment_capture=1, so "authorized" is captured shortly.
 SETTLED_GATEWAY_STATES = ("captured", "authorized")
@@ -290,6 +381,11 @@ __all__ = [
     "fetch_card",
     "create_recurring_payment",
     "create_customer",
+    "create_plan",
+    "create_subscription",
+    "fetch_subscription",
+    "cancel_subscription",
+    "verify_subscription_signature",
     "verify_fetched_payment",
     "SETTLED_GATEWAY_STATES",
     "reset_client",

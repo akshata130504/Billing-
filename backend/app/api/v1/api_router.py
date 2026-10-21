@@ -52,6 +52,7 @@ ROUTERS = [
     ("imports", "/imports", ["Control Center"]),
     ("admin", "/admin", ["Admin"]),
     ("public_invoices", "/public/invoices", ["Public"]),
+    ("public_autopay", "/public/autopay", ["Public"]),
     ("public_quotes", "/public/quotes", ["Public"]),
     ("public_website", "/public/website", ["Public"]),
     ("hosted_checkout", "/checkout", ["Hosted Checkout"]),

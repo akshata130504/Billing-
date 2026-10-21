@@ -1,5 +1,7 @@
 import { apiClient, cleanParams } from './apiClient';
 import type {
+  AutopayMandate,
+  AutopayStatusOut,
   InvoiceOut,
   PageParams,
   Paginated,
@@ -87,6 +89,23 @@ export const subscriptionService = {
 
   activate: async (id: string): Promise<SubscriptionOut> => {
     const { data } = await apiClient.post<SubscriptionOut>(`/subscriptions/${id}/activate`);
+    return data;
+  },
+
+  /** UPI AutoPay / e-mandate (Razorpay Subscriptions). */
+  getAutopay: async (id: string): Promise<AutopayStatusOut> => {
+    const { data } = await apiClient.get<AutopayStatusOut>(`/subscriptions/${id}/autopay`);
+    return data;
+  },
+
+  /** Creates (or reuses) the mandate request and returns a fresh customer authorisation link. */
+  setupAutopay: async (id: string): Promise<AutopayMandate> => {
+    const { data } = await apiClient.post<AutopayMandate>(`/subscriptions/${id}/autopay`);
+    return data;
+  },
+
+  cancelAutopay: async (id: string): Promise<AutopayMandate> => {
+    const { data } = await apiClient.post<AutopayMandate>(`/subscriptions/${id}/autopay/cancel`);
     return data;
   },
 

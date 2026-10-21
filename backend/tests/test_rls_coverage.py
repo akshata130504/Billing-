@@ -26,6 +26,7 @@ RLS_MIGRATIONS = (
     "0d1e2f3a4b5c_0032_tenant_row_level_security.py",
     "4c5d6e7f8091_0036_trial_subscription_lifecycle.py",
     "5d6e7f809102_0037_rls_every_tenant_table.py",
+    "6e7f80910213_0038_upi_autopay_gateway_subscriptions.py",
 )
 
 # Tables with an organization_id column that are deliberately NOT under the tenant policy.

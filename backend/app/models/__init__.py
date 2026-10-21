@@ -50,6 +50,7 @@ from backend.app.models.subscription_access import (
     SubscriptionRequestStatus,
 )
 from backend.app.models.access_grants import GrantScope, GrantStatus, TenantAccessGrant
+from backend.app.models.autopay import AutopayStatus, GatewaySubscription
 from backend.app.models.billing_cycles import (
     BillingCycle,
     BillingCycleStatus,
@@ -390,4 +391,6 @@ __all__ = [
     "GrantScope",
     "GrantStatus",
     "TenantAccessGrant",
+    "AutopayStatus",
+    "GatewaySubscription",
 ]

@@ -7,7 +7,10 @@
  */
 
 interface RazorpayCheckoutSuccess {
+  /** Order payments (absent for a subscription authorisation). */
   razorpay_order_id: string;
+  /** Subscription (mandate) authorisations. */
+  razorpay_subscription_id?: string;
   razorpay_payment_id: string;
   razorpay_signature: string;
 }
@@ -20,13 +23,15 @@ interface RazorpayCheckoutPrefill {
 
 interface RazorpayCheckoutOptions {
   key: string;
-  /** Paise, integer. */
-  amount: number;
-  currency: string;
+  /** Paise, integer. Not sent for a subscription (the plan sets it). */
+  amount?: number;
+  currency?: string;
   name: string;
   description?: string;
   image?: string;
-  order_id: string;
+  /** One of order_id (a payment) or subscription_id (authorise a UPI AutoPay / e-mandate). */
+  order_id?: string;
+  subscription_id?: string;
   /** Razorpay customer (cust_...) — with `save: 1` lets the customer save the card as a reusable token. */
   customer_id?: string;
   save?: 0 | 1;

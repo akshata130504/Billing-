@@ -33,6 +33,7 @@ import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { formatMoney, formatDate, formatDateTime, humanize, statusVariant } from '../../utils/format';
 import { manualRenewalState } from './renewal';
+import { AutopayCard } from './AutopayCard';
 
 export function SubscriptionDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -498,6 +499,8 @@ export function SubscriptionDetailPage() {
               </div>
             )}
           </div>
+
+          <AutopayCard subscriptionId={subscription.id} canWrite={canWrite} />
 
           {/* Linked Invoices Section */}
           <div className="bg-white rounded-xl border border-slate-200/90 shadow-sm p-5 space-y-4">
