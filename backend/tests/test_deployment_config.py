@@ -61,7 +61,7 @@ def test_compose_serves_one_website_and_keeps_platform_sign_in_mandatory():
     backend = _service_block(compose, "backend")
     assert "PLATFORM_JWT_SECRET: ${PLATFORM_JWT_SECRET:?" in backend  # the console always ships
     frontend = _service_block(compose, "frontend")
-    assert "rooman-billing-web:${IMAGE_TAG:-latest}" in frontend
+    assert "rooman-billing-web}:${IMAGE_TAG:-latest}" in frontend
     assert "healthcheck:" in frontend and "/healthz" in frontend
     # least-privilege DB role stays mandatory for the API and the scheduler
     for name in ("backend", "scheduler"):
