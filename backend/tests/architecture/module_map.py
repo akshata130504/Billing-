@@ -53,4 +53,9 @@ MODULES: dict[str, set[str]] = {
     "subscriptions": {
         "api/v1/endpoints/subscriptions.py",
     },
+    # Routers only; collection_service and dunning_service stay in services/ until issue #12 is decided.
+    "collections": {
+        "api/v1/endpoints/collections.py",
+        "api/v1/endpoints/dunning.py",
+    },
 }
