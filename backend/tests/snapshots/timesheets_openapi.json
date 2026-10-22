@@ -1,0 +1,1507 @@
+{
+  "paths": {
+    "/api/v1/timesheets": {
+      "get": {
+        "description": "Lists time entries with tenant isolation and search/filtering.",
+        "operationId": "list_time_entries_api_v1_timesheets_get",
+        "parameters": [
+          {
+            "description": "Start date filter",
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Start date filter",
+              "title": "Start Date"
+            }
+          },
+          {
+            "description": "End date filter",
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "End date filter",
+              "title": "End Date"
+            }
+          },
+          {
+            "description": "Customer filter",
+            "in": "query",
+            "name": "customer_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Customer filter",
+              "title": "Customer Id"
+            }
+          },
+          {
+            "description": "Project filter",
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Project filter",
+              "title": "Project Id"
+            }
+          },
+          {
+            "description": "User filter",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "User filter",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "Billable filter",
+            "in": "query",
+            "name": "billable",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Billable filter",
+              "title": "Billable"
+            }
+          },
+          {
+            "description": "Status filter",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TimeEntryStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Status filter",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Search description or project",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search description or project",
+              "title": "Search"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TimeEntryRead"
+                  },
+                  "title": "Response List Time Entries Api V1 Timesheets Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Time Entries",
+        "tags": [
+          "Timesheets"
+        ]
+      },
+      "post": {
+        "description": "Creates a new time entry in the organization.",
+        "operationId": "create_time_entry_api_v1_timesheets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimeEntryCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeEntryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Time Entry",
+        "tags": [
+          "Timesheets"
+        ]
+      }
+    },
+    "/api/v1/timesheets/generate-invoice": {
+      "post": {
+        "description": "Converts billable time entries into an invoice.",
+        "operationId": "generate_invoice_api_v1_timesheets_generate_invoice_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimesheetInvoiceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Generate Invoice Api V1 Timesheets Generate Invoice Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Generate Invoice",
+        "tags": [
+          "Timesheets"
+        ]
+      }
+    },
+    "/api/v1/timesheets/summary": {
+      "get": {
+        "description": "Aggregates total hours, billable amounts, and pending approvals.",
+        "operationId": "get_summary_kpis_api_v1_timesheets_summary_get",
+        "parameters": [
+          {
+            "description": "Start date filter",
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Start date filter",
+              "title": "Start Date"
+            }
+          },
+          {
+            "description": "End date filter",
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "End date filter",
+              "title": "End Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeEntrySummaryKPIs"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Summary Kpis",
+        "tags": [
+          "Timesheets"
+        ]
+      }
+    },
+    "/api/v1/timesheets/weekly": {
+      "get": {
+        "description": "Returns weekly matrix breakdown grouped by project and customer.",
+        "operationId": "get_weekly_timesheet_api_v1_timesheets_weekly_get",
+        "parameters": [
+          {
+            "description": "Starting date of the week (Monday)",
+            "in": "query",
+            "name": "week_start",
+            "required": true,
+            "schema": {
+              "description": "Starting date of the week (Monday)",
+              "format": "date",
+              "title": "Week Start",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeeklyTimesheetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Weekly Timesheet",
+        "tags": [
+          "Timesheets"
+        ]
+      }
+    },
+    "/api/v1/timesheets/{entry_id}": {
+      "delete": {
+        "description": "Deletes an unbilled time entry.",
+        "operationId": "delete_time_entry_api_v1_timesheets__entry_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Time Entry",
+        "tags": [
+          "Timesheets"
+        ]
+      },
+      "get": {
+        "description": "Gets details for a single time entry.",
+        "operationId": "get_time_entry_api_v1_timesheets__entry_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeEntryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Time Entry",
+        "tags": [
+          "Timesheets"
+        ]
+      },
+      "patch": {
+        "description": "Updates a time entry with RBAC checks.",
+        "operationId": "update_time_entry_api_v1_timesheets__entry_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimeEntryUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeEntryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Time Entry",
+        "tags": [
+          "Timesheets"
+        ]
+      }
+    },
+    "/api/v1/timesheets/{entry_id}/approve": {
+      "post": {
+        "description": "Approves a submitted time entry.",
+        "operationId": "approve_time_entry_api_v1_timesheets__entry_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeEntryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve Time Entry",
+        "tags": [
+          "Timesheets"
+        ]
+      }
+    },
+    "/api/v1/timesheets/{entry_id}/reject": {
+      "post": {
+        "description": "Rejects a submitted time entry with a reason.",
+        "operationId": "reject_time_entry_api_v1_timesheets__entry_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/TimesheetActionReason"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeEntryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reject Time Entry",
+        "tags": [
+          "Timesheets"
+        ]
+      }
+    },
+    "/api/v1/timesheets/{entry_id}/submit": {
+      "post": {
+        "description": "Submits a time entry for approval.",
+        "operationId": "submit_time_entry_api_v1_timesheets__entry_id__submit_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeEntryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Submit Time Entry",
+        "tags": [
+          "Timesheets"
+        ]
+      }
+    }
+  },
+  "schemas": {
+    "HTTPValidationError": {
+      "properties": {
+        "detail": {
+          "items": {
+            "$ref": "#/components/schemas/ValidationError"
+          },
+          "title": "Detail",
+          "type": "array"
+        }
+      },
+      "title": "HTTPValidationError",
+      "type": "object"
+    },
+    "TimeEntryCreate": {
+      "properties": {
+        "billable": {
+          "default": true,
+          "title": "Billable",
+          "type": "boolean"
+        },
+        "billing_rate": {
+          "anyOf": [
+            {
+              "maximum": 9999999999.99,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "default": "0.00",
+          "title": "Billing Rate"
+        },
+        "customer_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer Id"
+        },
+        "date": {
+          "format": "date",
+          "title": "Date",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "duration_hours": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "maximum": 24.0,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Duration Hours"
+        },
+        "end_time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "End Time"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Project Id"
+        },
+        "project_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Project Name"
+        },
+        "start_time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Start Time"
+        }
+      },
+      "required": [
+        "date",
+        "duration_hours",
+        "description"
+      ],
+      "title": "TimeEntryCreate",
+      "type": "object"
+    },
+    "TimeEntryRead": {
+      "properties": {
+        "approved_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Approved At"
+        },
+        "approved_by_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Approved By Id"
+        },
+        "approved_by_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Approved By Name"
+        },
+        "billable": {
+          "title": "Billable",
+          "type": "boolean"
+        },
+        "billable_amount": {
+          "title": "Billable Amount",
+          "type": "string"
+        },
+        "billing_rate": {
+          "title": "Billing Rate",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "customer_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer Id"
+        },
+        "customer_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer Name"
+        },
+        "customer_number": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer Number"
+        },
+        "date": {
+          "format": "date",
+          "title": "Date",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "duration_hours": {
+          "title": "Duration Hours",
+          "type": "string"
+        },
+        "end_time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "End Time"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "invoice_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Invoice Id"
+        },
+        "invoice_number": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Invoice Number"
+        },
+        "organization_id": {
+          "title": "Organization Id",
+          "type": "string"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Project Id"
+        },
+        "project_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Project Name"
+        },
+        "rejection_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Rejection Reason"
+        },
+        "start_time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Start Time"
+        },
+        "status": {
+          "$ref": "#/components/schemas/TimeEntryStatus"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        },
+        "user_email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "User Email"
+        },
+        "user_id": {
+          "title": "User Id",
+          "type": "string"
+        },
+        "user_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "User Name"
+        }
+      },
+      "required": [
+        "id",
+        "organization_id",
+        "user_id",
+        "date",
+        "duration_hours",
+        "description",
+        "billable",
+        "billing_rate",
+        "billable_amount",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "TimeEntryRead",
+      "type": "object"
+    },
+    "TimeEntryStatus": {
+      "enum": [
+        "draft",
+        "submitted",
+        "approved",
+        "rejected",
+        "billed"
+      ],
+      "title": "TimeEntryStatus",
+      "type": "string"
+    },
+    "TimeEntrySummaryKPIs": {
+      "properties": {
+        "billable_amount": {
+          "title": "Billable Amount",
+          "type": "string"
+        },
+        "billable_hours": {
+          "title": "Billable Hours",
+          "type": "string"
+        },
+        "billed_amount": {
+          "title": "Billed Amount",
+          "type": "string"
+        },
+        "non_billable_hours": {
+          "title": "Non Billable Hours",
+          "type": "string"
+        },
+        "pending_approval_count": {
+          "title": "Pending Approval Count",
+          "type": "integer"
+        },
+        "total_hours": {
+          "title": "Total Hours",
+          "type": "string"
+        },
+        "unbilled_amount": {
+          "title": "Unbilled Amount",
+          "type": "string"
+        }
+      },
+      "required": [
+        "total_hours",
+        "billable_hours",
+        "non_billable_hours",
+        "billable_amount",
+        "unbilled_amount",
+        "billed_amount",
+        "pending_approval_count"
+      ],
+      "title": "TimeEntrySummaryKPIs",
+      "type": "object"
+    },
+    "TimeEntryUpdate": {
+      "properties": {
+        "billable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billable"
+        },
+        "billing_rate": {
+          "anyOf": [
+            {
+              "maximum": 9999999999.99,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing Rate"
+        },
+        "customer_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer Id"
+        },
+        "date": {
+          "title": "Date",
+          "type": "null"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Description"
+        },
+        "duration_hours": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "maximum": 24.0,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Duration Hours"
+        },
+        "end_time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "End Time"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Project Id"
+        },
+        "project_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Project Name"
+        },
+        "start_time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Start Time"
+        }
+      },
+      "title": "TimeEntryUpdate",
+      "type": "object"
+    },
+    "TimesheetActionReason": {
+      "properties": {
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reason"
+        }
+      },
+      "title": "TimesheetActionReason",
+      "type": "object"
+    },
+    "TimesheetInvoiceCreate": {
+      "properties": {
+        "customer_id": {
+          "title": "Customer Id",
+          "type": "string"
+        },
+        "due_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Due Date"
+        },
+        "issue_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Issue Date"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Notes"
+        },
+        "time_entry_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Time Entry Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "customer_id",
+        "time_entry_ids"
+      ],
+      "title": "TimesheetInvoiceCreate",
+      "type": "object"
+    },
+    "ValidationError": {
+      "properties": {
+        "ctx": {
+          "title": "Context",
+          "type": "object"
+        },
+        "input": {
+          "title": "Input"
+        },
+        "loc": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "title": "Location",
+          "type": "array"
+        },
+        "msg": {
+          "title": "Message",
+          "type": "string"
+        },
+        "type": {
+          "title": "Error Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "loc",
+        "msg",
+        "type"
+      ],
+      "title": "ValidationError",
+      "type": "object"
+    },
+    "WeeklyMatrixRow": {
+      "properties": {
+        "billable_amount": {
+          "title": "Billable Amount",
+          "type": "string"
+        },
+        "billable_hours": {
+          "title": "Billable Hours",
+          "type": "string"
+        },
+        "customer_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer Id"
+        },
+        "customer_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer Name"
+        },
+        "daily_hours": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Daily Hours",
+          "type": "object"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Project Id"
+        },
+        "project_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Project Name"
+        },
+        "total_hours": {
+          "title": "Total Hours",
+          "type": "string"
+        },
+        "user_id": {
+          "title": "User Id",
+          "type": "string"
+        },
+        "user_name": {
+          "title": "User Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "user_id",
+        "user_name",
+        "daily_hours",
+        "total_hours",
+        "billable_hours",
+        "billable_amount"
+      ],
+      "title": "WeeklyMatrixRow",
+      "type": "object"
+    },
+    "WeeklyTimesheetResponse": {
+      "properties": {
+        "billable_hours": {
+          "title": "Billable Hours",
+          "type": "string"
+        },
+        "day_totals": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Day Totals",
+          "type": "object"
+        },
+        "non_billable_hours": {
+          "title": "Non Billable Hours",
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/components/schemas/WeeklyMatrixRow"
+          },
+          "title": "Rows",
+          "type": "array"
+        },
+        "total_hours": {
+          "title": "Total Hours",
+          "type": "string"
+        },
+        "week_end": {
+          "format": "date",
+          "title": "Week End",
+          "type": "string"
+        },
+        "week_start": {
+          "format": "date",
+          "title": "Week Start",
+          "type": "string"
+        }
+      },
+      "required": [
+        "week_start",
+        "week_end",
+        "total_hours",
+        "billable_hours",
+        "non_billable_hours",
+        "rows",
+        "day_totals"
+      ],
+      "title": "WeeklyTimesheetResponse",
+      "type": "object"
+    }
+  }
+}

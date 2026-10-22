@@ -26,4 +26,12 @@ MODULES: dict[str, set[str]] = {
         "schemas/customers.py",
         "models/customers.py",
     },
+    # timesheet_service imports invoice_service at module level and invoice_service imports it back
+    # inside a function; a move must keep both imports where they are.
+    "timesheets": {
+        "api/v1/endpoints/timesheets.py",
+        "services/timesheet_service.py",
+        "schemas/timesheets.py",
+        "models/timesheets.py",
+    },
 }
