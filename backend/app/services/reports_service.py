@@ -320,7 +320,8 @@ def _line_items_grouped(db: Session, organization_id: str, r: ReportRange, group
         .join(Invoice, Invoice.id == InvoiceItem.invoice_id)
         .where(
             InvoiceItem.organization_id == organization_id,
-            Invoice.status != InvoiceStatus.DRAFT,
+            # Same rule as _invoiced_query: drafts were never issued, voided invoices were cancelled.
+            Invoice.status.not_in([InvoiceStatus.DRAFT, InvoiceStatus.VOID]),
             Invoice.issue_date >= r.start,
             Invoice.issue_date <= r.end,
             _invoice_currency_is(currency),

@@ -470,6 +470,52 @@ def test_revenue_by_product_and_plan_grouping_excludes_ad_hoc_lines(db: Session,
     assert Decimal(by_plan[0]["quantity"]) == Decimal("2")
 
 
+def test_revenue_by_product_and_plan_exclude_voided_invoices(db: Session, org_ctx):
+    # A voided invoice was cancelled, so its lines are not revenue - the same rule as
+    # total_invoiced and invoiced_vs_collected (_invoiced_query excludes DRAFT and VOID).
+    org, user, customer, ctx = org_ctx
+    product, plan = _mk_product_plan(db, org, pricing_model=PricingModel.FLAT)
+    line = {"description": "Subscription", "product_id": product.id, "plan_id": plan.id}
+    _mk_invoice(
+        db, org, customer, status=InvoiceStatus.SENT, issue_date=TODAY, due_date=TODAY + timedelta(days=30),
+        total="1000.00", items=[{**line, "quantity": "2", "unit_price": "500.00", "amount": "1000.00"}],
+    )
+    _mk_invoice(
+        db, org, customer, status=InvoiceStatus.VOID, issue_date=TODAY, due_date=TODAY + timedelta(days=30),
+        total="9999.00", items=[{**line, "quantity": "50", "unit_price": "199.98", "amount": "9999.00"}],
+    )
+
+    r = _custom_range(TODAY - timedelta(days=1), TODAY + timedelta(days=1))
+    revenue = svc.revenue_analytics(db, org.id, r)
+    assert [(row["revenue"], Decimal(row["quantity"])) for row in revenue["revenue_by_product"]] == [("1000.00", Decimal("2"))]
+    assert [(row["revenue"], Decimal(row["quantity"])) for row in revenue["revenue_by_plan"]] == [("1000.00", Decimal("2"))]
+
+    products = svc.product_analytics(db, org.id, r)
+    assert [Decimal(row["quantity"]) for row in products["best_selling"]] == [Decimal("2")]
+    assert products["revenue_by_pricing_model"] == [{"pricing_model": "flat", "amount": "1000.00", "currency": "INR"}]
+
+    csv_text = "".join(svc.export_section_csv(db, org.id, "revenue_by_product", r))
+    assert "1000.00" in csv_text and "9999.00" not in csv_text
+
+
+def test_unlinked_payment_counts_in_totals_but_not_in_customer_ranking(db: Session, org_ctx):
+    # A payment without a customer (customer_id is nullable) is real cash: it stays in every
+    # total and in the method breakdown; only the per-customer ranking cannot place it.
+    org, user, customer, ctx = org_ctx
+    _mk_payment(db, org, customer, amount="600.00", paid_at=_noon(TODAY))
+    unlinked = _mk_payment(db, org, customer, amount="400.00", paid_at=_noon(TODAY), method=PaymentMethod.UPI)
+    unlinked.customer_id = None
+    db.commit()
+
+    r = _custom_range(TODAY - timedelta(days=1), TODAY + timedelta(days=1))
+    assert svc.kpis(db, org.id, r)["total_collected"] == "1000.00"
+    payments = svc.payment_analytics(db, org.id, r)
+    assert (payments["total_payments"], payments["payment_count"]) == ("1000.00", 2)
+    assert sum(Decimal(row["amount"]) for row in payments["method_breakdown"]) == Decimal("1000.00")
+    ranking = svc.revenue_analytics(db, org.id, r)["revenue_by_customer"]
+    assert [(row["customer"]["id"], row["amount"]) for row in ranking] == [(customer.id, "600.00")]
+
+
 def test_revenue_over_time_and_invoiced_vs_collected_buckets(db: Session, org_ctx):
     org, user, customer, ctx = org_ctx
     _mk_invoice(db, org, customer, status=InvoiceStatus.SENT, issue_date=TODAY, due_date=TODAY + timedelta(days=30), total="500.00")
