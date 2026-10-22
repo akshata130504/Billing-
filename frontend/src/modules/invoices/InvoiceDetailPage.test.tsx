@@ -20,7 +20,7 @@ vi.mock('../../components/common/Toast', () => ({
   useToast: () => ({ showToast: vi.fn() }),
 }));
 
-vi.mock('../settings/PreferencesTab', () => ({
+vi.mock('../../pages/settings/PreferencesTab', () => ({
   loadPreferences: () => ({ confirmBeforeSendInvoice: false }),
 }));
 

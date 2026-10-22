@@ -1,5 +1,5 @@
-import type { BadgeProps } from '../../components/common/Badge';
-import type { CreditNoteStatus } from '../../services/creditNoteService';
+import type { BadgeProps } from '../../../components/common/Badge';
+import type { CreditNoteStatus } from '../../../services/creditNoteService';
 
 export const CREDIT_NOTE_STATUS_LABELS: Record<CreditNoteStatus, string> = {
   draft: 'Draft',
