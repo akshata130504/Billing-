@@ -1,5 +1,5 @@
 import { apiClient, cleanParams } from './apiClient';
-import type { Project, ProjectInvoice } from '../pages/projects/types';
+import type { Project, ProjectInvoice } from '../modules/projects/types';
 
 export interface ProjectListParams {
   search?: string;

@@ -1,4 +1,2 @@
-export { ProjectsPage } from './ProjectsPage';
-export { ProjectDetailsPage } from './ProjectDetailsPage';
-export { ProjectsProvider, useProjects } from './ProjectsContext';
-export * from './types';
+export * from '../../modules/projects';
+export * from '../../modules/projects/types';

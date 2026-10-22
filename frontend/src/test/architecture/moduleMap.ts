@@ -6,5 +6,5 @@
  * a trailing "/" maps a whole folder, otherwise a single file.
  */
 export const MODULES: Record<string, string[]> = {
-  projects: ['pages/projects/', 'services/projectService.ts'],
+  projects: ['modules/projects/', 'pages/projects/', 'services/projectService.ts'],
 };
