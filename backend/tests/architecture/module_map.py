@@ -39,4 +39,9 @@ MODULES: dict[str, set[str]] = {
         "api/v1/endpoints/expenses.py",
         "services/expense_service.py",
     },
+    # Routers only; quote_service and the CPQ services stay in services/ until issue #12 is decided.
+    "quotes": {
+        "api/v1/endpoints/quotes.py",
+        "api/v1/endpoints/cpq.py",
+    },
 }
