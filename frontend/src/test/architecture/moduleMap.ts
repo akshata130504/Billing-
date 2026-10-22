@@ -11,4 +11,5 @@ export const MODULES: Record<string, string[]> = {
   products: ['modules/products/', 'pages/catalog/', 'services/catalogService.ts'],
   // services/customerService.ts stays shared: it has 28 importers across other features.
   customers: ['modules/customers/', 'pages/customers/'],
+  timesheets: ['modules/timesheets/', 'pages/timesheets/'],
 };

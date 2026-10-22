@@ -115,7 +115,7 @@ describe('import report (report-only)', () => {
     const { code, tests } = report.inbound.projects;
     expect(code).toContain('routes/index.tsx -> pages/projects/ProjectsPage.tsx');
     expect(code).toContain('pages/expenses/useCustomerProjects.ts -> services/projectService.ts');
-    expect(tests).toContain('pages/timesheets/TimeEntryModal.test.tsx -> services/projectService.ts');
+    expect(tests).toContain('modules/timesheets/TimeEntryModal.test.tsx -> services/projectService.ts');
     expect(report.rawSourceReads).toContain('routes/AdminRoutes.test.tsx reads the text of routes/index.tsx');
   });
 });

@@ -5,7 +5,7 @@ import { Modal } from '../../components/common/Modal';
 import { customerService } from '../../services/customerService';
 import { validateDescription, validateNonNegativeMoney, parseStrictNumber } from '../../utils/validation';
 import { todayIso } from '../../utils/format';
-import { useCustomerProjects } from '../expenses/useCustomerProjects';
+import { useCustomerProjects } from '../../pages/expenses/useCustomerProjects';
 
 interface TimeEntryModalProps {
   isOpen: boolean;
