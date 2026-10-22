@@ -1,7 +1,10 @@
-"""Forwarding alias for backend.app.modules.projects.service.
+"""Moved to backend.app.modules.projects.service; this path stays importable during the migration."""
+import sys
 
-Kept so existing consumers outside the module can keep importing from here
-without a breaking change during modularization.
-"""
-from backend.app.modules.projects.service import *  # noqa: F401, F403
 
+def __getattr__(name):  # PEP 562: a reference taken mid-import (circular import) still resolves
+    return getattr(sys.modules["backend.app.modules.projects.service"], name)
+
+
+from backend.app.modules.projects import service as _module  # noqa: E402
+sys.modules[__name__] = _module
