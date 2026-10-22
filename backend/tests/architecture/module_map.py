@@ -34,4 +34,9 @@ MODULES: dict[str, set[str]] = {
         "schemas/timesheets.py",
         "models/timesheets.py",
     },
+    # expense_service is in the lazy 21-service cycle; its imports stay where they are.
+    "expenses": {
+        "api/v1/endpoints/expenses.py",
+        "services/expense_service.py",
+    },
 }
