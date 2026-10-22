@@ -81,7 +81,7 @@ services:
       dockerfile: backend/Dockerfile
     # Pulled from GHCR by deploy/deploy-poll.sh in normal operation; `build:` above is
     # kept so `docker compose up -d --build` still works for a manual/local rebuild.
-    image: ghcr.io/rooman-itsd/rooman-billing-api:${IMAGE_TAG:-latest}
+    image: ${API_IMAGE:-ghcr.io/rooman-itsd/rooman-billing-api}:${IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file: .env.production
     environment:
@@ -134,7 +134,7 @@ services:
     logging: *default-logging
 
   scheduler:
-    image: ghcr.io/rooman-itsd/rooman-billing-api:${IMAGE_TAG:-latest}
+    image: ${API_IMAGE:-ghcr.io/rooman-itsd/rooman-billing-api}:${IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file: .env.production
     environment:
@@ -252,7 +252,7 @@ services:
         VITE_SUPPORT_EMAIL: ${VITE_SUPPORT_EMAIL:-}
     # Pulled from GHCR by deploy/deploy-poll.sh in normal operation; `build:` above is
     # kept so `docker compose up -d --build` still works for a manual/local rebuild.
-    image: ghcr.io/rooman-itsd/rooman-billing-web:${IMAGE_TAG:-latest}
+    image: ${WEB_IMAGE:-ghcr.io/rooman-itsd/rooman-billing-web}:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
       - "${FRONTEND_BIND:-80}:80"
