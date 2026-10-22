@@ -439,11 +439,12 @@ function PaymentInspectModal({
 
   const invoiceOptions = (invoicesQuery.data?.items ?? []).map((inv: Invoice) => ({
     value: inv.id,
-    label: `${inv.invoice_number} — ${formatMoney(inv.amount_due)} due`,
+    label: `${inv.invoice_number} — ${formatMoney(inv.amount_due, inv.currency || payment.currency)} due`,
   }));
 
   const allocateMutation = useMutation({
-    mutationFn: () => paymentService.setAllocations(payment.id, [{ invoice_id: selectedInvoiceId, amount: toMoneyString(amount) }]),
+    // Adds to the payment's existing allocations; the replace endpoint would drop them (L-5).
+    mutationFn: () => paymentService.addAllocation(payment.id, { invoice_id: selectedInvoiceId, amount: toMoneyString(amount) }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.payments.all });
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
@@ -462,7 +463,10 @@ function PaymentInspectModal({
     }
   };
 
-  const canSubmit = selectedInvoiceId !== '' && parseMoney(amount) > 0;
+  // Compare in paise so 20.00 vs '20' never fails on float noise.
+  const exceedsUnallocated =
+    amount !== '' && Math.round(parseMoney(amount) * 100) > Math.round(parseMoney(payment.amount_unallocated) * 100);
+  const canSubmit = selectedInvoiceId !== '' && parseMoney(amount) > 0 && !exceedsUnallocated;
 
   return (
     <Modal
@@ -564,6 +568,7 @@ function PaymentInspectModal({
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   helperText={`Up to ${formatMoney(payment.amount_unallocated, payment.currency)} unallocated on this payment.`}
+                  error={exceedsUnallocated ? `More than the ${formatMoney(payment.amount_unallocated, payment.currency)} still unallocated.` : undefined}
                 />
               </>
             )}

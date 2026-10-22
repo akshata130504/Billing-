@@ -215,7 +215,16 @@ interface PaymentOut {
 - `GET /payments` [viewer] query `search,status,method,gateway,reconciliation_status,customer_id,date_from,date_to,page,page_size,sort` → paginated
 - `POST /payments` [finance] body `{ customer_id, amount, method, paid_at?, reference?, notes?, allocations?: { invoice_id, amount }[] }` → 201 (unallocated remainder ⇒ `unmatched`; fully allocated ⇒ `matched`).
 - `GET /payments/{id}`; `PATCH /payments/{id}` [finance] body `{ reference?, notes? }`
-- `PUT /payments/{id}/allocations` [finance] body `{ allocations: { invoice_id, amount }[] }` → `PaymentOut` (replaces allocations; re-computes each affected invoice; 422 if Σ > payment amount or any allocation exceeds an invoice's due).
+- `PUT /payments/{id}/allocations` [finance] body `{ allocations: { invoice_id, amount }[] }` → `PaymentOut`. **Replaces the whole allocation set**: any existing allocation not in the list is removed and its invoice re-opened. Re-computes each affected invoice. Returns 422 if Σ > payment amount, or if any allocation exceeds an invoice's due. An allocation to an invoice that this payment itself paid off may be kept or reduced, but not increased; draft and void invoices are refused.
+- `POST /payments/{id}/allocations/add` [finance] body `{ invoice_id, amount }` → `PaymentOut`. **Adds** one allocation from the payment's unallocated amount and **keeps every existing allocation**; a second add to the same invoice merges into one allocation. Use this (not the PUT) to apply a leftover balance; Reconciliation's "Save Allocation" does.
+  - **Effect:** the invoice is re-computed (`paid` / `partially_paid`), and the payment's `reconciliation_status` becomes `matched` once nothing is unallocated. Audited as `PAYMENT_ALLOCATED`, with the full before and after allocation sets and the `added` line.
+  - **Atomicity:** everything runs in one transaction with the payment row locked first, so concurrent adds cannot spend the same unallocated amount twice.
+  - **Errors:**
+    - 422 `VALIDATION_ERROR`: `fields.amount` if the amount exceeds the unallocated amount after refunds; `fields["allocations.0.invoice_id"]` if the invoice belongs to another customer, is in another currency, or is not open (draft/void/paid); `fields["allocations.0.amount"]` if it exceeds the invoice's amount due; also for `amount <= 0` or unknown fields.
+    - 409 `INVALID_STATE` if the payment is not settled.
+    - 404 for another organization's payment or invoice.
+    - 403 below the finance role.
+  - On any error nothing is changed.
 - `POST /payments/{id}/refund` [admin] body `{ amount, reason? }` → `PaymentOut`. For `gateway=razorpay` this calls the Razorpay refund API (503 when not configured, 502 on gateway failure). Refund reverses allocations proportionally and re-opens invoices.
 - `GET /payments/reconciliation/summary` [viewer] → `{ auto_matched: n, matched: n, unmatched: n, exception: n, total: n, unallocated_amount: string }`
 

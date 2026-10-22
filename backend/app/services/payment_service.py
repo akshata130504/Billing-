@@ -444,10 +444,14 @@ def _validate_allocations(
                 f"invoice {invoice.invoice_number} is in {_currency(invoice.currency)}; this payment is in {_currency(currency)}"
             )
             continue
-        if invoice.status not in OPEN_INVOICE_STATUSES:
+        existing = own_existing.get(invoice.id, Decimal("0"))
+        # An invoice that this payment already settles may stay allocated (unchanged or reduced)
+        # even though that very allocation made it PAID; only new money needs an open invoice.
+        keeps_own_settlement = invoice.status == InvoiceStatus.PAID and existing > 0 and amount <= existing
+        if invoice.status not in OPEN_INVOICE_STATUSES and not keeps_own_settlement:
             fields[f"allocations.{idx}.invoice_id"] = f"invoice {invoice.invoice_number} is {invoice.status.value}, not open"
             continue
-        headroom = q2(D(invoice.amount_due) + own_existing.get(invoice.id, Decimal("0")))
+        headroom = q2(D(invoice.amount_due) + existing)
         if amount > headroom:
             fields[f"allocations.{idx}.amount"] = f"exceeds amount due on {invoice.invoice_number} ({headroom})"
             continue
@@ -678,6 +682,62 @@ def set_allocations(db: Session, ctx: CurrentContext, payment: Payment, allocati
         ctx=ctx,
         before=before,
         after={**snapshot(payment), "allocations": [{"invoice_id": i.id, "invoice_number": i.invoice_number, "amount": a} for i, a in pairs]},
+    )
+    db.commit()
+    return _reload(db, payment)
+
+
+def add_allocation(db: Session, ctx: CurrentContext, payment: Payment, allocation: AllocationIn) -> Payment:
+    """Allocate part of the payment's unallocated amount to one more invoice, keeping every
+    existing allocation (unlike `set_allocations`, which replaces the whole set).
+
+    Runs in one transaction: the payment row is locked first, so two concurrent adds cannot both
+    spend the same unallocated amount; the invoice is locked inside validation."""
+    if payment.status not in (PaymentStatus.SUCCEEDED, PaymentStatus.PARTIALLY_REFUNDED):
+        raise InvalidStateError(f"Allocations can only be changed on settled payments; this payment is {payment.status.value}.")
+    payment = lock_payment(db, payment)
+    amount = q2(allocation.amount)
+    unallocated = q2(max(Decimal("0"), effective_amount(payment) - allocated_amount(payment)))
+    if amount > unallocated:
+        raise ValidationAppError(
+            "Allocation is invalid.",
+            {"fields": {"amount": f"exceeds the unallocated amount on {payment.payment_number} ({unallocated})"}},
+        )
+    # Same customer, same currency, open invoice, within its amount due. New money only, so the
+    # payment's existing allocation to the invoice gives no extra headroom.
+    [(invoice, amount)] = _validate_allocations(
+        db,
+        ctx.organization_id,
+        unallocated,
+        [allocation],
+        customer_id=payment.customer_id,
+        currency=payment.currency,
+    )
+    before = {**snapshot(payment), "allocations": [{"invoice_id": a.invoice_id, "amount": a.amount} for a in payment.allocations]}
+
+    existing = next((a for a in payment.allocations if a.invoice_id == invoice.id), None)
+    if existing is not None:
+        existing.amount = q2(D(existing.amount) + amount)
+    else:
+        db.add(PaymentAllocation(organization_id=ctx.organization_id, payment_id=payment.id, invoice_id=invoice.id, amount=amount))
+    db.flush()
+    db.refresh(payment)
+    refresh_reconciliation(payment)
+    payment.updated_at = utcnow()
+    recompute_invoice(db, invoice, ctx=ctx)
+    audit.record(
+        db,
+        action="PAYMENT_ALLOCATED",
+        entity_type="payment",
+        entity_id=payment.id,
+        entity_label=payment.payment_number,
+        ctx=ctx,
+        before=before,
+        after={
+            **snapshot(payment),
+            "allocations": [{"invoice_id": a.invoice_id, "amount": a.amount} for a in payment.allocations],
+            "added": {"invoice_id": invoice.id, "invoice_number": invoice.invoice_number, "amount": amount},
+        },
     )
     db.commit()
     return _reload(db, payment)
