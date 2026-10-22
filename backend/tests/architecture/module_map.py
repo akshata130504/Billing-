@@ -58,4 +58,9 @@ MODULES: dict[str, set[str]] = {
         "api/v1/endpoints/collections.py",
         "api/v1/endpoints/dunning.py",
     },
+    # payment_service is in the lazy 21-service cycle; its imports stay where they are.
+    "payments": {
+        "api/v1/endpoints/payments.py",
+        "services/payment_service.py",
+    },
 }

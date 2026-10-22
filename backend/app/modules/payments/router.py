@@ -18,7 +18,8 @@ from backend.app.schemas.payments import (
     ReconciliationSummary,
     RefundIn,
 )
-from backend.app.services import idempotency_service, payment_service
+from backend.app.services import idempotency_service
+from backend.app.modules.payments import service as payment_service
 from backend.app.services.pagination import PageParams, page_params
 
 router = APIRouter()
