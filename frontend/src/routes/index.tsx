@@ -18,10 +18,10 @@ const SignupPage = lazyNamed(() => import('../pages/auth/SignupPage'), 'SignupPa
 const ForgotPasswordPage = lazyNamed(() => import('../pages/auth/ForgotPasswordPage'), 'ForgotPasswordPage');
 const ResetPasswordPage = lazyNamed(() => import('../pages/auth/ResetPasswordPage'), 'ResetPasswordPage');
 const AcceptInvitationPage = lazyNamed(() => import('../pages/auth/AcceptInvitationPage'), 'AcceptInvitationPage');
-const CustomersListPage = lazyNamed(() => import('../pages/customers/CustomersListPage'), 'CustomersListPage');
-const CustomerFormPage = lazyNamed(() => import('../pages/customers/CustomerFormPage'), 'CustomerFormPage');
-const CustomerDetailPage = lazyNamed(() => import('../pages/customers/CustomerDetailPage'), 'CustomerDetailPage');
-const CatalogPage = lazyNamed(() => import('../pages/catalog/CatalogPage'), 'CatalogPage');
+const CustomersListPage = lazyNamed(() => import('../modules/customers/CustomersListPage'), 'CustomersListPage');
+const CustomerFormPage = lazyNamed(() => import('../modules/customers/CustomerFormPage'), 'CustomerFormPage');
+const CustomerDetailPage = lazyNamed(() => import('../modules/customers/CustomerDetailPage'), 'CustomerDetailPage');
+const CatalogPage = lazyNamed(() => import('../modules/products/CatalogPage'), 'CatalogPage');
 const PlansPricingPage = lazyNamed(() => import('../pages/plans-pricing/PlansPricingPage'), 'PlansPricingPage');
 const PricingSimulatorPage = lazyNamed(() => import('../pages/plans-pricing/PricingSimulatorPage'), 'PricingSimulatorPage');
 const CPQPage = lazyNamed(() => import('../pages/cpq/CPQPage'), 'CPQPage');
