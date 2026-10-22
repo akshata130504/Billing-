@@ -67,7 +67,7 @@ const ExpenseDetailsPage = lazyNamed(() => import('../pages/expenses/ExpenseDeta
 const ExpensesProvider = lazyNamed(() => import('../pages/expenses/ExpensesContext'), 'ExpensesProvider');
 const CustomerLifecycleListPage = lazyNamed(() => import('../pages/customer-lifecycle/CustomerLifecycleListPage'), 'CustomerLifecycleListPage');
 const CustomerLifecycleDetailPage = lazyNamed(() => import('../pages/customer-lifecycle/CustomerLifecycleDetailPage'), 'CustomerLifecycleDetailPage');
-const TimesheetsPage = lazyNamed(() => import('../pages/timesheets/TimesheetsPage'), 'TimesheetsPage');
+const TimesheetsPage = lazyNamed(() => import('../modules/timesheets/TimesheetsPage'), 'TimesheetsPage');
 const ReportsPage = lazyNamed(() => import('../pages/reports/ReportsPage'), 'ReportsPage');
 const SettingsPage = lazyNamed(() => import('../pages/settings/SettingsPage'), 'SettingsPage');
 const MobilePlatformPage = lazyNamed(() => import('../pages/platforms/MobilePlatformPage'), 'MobilePlatformPage');
