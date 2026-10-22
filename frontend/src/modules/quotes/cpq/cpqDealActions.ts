@@ -1,4 +1,4 @@
-import type { CPQDealOut } from '../../types/catalog_cpq';
+import type { CPQDealOut } from '../../../types/catalog_cpq';
 
 export interface CPQDealActionContext {
   /** Signed-in user's id; used to hide Approve on the user's own deal. */

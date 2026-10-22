@@ -21,7 +21,7 @@ import type { PlanPricingItem } from '../../types/plans_pricing';
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
-import { loadPreferences } from '../settings/PreferencesTab';
+import { loadPreferences } from '../../pages/settings/PreferencesTab';
 import { PhoneInput } from '../../components/common/PhoneInput';
 import { CustomerCombobox } from '../../components/common/CustomerCombobox';
 import { useToast } from '../../components/common/Toast';

@@ -420,7 +420,7 @@ describe('uiToPaymentIn', () => {
   // builds a payload that allocates more than the payment amount. The backend
   // rejects it with a 4xx the user then has to decode; the mapper (or the form)
   // should refuse to over-allocate.
-  // See src/pages/payments/paymentMapper.ts:161-185 (uiToPaymentIn).
+  // See src/modules/payments/paymentMapper.ts:161-185 (uiToPaymentIn).
   it('should not allocate more than the payment amount', () => {
     expect(() =>
       uiToPaymentIn({

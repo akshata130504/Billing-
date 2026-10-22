@@ -23,7 +23,7 @@ import { Badge } from '../../components/common/Badge';
 import { Modal } from '../../components/common/Modal';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { PricingExplanation } from '../../components/common/PricingExplanation';
-import { loadPreferences } from '../settings/PreferencesTab';
+import { loadPreferences } from '../../pages/settings/PreferencesTab';
 import { validateDateNotFuture } from '../../utils/validation';
 import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../hooks/useAuth';

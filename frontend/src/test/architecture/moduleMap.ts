@@ -12,4 +12,10 @@ export const MODULES: Record<string, string[]> = {
   // services/customerService.ts stays shared: it has 28 importers across other features.
   customers: ['modules/customers/', 'pages/customers/'],
   timesheets: ['modules/timesheets/', 'pages/timesheets/'],
+  expenses: ['modules/expenses/', 'pages/expenses/'],
+  quotes: ['modules/quotes/', 'pages/quotes/', 'pages/cpq/'],
+  invoices: ['modules/invoices/', 'pages/invoices/', 'pages/credit-notes/'],
+  subscriptions: ['modules/subscriptions/', 'pages/subscriptions/'],
+  collections: ['modules/collections/', 'pages/collections/'],
+  payments: ['modules/payments/', 'pages/payments/'],
 };

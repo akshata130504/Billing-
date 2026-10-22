@@ -2,11 +2,11 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { CPQPage } from './CPQPage';
-import { catalogCpqService } from '../../services/catalogCpqService';
-import { customerService } from '../../services/customerService';
-import { dashboardSummaryService } from '../../services/dashboardSummaryService';
+import { catalogCpqService } from '../../../services/catalogCpqService';
+import { customerService } from '../../../services/customerService';
+import { dashboardSummaryService } from '../../../services/dashboardSummaryService';
 
-vi.mock('../../services/catalogCpqService', () => ({
+vi.mock('../../../services/catalogCpqService', () => ({
   catalogCpqService: {
     listDeals: vi.fn(),
     listOfferings: vi.fn(),
@@ -16,21 +16,21 @@ vi.mock('../../services/catalogCpqService', () => ({
   },
 }));
 
-vi.mock('../../services/dashboardSummaryService', () => ({
+vi.mock('../../../services/dashboardSummaryService', () => ({
   dashboardSummaryService: {
     deals: vi.fn(),
   },
 }));
 
-vi.mock('../../services/customerService', () => ({
+vi.mock('../../../services/customerService', () => ({
   customerService: { list: vi.fn(), create: vi.fn() },
 }));
 
-vi.mock('../../hooks/useAuth', () => ({
+vi.mock('../../../hooks/useAuth', () => ({
   useAuth: () => ({ hasRole: () => true, user: { id: 'u-1' } }),
 }));
 
-vi.mock('../../components/common/Toast', () => ({
+vi.mock('../../../components/common/Toast', () => ({
   useToast: () => ({ showToast: vi.fn() }),
 }));
 
