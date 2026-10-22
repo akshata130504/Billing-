@@ -19,4 +19,11 @@ MODULES: dict[str, set[str]] = {
         "schemas/catalog.py",
         "models/catalog.py",
     },
+    # The portal-access routes live in the customers router; their logic stays in customer_portal_service.
+    "customers": {
+        "api/v1/endpoints/customers.py",
+        "services/customer_service.py",
+        "schemas/customers.py",
+        "models/customers.py",
+    },
 }
