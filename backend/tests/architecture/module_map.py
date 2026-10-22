@@ -49,4 +49,8 @@ MODULES: dict[str, set[str]] = {
         "api/v1/endpoints/invoices.py",
         "api/v1/endpoints/credit_notes.py",
     },
+    # Router only; subscription_service stays in services/ until issue #12 is decided. /plans is in products.
+    "subscriptions": {
+        "api/v1/endpoints/subscriptions.py",
+    },
 }
