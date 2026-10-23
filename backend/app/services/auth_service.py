@@ -753,6 +753,78 @@ def verify_signup_otp(
     )
 
 
+def create_organization(
+    db: Session,
+    name: str,
+    owner: User,
+    *,
+    now: datetime,
+    organization_id: Optional[str] = None,
+    ip: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Organization:
+    """Create a self-service organization (ACTIVE, free trial starting now) for ``owner``.
+
+    Shared by email sign-up and the first "Sign in with Rooman One" of an organization, which
+    passes ``organization_id`` so Billing keeps Rooman One's id. The caller adds the OWNER
+    membership and commits. After the trial a subscription request, decided by a Platform
+    Administrator, sets its modules and seats (subscription_request_service); the platform can
+    suspend it any time.
+    """
+    organization = Organization(
+        name=name,
+        slug=unique_slug(db, name),
+        status=OrganizationStatus.ACTIVE,
+        module_access=ModuleAccess.TRIAL.value,
+        trial_started_at=now,
+        trial_ends_at=now + timedelta(days=settings.ORGANIZATION_TRIAL_DAYS),
+    )
+    if organization_id:
+        organization.id = organization_id
+    db.add(organization)
+    db.flush()
+
+    from backend.app.services import platform_audit
+    platform_audit.record(
+        db,
+        action=platform_audit.ORGANIZATION_CREATED,
+        result=platform_audit.SUCCESS,
+        staff=None,
+        tenant_actor=owner,
+        tenant_role=MemberRole.OWNER,
+        session_id=None,
+        ip_address=ip,
+        user_agent=user_agent,
+        organization=organization,
+        target_type="organization",
+        target_id=organization.id,
+        details={
+            "owner_email": owner.email,
+            "owner_name": owner.full_name,
+            "organization_name": organization.name,
+            "status": organization.status.value,
+        },
+    )
+    platform_audit.record(
+        db,
+        action=platform_audit.ORGANIZATION_TRIAL_STARTED,
+        result=platform_audit.SUCCESS,
+        tenant_actor=owner,
+        tenant_role=MemberRole.OWNER,
+        ip_address=ip,
+        user_agent=user_agent,
+        organization=organization,
+        target_type="organization",
+        target_id=organization.id,
+        details={
+            "trial_started_at": organization.trial_started_at.isoformat(),
+            "trial_ends_at": organization.trial_ends_at.isoformat(),
+            "trial_days": settings.ORGANIZATION_TRIAL_DAYS,
+        },
+    )
+    return organization
+
+
 def _create_verified_signup(
     db: Session,
     pending: PendingSignup,
@@ -773,20 +845,6 @@ def _create_verified_signup(
 
     # Remove pending record so OTP can never be reused
     db.delete(pending)
-    db.flush()
-
-    # Self-service signup: the organization is ACTIVE at once and its free trial starts now (no
-    # approval). After the trial a subscription request, decided by a Platform Administrator, sets
-    # its modules and seats (subscription_request_service); the platform can suspend it any time.
-    organization = Organization(
-        name=org_name,
-        slug=unique_slug(db, org_name),
-        status=OrganizationStatus.ACTIVE,
-        module_access=ModuleAccess.TRIAL.value,
-        trial_started_at=now,
-        trial_ends_at=now + timedelta(days=settings.ORGANIZATION_TRIAL_DAYS),
-    )
-    db.add(organization)
     db.flush()
 
     if existing is not None:
@@ -810,6 +868,7 @@ def _create_verified_signup(
         db.add(user)
     db.flush()
 
+    organization = create_organization(db, org_name, user, now=now, ip=ip, user_agent=user_agent)
     membership = Membership(
         organization_id=organization.id,
         user_id=user.id,
@@ -838,44 +897,6 @@ def _create_verified_signup(
             "email_verified": True,
             "claimed_invited_user": existing is not None,
             "organization_status": organization.status.value,
-        },
-    )
-    from backend.app.services import platform_audit
-    platform_audit.record(
-        db,
-        action=platform_audit.ORGANIZATION_CREATED,
-        result=platform_audit.SUCCESS,
-        staff=None,
-        tenant_actor=user,
-        tenant_role=membership.role,
-        session_id=None,
-        ip_address=ip,
-        user_agent=user_agent,
-        organization=organization,
-        target_type="organization",
-        target_id=organization.id,
-        details={
-            "owner_email": user.email,
-            "owner_name": user.full_name,
-            "organization_name": organization.name,
-            "status": organization.status.value,
-        },
-    )
-    platform_audit.record(
-        db,
-        action=platform_audit.ORGANIZATION_TRIAL_STARTED,
-        result=platform_audit.SUCCESS,
-        tenant_actor=user,
-        tenant_role=membership.role,
-        ip_address=ip,
-        user_agent=user_agent,
-        organization=organization,
-        target_type="organization",
-        target_id=organization.id,
-        details={
-            "trial_started_at": organization.trial_started_at.isoformat(),
-            "trial_ends_at": organization.trial_ends_at.isoformat(),
-            "trial_days": settings.ORGANIZATION_TRIAL_DAYS,
         },
     )
     _commit(db, "An account with this email or organization already exists.")
@@ -927,6 +948,7 @@ def _complete_login(
     user_agent: Optional[str],
     *,
     mfa: bool = False,
+    via: Optional[str] = None,
 ) -> TokenBundle:
     now = utcnow()
     organization = db.get(Organization, membership.organization_id)
@@ -943,7 +965,12 @@ def _complete_login(
         entity_label=user.email,
         ctx=ctx,
         actor_label=user.email,
-        after={"organization_id": membership.organization_id, "role": membership.role.value, "mfa": mfa},
+        after={
+            "organization_id": membership.organization_id,
+            "role": membership.role.value,
+            "mfa": mfa,
+            **({"via": via} if via else {}),
+        },
     )
     _commit(db)
     return tokens

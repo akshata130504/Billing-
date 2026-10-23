@@ -90,6 +90,20 @@ class LoginResponse(BaseModel):
     mfa_token: Optional[str] = None
 
 
+class RoomanOneStatus(BaseModel):
+    enabled: bool = Field(description="Whether 'Sign in with Rooman One' is configured")
+
+
+class RoomanOneExchangeRequest(BaseModel):
+    handoff: str = Field(min_length=1, max_length=8192, description="The #handoff value from the callback redirect")
+
+
+class RoomanOneExchangeResponse(LoginResponse):
+    """The sign-in result (tokens, or the MFA challenge for a two-factor account) and where to go."""
+
+    next: str = "/dashboard"
+
+
 class TotpSetupResponse(BaseModel):
     secret: str = Field(description="Base32 seed to type into an authenticator app")
     otpauth_uri: str = Field(description="otpauth:// URI (render as a QR code)")

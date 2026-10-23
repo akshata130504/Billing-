@@ -18,6 +18,7 @@ const SignupPage = lazyNamed(() => import('../pages/auth/SignupPage'), 'SignupPa
 const ForgotPasswordPage = lazyNamed(() => import('../pages/auth/ForgotPasswordPage'), 'ForgotPasswordPage');
 const ResetPasswordPage = lazyNamed(() => import('../pages/auth/ResetPasswordPage'), 'ResetPasswordPage');
 const AcceptInvitationPage = lazyNamed(() => import('../pages/auth/AcceptInvitationPage'), 'AcceptInvitationPage');
+const RoomanOneCallbackPage = lazyNamed(() => import('../pages/auth/RoomanOneCallbackPage'), 'RoomanOneCallbackPage');
 const CustomersListPage = lazyNamed(() => import('../pages/customers/CustomersListPage'), 'CustomersListPage');
 const CustomerFormPage = lazyNamed(() => import('../pages/customers/CustomerFormPage'), 'CustomerFormPage');
 const CustomerDetailPage = lazyNamed(() => import('../pages/customers/CustomerDetailPage'), 'CustomerDetailPage');
@@ -422,6 +423,7 @@ export function AppRoutes() {
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
+      <Route path="/auth/rooman-one" element={<RoomanOneCallbackPage />} />
 
       {/* Public: landing & hosted pages */}
       <Route path="/" element={<LandingPage />} />

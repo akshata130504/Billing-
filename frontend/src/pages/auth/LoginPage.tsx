@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck } from 'lucide-react';
 import { Input } from '../../components/common/Input';
@@ -9,6 +9,7 @@ import { fieldErrors, toApiError } from '../../services/apiClient';
 import { FormErrorBanner } from './AuthShell';
 import { RoomanLogo } from '../../components/common/RoomanLogo';
 import { postLoginRedirect } from '../../utils/redirect';
+import { authService } from '../../services/authService';
 
 
 export function LoginPage() {
@@ -22,10 +23,28 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [formError, setFormError] = useState<string | null>(null);
-  // Two-factor step: set once the password is accepted for an account with 2FA enabled.
-  const [mfaToken, setMfaToken] = useState<string | null>(null);
+  // A failed "Sign in with Rooman One" comes back as /login?sso_error=<message>.
+  const [formError, setFormError] = useState<string | null>(
+    () => new URLSearchParams(location.search).get('sso_error')
+  );
+  // Two-factor step: set once the password is accepted for an account with 2FA enabled, or
+  // handed over by the Rooman One callback page for a two-factor account.
+  const [mfaToken, setMfaToken] = useState<string | null>(
+    () => (location.state as { mfaToken?: string } | null)?.mfaToken ?? null
+  );
   const [mfaCode, setMfaCode] = useState('');
+  const [roomanOne, setRoomanOne] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    authService
+      .roomanOneEnabled()
+      .then((enabled) => active && setRoomanOne(enabled))
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Same-origin app paths only (see utils/redirect for the open-redirect guard).
   const redirectTo = postLoginRedirect(location.state);
@@ -270,6 +289,22 @@ export function LoginPage() {
                 </>
               )}
             </button>
+
+            {roomanOne && !mfaToken && (
+              <>
+                <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                  <span className="h-px flex-1 bg-slate-200" />
+                  <span>or</span>
+                  <span className="h-px flex-1 bg-slate-200" />
+                </div>
+                <a
+                  href={authService.roomanOneStartUrl(redirectTo)}
+                  className="w-full py-3 px-4 rounded-xl border border-slate-300 text-[#11194F] font-semibold text-sm flex items-center justify-center gap-2 hover:bg-slate-50 transition-colors"
+                >
+                  Sign in with Rooman One
+                </a>
+              </>
+            )}
 
             {/* Security Assurance */}
             <div className="flex items-center justify-center gap-1.5 text-[11px] sm:text-xs text-slate-500 pt-1">

@@ -161,6 +161,14 @@ class Settings(BaseSettings):
     # Set to true once the app is served over HTTPS so cookies/links assume TLS.
     SECURE_COOKIES: bool = False
 
+    # "Sign in with Rooman One" (OpenID Connect, docs/rooman-one-sign-in.md). Off until both
+    # OIDC_ISSUER and OIDC_CLIENT_ID are set; the client id/secret come from the Rooman One team.
+    OIDC_ISSUER: str | None = None
+    OIDC_CLIENT_ID: str | None = None
+    OIDC_CLIENT_SECRET: str | None = None
+    # https://<billing host>/api/v1/auth/rooman-one/callback, exactly as registered at Rooman One.
+    OIDC_REDIRECT_URI: str | None = None
+
     # NoDecode stops pydantic-settings from JSON-decoding the raw env value so the
     # validator below can accept either a JSON array or a comma-separated list.
     ALLOWED_ORIGINS: Annotated[List[str], NoDecode] = [
@@ -609,6 +617,7 @@ class Settings(BaseSettings):
             "RAZORPAY_KEY_SECRET",
             "RAZORPAY_WEBHOOK_SECRET",
             "SMTP_PASSWORD",
+            "OIDC_CLIENT_SECRET",
             "GEMINI_API_KEY",
             "REDIS_URL",
             "DATABASE_URL",
