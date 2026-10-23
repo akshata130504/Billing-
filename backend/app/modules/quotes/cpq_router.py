@@ -17,7 +17,7 @@ from backend.app.schemas.catalog_cpq import (
 from backend.app.schemas.common_refs import PaginatedResponse
 from backend.app.schemas.quotes import QuoteOut
 from backend.app.services import catalog_cpq_service as svc
-from backend.app.services import quote_service
+from backend.app.modules.quotes import service as quote_service
 from backend.app.services.pagination import PageParams, page_params
 
 router = APIRouter()

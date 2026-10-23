@@ -20,7 +20,7 @@ from backend.app.schemas.collections import (
 )
 from backend.app.schemas.common import PaginatedResponse
 from backend.app.schemas.invoices import InvoiceOut
-from backend.app.services import collection_service
+from backend.app.modules.collections import service as collection_service
 from backend.app.services.pagination import PageParams, page_params
 
 router = APIRouter()

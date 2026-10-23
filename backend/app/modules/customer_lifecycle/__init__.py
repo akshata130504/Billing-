@@ -1,0 +1,1 @@
+"""Customer lifecycle module (modularization)."""

@@ -20,8 +20,9 @@ from backend.app.schemas.invoices import (
     RecordPaymentIn,
 )
 from backend.app.schemas.payments import PaymentOut
-from backend.app.services import idempotency_service, invoice_service, payment_service
-from backend.app.services.invoice_pdf import render_invoice_pdf
+from backend.app.services import idempotency_service, payment_service
+from backend.app.modules.invoices import service as invoice_service
+from backend.app.modules.invoices.invoice_pdf import render_invoice_pdf
 from backend.app.services.pagination import PageParams, page_params
 
 router = APIRouter()
