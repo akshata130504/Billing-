@@ -5,7 +5,8 @@
 #
 # Each run:
 #   1. pg_dump (custom format) of the application database
-#   2. tar.gz of the uploads volume (logos, avatars, attachments), mounted read-only
+#   2. tar.gz of the uploads volume (logos, avatars, attachments) and of the private
+#      uploads volume (expense receipts), both mounted read-only
 #   3. local retention (BACKUP_RETENTION_DAYS)
 #   4. optional offsite copy with rclone (OFFSITE_BACKUP_REMOTE) + offsite retention
 #   5. on success: writes $BACKUP_DIR/last_success (the container healthcheck reads it)
@@ -14,6 +15,7 @@
 # Environment (all passed explicitly by docker-compose.prod.yml - no env_file):
 #   POSTGRES_SERVER POSTGRES_PORT POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
 #   BACKUP_DIR (default /var/backups/rooman)  UPLOADS_DIR (default /uploads)
+#   PRIVATE_UPLOADS_DIR (default /private_uploads)
 #   BACKUP_RETENTION_DAYS (default 30)
 #   OFFSITE_BACKUP_REMOTE   rclone destination, e.g. "offsite:my-bucket/rooman-billing".
 #                           The "offsite" remote is configured from RCLONE_CONFIG_OFFSITE_*
@@ -28,6 +30,7 @@ set -eu
 
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/rooman}"
 UPLOADS_DIR="${UPLOADS_DIR:-/uploads}"
+PRIVATE_UPLOADS_DIR="${PRIVATE_UPLOADS_DIR:-/private_uploads}"
 RETENTION="${BACKUP_RETENTION_DAYS:-30}"
 HOST_LABEL="${BACKUP_HOST_LABEL:-$(hostname)}"
 
@@ -59,6 +62,7 @@ mkdir -p "$BACKUP_DIR" || fail "cannot create $BACKUP_DIR"
 DATE=$(date +%Y%m%d_%H%M%S)
 DB_FILE="$BACKUP_DIR/rooman_${DATE}.dump"
 UPLOADS_FILE="$BACKUP_DIR/uploads_${DATE}.tar.gz"
+PRIVATE_UPLOADS_FILE="$BACKUP_DIR/private_uploads_${DATE}.tar.gz"
 
 # ---- 1. database ------------------------------------------------------------------
 log "Starting database backup to $DB_FILE"
@@ -77,21 +81,27 @@ mv "$DB_FILE.partial" "$DB_FILE"
 log "Database backup OK: $(ls -lh "$DB_FILE" | awk '{print $5}')"
 
 # ---- 2. uploads -------------------------------------------------------------------
-if [ -d "$UPLOADS_DIR" ]; then
-    log "Archiving uploads from $UPLOADS_DIR to $UPLOADS_FILE"
-    if ! tar -czf "$UPLOADS_FILE.partial" -C "$UPLOADS_DIR" .; then
-        rm -f "$UPLOADS_FILE.partial"
-        fail "tar of uploads volume failed"
+# archive_dir <dir> <tarball> <label>: prints the tarball path, or nothing when <dir> is
+# not mounted (the caller then leaves it out of the offsite copy).
+archive_dir() {
+    if [ -d "$1" ]; then
+        log "Archiving $3 from $1 to $2" >&2
+        if ! tar -czf "$2.partial" -C "$1" .; then
+            rm -f "$2.partial"
+            fail "tar of $3 volume failed"
+        fi
+        mv "$2.partial" "$2"
+        log "$3 backup OK: $(ls -lh "$2" | awk '{print $5}')" >&2
+        printf '%s' "$2"
+    else
+        log "WARNING: $1 not mounted - skipping $3 archive" >&2
     fi
-    mv "$UPLOADS_FILE.partial" "$UPLOADS_FILE"
-    log "Uploads backup OK: $(ls -lh "$UPLOADS_FILE" | awk '{print $5}')"
-else
-    log "WARNING: $UPLOADS_DIR not mounted - skipping uploads archive" >&2
-    UPLOADS_FILE=""
-fi
+}
+UPLOADS_FILE="$(archive_dir "$UPLOADS_DIR" "$UPLOADS_FILE" uploads)"
+PRIVATE_UPLOADS_FILE="$(archive_dir "$PRIVATE_UPLOADS_DIR" "$PRIVATE_UPLOADS_FILE" "private uploads")"
 
 # ---- 3. local retention -------------------------------------------------------------
-find "$BACKUP_DIR" -maxdepth 1 \( -name 'rooman_*.dump' -o -name 'uploads_*.tar.gz' \) \
+find "$BACKUP_DIR" -maxdepth 1 \( -name 'rooman_*.dump' -o -name 'uploads_*.tar.gz' -o -name 'private_uploads_*.tar.gz' \) \
     -mtime +"$RETENTION" -delete
 log "Local retention applied (${RETENTION} days)."
 
@@ -104,7 +114,7 @@ if [ -n "${OFFSITE_BACKUP_REMOTE:-}" ]; then
     else
         remote="${OFFSITE_BACKUP_REMOTE%/}"
         offsite_ok=1
-        for f in "$DB_FILE" $UPLOADS_FILE; do
+        for f in "$DB_FILE" $UPLOADS_FILE $PRIVATE_UPLOADS_FILE; do
             log "Uploading $(basename "$f") to $remote/"
             if ! rclone copy --retries 3 --low-level-retries 10 "$f" "$remote/"; then
                 offsite_ok=0
@@ -117,7 +127,7 @@ if [ -n "${OFFSITE_BACKUP_REMOTE:-}" ]; then
             log "Offsite upload OK."
             if [ -n "${OFFSITE_RETENTION_DAYS:-}" ] && [ "${OFFSITE_RETENTION_DAYS}" != "0" ]; then
                 rclone delete --min-age "${OFFSITE_RETENTION_DAYS}d" \
-                    --include 'rooman_*.dump' --include 'uploads_*.tar.gz' "$remote/" \
+                    --include 'rooman_*.dump' --include 'uploads_*.tar.gz' --include 'private_uploads_*.tar.gz' "$remote/" \
                     || alert "offsite retention cleanup on $remote failed (backups are still uploaded)"
             fi
         fi

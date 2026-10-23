@@ -197,6 +197,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env.production}
       BACKUP_DIR: /var/backups/rooman
       UPLOADS_DIR: /uploads
+      PRIVATE_UPLOADS_DIR: /private_uploads
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
       BACKUP_CRON: ${BACKUP_CRON:-15 1 * * *}
       BACKUP_MAX_AGE_MINUTES: ${BACKUP_MAX_AGE_MINUTES:-1560}
@@ -218,8 +219,9 @@ services:
     volumes:
       - backup_data:/var/backups/rooman
       - uploads_data:/uploads:ro
-      # Nested mount so the uploads tarball also captures private expense receipts.
-      - private_uploads_data:/uploads/_private_uploads:ro
+      # Private expense receipts get their own archive. Not nested under /uploads: Docker
+      # cannot create a mountpoint inside a read-only mount, so the container fails to start.
+      - private_uploads_data:/private_uploads:ro
       # Synced from the repo by deploy/deploy-poll.sh together with this file.
       - ./deploy/backup.sh:/usr/local/bin/backup-job.sh:ro
     depends_on:
