@@ -1,4 +1,4 @@
-import { apiClient, tokenStorage } from './apiClient';
+import { API_BASE_URL, apiClient, tokenStorage } from './apiClient';
 import type {
   AcceptInvitationRequest,
   AuthTokens,
@@ -64,6 +64,22 @@ export const authService = {
 
   login: async (body: LoginRequest): Promise<LoginResult> => {
     const { data } = await apiClient.post<LoginResult>('/auth/login', body);
+    return data;
+  },
+
+  /** Whether "Sign in with Rooman One" is configured on this server. */
+  roomanOneEnabled: async (): Promise<boolean> => {
+    const { data } = await apiClient.get<{ enabled: boolean }>('/auth/rooman-one');
+    return Boolean(data?.enabled);
+  },
+
+  /** Full-page URL that starts the Rooman One sign-in and comes back to `next`. */
+  roomanOneStartUrl: (next: string): string =>
+    `${API_BASE_URL}/auth/rooman-one/start?${new URLSearchParams({ next }).toString()}`,
+
+  /** Redeem the one-time hand-over from the callback: tokens, or the two-factor challenge. */
+  roomanOneExchange: async (handoff: string): Promise<LoginResult & { next?: string }> => {
+    const { data } = await apiClient.post<LoginResult & { next?: string }>('/auth/rooman-one/exchange', { handoff });
     return data;
   },
 

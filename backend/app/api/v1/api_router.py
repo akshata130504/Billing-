@@ -17,6 +17,7 @@ ROUTERS = [
     ("meta", "/meta", ["Meta"]),
     ("ui_config", "/ui-config", ["Meta"]),
     ("auth", "/auth", ["Auth"]),
+    ("rooman_one_login", "/auth/rooman-one", ["Auth"]),
     ("platform_auth", "/platform/auth", ["Platform Auth"]),
     ("platform_overview", "/platform", ["Platform Console"]),
     ("platform_organizations", "/platform/organizations", ["Platform Console"]),
