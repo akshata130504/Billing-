@@ -63,4 +63,8 @@ MODULES: dict[str, set[str]] = {
         "api/v1/endpoints/payments.py",
         "services/payment_service.py",
     },
+    "platforms": {
+        "api/v1/endpoints/devices.py",
+        "services/device_service.py",
+    },
 }
