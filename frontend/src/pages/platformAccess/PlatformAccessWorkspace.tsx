@@ -190,7 +190,7 @@ export function PlatformAccessWorkspace() {
         <span className="opacity-90">ticket {session.ticket_ref}</span>
         <button type="button" onClick={() => void exit()}
           className="ml-auto inline-flex items-center gap-1 rounded-md bg-white px-3 py-1 font-semibold text-rose-700 hover:bg-rose-50">
-          <LogOut className="h-4 w-4" aria-hidden="true" /> Exit tenant
+          <LogOut className="h-4 w-4 shrink-0" aria-hidden="true" /> Exit tenant
         </button>
       </div>
       <div className="mx-auto max-w-6xl p-4 sm:p-6">

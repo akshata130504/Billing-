@@ -124,7 +124,7 @@ export function TemplatePreviewModal({ template, draft, onClose }: TemplatePrevi
                       active ? 'bg-white text-brand-700 shadow-subtle' : 'text-slate-600 hover:text-slate-900'
                     )}
                   >
-                    <Icon className="w-3.5 h-3.5" />
+                    <Icon className="w-3.5 h-3.5 shrink-0" />
                     {opt.label}
                   </button>
                 );

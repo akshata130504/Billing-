@@ -344,9 +344,9 @@ export function DashboardPage() {
               onClick={() => setDateDropdownOpen((prev) => !prev)}
               className="inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200/90 rounded-xl hover:bg-slate-50 shadow-2xs transition-colors cursor-pointer"
             >
-              <Calendar className="w-3.5 h-3.5 text-slate-400" />
+              <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
               <span>{dateFilterLabels[dateFilter]}</span>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             </button>
 
             {dateDropdownOpen && (
@@ -384,7 +384,7 @@ export function DashboardPage() {
             onClick={() => setCustomizeOpen(true)}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-gradient-to-r from-[#E83E8C] to-[#D81B60] hover:from-[#D81B60] hover:to-[#C2185B] active:opacity-90 rounded-xl shadow-xs transition-all cursor-pointer"
           >
-            <SlidersHorizontal className="w-3.5 h-3.5 text-white" />
+            <SlidersHorizontal className="w-3.5 h-3.5 text-white shrink-0" />
             <span>Customize Dashboard</span>
           </button>
         </div>

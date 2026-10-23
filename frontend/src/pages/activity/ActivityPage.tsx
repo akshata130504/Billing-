@@ -227,7 +227,7 @@ function FilterBar({
                     : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:text-slate-900'
                 )}
               >
-                <Icon className={cn('w-3.5 h-3.5', active ? 'text-brand-600' : 'text-slate-400')} />
+                <Icon className={cn('w-3.5 h-3.5 shrink-0', active ? 'text-brand-600' : 'text-slate-400')} />
                 {f.label}
               </button>
             );

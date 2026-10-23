@@ -206,7 +206,7 @@ export function ProjectTable({
                     }}
                     className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600 rounded-lg transition-colors cursor-pointer"
                   >
-                    <Eye className="w-3.5 h-3.5 text-slate-400" />
+                    <Eye className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                     <span>View Project</span>
                   </button>
 
@@ -218,7 +218,7 @@ export function ProjectTable({
                     }}
                     className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600 rounded-lg transition-colors cursor-pointer"
                   >
-                    <Edit2 className="w-3.5 h-3.5 text-slate-400" />
+                    <Edit2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                     <span>Edit Project</span>
                   </button>
 
@@ -230,7 +230,7 @@ export function ProjectTable({
                     }}
                     className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600 rounded-lg transition-colors cursor-pointer"
                   >
-                    <Copy className="w-3.5 h-3.5 text-slate-400" />
+                    <Copy className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                     <span>Duplicate</span>
                   </button>
 
@@ -243,7 +243,7 @@ export function ProjectTable({
                       }}
                       className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
                     >
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                       <span>Mark Completed</span>
                     </button>
                   )}
@@ -258,7 +258,7 @@ export function ProjectTable({
                     }}
                     className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Trash2 className="w-3.5 h-3.5 shrink-0" />
                     <span>Delete</span>
                   </button>
                 </div>
@@ -388,7 +388,7 @@ export function ProjectTable({
                               }}
                               className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600 rounded-lg transition-colors cursor-pointer"
                             >
-                              <Eye className="w-3.5 h-3.5 text-slate-400" />
+                              <Eye className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                               <span>View Project</span>
                             </button>
 
@@ -400,7 +400,7 @@ export function ProjectTable({
                               }}
                               className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600 rounded-lg transition-colors cursor-pointer"
                             >
-                              <Edit2 className="w-3.5 h-3.5 text-slate-400" />
+                              <Edit2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                               <span>Edit Project</span>
                             </button>
 
@@ -412,7 +412,7 @@ export function ProjectTable({
                               }}
                               className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600 rounded-lg transition-colors cursor-pointer"
                             >
-                              <Copy className="w-3.5 h-3.5 text-slate-400" />
+                              <Copy className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                               <span>Duplicate</span>
                             </button>
 
@@ -425,7 +425,7 @@ export function ProjectTable({
                                 }}
                                 className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
                               >
-                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                                 <span>Mark Completed</span>
                               </button>
                             )}
@@ -440,7 +440,7 @@ export function ProjectTable({
                               }}
                               className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-3.5 h-3.5 shrink-0" />
                               <span>Delete</span>
                             </button>
                           </div>

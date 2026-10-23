@@ -154,7 +154,7 @@ export function RevenueOverviewWidget({ revenue, currency = 'INR', title = 'Reve
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#59617D] bg-white hover:bg-[#F7F8FC] border border-[#E7E9F2] rounded-xl shadow-3xs transition-colors cursor-pointer active:scale-[0.98]"
           >
             <span>{selectedRange}</span>
-            <ChevronDown className="w-3.5 h-3.5 text-[#7B829A]" />
+            <ChevronDown className="w-3.5 h-3.5 text-[#7B829A] shrink-0" />
           </button>
 
           {rangeOpen && (

@@ -323,7 +323,7 @@ export function CustomerLifecycleDetailPage() {
               : 'border-transparent text-slate-500 hover:text-slate-900'
           }`}
         >
-          <Clock className="w-4 h-4" />
+          <Clock className="w-4 h-4 shrink-0" />
           <span>Activity Timeline ({timeline.length})</span>
         </button>
 
@@ -335,7 +335,7 @@ export function CustomerLifecycleDetailPage() {
               : 'border-transparent text-slate-500 hover:text-slate-900'
           }`}
         >
-          <Repeat className="w-4 h-4" />
+          <Repeat className="w-4 h-4 shrink-0" />
           <span>Subscriptions ({subscriptions.length})</span>
         </button>
 
@@ -347,7 +347,7 @@ export function CustomerLifecycleDetailPage() {
               : 'border-transparent text-slate-500 hover:text-slate-900'
           }`}
         >
-          <FileText className="w-4 h-4" />
+          <FileText className="w-4 h-4 shrink-0" />
           <span>Quotes ({quotes.length})</span>
         </button>
 
@@ -359,7 +359,7 @@ export function CustomerLifecycleDetailPage() {
               : 'border-transparent text-slate-500 hover:text-slate-900'
           }`}
         >
-          <DollarSign className="w-4 h-4" />
+          <DollarSign className="w-4 h-4 shrink-0" />
           <span>Invoices ({invoices.length})</span>
         </button>
 
@@ -371,7 +371,7 @@ export function CustomerLifecycleDetailPage() {
               : 'border-transparent text-slate-500 hover:text-slate-900'
           }`}
         >
-          <CreditCard className="w-4 h-4" />
+          <CreditCard className="w-4 h-4 shrink-0" />
           <span>Payments ({payments.length})</span>
         </button>
 
@@ -383,7 +383,7 @@ export function CustomerLifecycleDetailPage() {
               : 'border-transparent text-slate-500 hover:text-slate-900'
           }`}
         >
-          <Timer className="w-4 h-4" />
+          <Timer className="w-4 h-4 shrink-0" />
           <span>Timesheets ({timesheet_summary.total_entries})</span>
         </button>
       </div>

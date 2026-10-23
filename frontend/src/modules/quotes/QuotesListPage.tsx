@@ -304,7 +304,7 @@ export function QuotesListPage() {
               className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-1"
               title="Convert to Live Invoice"
             >
-              <Receipt className="w-3 h-3" />
+              <Receipt className="w-3 h-3 shrink-0" />
               Invoice
             </button>
           )}

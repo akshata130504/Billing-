@@ -219,7 +219,7 @@ function MediaInput({ value, onChange, error, label, help, id }: {
         <input id={id} value={value} onChange={(e) => onChange(e.target.value)} className={cls(error)} maxLength={120} />
         <button type="button" disabled={busy} onClick={() => fileRef.current?.click()}
           className="mt-1 inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-          <Upload className="h-4 w-4" aria-hidden="true" /> {busy ? 'Uploading...' : 'Upload'}
+          <Upload className="h-4 w-4 shrink-0" aria-hidden="true" /> {busy ? 'Uploading...' : 'Upload'}
         </button>
         <input ref={fileRef} type="file" accept="video/mp4,image/png,image/jpeg,image/webp" className="hidden" aria-label={`Upload ${label}`}
           onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ''; }} />
@@ -305,7 +305,7 @@ export function FieldEditor({ spec, value, onChange, path, errors }: {
             ))}
             {(!spec.max || items.length < spec.max) && (
               <button type="button" onClick={() => onChange([...items, ''])} className="inline-flex items-center gap-1 text-sm font-medium text-brand-600">
-                <Plus className="h-4 w-4" /> Add
+                <Plus className="h-4 w-4 shrink-0" /> Add
               </button>
             )}
           </div>
@@ -376,7 +376,7 @@ function ListEditor({ spec, value, onChange, path, errors }: {
       {(!spec.max || items.length < spec.max) && (
         <button type="button" onClick={() => { onChange([...items, spec.newItem()]); setOpen(items.length); }}
           className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-brand-600">
-          <Plus className="h-4 w-4" /> Add {spec.label.toLowerCase().replace(/\s*\(.*\)$/, '').replace(/s$/, '')}
+          <Plus className="h-4 w-4 shrink-0" /> Add {spec.label.toLowerCase().replace(/\s*\(.*\)$/, '').replace(/s$/, '')}
         </button>
       )}
       <ErrorText error={errors[path]} />

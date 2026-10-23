@@ -249,7 +249,7 @@ export function ImportExpenseModal({ isOpen, onClose, onImport }: ImportExpenseM
               onClick={handleDownloadSample}
               className="inline-flex items-center gap-1.5 px-2.5 py-1 font-semibold text-blue-700 bg-white border border-blue-200 rounded hover:bg-blue-50 transition-colors shrink-0"
             >
-              <Download className="w-3.5 h-3.5" />
+              <Download className="w-3.5 h-3.5 shrink-0" />
               <span>Sample CSV</span>
             </button>
           </div>
@@ -357,7 +357,7 @@ export function ImportExpenseModal({ isOpen, onClose, onImport }: ImportExpenseM
             onClick={handleExecuteImport}
             className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-2xs"
           >
-            <UploadCloud className="w-3.5 h-3.5" />
+            <UploadCloud className="w-3.5 h-3.5 shrink-0" />
             <span>Import {parsedRows.length > 0 ? `${parsedRows.length} Expenses` : ''}</span>
           </button>
         </div>

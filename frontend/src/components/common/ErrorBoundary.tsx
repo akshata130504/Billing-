@@ -77,7 +77,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             onClick={this.handleReload}
             className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-lg bg-brand-600 text-white hover:bg-brand-700"
           >
-            <RotateCw className="w-3.5 h-3.5" />
+            <RotateCw className="w-3.5 h-3.5 shrink-0" />
             Reload page
           </button>
         </div>

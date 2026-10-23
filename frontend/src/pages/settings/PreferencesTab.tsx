@@ -122,7 +122,7 @@ export function PreferencesTab() {
                   : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
               )}
             >
-              <Sun className={cn('w-5 h-5 mb-1.5', prefs.theme === 'light' ? 'text-brand-600' : 'text-slate-400')} />
+              <Sun className={cn('w-5 h-5 mb-1.5 shrink-0', prefs.theme === 'light' ? 'text-brand-600' : 'text-slate-400')} />
               <span className="text-xs font-semibold">Light</span>
               <span className="text-[10px] text-slate-400">Default clean theme</span>
             </button>
@@ -137,7 +137,7 @@ export function PreferencesTab() {
                   : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
               )}
             >
-              <Moon className={cn('w-5 h-5 mb-1.5', prefs.theme === 'dark' ? 'text-brand-600' : 'text-slate-400')} />
+              <Moon className={cn('w-5 h-5 mb-1.5 shrink-0', prefs.theme === 'dark' ? 'text-brand-600' : 'text-slate-400')} />
               <span className="text-xs font-semibold">Dark</span>
               <span className="text-[10px] text-slate-400">Reduced eye strain</span>
             </button>
@@ -152,7 +152,7 @@ export function PreferencesTab() {
                   : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
               )}
             >
-              <Laptop className={cn('w-5 h-5 mb-1.5', prefs.theme === 'system' ? 'text-brand-600' : 'text-slate-400')} />
+              <Laptop className={cn('w-5 h-5 mb-1.5 shrink-0', prefs.theme === 'system' ? 'text-brand-600' : 'text-slate-400')} />
               <span className="text-xs font-semibold">System</span>
               <span className="text-[10px] text-slate-400">Sync with OS</span>
             </button>

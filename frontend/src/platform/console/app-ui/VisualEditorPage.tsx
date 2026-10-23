@@ -197,8 +197,8 @@ export function VisualEditorPage() {
         <div className="flex rounded-lg border border-slate-200" role="group" aria-label="Preview size">
           {([['desktop', Monitor], ['tablet', Tablet], ['mobile', Smartphone]] as const).map(([v, Icon]) => (
             <button key={v} type="button" onClick={() => setViewport(v)} aria-pressed={viewport === v} title={v}
-              className={`px-2.5 py-1.5 ${viewport === v ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
-              <Icon className="h-4 w-4" aria-hidden="true" /><span className="sr-only">{v}</span>
+              className={`inline-flex items-center justify-center px-2.5 py-1.5 ${viewport === v ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
+              <Icon className="h-4 w-4 shrink-0" aria-hidden="true" /><span className="sr-only">{v}</span>
             </button>
           ))}
         </div>

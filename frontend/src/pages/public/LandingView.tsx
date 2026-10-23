@@ -1543,7 +1543,7 @@ export function LandingView({ content, isAuthenticated }: LandingViewProps) {
                 onClick={() => scrollToSection('workflow')}
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-lg border border-white/20 bg-white/10 text-white font-medium hover:bg-white/20 transition-all cursor-pointer text-base backdrop-blur-sm active:scale-[0.98]"
               >
-                <Layers className="w-4 h-4 text-slate-300" />
+                <Layers className="w-4 h-4 text-slate-300 shrink-0" />
                 <span>{content.final_cta.secondary_cta_label}</span>
               </button>
             </div>
@@ -1760,7 +1760,7 @@ export function LandingView({ content, isAuthenticated }: LandingViewProps) {
                 onClick={() => scrollToSection('workflow')}
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-lg border border-white/20 bg-white/10 text-white font-medium hover:bg-white/20 shadow-xs transition-all active:scale-[0.98] cursor-pointer text-sm sm:text-base backdrop-blur-sm"
               >
-                <Layers className="w-4 h-4 text-slate-300" />
+                <Layers className="w-4 h-4 text-slate-300 shrink-0" />
                 <span>{hero.secondary_cta_label}</span>
               </button>
             </div>

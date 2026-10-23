@@ -137,7 +137,7 @@ export function ConsoleLayout() {
         onClick={() => void session.signOut()}
         className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-white/10"
       >
-        <LogOut className="h-4 w-4" aria-hidden="true" />
+        <LogOut className="h-4 w-4 shrink-0" aria-hidden="true" />
         Sign out
       </button>
     </div>

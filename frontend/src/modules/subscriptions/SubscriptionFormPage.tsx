@@ -310,9 +310,9 @@ export function SubscriptionFormPage() {
       <div className="border-b border-slate-200 pb-4">
         <button
           onClick={() => navigate(isTrialMode ? '/trials' : '/subscriptions')}
-          className="inline-flex items-center text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors mb-2"
+          className="inline-flex items-center text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors mb-2 gap-2"
         >
-          <ArrowLeft className="w-3.5 h-3.5 mr-1" />
+          <ArrowLeft className="w-3.5 h-3.5 mr-1 shrink-0" />
           {isTrialMode ? 'Back to Trial Center' : 'Back to Subscriptions'}
         </button>
         <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5">

@@ -354,7 +354,7 @@ export function RoomiChatbot() {
                             className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 border border-indigo-200 transition-colors shadow-2xs"
                           >
                             <span>Open {msg.navigation.label}</span>
-                            <ExternalLink className="w-3 h-3" />
+                            <ExternalLink className="w-3 h-3 shrink-0" />
                           </button>
                         </div>
                       )}
@@ -366,7 +366,7 @@ export function RoomiChatbot() {
                             onClick={() => handleSend(lastFailedPrompt)}
                             className="inline-flex items-center gap-1 text-xs font-medium text-rose-600 hover:text-rose-700"
                           >
-                            <RefreshCw className="w-3 h-3" />
+                            <RefreshCw className="w-3 h-3 shrink-0" />
                             <span>Retry</span>
                           </button>
                         </div>

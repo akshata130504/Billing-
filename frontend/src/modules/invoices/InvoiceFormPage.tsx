@@ -606,7 +606,7 @@ export const InvoiceFormPage: React.FC = () => {
                   onClick={() => setShowCustomerModal(true)}
                   className="text-xs text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1"
                 >
-                  <UserPlus className="w-3.5 h-3.5" /> + Create Customer
+                  <UserPlus className="w-3.5 h-3.5 shrink-0" /> + Create Customer
                 </button>
               </div>
               <CustomerCombobox

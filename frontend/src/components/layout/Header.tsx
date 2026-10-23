@@ -487,7 +487,7 @@ export function Header({ onMenuClick, onQuickCreateClick, onOpenSearch }: Header
             type="button"
             onClick={() => setNotificationsOpen((prev) => !prev)}
             className={cn(
-              "relative p-2 rounded-xl transition-colors cursor-pointer",
+              "relative inline-flex items-center justify-center p-2 rounded-xl transition-colors cursor-pointer",
               notificationsOpen
                 ? "bg-[#E8EBFC] text-[#25247A]"
                 : "text-[#7B829A] hover:text-[#11194F] hover:bg-[#F7F8FC]"
@@ -497,7 +497,7 @@ export function Header({ onMenuClick, onQuickCreateClick, onOpenSearch }: Header
             aria-expanded={notificationsOpen}
             aria-haspopup="true"
           >
-            <Bell className="w-4 h-4" />
+            <Bell className="w-4 h-4 shrink-0" />
             {unreadCount > 0 && (
               <span className="absolute top-1 right-1 min-w-[14px] h-3.5 px-0.5 bg-[#E83E8C] text-white text-[9px] font-bold rounded-full flex items-center justify-center leading-none animate-in zoom-in-75">
                 {unreadCount}
@@ -524,7 +524,7 @@ export function Header({ onMenuClick, onQuickCreateClick, onOpenSearch }: Header
                     onClick={handleMarkAllRead}
                     className="text-[11px] font-semibold text-[#3F51C9] hover:text-[#25247A] flex items-center gap-1 cursor-pointer transition-colors"
                   >
-                    <CheckCheck className="w-3.5 h-3.5" />
+                    <CheckCheck className="w-3.5 h-3.5 shrink-0" />
                     <span>Mark all read</span>
                   </button>
                 )}
