@@ -27,8 +27,9 @@ UTC) and once at container start:
 
 1. `pg_dump --format=custom` -> `rooman_<YYYYmmdd_HHMMSS>.dump` (verified with `pg_restore --list`)
 2. `tar czf` of the uploads volume (mounted read-only) -> `uploads_<YYYYmmdd_HHMMSS>.tar.gz`
+   and of the private uploads volume (expense receipts) -> `private_uploads_<YYYYmmdd_HHMMSS>.tar.gz`
 3. deletes local files older than `BACKUP_RETENTION_DAYS` (30) from the `backup_data` volume
-4. if `OFFSITE_BACKUP_REMOTE` is set, `rclone copy` of both files to it, then optional offsite
+4. if `OFFSITE_BACKUP_REMOTE` is set, `rclone copy` of all three files to it, then optional offsite
    retention (`OFFSITE_RETENTION_DAYS`)
 5. writes `last_success`; the container healthcheck turns **unhealthy** when no run succeeded in
    `BACKUP_MAX_AGE_MINUTES` (26 h)
@@ -95,6 +96,7 @@ then restore from the `backup_data` volume as above.
 rb stop backend scheduler
 # the uploads volume is mounted read-only in `backup`; use a throwaway container for the write
 docker run --rm -v rooman-billing_uploads_data:/uploads -v "$PWD":/in alpine   sh -c 'rm -rf /uploads/* && tar xzf /in/uploads_20260901_011500.tar.gz -C /uploads && chown -R 10001:10001 /uploads'
+docker run --rm -v rooman-billing_private_uploads_data:/private -v "$PWD":/in alpine   sh -c 'rm -rf /private/* && tar xzf /in/private_uploads_20260901_011500.tar.gz -C /private && chown -R 10001:10001 /private'
 rb start backend scheduler
 ```
 
