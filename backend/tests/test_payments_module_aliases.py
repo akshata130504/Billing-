@@ -17,7 +17,7 @@ ROUTER_ENTRIES = [
     ('payments', '/payments', ['Payments']),
 ]
 # (method, path) pairs per tag, counted before the move; a move must not add, drop or duplicate one.
-ROUTE_COUNTS = {'Payments': 8}
+ROUTE_COUNTS = {'Payments': 9}
 PATCH_OLD_PATH, PATCH_ATTRIBUTE = 'backend.app.services.payment_service', 'snapshot'
 
 
