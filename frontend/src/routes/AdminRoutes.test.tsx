@@ -44,7 +44,9 @@ describe('/admin - the tenant app entry point', () => {
 
   it('/admin opens the tenant sign-in directly', async () => {
     renderAt('/admin');
-    expect(await screen.findByText('Sign in to your Rooman Billing workspace.')).toBeInTheDocument();
+    // The first render in this file loads the lazy sign-in page cold; in a busy full run that can
+    // take longer than findByText's 1 s default.
+    expect(await screen.findByText('Sign in to your Rooman Billing workspace.', {}, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getByTestId('where')).toHaveTextContent(/^\/admin$/);
   });
 

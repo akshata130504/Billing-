@@ -1,0 +1,2516 @@
+{
+  "paths": {
+    "/api/v1/customers": {
+      "get": {
+        "operationId": "list_customers_api_v1_customers_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "field or -field for descending",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "field or -field for descending",
+              "title": "Sort"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_CustomerOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List customers",
+        "tags": [
+          "Customers"
+        ]
+      },
+      "post": {
+        "operationId": "create_customer_api_v1_customers_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create a customer",
+        "tags": [
+          "Customers"
+        ]
+      }
+    },
+    "/api/v1/customers/{customer_id}": {
+      "delete": {
+        "operationId": "delete_customer_api_v1_customers__customer_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete a customer",
+        "tags": [
+          "Customers"
+        ]
+      },
+      "get": {
+        "operationId": "get_customer_api_v1_customers__customer_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get a customer with stats",
+        "tags": [
+          "Customers"
+        ]
+      },
+      "patch": {
+        "operationId": "update_customer_api_v1_customers__customer_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update a customer",
+        "tags": [
+          "Customers"
+        ]
+      }
+    },
+    "/api/v1/customers/{customer_id}/contacts": {
+      "put": {
+        "operationId": "set_contacts_api_v1_customers__customer_id__contacts_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "$ref": "#/components/schemas/ContactIn"
+                },
+                "title": "Body",
+                "type": "array"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Replace the customer's contacts",
+        "tags": [
+          "Customers"
+        ]
+      }
+    },
+    "/api/v1/customers/{customer_id}/invoices": {
+      "get": {
+        "operationId": "customer_invoices_api_v1_customers__customer_id__invoices_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "field or -field for descending",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "field or -field for descending",
+              "title": "Sort"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_CustomerInvoiceRow_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Customer invoices",
+        "tags": [
+          "Customers"
+        ]
+      }
+    },
+    "/api/v1/customers/{customer_id}/payments": {
+      "get": {
+        "operationId": "customer_payments_api_v1_customers__customer_id__payments_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "field or -field for descending",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "field or -field for descending",
+              "title": "Sort"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_CustomerPaymentRow_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Customer payments",
+        "tags": [
+          "Customers"
+        ]
+      }
+    },
+    "/api/v1/customers/{customer_id}/portal-access": {
+      "get": {
+        "operationId": "get_customer_portal_access_api_v1_customers__customer_id__portal_access_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerPortalAccessStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get customer portal access status",
+        "tags": [
+          "Customers"
+        ]
+      }
+    },
+    "/api/v1/customers/{customer_id}/portal-invite": {
+      "post": {
+        "operationId": "invite_customer_to_portal_api_v1_customers__customer_id__portal_invite_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/CustomerPortalInviteIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerPortalInvitationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Invite or re-invite customer to portal",
+        "tags": [
+          "Customers"
+        ]
+      }
+    },
+    "/api/v1/customers/{customer_id}/portal-reactivate": {
+      "post": {
+        "operationId": "reactivate_customer_portal_access_api_v1_customers__customer_id__portal_reactivate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerPortalAccessStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reactivate customer portal access",
+        "tags": [
+          "Customers"
+        ]
+      }
+    },
+    "/api/v1/customers/{customer_id}/portal-revoke": {
+      "post": {
+        "operationId": "revoke_customer_portal_access_api_v1_customers__customer_id__portal_revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerPortalAccessStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke customer portal access",
+        "tags": [
+          "Customers"
+        ]
+      }
+    },
+    "/api/v1/customers/{customer_id}/subscriptions": {
+      "get": {
+        "operationId": "customer_subscriptions_api_v1_customers__customer_id__subscriptions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "field or -field for descending",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "field or -field for descending",
+              "title": "Sort"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_CustomerSubscriptionRow_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Customer subscriptions",
+        "tags": [
+          "Customers"
+        ]
+      }
+    }
+  },
+  "schemas": {
+    "ContactIn": {
+      "properties": {
+        "designation": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Designation"
+        },
+        "email": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Email"
+        },
+        "is_primary": {
+          "default": false,
+          "title": "Is Primary",
+          "type": "boolean"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "phone": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Phone"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ContactIn",
+      "type": "object"
+    },
+    "ContactOut": {
+      "properties": {
+        "designation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Designation"
+        },
+        "email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Email"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "is_primary": {
+          "title": "Is Primary",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "phone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Phone"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "is_primary"
+      ],
+      "title": "ContactOut",
+      "type": "object"
+    },
+    "CustomerCreate": {
+      "properties": {
+        "billing_address_line1": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing Address Line1"
+        },
+        "billing_address_line2": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing Address Line2"
+        },
+        "billing_city": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing City"
+        },
+        "billing_country": {
+          "anyOf": [
+            {
+              "maxLength": 2,
+              "minLength": 2,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing Country"
+        },
+        "billing_postal_code": {
+          "anyOf": [
+            {
+              "maxLength": 20,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing Postal Code"
+        },
+        "billing_state": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing State"
+        },
+        "company_name": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Company Name"
+        },
+        "contacts": {
+          "items": {
+            "$ref": "#/components/schemas/ContactIn"
+          },
+          "title": "Contacts",
+          "type": "array"
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "maxLength": 3,
+              "minLength": 3,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Currency"
+        },
+        "display_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        },
+        "email": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Email"
+        },
+        "gstin": {
+          "anyOf": [
+            {
+              "maxLength": 15,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Gstin"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Notes"
+        },
+        "pan": {
+          "anyOf": [
+            {
+              "maxLength": 10,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pan"
+        },
+        "payment_terms_days": {
+          "anyOf": [
+            {
+              "maximum": 365.0,
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Payment Terms Days"
+        },
+        "phone": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Phone"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/CustomerStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tax_exempt": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Tax Exempt"
+        },
+        "website": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Website"
+        }
+      },
+      "required": [
+        "display_name"
+      ],
+      "title": "CustomerCreate",
+      "type": "object"
+    },
+    "CustomerCurrencyStats": {
+      "properties": {
+        "currency": {
+          "title": "Currency",
+          "type": "string"
+        },
+        "open_invoice_count": {
+          "title": "Open Invoice Count",
+          "type": "integer"
+        },
+        "outstanding_amount": {
+          "title": "Outstanding Amount",
+          "type": "string"
+        },
+        "total_billed": {
+          "title": "Total Billed",
+          "type": "string"
+        },
+        "total_paid": {
+          "title": "Total Paid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "currency",
+        "open_invoice_count",
+        "outstanding_amount",
+        "total_billed",
+        "total_paid"
+      ],
+      "title": "CustomerCurrencyStats",
+      "type": "object"
+    },
+    "CustomerInvoiceRow": {
+      "properties": {
+        "amount_due": {
+          "title": "Amount Due",
+          "type": "string"
+        },
+        "amount_paid": {
+          "title": "Amount Paid",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "currency": {
+          "title": "Currency",
+          "type": "string"
+        },
+        "customer": {
+          "$ref": "#/components/schemas/CustomerRef"
+        },
+        "days_overdue": {
+          "title": "Days Overdue",
+          "type": "integer"
+        },
+        "discount_amount": {
+          "title": "Discount Amount",
+          "type": "string"
+        },
+        "discount_pct": {
+          "title": "Discount Pct",
+          "type": "string"
+        },
+        "due_date": {
+          "format": "date",
+          "title": "Due Date",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "invoice_number": {
+          "title": "Invoice Number",
+          "type": "string"
+        },
+        "issue_date": {
+          "format": "date",
+          "title": "Issue Date",
+          "type": "string"
+        },
+        "paid_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Paid At"
+        },
+        "quote_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Quote Id"
+        },
+        "sent_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sent At"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "subscription_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Subscription Id"
+        },
+        "subtotal": {
+          "title": "Subtotal",
+          "type": "string"
+        },
+        "tax_amount": {
+          "title": "Tax Amount",
+          "type": "string"
+        },
+        "total": {
+          "title": "Total",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "invoice_number",
+        "customer",
+        "status",
+        "issue_date",
+        "due_date",
+        "currency",
+        "subtotal",
+        "discount_pct",
+        "discount_amount",
+        "tax_amount",
+        "total",
+        "amount_paid",
+        "amount_due",
+        "days_overdue",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "CustomerInvoiceRow",
+      "type": "object"
+    },
+    "CustomerOut": {
+      "properties": {
+        "billing_address_line1": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing Address Line1"
+        },
+        "billing_address_line2": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing Address Line2"
+        },
+        "billing_city": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing City"
+        },
+        "billing_country": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing Country"
+        },
+        "billing_postal_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing Postal Code"
+        },
+        "billing_state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing State"
+        },
+        "company_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Company Name"
+        },
+        "contacts": {
+          "items": {
+            "$ref": "#/components/schemas/ContactOut"
+          },
+          "title": "Contacts",
+          "type": "array"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "currency": {
+          "title": "Currency",
+          "type": "string"
+        },
+        "customer_number": {
+          "title": "Customer Number",
+          "type": "string"
+        },
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Email"
+        },
+        "gstin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Gstin"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Notes"
+        },
+        "pan": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pan"
+        },
+        "payment_terms_days": {
+          "title": "Payment Terms Days",
+          "type": "integer"
+        },
+        "phone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Phone"
+        },
+        "portal_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Portal Url"
+        },
+        "stats": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/CustomerStats"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "tax_exempt": {
+          "title": "Tax Exempt",
+          "type": "boolean"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        },
+        "warnings": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        },
+        "website": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Website"
+        }
+      },
+      "required": [
+        "id",
+        "customer_number",
+        "display_name",
+        "tax_exempt",
+        "currency",
+        "payment_terms_days",
+        "status",
+        "contacts",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "CustomerOut",
+      "type": "object"
+    },
+    "CustomerPaymentRow": {
+      "properties": {
+        "amount": {
+          "title": "Amount",
+          "type": "string"
+        },
+        "amount_refunded": {
+          "title": "Amount Refunded",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "currency": {
+          "title": "Currency",
+          "type": "string"
+        },
+        "customer": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/CustomerRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gateway": {
+          "title": "Gateway",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "method": {
+          "title": "Method",
+          "type": "string"
+        },
+        "paid_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Paid At"
+        },
+        "payment_number": {
+          "title": "Payment Number",
+          "type": "string"
+        },
+        "reconciliation_status": {
+          "title": "Reconciliation Status",
+          "type": "string"
+        },
+        "reference": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reference"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "payment_number",
+        "amount",
+        "currency",
+        "method",
+        "gateway",
+        "status",
+        "reconciliation_status",
+        "amount_refunded",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "CustomerPaymentRow",
+      "type": "object"
+    },
+    "CustomerPortalAccessStatusOut": {
+      "properties": {
+        "invitation": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/CustomerPortalInvitationOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "portal_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Portal Url"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "user": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/PortalUserOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "CustomerPortalAccessStatusOut",
+      "type": "object"
+    },
+    "CustomerPortalInvitationOut": {
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "customer_id": {
+          "title": "Customer Id",
+          "type": "string"
+        },
+        "email": {
+          "title": "Email",
+          "type": "string"
+        },
+        "email_delivered": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Email Delivered"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "invite_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Invite Url"
+        },
+        "invited_by_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Invited By Name"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "customer_id",
+        "email",
+        "expires_at",
+        "created_at",
+        "status"
+      ],
+      "title": "CustomerPortalInvitationOut",
+      "type": "object"
+    },
+    "CustomerPortalInviteIn": {
+      "properties": {
+        "email": {
+          "anyOf": [
+            {
+              "format": "email",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Email"
+        }
+      },
+      "title": "CustomerPortalInviteIn",
+      "type": "object"
+    },
+    "CustomerRef": {
+      "properties": {
+        "customer_number": {
+          "title": "Customer Number",
+          "type": "string"
+        },
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Email"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "customer_number",
+        "display_name"
+      ],
+      "title": "CustomerRef",
+      "type": "object"
+    },
+    "CustomerStats": {
+      "properties": {
+        "active_subscriptions": {
+          "title": "Active Subscriptions",
+          "type": "integer"
+        },
+        "by_currency": {
+          "default": [],
+          "items": {
+            "$ref": "#/components/schemas/CustomerCurrencyStats"
+          },
+          "title": "By Currency",
+          "type": "array"
+        },
+        "currency": {
+          "default": "INR",
+          "title": "Currency",
+          "type": "string"
+        },
+        "open_invoice_count": {
+          "title": "Open Invoice Count",
+          "type": "integer"
+        },
+        "outstanding_amount": {
+          "title": "Outstanding Amount",
+          "type": "string"
+        },
+        "total_billed": {
+          "title": "Total Billed",
+          "type": "string"
+        },
+        "total_paid": {
+          "title": "Total Paid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "open_invoice_count",
+        "outstanding_amount",
+        "total_billed",
+        "total_paid",
+        "active_subscriptions"
+      ],
+      "title": "CustomerStats",
+      "type": "object"
+    },
+    "CustomerStatus": {
+      "enum": [
+        "active",
+        "inactive"
+      ],
+      "title": "CustomerStatus",
+      "type": "string"
+    },
+    "CustomerSubscriptionPlan": {
+      "properties": {
+        "billing_interval": {
+          "title": "Billing Interval",
+          "type": "string"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "currency": {
+          "title": "Currency",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "interval_count": {
+          "title": "Interval Count",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "product_name": {
+          "title": "Product Name",
+          "type": "string"
+        },
+        "unit_amount": {
+          "title": "Unit Amount",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "code",
+        "billing_interval",
+        "interval_count",
+        "unit_amount",
+        "currency",
+        "product_name"
+      ],
+      "title": "CustomerSubscriptionPlan",
+      "type": "object"
+    },
+    "CustomerSubscriptionRow": {
+      "properties": {
+        "cancel_at_period_end": {
+          "title": "Cancel At Period End",
+          "type": "boolean"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "current_period_end": {
+          "format": "date",
+          "title": "Current Period End",
+          "type": "string"
+        },
+        "current_period_start": {
+          "format": "date",
+          "title": "Current Period Start",
+          "type": "string"
+        },
+        "customer": {
+          "$ref": "#/components/schemas/CustomerRef"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "next_billing_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Next Billing Date"
+        },
+        "plan": {
+          "$ref": "#/components/schemas/CustomerSubscriptionPlan"
+        },
+        "quantity": {
+          "title": "Quantity",
+          "type": "integer"
+        },
+        "start_date": {
+          "format": "date",
+          "title": "Start Date",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "subscription_number": {
+          "title": "Subscription Number",
+          "type": "string"
+        },
+        "trial_end": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Trial End"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "subscription_number",
+        "customer",
+        "plan",
+        "quantity",
+        "status",
+        "start_date",
+        "current_period_start",
+        "current_period_end",
+        "cancel_at_period_end",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "CustomerSubscriptionRow",
+      "type": "object"
+    },
+    "CustomerUpdate": {
+      "properties": {
+        "billing_address_line1": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing Address Line1"
+        },
+        "billing_address_line2": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing Address Line2"
+        },
+        "billing_city": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing City"
+        },
+        "billing_country": {
+          "anyOf": [
+            {
+              "maxLength": 2,
+              "minLength": 2,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing Country"
+        },
+        "billing_postal_code": {
+          "anyOf": [
+            {
+              "maxLength": 20,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing Postal Code"
+        },
+        "billing_state": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Billing State"
+        },
+        "company_name": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Company Name"
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "maxLength": 3,
+              "minLength": 3,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Currency"
+        },
+        "display_name": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Display Name"
+        },
+        "email": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Email"
+        },
+        "gstin": {
+          "anyOf": [
+            {
+              "maxLength": 15,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Gstin"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Notes"
+        },
+        "pan": {
+          "anyOf": [
+            {
+              "maxLength": 10,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pan"
+        },
+        "payment_terms_days": {
+          "anyOf": [
+            {
+              "maximum": 365.0,
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Payment Terms Days"
+        },
+        "phone": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Phone"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/CustomerStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tax_exempt": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Tax Exempt"
+        },
+        "website": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Website"
+        }
+      },
+      "title": "CustomerUpdate",
+      "type": "object"
+    },
+    "HTTPValidationError": {
+      "properties": {
+        "detail": {
+          "items": {
+            "$ref": "#/components/schemas/ValidationError"
+          },
+          "title": "Detail",
+          "type": "array"
+        }
+      },
+      "title": "HTTPValidationError",
+      "type": "object"
+    },
+    "PaginatedResponse_CustomerInvoiceRow_": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/CustomerInvoiceRow"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "page": {
+          "title": "Page",
+          "type": "integer"
+        },
+        "page_size": {
+          "title": "Page Size",
+          "type": "integer"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "total_pages": {
+          "title": "Total Pages",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "total",
+        "page",
+        "page_size",
+        "total_pages"
+      ],
+      "title": "PaginatedResponse[CustomerInvoiceRow]",
+      "type": "object"
+    },
+    "PaginatedResponse_CustomerOut_": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/CustomerOut"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "page": {
+          "title": "Page",
+          "type": "integer"
+        },
+        "page_size": {
+          "title": "Page Size",
+          "type": "integer"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "total_pages": {
+          "title": "Total Pages",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "total",
+        "page",
+        "page_size",
+        "total_pages"
+      ],
+      "title": "PaginatedResponse[CustomerOut]",
+      "type": "object"
+    },
+    "PaginatedResponse_CustomerPaymentRow_": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/CustomerPaymentRow"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "page": {
+          "title": "Page",
+          "type": "integer"
+        },
+        "page_size": {
+          "title": "Page Size",
+          "type": "integer"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "total_pages": {
+          "title": "Total Pages",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "total",
+        "page",
+        "page_size",
+        "total_pages"
+      ],
+      "title": "PaginatedResponse[CustomerPaymentRow]",
+      "type": "object"
+    },
+    "PaginatedResponse_CustomerSubscriptionRow_": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/CustomerSubscriptionRow"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "page": {
+          "title": "Page",
+          "type": "integer"
+        },
+        "page_size": {
+          "title": "Page Size",
+          "type": "integer"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "total_pages": {
+          "title": "Total Pages",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "total",
+        "page",
+        "page_size",
+        "total_pages"
+      ],
+      "title": "PaginatedResponse[CustomerSubscriptionRow]",
+      "type": "object"
+    },
+    "PortalUserOut": {
+      "properties": {
+        "customer_id": {
+          "title": "Customer Id",
+          "type": "string"
+        },
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "email": {
+          "title": "Email",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "is_active": {
+          "title": "Is Active",
+          "type": "boolean"
+        },
+        "last_login_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Login At"
+        },
+        "mfa_enabled": {
+          "title": "Mfa Enabled",
+          "type": "boolean"
+        },
+        "organization_id": {
+          "title": "Organization Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "organization_id",
+        "customer_id",
+        "email",
+        "display_name",
+        "is_active",
+        "mfa_enabled"
+      ],
+      "title": "PortalUserOut",
+      "type": "object"
+    },
+    "ValidationError": {
+      "properties": {
+        "ctx": {
+          "title": "Context",
+          "type": "object"
+        },
+        "input": {
+          "title": "Input"
+        },
+        "loc": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "title": "Location",
+          "type": "array"
+        },
+        "msg": {
+          "title": "Message",
+          "type": "string"
+        },
+        "type": {
+          "title": "Error Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "loc",
+        "msg",
+        "type"
+      ],
+      "title": "ValidationError",
+      "type": "object"
+    }
+  }
+}
