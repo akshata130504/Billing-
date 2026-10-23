@@ -67,4 +67,24 @@ MODULES: dict[str, set[str]] = {
         "api/v1/endpoints/devices.py",
         "services/device_service.py",
     },
+    "integrations": {
+        "api/v1/endpoints/integrations.py",
+        "services/integrations_service.py",
+    },
+    "ai_billing": {
+        "api/v1/endpoints/ai.py",
+        "api/v1/endpoints/chat.py",
+        "services/ai_service.py",
+        "services/roomi_service.py",
+    },
+    "customer_portal": {
+        "api/v1/endpoints/portal.py",
+        "api/v1/endpoints/hosted_checkout.py",
+        "services/customer_portal_service.py",
+        "services/checkout_service.py",
+    },
+    "automation": {
+        "api/v1/endpoints/customization.py",
+        "services/customization_service.py",
+    },
 }
