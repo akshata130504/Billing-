@@ -6,22 +6,22 @@ import {
   MAX_SIMULATOR_QUANTITY,
   clampSimulatorQuantity,
 } from './PricingSimulatorPage';
-import { planPricingService } from '../../services/planPricingService';
-import { customerService } from '../../services/customerService';
-import { catalogCpqService } from '../../services/catalogCpqService';
+import { planPricingService } from '../../../services/planPricingService';
+import { customerService } from '../../../services/customerService';
+import { catalogCpqService } from '../../../services/catalogCpqService';
 
-vi.mock('../../services/planPricingService', () => ({
+vi.mock('../../../services/planPricingService', () => ({
   planPricingService: {
     listPlans: vi.fn(),
     simulatePricing: vi.fn(),
   },
 }));
 
-vi.mock('../../services/customerService', () => ({
+vi.mock('../../../services/customerService', () => ({
   customerService: { list: vi.fn() },
 }));
 
-vi.mock('../../services/catalogCpqService', () => ({
+vi.mock('../../../services/catalogCpqService', () => ({
   catalogCpqService: { listPriceBooks: vi.fn() },
 }));
 

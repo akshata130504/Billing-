@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PlanModal } from './PlanModal';
-import type { PlanPricingItem } from '../../../types/plans_pricing';
+import type { PlanPricingItem } from '../../../../types/plans_pricing';
 
 describe('<PlanModal /> Currency Display and Dynamic Formatting', () => {
   it('updates base rate label and live preview currency symbols when currency is changed to USD', () => {

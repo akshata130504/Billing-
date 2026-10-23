@@ -7,8 +7,8 @@
  */
 export const MODULES: Record<string, string[]> = {
   projects: ['pages/projects/', 'services/projectService.ts'],
-  // Products, plans and the catalog page (offerings and price books). pages/plans-pricing (/pricing) stays unassigned.
-  products: ['modules/products/', 'pages/catalog/', 'services/catalogService.ts'],
+  // Products, plans, the catalog page (offerings and price books) and plans & pricing (/pricing).
+  products: ['modules/products/', 'pages/catalog/', 'services/catalogService.ts', 'modules/products/plans-pricing/', 'pages/plans-pricing/'],
   // services/customerService.ts stays shared: it has 28 importers across other features.
   customers: ['modules/customers/', 'pages/customers/'],
   timesheets: ['modules/timesheets/', 'pages/timesheets/'],
@@ -24,4 +24,6 @@ export const MODULES: Record<string, string[]> = {
   customer_portal: ['modules/customer_portal/', 'modules/customer_portal/hosted-payment-pages/', 'modules/customer_portal/portal-customer/', 'pages/customer-portal/', 'pages/hosted-payment-pages/'],
   dunning: ['modules/dunning/', 'pages/dunning/'],
   integrations: ['modules/integrations/IntegrationsTab.tsx', 'pages/settings/'],
+  reports: ['modules/reports/', 'modules/reports/revenue-intelligence/', 'pages/reports/', 'pages/revenue-intelligence/'],
+  customer_lifecycle: ['modules/customer_lifecycle/', 'pages/customer-lifecycle/'],
 };

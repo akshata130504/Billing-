@@ -1,5 +1,5 @@
-import type { PlanPricingModel, PlanPricingTier } from '../../../types/plans_pricing';
-import { currencySymbol } from '../../../utils/format';
+import type { PlanPricingModel, PlanPricingTier } from '../../../../types/plans_pricing';
+import { currencySymbol } from '../../../../utils/format';
 
 // Client-side price preview for the plan editor. Mirrors the bracket semantics of
 // backend/app/services/pricing_engine.py (calculate_line_item_pricing / _normalize_brackets):

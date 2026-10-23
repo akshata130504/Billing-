@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2, Calculator, CheckCircle2, AlertCircle } from 'lucide-react';
-import { Button } from '../../../components/common/Button';
-import { ModalShell } from '../../../components/common/Modal';
-import { validateSensibleName, validateSku, validatePercentage, validateNonNegativeMoney } from '../../../utils/validation';
+import { Button } from '../../../../components/common/Button';
+import { ModalShell } from '../../../../components/common/Modal';
+import { validateSensibleName, validateSku, validatePercentage, validateNonNegativeMoney } from '../../../../utils/validation';
 import { calculatePricePreview } from './planPricePreview';
-import { currencySymbol } from '../../../utils/format';
-import { errorSummary } from '../../../services/apiClient';
+import { currencySymbol } from '../../../../utils/format';
+import { errorSummary } from '../../../../services/apiClient';
 import { clampSimulatorQuantity, MAX_SIMULATOR_QUANTITY } from '../PricingSimulatorPage';
 import type {
   PlanPricingItem,
@@ -13,7 +13,7 @@ import type {
   PlanPricingModel,
   PlanBillingFrequency,
   PlanPricingTier,
-} from '../../../types/plans_pricing';
+} from '../../../../types/plans_pricing';
 
 /** Largest price the API accepts for a base/tier price. */
 export const MAX_PLAN_PRICE = 999999999999.99;

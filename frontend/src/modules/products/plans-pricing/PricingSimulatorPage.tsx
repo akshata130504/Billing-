@@ -6,16 +6,16 @@ import {
   Sparkles,
   FileText,
 } from 'lucide-react';
-import { Button } from '../../components/common/Button';
-import { planPricingService } from '../../services/planPricingService';
-import { customerService } from '../../services/customerService';
-import { catalogCpqService } from '../../services/catalogCpqService';
-import type { PlanPricingItem, PricingSimulationResponse } from '../../types/plans_pricing';
-import type { CustomerOut } from '../../types/api';
-import type { PriceBookOut } from '../../types/catalog_cpq';
+import { Button } from '../../../components/common/Button';
+import { planPricingService } from '../../../services/planPricingService';
+import { customerService } from '../../../services/customerService';
+import { catalogCpqService } from '../../../services/catalogCpqService';
+import type { PlanPricingItem, PricingSimulationResponse } from '../../../types/plans_pricing';
+import type { CustomerOut } from '../../../types/api';
+import type { PriceBookOut } from '../../../types/catalog_cpq';
 
-import { LoadingState } from '../../components/common/LoadingState';
-import { currencySymbol } from '../../utils/format';
+import { LoadingState } from '../../../components/common/LoadingState';
+import { currencySymbol } from '../../../utils/format';
 
 /** Largest quantity the simulator prices (the API rejects anything above it with a 422). */
 export const MAX_SIMULATOR_QUANTITY = 1_000_000;
