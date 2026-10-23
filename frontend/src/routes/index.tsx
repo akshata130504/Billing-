@@ -23,8 +23,8 @@ const CustomersListPage = lazyNamed(() => import('../modules/customers/Customers
 const CustomerFormPage = lazyNamed(() => import('../modules/customers/CustomerFormPage'), 'CustomerFormPage');
 const CustomerDetailPage = lazyNamed(() => import('../modules/customers/CustomerDetailPage'), 'CustomerDetailPage');
 const CatalogPage = lazyNamed(() => import('../modules/products/CatalogPage'), 'CatalogPage');
-const PlansPricingPage = lazyNamed(() => import('../pages/plans-pricing/PlansPricingPage'), 'PlansPricingPage');
-const PricingSimulatorPage = lazyNamed(() => import('../pages/plans-pricing/PricingSimulatorPage'), 'PricingSimulatorPage');
+const PlansPricingPage = lazyNamed(() => import('../modules/products/plans-pricing/PlansPricingPage'), 'PlansPricingPage');
+const PricingSimulatorPage = lazyNamed(() => import('../modules/products/plans-pricing/PricingSimulatorPage'), 'PricingSimulatorPage');
 const CPQPage = lazyNamed(() => import('../modules/quotes/cpq/CPQPage'), 'CPQPage');
 const QuotesListPage = lazyNamed(() => import('../modules/quotes/QuotesListPage'), 'QuotesListPage');
 const QuoteFormPage = lazyNamed(() => import('../modules/quotes/QuoteFormPage'), 'QuoteFormPage');
@@ -65,10 +65,10 @@ const ExpensesPage = lazyNamed(() => import('../modules/expenses/ExpensesPage'),
 const RecurringExpensesPage = lazyNamed(() => import('../modules/expenses/RecurringExpensesPage'), 'RecurringExpensesPage');
 const ExpenseDetailsPage = lazyNamed(() => import('../modules/expenses/ExpenseDetailsPage'), 'ExpenseDetailsPage');
 const ExpensesProvider = lazyNamed(() => import('../modules/expenses/ExpensesContext'), 'ExpensesProvider');
-const CustomerLifecycleListPage = lazyNamed(() => import('../pages/customer-lifecycle/CustomerLifecycleListPage'), 'CustomerLifecycleListPage');
-const CustomerLifecycleDetailPage = lazyNamed(() => import('../pages/customer-lifecycle/CustomerLifecycleDetailPage'), 'CustomerLifecycleDetailPage');
+const CustomerLifecycleListPage = lazyNamed(() => import('../modules/customer_lifecycle/CustomerLifecycleListPage'), 'CustomerLifecycleListPage');
+const CustomerLifecycleDetailPage = lazyNamed(() => import('../modules/customer_lifecycle/CustomerLifecycleDetailPage'), 'CustomerLifecycleDetailPage');
 const TimesheetsPage = lazyNamed(() => import('../modules/timesheets/TimesheetsPage'), 'TimesheetsPage');
-const ReportsPage = lazyNamed(() => import('../pages/reports/ReportsPage'), 'ReportsPage');
+const ReportsPage = lazyNamed(() => import('../modules/reports/ReportsPage'), 'ReportsPage');
 const SettingsPage = lazyNamed(() => import('../pages/settings/SettingsPage'), 'SettingsPage');
 const MobilePlatformPage = lazyNamed(() => import('../modules/platforms/MobilePlatformPage'), 'MobilePlatformPage');
 const DesktopPlatformPage = lazyNamed(() => import('../modules/platforms/DesktopPlatformPage'), 'DesktopPlatformPage');
@@ -78,7 +78,7 @@ const ProrationPage = lazyNamed(() => import('../modules/subscriptions/proration
 const DunningPage = lazyNamed(() => import('../modules/dunning/DunningPage'), 'DunningPage');
 const CustomerPortalPage = lazyNamed(() => import('../modules/customer_portal/CustomerPortalPage'), 'CustomerPortalPage');
 const HostedPaymentPagesPage = lazyNamed(() => import('../modules/customer_portal/hosted-payment-pages/HostedPaymentPagesPage'), 'HostedPaymentPagesPage');
-const RevenueIntelligencePage = lazyNamed(() => import('../pages/revenue-intelligence/RevenueIntelligencePage'), 'RevenueIntelligencePage');
+const RevenueIntelligencePage = lazyNamed(() => import('../modules/reports/revenue-intelligence/RevenueIntelligencePage'), 'RevenueIntelligencePage');
 const AutomationPage = lazyNamed(() => import('../modules/automation/AutomationPage'), 'AutomationPage');
 const CustomizationPage = lazyNamed(() => import('../modules/automation/customization/CustomizationPage'), 'CustomizationPage');
 const PortalAuthProvider = lazyNamed(() => import('../modules/customer_portal/portal-customer/PortalAuthContext'), 'PortalAuthProvider');

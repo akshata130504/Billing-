@@ -2,15 +2,15 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { PricingSimulatorPage } from './PricingSimulatorPage';
-import { planPricingService } from '../../services/planPricingService';
-import { customerService } from '../../services/customerService';
-import { catalogCpqService } from '../../services/catalogCpqService';
+import { planPricingService } from '../../../services/planPricingService';
+import { customerService } from '../../../services/customerService';
+import { catalogCpqService } from '../../../services/catalogCpqService';
 
-vi.mock('../../services/planPricingService', () => ({
+vi.mock('../../../services/planPricingService', () => ({
   planPricingService: { listPlans: vi.fn(), simulatePricing: vi.fn() },
 }));
-vi.mock('../../services/customerService', () => ({ customerService: { list: vi.fn() } }));
-vi.mock('../../services/catalogCpqService', () => ({ catalogCpqService: { listPriceBooks: vi.fn() } }));
+vi.mock('../../../services/customerService', () => ({ customerService: { list: vi.fn() } }));
+vi.mock('../../../services/catalogCpqService', () => ({ catalogCpqService: { listPriceBooks: vi.fn() } }));
 
 describe('<PricingSimulatorPage /> overflow with huge values', () => {
   beforeEach(() => {

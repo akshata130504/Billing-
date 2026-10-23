@@ -2,9 +2,9 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { PlansPricingPage } from './PlansPricingPage';
-import { planPricingService } from '../../services/planPricingService';
+import { planPricingService } from '../../../services/planPricingService';
 
-vi.mock('../../services/planPricingService', () => ({
+vi.mock('../../../services/planPricingService', () => ({
   planPricingService: {
     listPlans: vi.fn(),
     updatePlan: vi.fn(),
@@ -13,10 +13,10 @@ vi.mock('../../services/planPricingService', () => ({
     createPlan: vi.fn(),
   },
 }));
-vi.mock('../../components/common/Toast', () => ({
+vi.mock('../../../components/common/Toast', () => ({
   useToast: () => ({ showToast: vi.fn() }),
 }));
-vi.mock('../../hooks/useAuth', () => ({
+vi.mock('../../../hooks/useAuth', () => ({
   useAuth: () => ({ hasRole: () => true, user: { full_name: 'Tester' } }),
 }));
 

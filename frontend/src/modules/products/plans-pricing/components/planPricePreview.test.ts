@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { calculatePricePreview, normalizeBrackets } from './planPricePreview';
-import type { PlanPricingTier } from '../../../types/plans_pricing';
+import type { PlanPricingTier } from '../../../../types/plans_pricing';
 
 const TIERS: PlanPricingTier[] = [
   { min_qty: 1, max_qty: 10, unit_price: 100 },
