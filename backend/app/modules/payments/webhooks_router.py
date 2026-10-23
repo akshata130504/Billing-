@@ -39,7 +39,8 @@ from backend.app.core.logging import logger
 from backend.app.core.rate_limit import limiter, webhook_rate_limit
 from backend.app.models import AuditStatus, Invoice, InvoiceStatus, Payment, PaymentStatus, RefundStatus, WebhookEvent, utcnow
 from backend.app.schemas.public import WebhookAck
-from backend.app.services import audit, dunning_service, payment_service
+from backend.app.services import audit, dunning_service
+from backend.app.modules.payments import service as payment_service
 from backend.app.modules.payments import razorpay_gateway as razorpay_gateway
 
 router = APIRouter()

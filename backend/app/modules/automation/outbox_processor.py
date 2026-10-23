@@ -178,7 +178,7 @@ def _handle_email_send(db: Session, event: OutboxEvent) -> None:
 
 def _handle_webhook_delivery(db: Session, event: OutboxEvent) -> None:
     from backend.app.models.customization import OutboundWebhookDelivery
-    from backend.app.services import customization_service
+    from backend.app.modules.automation import service as customization_service
 
     delivery_id = (event.payload or {}).get("delivery_id") or event.aggregate_id
     delivery = db.get(OutboundWebhookDelivery, delivery_id)
@@ -213,7 +213,7 @@ def _sync_webhook_notification(db: Session, delivery: Any, sent: bool) -> None:
 
 
 def _handle_domain_event(db: Session, event: OutboxEvent) -> None:
-    from backend.app.services import customization_service
+    from backend.app.modules.automation import service as customization_service
 
     event_type = _event_type_str(event.event_type)
     payload = dict(event.payload or {})
