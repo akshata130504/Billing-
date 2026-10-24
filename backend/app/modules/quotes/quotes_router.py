@@ -20,9 +20,9 @@ from backend.app.schemas.quotes import (
 )
 from backend.app.schemas.subscriptions import SubscriptionOut
 from sqlalchemy import select
-from backend.app.services import quote_service as svc
+from backend.app.modules.quotes import service as svc
 from backend.app.services.pagination import PageParams, page_params
-from backend.app.services.quote_pdf import render_quote_pdf
+from backend.app.modules.quotes.quote_pdf import render_quote_pdf
 
 router = APIRouter()
 

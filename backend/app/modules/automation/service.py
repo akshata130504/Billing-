@@ -927,7 +927,7 @@ def queue_webhook_delivery(
     rule_id: Optional[str] = None,
 ) -> OutboundWebhookDelivery:
     """Creates a pending delivery row and a ``webhook.deliver`` outbox event (retried with backoff)."""
-    from backend.app.services.outbox_processor import enqueue_webhook_delivery
+    from backend.app.modules.automation.outbox_processor import enqueue_webhook_delivery
 
     delivery = OutboundWebhookDelivery(
         organization_id=organization_id,
@@ -953,7 +953,7 @@ def enqueue_subscribed_webhooks(
 ) -> int:
     """Fans a domain event out to the organization's Integrations webhook endpoint when it is
     connected and subscribed to ``event_type`` (or ``*``). Returns the number of deliveries queued."""
-    from backend.app.services.outbox_processor import INTERNAL_EVENT_TYPES
+    from backend.app.modules.automation.outbox_processor import INTERNAL_EVENT_TYPES
     from backend.app.services.integrations_service import get_webhook_config
 
     if not event_type or event_type in INTERNAL_EVENT_TYPES:

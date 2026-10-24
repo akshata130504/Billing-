@@ -17,7 +17,8 @@ from backend.app.schemas.subscriptions import (
     SubscriptionSummaryOut,
     SubscriptionUpdate,
 )
-from backend.app.services import invoice_service, subscription_service
+from backend.app.services import invoice_service
+from backend.app.modules.subscriptions import service as subscription_service
 from backend.app.services.pagination import PageParams, page_params
 
 router = APIRouter()
@@ -40,7 +41,7 @@ def subscription_plan_options(
     ctx: CurrentContext = Depends(require_viewer),
     db: Session = Depends(get_db),
 ):
-    from backend.app.services import offering_subscription_service
+    from backend.app.modules.subscriptions import offering_service as offering_subscription_service
 
     return offering_subscription_service.list_subscribable_options(db, ctx.organization_id)
 

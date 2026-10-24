@@ -42,7 +42,8 @@ from backend.app.schemas.common_refs import customer_ref, iso_dt, money_str, use
 from backend.app.schemas.invoices import RecordPaymentIn
 from backend.app.schemas.payments import AllocationIn, PaymentCreate, PaymentUpdate
 from backend.app.schemas.validators import is_after_org_today
-from backend.app.services import audit, currency_totals, razorpay_gateway, timezones
+from backend.app.services import audit, currency_totals, timezones
+from backend.app.modules.payments import razorpay_gateway as razorpay_gateway
 from backend.app.services.invoice_service import (
     SETTLED_PAYMENT_STATUSES,
     get_customer,

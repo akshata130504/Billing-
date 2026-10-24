@@ -19,7 +19,7 @@ from backend.app.schemas.dunning import (
     DunningPolicyUpdate,
     ExpiringCardNoticeOut,
 )
-from backend.app.services import dunning_service
+from backend.app.modules.collections import dunning_service as dunning_service
 
 router = APIRouter(prefix="/dunning", tags=["Dunning Management"])
 

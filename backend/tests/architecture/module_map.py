@@ -18,6 +18,10 @@ MODULES: dict[str, set[str]] = {
         "services/catalog_service.py",
         "schemas/catalog.py",
         "models/catalog.py",
+        "services/pricing_engine.py",
+        "services/catalog_cpq_service.py",
+        "api/v1/endpoints/pricing.py",
+        "api/v1/endpoints/catalog.py",
     },
     # The portal-access routes live in the customers router; their logic stays in customer_portal_service.
     "customers": {
@@ -39,29 +43,53 @@ MODULES: dict[str, set[str]] = {
         "api/v1/endpoints/expenses.py",
         "services/expense_service.py",
     },
-    # Routers only; quote_service and the CPQ services stay in services/ until issue #12 is decided.
+    # quote_service is in the lazy service cycle; its old path is a forwarding alias, so the
+    # cycle's imports keep resolving. Offerings and price books (/catalog) are in products.
     "quotes": {
         "api/v1/endpoints/quotes.py",
         "api/v1/endpoints/cpq.py",
+        "services/quote_service.py",
+        "services/quote_pdf.py",
+        "api/v1/endpoints/public_quotes.py",
     },
-    # Routers only; invoice_service and credit_service stay in services/ until issue #12 is decided.
+    # invoice_service is in the lazy service cycle (timesheets, subscriptions, payments import it);
+    # its old path is a forwarding alias, so those imports keep resolving.
     "invoices": {
         "api/v1/endpoints/invoices.py",
         "api/v1/endpoints/credit_notes.py",
+        "services/invoice_service.py",
+        "services/credit_service.py",
+        "services/invoice_pdf.py",
+        "api/v1/endpoints/public_invoices.py",
     },
-    # Router only; subscription_service stays in services/ until issue #12 is decided. /plans is in products.
+    # Subscriptions & Usage: subscriptions, changes/proration, meters and trials. /plans is in products.
     "subscriptions": {
         "api/v1/endpoints/subscriptions.py",
+        "services/subscription_service.py",
+        "services/subscription_change_service.py",
+        "services/meter_service.py",
+        "services/trial_service.py",
+        "services/proration_calculator.py",
+        "services/offering_subscription_service.py",
+        "api/v1/endpoints/subscription_changes.py",
+        "api/v1/endpoints/meters.py",
+        "api/v1/endpoints/trials.py",
     },
-    # Routers only; collection_service and dunning_service stay in services/ until issue #12 is decided.
+    # Collections and dunning (modules.json lists dunning separately; its code lives here).
     "collections": {
         "api/v1/endpoints/collections.py",
         "api/v1/endpoints/dunning.py",
+        "services/collection_service.py",
+        "services/dunning_service.py",
     },
     # payment_service is in the lazy 21-service cycle; its imports stay where they are.
     "payments": {
         "api/v1/endpoints/payments.py",
         "services/payment_service.py",
+        "services/payment_method_service.py",
+        "services/razorpay_gateway.py",
+        "api/v1/endpoints/payment_methods.py",
+        "api/v1/endpoints/webhooks.py",
     },
     "platforms": {
         "api/v1/endpoints/devices.py",
@@ -86,5 +114,14 @@ MODULES: dict[str, set[str]] = {
     "automation": {
         "api/v1/endpoints/customization.py",
         "services/customization_service.py",
+        "services/outbox_processor.py",
+    },
+    "reports": {
+        "api/v1/endpoints/reports.py",
+        "services/reports_service.py",
+    },
+    "customer_lifecycle": {
+        "api/v1/endpoints/lifecycle.py",
+        "services/lifecycle_service.py",
     },
 }

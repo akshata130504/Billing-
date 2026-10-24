@@ -17,7 +17,7 @@ from backend.app.schemas.credits import (
     CreditNoteOut,
     CreditNoteSummaryOut,
 )
-from backend.app.services import credit_service
+from backend.app.modules.invoices import credit_service as credit_service
 
 router = APIRouter()
 
