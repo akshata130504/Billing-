@@ -80,7 +80,7 @@ export function PaymentsPage() {
             onClick={() => setIsRecordOpen(true)}
             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 shadow-2xs transition-colors self-start sm:self-auto"
           >
-            <Plus className="w-3.5 h-3.5" />
+            <Plus className="w-3.5 h-3.5 shrink-0" />
             <span>Record Payment</span>
           </button>
         )}

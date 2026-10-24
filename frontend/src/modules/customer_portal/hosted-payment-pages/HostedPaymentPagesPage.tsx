@@ -459,7 +459,7 @@ export function HostedPaymentPagesPage() {
                   active ? 'bg-brand-50 text-brand-700 font-semibold' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 )}
               >
-                <Icon className={cn('w-4 h-4', active ? 'text-brand-600' : 'text-slate-400')} />
+                <Icon className={cn('w-4 h-4 shrink-0', active ? 'text-brand-600' : 'text-slate-400')} />
                 {t.label}
                 <span className={cn('ml-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold', active ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-500')}>
                   {t.count}

@@ -737,7 +737,7 @@ export function CustomerLifecycleCinematicPage() {
                 onClick={handleRestart}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white/10 hover:bg-white/20 border border-white/10 text-xs font-medium text-white transition"
               >
-                <RotateCcw className="w-3.5 h-3.5" />
+                <RotateCcw className="w-3.5 h-3.5 shrink-0" />
                 <span>Replay</span>
               </button>
             </div>
@@ -761,7 +761,7 @@ export function CustomerLifecycleCinematicPage() {
                 onClick={toggleFullscreen}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-white/10 hover:bg-white/20 border border-white/10 text-xs font-medium text-white transition"
               >
-                <Maximize2 className="w-3.5 h-3.5" />
+                <Maximize2 className="w-3.5 h-3.5 shrink-0" />
                 <span className="hidden sm:inline">Fullscreen</span>
               </button>
             </div>

@@ -523,7 +523,7 @@ export function CPQPage() {
                         onClick={() => setShowQuickCreateCustomer(!showQuickCreateCustomer)}
                         className="text-[11px] font-semibold text-brand-600 hover:text-brand-700 flex items-center gap-1"
                       >
-                        <UserPlus className="w-3.5 h-3.5" />
+                        <UserPlus className="w-3.5 h-3.5 shrink-0" />
                         {showQuickCreateCustomer ? 'Cancel New Customer' : '+ New Customer'}
                       </button>
                     </div>

@@ -344,7 +344,7 @@ export function ChangePlanner({
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
                 )}
               >
-                <TrendingUp className="w-3.5 h-3.5" />
+                <TrendingUp className="w-3.5 h-3.5 shrink-0" />
                 Upgrade
               </button>
               <button
@@ -357,7 +357,7 @@ export function ChangePlanner({
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
                 )}
               >
-                <TrendingDown className="w-3.5 h-3.5" />
+                <TrendingDown className="w-3.5 h-3.5 shrink-0" />
                 Downgrade
               </button>
               <button
@@ -370,7 +370,7 @@ export function ChangePlanner({
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
                 )}
               >
-                <Sliders className="w-3.5 h-3.5" />
+                <Sliders className="w-3.5 h-3.5 shrink-0" />
                 Resize
               </button>
             </div>

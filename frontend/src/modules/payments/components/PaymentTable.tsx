@@ -126,7 +126,7 @@ export function PaymentTable({
             onClick={onRecordNew}
             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 shadow-2xs transition-colors"
           >
-            <PlusCircle className="w-3.5 h-3.5" />
+            <PlusCircle className="w-3.5 h-3.5 shrink-0" />
             <span>Record Payment</span>
           </button>
         </div>
@@ -329,7 +329,7 @@ export function PaymentTable({
                                       }}
                                       className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
                                     >
-                                      <Receipt className="w-3.5 h-3.5 text-slate-400" />
+                                      <Receipt className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                                       Receipt
                                     </button>
                                     {canRefund && (
@@ -344,7 +344,7 @@ export function PaymentTable({
                                           }}
                                           className="w-full px-3 py-1.5 text-left text-rose-600 hover:bg-rose-50 flex items-center gap-2 font-medium"
                                         >
-                                          <RotateCcw className="w-3.5 h-3.5" />
+                                          <RotateCcw className="w-3.5 h-3.5 shrink-0" />
                                           Issue Refund
                                         </button>
                                       </>

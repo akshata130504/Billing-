@@ -613,7 +613,7 @@ export function ExpenseFormModal({
             onClick={handleSubmit}
             className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg shadow-2xs transition-colors font-semibold"
           >
-            <CheckCircle className="w-3.5 h-3.5" />
+            <CheckCircle className="w-3.5 h-3.5 shrink-0" />
             <span>{editingExpense ? 'Save Changes' : 'Save Expense'}</span>
           </button>
         </div>

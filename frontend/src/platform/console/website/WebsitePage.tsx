@@ -173,7 +173,7 @@ export function WebsitePage() {
         {dirty && <Badge variant="info">Unsaved changes</Badge>}
         {hasDraft && !dirty && (
           <button type="button" onClick={() => void discard()} className="ml-auto inline-flex items-center gap-1 text-sm text-rose-600 hover:underline">
-            <Undo2 className="h-4 w-4" /> Discard draft
+            <Undo2 className="h-4 w-4 shrink-0" /> Discard draft
           </button>
         )}
       </div>

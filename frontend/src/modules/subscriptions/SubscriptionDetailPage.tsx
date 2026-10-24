@@ -259,9 +259,9 @@ export function SubscriptionDetailPage() {
         <div>
           <button
             onClick={() => navigate('/subscriptions')}
-            className="inline-flex items-center text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors mb-2"
+            className="inline-flex items-center text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors mb-2 gap-2"
           >
-            <ArrowLeft className="w-3.5 h-3.5 mr-1" />
+            <ArrowLeft className="w-3.5 h-3.5 mr-1 shrink-0" />
             Back to Subscriptions
           </button>
           <div className="flex flex-wrap items-center gap-3">

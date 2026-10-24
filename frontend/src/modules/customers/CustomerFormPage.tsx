@@ -717,7 +717,7 @@ export function CustomerFormPage() {
                       )}
                       aria-pressed={c.is_primary}
                     >
-                      <Star className={cn('w-3.5 h-3.5', c.is_primary && 'fill-current')} />
+                      <Star className={cn('w-3.5 h-3.5 shrink-0', c.is_primary && 'fill-current')} />
                       {c.is_primary ? 'Primary contact' : 'Make primary'}
                     </button>
                     <button

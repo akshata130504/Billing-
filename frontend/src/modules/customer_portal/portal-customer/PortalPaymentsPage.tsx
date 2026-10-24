@@ -150,7 +150,7 @@ export const PortalPaymentsPage: React.FC = () => {
                       onClick={() => handleSetDefault(m.id)}
                       className="text-xs text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1 disabled:opacity-50"
                     >
-                      <Star className="w-3 h-3" /> Set Default
+                      <Star className="w-3 h-3 shrink-0" /> Set Default
                     </button>
                   ) : (
                     <span className="text-[11px] text-slate-400">Primary Method</span>
@@ -161,7 +161,7 @@ export const PortalPaymentsPage: React.FC = () => {
                     onClick={() => handleDeleteMethod(m.id)}
                     className="text-xs text-rose-600 hover:text-rose-800 font-medium flex items-center gap-1 disabled:opacity-50"
                   >
-                    <Trash2 className="w-3.5 h-3.5" /> Remove
+                    <Trash2 className="w-3.5 h-3.5 shrink-0" /> Remove
                   </button>
                 </div>
               </div>

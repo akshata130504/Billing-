@@ -102,7 +102,7 @@ export function RecurringExpenseTable({
             onClick={onNew}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-brand-600 hover:bg-brand-700 shadow-2xs transition-colors"
           >
-            <PlusCircle className="w-3.5 h-3.5" />
+            <PlusCircle className="w-3.5 h-3.5 shrink-0" />
             <span>New Recurring Expense</span>
           </button>
         </div>
@@ -297,7 +297,7 @@ export function RecurringExpenseTable({
                                 }}
                                 className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
                               >
-                                <Copy className="w-3.5 h-3.5 text-slate-400" />
+                                <Copy className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                                 Duplicate
                               </button>
                               <div className="my-1 border-t border-slate-100" />
@@ -310,7 +310,7 @@ export function RecurringExpenseTable({
                                 }}
                                 className="w-full px-3 py-1.5 text-left text-rose-600 hover:bg-rose-50 flex items-center gap-2 font-medium"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <Trash2 className="w-3.5 h-3.5 shrink-0" />
                                 Delete Profile
                               </button>
                             </div>

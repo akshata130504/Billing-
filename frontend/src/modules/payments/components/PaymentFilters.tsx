@@ -94,7 +94,7 @@ export function PaymentFilters({
               className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200/70 rounded-lg transition-colors"
               title="Reset all filters"
             >
-              <RotateCcw className="w-3 h-3" />
+              <RotateCcw className="w-3 h-3 shrink-0" />
               <span>Clear</span>
             </button>
           )}

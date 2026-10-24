@@ -250,14 +250,14 @@ export function HelpTab() {
                 <button
                   type="button"
                   onClick={() => setExpandedFaq(isOpen ? null : idx)}
-                  className="w-full flex items-center justify-between px-4 py-3 text-left text-xs font-semibold text-slate-800 bg-white hover:bg-slate-50 transition-colors"
+                  className="w-full flex items-center justify-between px-4 py-3 text-left text-xs font-semibold text-slate-800 bg-white hover:bg-slate-50 transition-colors gap-2"
                 >
                   <span className="flex items-center gap-2">
                     <HelpCircle className="w-3.5 h-3.5 text-brand-600 shrink-0" />
                     {faq.q}
                   </span>
                   <ChevronRight
-                    className={`w-3.5 h-3.5 text-slate-400 transition-transform ${
+                    className={`w-3.5 h-3.5 shrink-0 text-slate-400 transition-transform ${
                       isOpen ? 'rotate-90 text-brand-600' : ''
                     }`}
                   />

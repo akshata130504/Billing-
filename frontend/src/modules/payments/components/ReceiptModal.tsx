@@ -46,7 +46,7 @@ export function ReceiptModal({ isOpen, onClose, payment }: ReceiptModalProps) {
               onClick={handleSendEmail}
               className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
             >
-              <Mail className="w-3 h-3 text-slate-500" />
+              <Mail className="w-3 h-3 text-slate-500 shrink-0" />
               <span>Send</span>
             </button>
             <button
@@ -54,7 +54,7 @@ export function ReceiptModal({ isOpen, onClose, payment }: ReceiptModalProps) {
               onClick={handleDownload}
               className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors shadow-2xs"
             >
-              <Download className="w-3 h-3" />
+              <Download className="w-3 h-3 shrink-0" />
               <span>Download / Print</span>
             </button>
             <button

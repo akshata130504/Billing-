@@ -308,7 +308,7 @@ export const OfferingModal: React.FC<OfferingModalProps> = ({
                   onClick={addTier}
                   className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center gap-1"
                 >
-                  <Plus className="w-3.5 h-3.5" /> Add Bracket
+                  <Plus className="w-3.5 h-3.5 shrink-0" /> Add Bracket
                 </button>
               </div>
               <div className="space-y-2">
@@ -361,7 +361,7 @@ export const OfferingModal: React.FC<OfferingModalProps> = ({
                   onClick={addBundleComp}
                   className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center gap-1"
                 >
-                  <Plus className="w-3.5 h-3.5" /> Add Component
+                  <Plus className="w-3.5 h-3.5 shrink-0" /> Add Component
                 </button>
               </div>
               <div className="space-y-2">

@@ -193,7 +193,7 @@ export const PriceBookModal: React.FC<PriceBookModalProps> = ({
                 onClick={addEntry}
                 className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center gap-1"
               >
-                <Plus className="w-3.5 h-3.5" /> Add Offering
+                <Plus className="w-3.5 h-3.5 shrink-0" /> Add Offering
               </button>
             </div>
 

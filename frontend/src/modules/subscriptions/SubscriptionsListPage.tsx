@@ -565,7 +565,7 @@ export function SubscriptionsListPage() {
                                       }}
                                       className="flex items-center gap-2 px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 w-full text-left"
                                     >
-                                      <FileText className="w-3.5 h-3.5 text-brand-600" />
+                                      <FileText className="w-3.5 h-3.5 text-brand-600 shrink-0" />
                                       Generate Invoice
                                     </button>
                                     <button
@@ -576,7 +576,7 @@ export function SubscriptionsListPage() {
                                       }}
                                       className="flex items-center gap-2 px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 w-full text-left"
                                     >
-                                      <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
+                                      <RefreshCw className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                                       Renew Period
                                     </button>
                                     <button
@@ -587,7 +587,7 @@ export function SubscriptionsListPage() {
                                       }}
                                       className="flex items-center gap-2 px-4 py-2 text-xs text-amber-700 hover:bg-amber-50 w-full text-left"
                                     >
-                                      <PauseCircle className="w-3.5 h-3.5 text-amber-600" />
+                                      <PauseCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                                       Pause Subscription
                                     </button>
                                   </div>
@@ -600,7 +600,7 @@ export function SubscriptionsListPage() {
                                       }}
                                       className="flex items-center gap-2 px-4 py-2 text-xs text-rose-700 hover:bg-rose-50 w-full text-left"
                                     >
-                                      <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                                      <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
                                       Cancel Subscription
                                     </button>
                                   </div>

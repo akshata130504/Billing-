@@ -177,7 +177,7 @@ export function PaymentDetailsPage() {
               onClick={() => setIsReceiptOpen(true)}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-700 bg-white border border-slate-200/80 hover:bg-slate-50 shadow-2xs transition-colors"
             >
-              <Receipt className="w-3.5 h-3.5 text-slate-500" />
+              <Receipt className="w-3.5 h-3.5 text-slate-500 shrink-0" />
               <span>View Receipt</span>
             </button>
 
@@ -186,7 +186,7 @@ export function PaymentDetailsPage() {
               onClick={handleSendReceipt}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-700 bg-white border border-slate-200/80 hover:bg-slate-50 shadow-2xs transition-colors"
             >
-              <Mail className="w-3.5 h-3.5 text-slate-500" />
+              <Mail className="w-3.5 h-3.5 text-slate-500 shrink-0" />
               <span>Send Receipt</span>
             </button>
 
@@ -196,7 +196,7 @@ export function PaymentDetailsPage() {
                 onClick={() => setIsRefundOpen(true)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-600 bg-white border border-rose-200/80 hover:bg-rose-50 shadow-2xs transition-colors"
               >
-                <RotateCcw className="w-3.5 h-3.5 text-rose-500" />
+                <RotateCcw className="w-3.5 h-3.5 text-rose-500 shrink-0" />
                 <span>Issue Refund</span>
               </button>
             )}
@@ -424,7 +424,7 @@ export function PaymentDetailsPage() {
               onClick={() => setIsReceiptOpen(true)}
               className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200/70 rounded-lg transition-colors"
             >
-              <FileText className="w-3.5 h-3.5" />
+              <FileText className="w-3.5 h-3.5 shrink-0" />
               <span>Preview Full Receipt</span>
             </button>
           </div>
